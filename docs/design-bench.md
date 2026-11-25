@@ -1995,8 +1995,20 @@ with the found target, under the stager's lock), the link pointed at
 the queue while the board runs and back at the found target when the
 run ends. The console log from the reboot to `Benchmarks done.`, or to
 a deadline of 300 seconds, is the run's log. L4Re does not reset the
-board: the board comes back on the way-back entry only at its next
-reset, a power cycle (see [L4Re's way back](#l4res-way-back)).
+board, so the run does what a person at the console would: it types
+Fiasco's kernel debugger's reboot, ESC and then `^` a second later, on
+the console it holds, and waits for erXos's banner from the way-back
+entry, within the boot deadline of [the walk](#the-walk). The debugger
+is in the image because erXos's kernel configuration leaves Fiasco's
+`JDB` at its default, which is on; the run's deadline types the reboot
+too, since the debugger may still answer when ipcbench has not
+finished. A board that shows no banner by then is left to a person: the
+run says so, the link names the found target again, and a power cycle
+brings the board back on it. Nothing of erXos enters L4Re's image. The
+run is `tools/erx bench NAME --env pi4-4gb-l4re --console DEVICE --ssh
+DEST --key FILE` (`L4ReBoard`), whose console is opened for writing as
+well as reading; a relay in front of the Glasgow's port passes what is
+written to its pty on to the board.
 
 **Import.** `tools/erx bench import NAME --env pi4-4gb-l4re --subject
 FILE LOG` makes the record from that log and the build record of
@@ -2005,9 +2017,17 @@ giving its cells; the environment is `pi4` with system `l4re` and one
 CPU. ipcbench pins none of the threads the comparison reads, so, as
 under HVF, one CPU is the only form in which their placement is known:
 the set's device tree keeps only the boot CPU's node, so Fiasco starts
-no other CPU. Whether Fiasco's generic platform honours that is
-unverified until the first board boot, whose banner shows the CPUs
-Fiasco started; a log that shows more than one is not imported.
+no other CPU: `BootPartition.lay_out_set` with `boot_cpu_only` removes
+every other `cpu@N` node from a copy of the board's tree
+(`BoardTree.boot_cpu_only`), and the set's record says so
+(`board_tree_cpus`). Whether Fiasco's generic platform honours that is
+unverified until the first board boot. Fiasco prints a line for each
+CPU it starts (`CPU0: ID_PFR...` for the boot CPU, `CPUn booted (same
+IDs as CPU0).` for another); a log that names more than one is not
+imported. The import prints the board's side-by-side table: the record
+beside erXos's newest board record of the benchmark, each system in its
+own form, erXos on four CPUs and L4Re on one, so the rows name no CPU
+form (`BenchSideBySide.tables` with `forms: false`).
 
 ### The interrupt probe
 
@@ -3285,24 +3305,6 @@ unchanged: a bench set is signed and checked as every staged build is,
 and a development build runs only trusted code, which a bench image is.
 
 ## Open decisions
-
-### L4Re's way back
-
-Nothing in L4Re's guest resets the board, so after `Benchmarks done.`
-the board stays in L4Re until a power cycle, and only then boots the
-way-back entry. A stub of a few instructions ahead of `bootstrap.raw`
-in `kernel8.img`, built by erXos, could arm the power-management
-watchdog (`hw/svd/pm_wdt/pm_wdt.svd`; its time field counts in units of
-1/65536 s, so its longest window is about 16 s, unverified on the board)
-and branch to `bootstrap` with the firmware's registers kept, so the
-board resets by itself about 16 s after L4Re starts and boots the way
-back unattended. It costs nothing inside a cell, but it adds erXos code
-to the image of the system erXos is compared with, and a run longer than
-the window is cut. **Recommendation: the stub,** if the time from
-`bootstrap` to `Benchmarks done.`, unmeasured on the board, is well within
-the window: the first board boot measures it, and a longer run keeps the
-power cycle; until it is decided, each board run of L4Re ends with a power
-cycle.
 
 ### A hardware watchdog in the bench root
 
