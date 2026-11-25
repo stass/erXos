@@ -19,7 +19,9 @@ keep erXos's form.
 the GPL-2.0-only original, written without reading it from the clean-room
 facts record (erxos-history `cleanroom/fiasco-gpl-facts.md`, commit
 `2a1e35e`) and the MIT files that include it, and is MIT-licensed. Its row
-is under `changes`.
+is under `changes`; the row of the same path under `files`, with an
+unrecognized notice, records the original as upstream's archive held it,
+and describes no byte in the tree.
 
 ```json
 {

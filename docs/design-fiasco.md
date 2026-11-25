@@ -4161,7 +4161,7 @@ no test can drive the change:
   it, and no agent that has read it writes it.
 * **`jdb_object.cpp` out of the release kernel.** Upstream's `Modules.generic` lists the debugger's kernel object for every
   kernel, whatever `CONFIG_JDB` says, so turning the debugger off would leave the
-  GPL-2.0 file compiled. The fork lists it only for a kernel built with the debugger (`fiasco/kernel/src/Modules.generic:62-63`), a one-line edit: no MIT file of
+  GPL-2.0 file compiled. The fork lists it only for a kernel built with the debugger (`fiasco/kernel/src/Modules.generic:50-51`), a one-line edit: no MIT file of
   the kernel refers to it, and capability slot 10, which it fills, is then empty, which the boot workload
   (`std_workload.cpp`) already allows. `sigma0`'s calls that name its objects then fail; that `sigma0` ignores the
   failure is unverified, and a boot of the release kernel checks it. These facts come from a clean-room facts record of
@@ -4361,9 +4361,14 @@ build from, only what those builds compile, include, install or generate from: t
 headers and the part of musl the minimal libc builds, beside every license file and every build file
 of a directory the build enters. It keeps every generic header of `l4sys/include` and all of its `ARCH-arm64`,
 because that is the system-call API `liberx`'s Fiasco backend is written against. It also keeps four package directories (`compiler-rt`, `compiler-rt-crt`, `compiler-rt-pure`, `crtn`) that compile nothing
-but that kept `Control` files require. The GPL files left are `jdb_object.cpp` and the
-configuration tool of the kernel and `mk` (`tool/kconfig`, GPL-2.0), which runs on the host while
-a build is configured and is compiled into no executable a boot image carries.
+but that kept `Control` files require. The GPL files left are `jdb_object.cpp`, which only a
+kernel with the debugger compiles, and the configuration tool of the kernel and `mk`
+(`tool/kconfig`, GPL-2.0), which runs on the host while a build is configured and is compiled into
+no executable a boot image carries. `src/kern/kobject_rpc.h` is not among them: every kernel build
+includes it, through `task.cpp`, `ipc_gate.cpp`, `irq.cpp` and `icu_helper.cpp` among others, but
+the file at that path is
+erXos's MIT clean-room header, which replaced the GPL original
+([The release's Fiasco build](#the-releases-fiasco-build)).
 
 ## Upstream security fixes
 

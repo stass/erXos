@@ -117,6 +117,8 @@ Fiasco backend is written against. The GPL files that remain are
 `jdb_object.cpp` and the configuration tool of the kernel and the
 build system, which runs on the development host while a build is
 configured and is compiled into nothing a boot image carries. The
+`kobject_rpc.h` every kernel build includes is not one of them: it
+is the MIT replacement, at the original's path. The
 release build's check reads every executable a boot image carries,
 for every board: the kernel,
 `bootstrap`, `sigma0`, and the Raspberry Pi 4's own `bootstrap`. It
