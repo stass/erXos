@@ -798,7 +798,7 @@ rather than pass.
 | **Milestone** | `make check-qemu` runs the `bench` suite fresh, as every suite; the full matrix runs by hand, and joins this gate only when CLAUDE.md's milestone gate list names it ([The full matrix](#the-full-matrix)) | the same |
 | **Plan gates and on demand** | `tools/erx bench NAME --profile full`, `--paired`, FD32's runs, and the Raspberry Pi 4's runs by hand | the board limits, for the milestones that ship on the board |
 
-**The landing matrix.** Three boots, each running its cells one after
+**The landing matrix.** Four boots, each running its cells one after
 another and never two at once, so that sharing a boot changes no cell's
 background:
 
@@ -807,9 +807,10 @@ background:
 | the native bench image, QEMU `virt` under HVF, four CPUs | `nullcall`: `root-same-space` and `root-cross-space` on the service's CPU, and `kernel`; `vm`: `reserve`, `commit`, `touch`, `protect`, `decommit` and `release` of one page, from a test task; `wake`: `wake-same-cpu`, `wake-cross-cpu` and `trigger-take` on one CPU, and `park-deadline` on one CPU, idle, for 2 s; `sched`: `share-equal` with four spinners on the last CPU, three 1 s windows |
 | the same image in deterministic mode | `nullcall`'s two root cells and `vm`'s one-page `commit` and `protect`, 1,000 samples each |
 | the `xdomain` bench image, under HVF | `xdomain`: `local-rtt` and `xdomain-pingpong`; `wake`: `erlang-timer` at `normal`, idle, for 2 s |
+| [Linux's Erlang guest](#linuxs-erlang-guest), under HVF, one CPU, then the same boot of its seeded `/init` | `xdomain`: `local-rtt` and `xdomain-pingpong` on stock OTP, recorded as Linux's; the seeded boot's `xdomain-pingpong` must be `failed` beside a `measured` `local-rtt` (the test row below). Its suite cell, `hvf-1cpu-linux-erlang-xdomain`, is `not_run`, the reason in the suite's notes, when the oracle's install export or Linux's fetched pins are missing |
 
 Every fast cell takes the landing form's 10,000 samples. The timed work
-is about 10 s; the rest of the suite's time is three boots and their
+is about 10 s; the rest of the suite's time is the boots and their
 calibration, which the suite measures and records. Its target is about a
 minute. If its recorded time passes that, the deterministic boot moves
 to the milestone gate. Every other cell, load and placement is in the
@@ -1567,14 +1568,26 @@ no stock program. Alpine's package is not used: Alpine 3.24's community
 repository for aarch64 offers `erlang27` 27.3.4.19 and `erlang28`
 28.5.0.8, and no OTP 29 ([References](#references)).
 
-**The initramfs.** The exported tree at its own prefix, so nothing is
-relocated; the libraries at the paths the loader listed; the bench
+**The initramfs.** What the two nodes load of the exported tree, at
+its own prefix, so nothing is relocated: the five programs of its ERTS
+directory; `bin/start.boot`, the boot both nodes start with; the
+`OTP_VERSION` of the boot's release, which the identity line reads; and
+every member of the code path the boot's `path` instructions set, read
+from the boot itself (`LinuxErlangGuest.packed`). In interactive mode
+the code server adds each `lib/*/ebin` it finds to that path, so an
+application left out is one the nodes cannot load: a module the nodes
+need and the boot does not name fails the boot rather than skewing it.
+The boot's directories select only members of the export's inventory, and
+one outside `$ROOT`, or with a `.` or `..` component, refuses the build.
+Beside that tree the initramfs holds the libraries at the paths the loader
+listed; the bench
 modules' beams under `/bench/ebin`; `/etc/hosts` with the IPv4 loopback
 line; `/dev/console` and `/dev/null`; and a launcher of its own as `/init`, `bench/linux/erlang_init.c`,
 which shares its wait and power-off with the C guest's `/init`
 (`bench/linux/launch.h`) and is built the same way, with the export's
 ERTS directory and the beams' directory passed as build flags. The
-export's logs and evidence stay out. Execute bits are derived, not
+export's logs and evidence stay out, and the record keeps the initramfs's
+size (`initramfs_bytes`) beside its hash. Execute bits are derived, not
 recorded: `/init`, the five programs of the export's ERTS directory and
 the interpreter their `PT_INTERP` program header names, the dynamic
 loader the kernel executes with each of them, get them; every other
@@ -2908,7 +2921,7 @@ fault that must fail it:
 | a `mean` through the record | a `mean` cell written by `BenchRecord.write` and read back has its count, total and printed mean, no percentiles, no maximum and no event counts, and the side-by-side table shows it without a ratio | the writer summarizing every cell from its histogram: the read-back cell reports a median of 0 and zero lost wakes |
 | a batched cell's total | an erXos cell of 20 samples in batches of 32 that spanned 3,000 ticks of the 24 MHz counter shows 640 operations and a mean of 195.3 ns beside its median of 4 ticks, and a total its samples rule out, such as one batch's ticks, is refused | the total shown without dividing it by its count, or the count taken as the samples instead of the operations: the mean is 3,000 ticks or 150; the range check dropped: one batch's ticks are read as the run's |
 | `cycles` stays cycles | an L4Re `mean` beside an erXos cell whose boot's `CLOCK` line measured cycles per tick prints cycles and no ratio | the conversion through the other boot's calibration put back: the table prints nanoseconds for L4Re |
-| Linux's Erlang guest | a one-CPU boot gives an `ERX_ORACLE 29.1.2` line and `measured` `local-rtt` and `xdomain-pingpong` cells in `monotonic` | the echo node started with another cookie: `xdomain-pingpong` is `failed`, the connection refused, while `local-rtt` is `measured`, which shows the cross cell went to the other OS process over distribution |
+| Linux's Erlang guest | the bench suite's one-CPU boot gives an `ERX_ORACLE 29.1.2 jit` line and `measured` `local-rtt` and `xdomain-pingpong` cells in `monotonic`; without the install export its cell is `not_run`, never `passed` | `/init` built with `-DERX_INIT_SEED_ECHO_COOKIE`, the echo node started with another cookie: `xdomain-pingpong` is `failed`, the connection refused, while `local-rtt` is `measured`, which shows the cross cell went to the other OS process over distribution |
 | L4Re's guest | a one-CPU boot of `bootstrap.elf` reaches `Benchmarks done.` and the importer reads every counterpart | an image built with `E=hello` instead of `E=ipcbench`: every L4Re cell is `not_run`, which shows the rows came from ipcbench's own output |
 | the interrupt-entry pairing (with the patch) | given receipts and `irq_entry` records, one entry between two receipts makes a sample, and none, two, or a window with a record counted as overwritten makes the receipt `partial` | the window's lower end dropped, pairing each receipt with the latest entry before it: the two-entry case yields a sample |
 | the board's set | the `nullcall` set's `kernel8.img` starts with the board's own first stage and boots in QEMU's `raspi4b` model under TCG, as the `raspi4b` suite boots the card, with `erx.arg=` and a name on its command line: the banner names the set's build and index hash, the root's naming lines carry the name, every declared cell reports between two of them, and the last line is `erx: end reset`; the model's numbers are not recorded, since the model is no environment | the main build's first stage packed instead: no banner appears before the boot's deadline; the root built to end with `ASKED_OFF`: the judge refuses the boot's end as `erx: end off` |

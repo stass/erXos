@@ -205,12 +205,6 @@ design does not have, to be deleted so no side-by-side table can show it under s
   64 committed pages and Linux unmaps pages never touched (fault them in during prepare, or call it the nearest
   counterpart); and the non-erXos build opens fixed `/tmp` names with `O_CREAT|O_TRUNC`, so on a shared host a
   planted symlink is truncated and written (`mkdtemp` one directory per run).
-* [Medium] benchmarks, Linux's Erlang guest's boot test ([design-bench.md](design-bench.md#linuxs-erlang-guest)): the
-  guest boots in a comparison session (`tools/erx bench xdomain --systems erxos,linux`, once `tools/erx oracle install
-  --flavour jit --docker-context NAME` has made the export), but no suite boots it. The design's test row, a one-CPU
-  boot with an `ERX_ORACLE 29.1.2 jit` line and `measured` `local-rtt` and `xdomain-pingpong` cells, and its seeded
-  fault, `/init` built with `-DERX_INIT_SEED_ECHO_COOKIE` so that `xdomain-pingpong` is `failed` while `local-rtt`
-  is `measured`, were run by hand; they belong in the bench suite, reported as not run when no export exists.
 * [Medium] benchmarks, L4Re's guest under HVF ([design-bench.md](design-bench.md#l4res-guest)): the build
   (`tools/erx build l4re --docker-context NAME` on an arm64 engine), the importer and the session run, and
   `tools/erx bench nullcall --systems erxos,l4re` measures all three of L4Re's 1-CPU rows, at upstream Fiasco
