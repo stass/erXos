@@ -1859,9 +1859,13 @@ and the rules below follow from that:
   the grantee row itself, a session template and the principal it
   belongs to, never a name, so a configured domain named as a start row
   is another grantee.
-* **No other grantee** holds it: not the system domain (B8), and not
-  any other session template, every session of which would hold the
-  same services and contend for their handlers.
+* **No other grantee** holds it: not the system domain (B8), not
+  root's session template, the console's, even when the system
+  principal has a `start` row and a `domains` quota of 1, since a radio
+  peer reaches root's line only through `bleuart`'s login
+  ([The console](#the-console)), and not any other session template,
+  every session of which would hold the same services and contend for
+  their handlers.
 
 So the scope of an app's grant is fixed at its install, in its record,
 and its facet is minted for each session of the app, as every template

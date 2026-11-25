@@ -2657,7 +2657,9 @@ module Erx
       # mint provides and the interface the check reasons from pick the same service. Every
       # service whose checker is ble_grant is served by a configured domain, the Bluetooth
       # domain, and no grant of one goes to the system domain, whose handler would take a
-      # phone's bytes into the trusted base (B8), or to a session template, which every
+      # phone's bytes into the trusted base (B8), to root's session template, the console's,
+      # which a radio peer reaches only through bleuart's login (docs/design-bluetooth.md,
+      # "The console"), or to any other session template, which every
       # session made from it would hold, so two sessions would contend for one service's
       # handler, as line_grant refuses one. It takes two kinds of template row: a start
       # row's template's (start_template?), one session of which lives at a time, and the
@@ -2687,6 +2689,8 @@ module Erx
           named = ble_grant_named(row, tables)
           invalid("#{named} is granted to the system domain, which takes no phone's bytes", 'facet.grantee') if
             row.fetch('grantee_kind') == grantee_kind('system')
+          invalid("#{named} is granted to root's session template, the console's, which takes no phone's bytes",
+                  'facet.grantee') if root_template?(*row.values_at('grantee_kind', 'grantee'), tables)
           invalid("#{named} is granted to a session template that is neither the app template nor a start row's " \
                   'template with a domains quota of 1, so two of its sessions could hold it', 'facet.grantee') if
             row.fetch('grantee_kind') == grantee_kind('session') && !app_template?(row, tables) && !start_template?(row, tables)

@@ -1652,7 +1652,7 @@ class ManifestDomainsTest < Minitest::Test
   # abi/gatt declares, packs. Each seeded violation differs from it in one thing and is
   # refused: the service of the ble interface named otherwise, a service named ble of
   # another interface, the service served by the system domain, the grant to the system
-  # domain (B8), the grant to a session template, and a name abi/gatt does not declare,
+  # domain (B8), the grant to root's session template, and a name abi/gatt does not declare,
   # against the tree's declarations
   # and against the context's.
   def test_a_ble_grant_names_declared_services_of_the_ble_service
@@ -1662,7 +1662,7 @@ class ManifestDomainsTest < Minitest::Test
       ['service.name', service('ble', '@domain.beta')] => /service ble is named ble exactly when it is of the ble interface/,
       ['service.server', ble_grant(%w[nus], server: 'system')] => /service ble is served by no configured domain/,
       ['facet.grantee', ble_grant(%w[nus], grantee: 'system')] => /ble grant nm is granted to the system domain/,
-      ['facet.grantee', ble_grant(%w[nus], grantee: '@session.system')] => /ble grant nm is granted to a session template/,
+      ['facet.grantee', ble_grant(%w[nus], grantee: '@session.system')] => /ble grant nm is granted to root's session template/,
       ['facet.parameter', ble_grant(%w[nus nusb])] => /ble grant nm names "nusb", which abi\/gatt does not declare/
     }.each do |(field, grant), message|
       refused(Erx::Manifest::Invalid, field, with_session(self.class.session) + grant, message: message)
@@ -1679,7 +1679,10 @@ class ManifestDomainsTest < Minitest::Test
   # the session template of principal other, which has a start row and a domains quota
   # of 1, packs, since one session of it lives at a time. Each seed differs from it in
   # one thing and is refused as a grant to a session template: other with no start row,
-  # other with a quota of 2, and the start row the system principal's, not other's.
+  # other with a quota of 2, and the start row the system principal's, not other's. A
+  # grant to root's session template is refused as root's even when the system principal
+  # has a start row and a quota of 1 (its configured domains given to other): a radio
+  # peer reaches root's line only through bleuart's login, never root's console template.
   def test_a_start_rows_template_with_one_domain_holds_ble
     source = lambda do |start: self.class.start('other'), domains: 1|
       with_display(start, served: '', grants: [ble_grant(%w[nus], grantee: '@session.other')])
@@ -1688,9 +1691,16 @@ class ManifestDomainsTest < Minitest::Test
         .sub(ManifestContextFixture::MAX_DOMAINS) { |line| line.sub(/\d+$/) { |count| (count.to_i + domains).to_s } }
     end
     admit(source.call)
+    roots = with_display(self.class.start, served: '', grants: [ble_grant(%w[nus], grantee: '@session.system')])
+            .gsub("  principal @principal.system\n  limits @limits.app\n", "  principal @principal.other\n  limits @limits.app\n")
+            .sub("principal other\n  memory 1048576\n  grant @share.half\n  domains 0\n",
+                 "principal other\n  memory 1048576\n  grant @share.half\n  domains 2\n")
+            .sub(ManifestContextFixture::SYSTEM_QUOTA) { "#{Regexp.last_match(1)}1" }
+            .sub(ManifestContextFixture::MAX_DOMAINS) { "#{Regexp.last_match(1)}3" }
     [source.call(start: ''), source.call(domains: 2), source.call(start: self.class.start)].each do |seeded|
       refused(Erx::Manifest::Invalid, 'facet.grantee', seeded, message: /ble grant nm is granted to a session template/)
     end
+    refused(Erx::Manifest::Invalid, 'facet.grantee', roots, message: /ble grant nm is granted to root's session template/)
   end
 
   # The app template's ble row (docs/design-bluetooth.md, "Who holds `ble`";
