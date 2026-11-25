@@ -899,7 +899,11 @@ One CPU claims the stop. Every other CPU parks and leaves its registers
 where a reader finds them, or is reported as not having answered, never
 shown with stale state. A CPU caught waiting for a lock says which lock,
 and two CPUs that each name the lock they wait for are most of a
-deadlock's diagnosis. The kernel then writes the crash record, with each
+deadlock's diagnosis. A CPU that finishes starting after the stop finds
+it and parks before it runs anything. A CPU that has not answered may
+still be writing the console, so what the kernel prints next is best
+effort, and its first line says so. The kernel then writes the crash
+record, with each
 CPU's state in it, and ends the machine. It never resumes, and no
 debugger runs inside it ([design-debugger.md](../design-debugger.md)).
 

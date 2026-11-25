@@ -106,7 +106,8 @@ website offers carry it and go out with a link to their source. The
 design takes Fiasco's debugger out of the tree, this file with it, and
 reads a stopped machine from the host instead
 ([chapter 21](21-live-machine.md#2154-reading-a-stopped-machine)), after
-which no kernel build compiles a GPL file. That removal is **Designed**.
+which no kernel build compiles a GPL file, and the website's images are
+rebuilt and republished without it. That removal is **Designed**.
 
 Fiasco's imported tree leaves out the copyleft parts no build uses: Fiasco's own
 tests, a coverage module and a checksumming console stream that erXos

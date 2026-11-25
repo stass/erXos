@@ -227,7 +227,8 @@ that one construction gives each requirement:
   build and board, with no operator.
 * A CPU's state (2) is one value of a closed enum, and "did not answer"
   and "was waiting for this lock" are two of its values, so a reader can
-  never mistake silence for a stop.
+  never mistake silence for a stop. A CPU that starts after the stop
+  finds it at its admission and parks, so none runs on unseen.
 * A stopped machine is read whole (3) because a target need only yield
   bytes. QEMU yields them all at once, a probe on demand, and a board
   through the hold, a loop that answers "read this range" on the console
@@ -255,9 +256,9 @@ shows was read from an address, so "what is at this address" (`whatis`)
 and "stop when this attribute changes" (`watch`, and `when` on a replay)
 need no knowledge of their own. Every row was read under the schema's
 types, so checking every row of a stopped machine against the schema
-(`audit`) names the structures that are corrupt. And every read of a
-session can be kept, so a session on a board leaves an image that gives
-the same answers after the board has gone.
+(`audit`) names the structures that are corrupt. And every read at one
+stopped moment can be kept, so a session on a board leaves an image that
+gives the same answers after the board has gone.
 
 ## Invariants
 
@@ -265,11 +266,13 @@ the same answers after the board has gone.
 | --- | --- | --- |
 | **One stop, never resumed.** The first CPU to claim the stop word is the leader; every later entry on any CPU follows that stop or ends the machine, and nothing returns from a stop | one compare-and-swap of one word; the stop path has no return and no request that resumes | the core's exhaustive test; the cell with two CPUs stopping at once |
 | **Every CPU is in exactly one stop state**, and a reader has a CPU's registers only if that CPU published them before the reader looked | a slot is written once per boot, its state stored last with release ordering | the core's exhaustive test; the litmus test of the publication |
+| **No CPU runs past a stop unseen.** Every CPU that reaches ordinary execution is in the leader's census, or parks at its admission, or both | a CPU's admission stores its bit in the admitted set and then loads the stop word, and the leader's claim stores the stop word and then loads the set, each with a full memory barrier between, so at least one of the two loads sees the other side's store; the stop word is never cleared | the core's exhaustive test; the litmus test of the admission; the cells with a CPU held back in its start |
 | **Kernel mode reads input in one state of one build kind**: the hold, of a development kernel, in a boot that carries `erx.hold=1` | a release kernel is built without the hold; the hold is entered from the stop path alone, after the record is printed; nothing else in either kernel reads a line | the configuration check; the cell that sends requests to a running machine and to a held one without the word |
-| **The hold reads RAM and writes nothing.** A request names a physical range, and the reply is refused unless the whole range lies in the RAM ranges of the kernel's own map | one check in the core against the anchor's ranges; the request layout has no operation that writes | the core's tests over every range against every map; the request decoder's fuzz target |
-| **After a stop the console line has one user, the stop, until the machine ends** | every CPU that answers is parked before the first byte, and nothing resumes | the stop cells' transcripts; the kernel-lines case of [design-fiasco.md](design-fiasco.md#the-backends-cases) |
+| **The hold reads readable RAM and writes nothing a request names.** A request names a physical range, and the reply is refused unless the whole range lies in one range of the anchor's map, which holds only pages the boot map gives as RAM and none it excludes | the core computes the map at boot and refuses one it cannot state whole; one check in the core against that map; the request layout has no operation that writes | the core's tests of the map, over virtual entries, exclusions inside a range and maps past the anchor's capacity, and of every range against every map; the request decoder's fuzz target |
+| **After a stop whose census is complete, the console line has one user, the stop, until the machine ends.** After an incomplete census the stop's output is best effort, and its first line says so | every admitted CPU is parked before the first byte, and nothing resumes; a CPU that did not answer may still write the line, and no lock the leader takes can promise that it will not | the stop cells' transcripts; the cell with a silent CPU that prints; the kernel-lines case of [design-fiasco.md](design-fiasco.md#the-backends-cases) |
 | **A hold and a running hardware watchdog never meet** | `erx.hold=1` is honoured only in a boot that is not a trial and whose board watchdog nothing has started; in such a boot nothing starts it | the hold decision's host test over every flag, boot value and watchdog state |
 | **The host's debugger writes nothing to its target** | its request builders have a constructor for each request it sends and no other, and none writes memory or registers | a test that no public method builds a write |
+| **Nothing the tool keeps outlives its moment.** A page, a register or a view read at one stopped moment is never shown, combined or saved at another | everything the tool keeps of a target is kept under the moment the target names, and a command that lets the machine run or moves it in time discards it before the next read | the stub client's test that reads one address on both sides of a seeded write |
 | **Never fabricate.** A value the tool shows was read from the target and checked against the schema's type or the build's layout; what it could not read it shows as `unknown`, `unsupported` or invalid, and every record names its target | commands reach memory only through the target interface, whose reads return bytes or "not here"; views are built by the generated validators | one test per status; the fuzz target that runs every command over random memory |
 | **Text from a target reaches the terminal only through the host's line escape** | the tool's one printer | the source check on the host tool's output calls ([design-live.md](design-live.md#invariants), V9), and a fuzz target |
 | **One schema for the living and the dead.** A path names the same kind with the same attributes whether the machine's inspector answers it or a walker reads it from memory | the tool's views are built from the host table `tools/gen_abi.rb` generates from `abi/inspection.txt`; walkers are checked against it when the build runs | the comparison of `inspect` on an image with `/proc` read just before it was taken |
@@ -306,19 +309,21 @@ every other:
 
 | State | Meaning | Registers a reader has |
 | --- | --- | --- |
-| `offline` | the CPU was not online when the leader took its census | none |
+| `offline` | the CPU had not been admitted when the leader took its census: it never started, or had not finished starting | none |
 | `leader` | it claimed the stop; it writes the record and serves the hold | its own at its entry into the stop: the trap's frame, or the call site |
 | `stopped` | it took the stop request | those the request interrupted |
 | `waiting` | it found the stop word while it waited for a spinlock with interrupts masked | those at the wait, and the lock's address |
 | `concurrent` | it entered a stop of its own and found the stop claimed | those at its own entry |
-| `unanswered` | it was online and had published nothing when the bound ran out | none |
+| `starting` | it found the stop word at its admission, before it ran anything | those at its admission |
+| `unanswered` | it was admitted and had published nothing when the bound ran out | none |
 
 `waiting` is how a deadlock shows itself: two CPUs that each name the
 lock they wait for are most of the diagnosis. `concurrent` is how a
 second, simultaneous failure stays visible: its message is lost, where it
-happened is not. `unanswered` is a statement, not an absence: a CPU that
-neither takes interrupts nor waits for a lock cannot be reached from
-inside the machine
+happened is not. `starting` is a CPU that came up into a stopped machine:
+it parks before it unmasks interrupts, prints or runs a thread.
+`unanswered` is a statement, not an absence: a CPU that neither takes
+interrupts nor waits for a lock cannot be reached from inside the machine
 ([Stopping every CPU](#stopping-every-cpu)).
 
 ### Stop slots
@@ -340,6 +345,13 @@ with release ordering; a reader loads the state with acquire ordering and
 reads the rest only for a state that has registers. A slot is written
 once per boot, so nobody ever reads a half-written slot as whole.
 
+The **admitted set** is one word of kernel memory beside the slots, a bit
+for each CPU. A CPU sets its bit at its admission, the last step of its
+start, and nothing clears one. The leader's census is over this set and
+not over whatever account the kernel keeps of its CPUs for other
+purposes, so that a bit means one thing: the CPU is at or past its check
+of the stop word ([Stopping every CPU](#stopping-every-cpu)).
+
 ### The anchor
 
 `erx_debug_anchor` in `abi/kernel.txt` is one page-aligned page in the
@@ -352,7 +364,7 @@ starts the root task; after that only its stop word changes.
 | `build_id` | the build identifier the banner and the crash record carry |
 | `image_virtual`, `image_physical` | where the kernel's image runs and where it lies, so a symbol's address gives a physical one |
 | `kernel_root`, `root_task_root`, `translation` | the physical addresses of the translation roots of the kernel's own mappings and of the root task's space, the second zero until the root task exists; and the architecture's word that says how such tables are walked, so the reader assumes no kernel's layout |
-| `ram` | the RAM ranges of the kernel's own map, at most 16, each a base and a length |
+| `ram` | the readable-RAM map: at most `debug_ram_ranges` (16) ranges of whole pages, each a base and a length, sorted and disjoint; no range when the map was refused ([Readable RAM](#readable-ram)) |
 | `slots`, `record` | the physical addresses of the stop slot array and of the crash buffer |
 | `stop` | the stop word: zero, or the leader's CPU number plus one |
 
@@ -360,6 +372,59 @@ The anchor is why a reader needs no register and no symbol to begin: it
 finds the page, checks it, and from the two translation roots reads any
 address of the kernel's or of the root task's. Every other space's root
 is in the kernel's records of spaces, which the walkers read.
+
+### Readable RAM
+
+The hold answers for memory, so the kernel must know which physical pages
+are memory it may read: a read of a device's register can have an effect,
+and a read of a hole, or of memory the firmware keeps, can fault. Neither
+kernel's boot memory map is that list as it stands. Fiasco's kernel
+information page describes address space as well as memory, and lists
+RAM that is in use, and ranges set aside for other reasons, as entries
+beside and over the RAM entries ([On Fiasco](#on-fiasco)). So the anchor's map is
+never copied from a boot map. One pure function of the core computes it
+from one, once, when the kernel completes the anchor:
+
+1. **Classify.** Each kernel hands the core its boot map as entries of a
+   base, a length and a class of the closed enum `ram_class` of
+   `abi/kernel.txt`:
+
+   | Class | The entry says |
+   | --- | --- |
+   | `ram` | the range is RAM |
+   | `used` | the range is RAM that the kernel, a boot module or a task occupies: the kernel reads it as memory, so it must come out inside the map |
+   | `excluded` | the range is not memory the kernel may read: a firmware reservation, a device's registers, or a kind of entry the kernel's table does not list |
+   | `ignored` | nothing about physical memory: the entry describes address space, or is empty |
+
+   Each kernel classifies with one table over every kind of entry its
+   boot map can hold, and a kind the table does not list is `excluded`:
+   a new kind of entry takes memory out of the map until someone decides
+   what it is.
+2. **Normalize.** The core rounds each `ram` range inward to whole pages
+   and each `excluded` range outward, with checked arithmetic, and takes
+   the union of the first less the union of the second. The result is the
+   **readable-RAM map**: ranges of whole pages, sorted by base, disjoint,
+   and joined where they touch.
+3. **Refuse, never cut.** The core refuses the map when an entry's end
+   overflows, when the result has more ranges than the anchor holds, or
+   when a `used` entry, rounded outward, does not lie whole inside one
+   range of the result. The kernel's own anchor page, stop slots and
+   crash buffer are `used` entries of every boot, so a map that lacks the
+   memory the kernel itself stands on is refused before anything trusts
+   it.
+
+A refused map is written to the anchor as no ranges, the kernel prints
+the reason in one line at boot, and that boot does not hold
+([The hold](#the-hold)). A map cut to fit would answer `range` for memory
+that is there, which the tool would show as "not memory": a wrong answer
+given as a right one.
+
+The map promises what its sources say and no more: every page of it lies
+in an entry the boot map gives as RAM and in none it excludes. That a
+board's boot map is itself right, with every hole and every range of the
+firmware's left out or excluded, is checked on each board by a test
+kernel that reads every page of the map once
+([Unverified facts](#unverified-facts), P11).
 
 ### The record's CPU entries
 
@@ -425,17 +490,19 @@ The host's one interface, which each kind of target implements:
 
 | Operation | Crash record | Memory image | Held board | Stub | Replay |
 | --- | --- | --- | --- | --- | --- |
-| list the CPUs and give one CPU's registers | the record's entries: six words a CPU, none for `unanswered` and `offline` | the image's register notes, and the stop slots through the anchor if the machine stopped itself | the stop slots through the anchor | the stub's threads, one a CPU | as a stub |
+| list the CPUs and give one CPU's registers | the record's entries: six words a CPU, none for `unanswered` and `offline` | the image's register notes, and the stop slots through the anchor if the machine stopped itself | the stop slots through the anchor | the stub's threads, one a CPU: the core registers from one reply, any other by its number ([The GDB remote protocol subset](#the-gdb-remote-protocol-subset)) | as a stub |
 | read physical memory | nothing: every read is "not here" | the image's segments; a gap is "not here" | a `read` request; a refusal or a silent line is "not here" | the stub's memory read in physical mode | as a stub |
 | stop, continue, break, watch | no | no | no | yes | yes |
 | move in time | no | no | no | no | yes: back to the last break or watch, and to an instruction count |
 | end the machine | no | no | `end` | no | no |
+| name the moment ([Moments and images](#moments-and-images)) | the record's own | the image's own | the stop | a count the tool advances each time the machine has run | the instruction count |
+| give the crash record | the file's frame | the crash buffer the anchor names, if the machine stopped itself | as an image | as an image | as an image |
 
 * A **crash record** is a file that holds a crash frame: a console's log,
   or the text of `/proc/kernel/crash`.
 * A **memory image** is an ELF core of the machine's physical memory, the
   form QEMU's `dump-guest-memory` writes with `paging` false, and the
-  form the tool itself writes when it keeps what a session read.
+  form the tool itself writes when it saves a moment.
 * A **held board** is a machine in the hold, reached through its console:
   a serial device, or the console socket of a QEMU run.
 * A **stub** is anything that speaks the GDB remote protocol, stops the
@@ -446,7 +513,9 @@ The host's one interface, which each kind of target implements:
 
 A command declares what it needs of a target (CPUs, memory, control,
 time), and a target that lacks it gets one refusal that names the target
-and the need. No command has a case per kind.
+and the need. No command has a case per kind: `report` and `log` take the
+record and the moment through the last two operations, as every other
+command takes memory through the second.
 
 ### The bundle
 
@@ -466,7 +535,7 @@ header where there is no memory, and uses the bundle of that identifier.
 A target whose identifier matches no bundle the tool can find is shown
 with raw addresses and no types, and the tool says why. A published
 build's bundle is kept outside the repository with that build's records
-([Open decisions](#open-decisions)).
+([Decisions](#decisions)).
 
 ### Views
 
@@ -510,28 +579,38 @@ return:
 2. **A fresh stack.** The leader switches to its CPU's panic stack, found
    through the CPU's hardware identifier and a table written at boot, so
    it trusts no pointer of the failing state.
-3. **Ask.** It sends the stop request, an inter-processor interrupt, to
-   every online CPU but itself, and wakes every CPU that sleeps in a
-   spinlock's wait.
+3. **Ask.** It loads the admitted set, once, with a full memory barrier
+   between its claim and the load, sends the stop request, an
+   inter-processor interrupt, to every CPU of the set but itself, and
+   wakes every CPU that sleeps in a spinlock's wait.
 4. **Census.** It waits until every CPU it asked has published its slot,
    or `stop_census_ms` (100) have passed. Each round the core decides
-   from the online CPUs, those asked and those published: ask a CPU that
-   came online since, wait, or finish with every CPU's state. A CPU still
-   silent at the bound is `unanswered`.
+   from the CPUs asked, those published, the time and the bound: wait, or
+   finish with every CPU's state. A CPU still silent at the bound is
+   `unanswered`, and the census is then **incomplete**. A CPU outside the
+   set needs no second look: it parks at its own admission
+   ([Stopping every CPU](#stopping-every-cpu)).
 5. **Record.** It walks its own frame pointers, at most 64 frames, each
    checked to lie inside the stack it claims, and hands the crash core
    the cause, the message, its registers, the frames and each CPU's
    entry. The boot image's development flag chooses the form, as for
    every crash record.
-6. **Print.** It writes the report's first part, which is the record's
-   own fields as text for the person at the console (the message, in a
-   development build the leader's registers and backtrace, and one line
-   for each CPU with its state and where it was), then the crash frame,
-   through the console's polled write alone. Every CPU that answered is
-   parked, so nothing else writes the line. It takes no lock that a CPU
-   which did not answer, or one parked in a wait, may hold: a lock the
-   console path needs it tries a bounded number of times and then goes on
-   without, and the report's first line says so.
+6. **Print.** It takes the console path's lock, with a bounded number of
+   tries, and keeps it until the machine ends; a leader that failed while
+   it held that lock holds it already. Then it writes the report's first
+   part, which is the record's own fields as text for the person at the
+   console (the message, in a development build the leader's registers
+   and backtrace, and one line for each CPU with its state and where it
+   was), and the crash frame, through the console's polled write alone.
+   * After a **complete** census every admitted CPU is parked, so nothing
+     else writes the line, with the lock or without it.
+   * After an **incomplete** census the output is **best effort**. A CPU
+     that did not answer may hold the lock, or be writing, and the leader
+     then prints without the lock rather than wait for a CPU that may
+     never let go. The report's first line names the CPUs that did not
+     answer and says whether the lock was taken. A frame that another
+     writer's bytes fell into fails its reader's checks and is reported
+     as damaged, never read as whole.
 7. **Hold**, where the boot allows it ([The hold](#the-hold)).
 8. **End.** It writes the last line, which names the end, and ends the
    machine as the kernel's policy says: on erXos's kernel by `erx.panic`
@@ -542,22 +621,24 @@ return:
 
 **What the core decides.** `kernel/core/machine_stop.c` holds the stop's
 decisions as pure functions: the claim, over the observed word, the CPU
-and its depth; the census step, over the sets of CPUs online, asked and
-published, the time and the bound; each CPU's final state; whether the
-boot allows a hold; and the hold's step, over its state and one event
-(a line, a finished reply, a tick). It reads no hardware and no global
-state, builds for the host, and its machine is explored exhaustively
-there. The compare-and-swap, the request, the slots, the clock, the
-frame walk, the console and the end are each kernel's effects.
+and its depth; the admission, over the observed word; the census step,
+over the CPUs asked and those published, the time and the bound; each
+CPU's final state; the readable-RAM map, from a boot map's entries;
+whether the boot allows a hold; and the hold's step, over its state and
+one event (a line, a finished reply, a tick). It reads no hardware and no
+global state, builds for the host, and its machine is explored
+exhaustively there. The compare-and-swap, the barriers, the request, the
+slots, the clock, the frame walk, the console and the end are each
+kernel's effects.
 
-**Order.** The leader stops the others before it prints, so a report
-never interleaves with a console driver still writing. The order costs up
-to the census bound of silence when a CPU does not answer, which the
-record then names.
+**Order.** The leader stops the others before it prints, so after a
+complete census a report never interleaves with a console driver still
+writing. The order costs up to the census bound of silence when a CPU
+does not answer, which the record then names.
 
 ### Stopping every CPU
 
-A CPU learns of the stop in one of three ways, and each leaves its own
+A CPU learns of the stop in one of four ways, and each leaves its own
 state:
 
 * **The stop request**, at its next point with interrupts unmasked: in
@@ -580,6 +661,21 @@ state:
   spinlock and in the cores' ticket lock ([On Fiasco](#on-fiasco)).
 * **Its own stop**, when it fails while another CPU leads the stop:
   `concurrent`.
+* **Its admission**, when it starts while the machine is stopped, or
+  stops. A CPU enters ordinary execution only through one step, the last
+  of its start, taken with interrupts masked once everything it needs to
+  take the stop request is set up: it sets its bit in the admitted set,
+  executes a full memory barrier, and loads the stop word. If the word is
+  set it publishes its registers as `starting` and parks, having run
+  nothing. The leader does the mirror image: its claim, a barrier, then
+  its one load of the set. Of the two loads at least one sees the other
+  side's store, so a CPU is in the leader's set and is asked, or finds
+  the stop at its admission, or both, and never neither. The stop word is
+  never cleared, so this holds for a CPU that starts a minute after the
+  census as for one that starts during it, and the census never asks
+  again which CPUs exist. A CPU that is asked and also parks at its
+  admission has published, so the census counts it and does not wait for
+  it.
 
 What none of these reaches is a CPU that runs in kernel mode with
 interrupts masked and waits for no lock: a loop that never ends, which in
@@ -594,8 +690,9 @@ take and the probe that would settle it, and takes none
 ([design-arch-aarch64.md](design-arch-aarch64.md#stopping-every-cpu)).
 
 A CPU that unmasks interrupts after the census takes the pending request
-then and parks, so no CPU returns to user mode after a stop, and no
-thread on it runs again.
+then and parks, and one that starts after it parks at its admission, so
+no CPU returns to user mode after a stop, and no thread runs again on
+any CPU that takes interrupts.
 
 ### The hold
 
@@ -611,11 +708,26 @@ boot image carries the development flag, the command line carries
 board's hardware watchdog is not running. A boot that carries the word
 and holds no lease is **attended**: nothing in it starts the board's
 watchdog, neither the root on Fiasco nor erXos's kernel, since a
-developer's host is what watches it. Where the firmware already started
-the watchdog, the kernel reports that it will not hold and reloads it as
-ever. A release kernel is built without the hold, whatever image it
-boots, and a release build refuses a boot whose command line carries the
-word, as it refuses `erx.det=1`.
+developer's host is what watches it. The kernel asks one thing more,
+which the root cannot see and need not: a stop holds in an allowed boot
+only if the kernel's readable-RAM map was not refused
+([Readable RAM](#readable-ram)). A boot that carries the word and will
+not hold, because the firmware already started the watchdog or the map
+was refused, says so and why in one line at boot, and the kernel reloads
+a running watchdog as ever. A
+release kernel is built without the hold, whatever image it boots, and a
+release build refuses a boot whose command line carries the word, as it
+refuses `erx.det=1`.
+
+**After an incomplete census** the hold is entered all the same. That
+stop is the one a developer most needs to read, and under QEMU the
+hold's line is the moment the harness takes its image at, where the
+emulator shows the CPU the kernel could not reach. What the hold then
+gives is less, and the tool says so at the head of everything it prints:
+a CPU that did not answer may still write the line, so a reply can arrive
+damaged, which its CRC catches and the tool asks for again; and it may
+still write memory, so what the tool reads may change while it reads
+([Moments and images](#moments-and-images)).
 
 **The loop.** The leader polls the console UART's receive register and
 gathers bytes into a line of at most a request's length. At a newline the
@@ -627,15 +739,18 @@ stop, draws no output.
 * `read` with a length above `hold_read_max` is answered `length`.
 * `read` of no bytes is answered `ok`, whatever its address: it only
   says the host is still there.
-* `read` whose range does not lie whole inside one of the anchor's RAM
-  ranges is answered `range`. Device registers and every hole are outside
-  those ranges, so the hold never touches a register whose read has an
-  effect.
+* `read` whose range does not lie whole inside one range of the anchor's
+  map is answered `range`. The map holds no device register, no hole and
+  nothing the boot map excludes ([Readable RAM](#readable-ram)), so the
+  hold never touches a register whose read has an effect.
 * Any other `read` is answered `ok` with the bytes, copied through the
   kernel's own mapping of RAM
   ([design-arch-aarch64.md](design-arch-aarch64.md#kernel-access-to-memory))
   or, on Fiasco, through one page of kernel address space at which the
-  glue maps each page of the range in turn.
+  glue maps each page of the range in turn. A read that faults all the
+  same, at a page the boot map wrongly gave as RAM, is a fault inside the
+  stop: a nested stop, which ends the machine
+  ([Failure handling](#failure-handling)).
 * `end` ends the hold at once.
 
 The hold keeps no state between requests but the time of the last valid
@@ -644,7 +759,9 @@ itself, so a machine nobody is reading holds for five seconds and no
 longer. The host's tool sends a `read` of no bytes each second while it
 has nothing to ask, so a session lasts as long as a tool is attached and
 five seconds more. The hold has no request that writes, resumes or
-changes a register, and no state a request could corrupt.
+changes a register, and no state a request could corrupt. What it writes
+is its own: the leader's stack, the UART and, on Fiasco, the one
+translation entry of its window.
 
 **What it costs to read a board.** At 115,200 baud a reply of 4 KiB takes
 about half a second, so a board yields about 8 KiB of memory a second
@@ -703,7 +820,7 @@ the need named, never answered with a guess.
 | `mem ADDRESS LENGTH` | a hex dump, printable ASCII beside it and a dot for every other byte | memory |
 | `whatis ADDRESS` | what an address is ([What an address is](#what-an-address-is)) | memory |
 | `audit` | every row of every kind, checked against the schema ([The audit](#the-audit)) | memory |
-| `save FILE` | every byte the session has read, and the CPUs' registers, as a memory image | memory |
+| `save FILE` | every page read at the current moment, and the CPUs' registers, as a memory image ([Moments and images](#moments-and-images)) | memory |
 | `stop`, `continue`, `detach` | stop or resume the whole machine; leave the stub | control |
 | `break ADDRESS`, `watch ADDRESS LENGTH read\|write\|access`, `watch PATH ATTRIBUTE`, `delete N` | hardware breakpoints and watchpoints; the second form of `watch` is on the place a view read an attribute from | control |
 | `now`, `at COUNT`, `back`, `when PATH ATTRIBUTE`, `when ADDRESS LENGTH` | the instruction count of this moment; move to a count; run backwards to the last break or watch; run backwards to the last write of an attribute or a range | time |
@@ -839,17 +956,43 @@ that is not in the space it meant.
 `report` is the one function every failure gets. It is deterministic: the
 same target and bundle give the same bytes, so two reports compare with
 `diff` and a test compares one with its expected text. When any CPU is
-`unanswered` it says first that the CPU may still run and that what
-follows may have changed while it was read.
+`unanswered` it says first that the CPU may still run, that what follows
+may have changed while it was read and, on a held board, that the CPU may
+have written the line the report came over.
 
-### Sessions are images
+### Moments and images
 
-Every byte a session reads from a held board or a stub is kept, and
-`save` writes it with the CPUs' registers as a memory image; on a held
-board the tool saves before it ends the machine without being asked. The
-image holds exactly the pages the session read, so every command that
-was run against the machine gives the same answer against the file, and
-the board's failure can be read again after the board has rebooted.
+A target is read at a **moment**: one stopped state of the machine. A
+crash record, a memory image and a held board have one moment each, since
+none of them runs again. A stub's machine has a new moment each time it
+has run, and a replay's moment is its instruction count. The target
+interface names the moment ([Targets](#targets)), and everything the tool
+keeps of a target, the pages it has read, each CPU's registers and the
+views built from them, is kept under the moment it was read at. A command
+that lets the machine run or moves it in time (`continue`, `back`, `at`,
+`when`, and `stop` of a running machine) discards all of it before
+anything else is read. So two reads of one address at two moments are two
+reads of the machine, and no view is built from pages of different
+moments, which would describe a machine that never existed.
+
+`save` writes one moment: every page read at the current moment, the
+CPUs' registers, and a note that names the target and the moment, as a
+memory image. Every command that was run at that moment gives the same
+answer against the file. On a held board the tool saves before it ends
+the machine without being asked, so the board's failure can be read again
+after the board has rebooted.
+
+Within a moment the tool reads each page once, so its own answers agree
+with each other. Whether they agree with the machine depends on what
+could still write the machine's memory while it was read, which the head
+of every record states:
+
+| Target | What can write memory while the tool reads |
+| --- | --- |
+| a crash record, a memory image | nothing |
+| a stub of QEMU's, a replay | nothing: QEMU stops every virtual CPU and the guest's clock with them |
+| a stub of a probe's | a device that was in the middle of a transfer when the cores halted: its DMA goes on |
+| a held board | a device's DMA, as under a probe; the hold itself, which writes the leader's stack and, on Fiasco, the translation entry of its window; and after an incomplete census every CPU that did not answer |
 
 ### The GDB remote protocol subset
 
@@ -858,12 +1001,14 @@ protocol (GDB manual, appendix E). It sends exactly these packets:
 
 | Packet | Use |
 | --- | --- |
-| `qSupported` | learn `PacketSize`, whether the stub serves target descriptions, and whether it runs backwards (`ReverseContinue`) |
-| `qXfer:features:read:target.xml:OFFSET,LENGTH` | the target description, from which it takes each register's number, size and name; one without the architecture's core registers refuses the target |
-| `Qqemu.PhyMemMode:1` | QEMU's stub only: read physical memory with `m` |
+| `qSupported` | learn `PacketSize`, whether the stub serves target descriptions (`qXfer:features:read`), and whether it runs backwards (`ReverseContinue`) |
+| `qXfer:features:read:ANNEX:OFFSET,LENGTH` | the target description: `target.xml`, and each annex `target.xml` includes, from which the tool takes each register's number, size and name |
+| `Qqemu.PhyMemMode:1` | QEMU's stub only: read physical memory with `m`; a stub that answers with the empty reply gives no physical reads, and the tool refuses it as a source of memory |
 | `?` | why the machine is stopped |
 | `0x03`, outside any packet | stop a running machine |
-| `qfThreadInfo`, `qsThreadInfo`, `Hg`, `g` | the CPUs, one thread each; select one; its registers |
+| `qfThreadInfo`, `qsThreadInfo`, `Hg` | the CPUs, one thread each; select one |
+| `g` | the selected CPU's core registers |
+| `p NUMBER` | one register of the selected CPU that the `g` reply does not carry |
 | `m ADDRESS,LENGTH` | read memory |
 | `Z1`, `z1`, `Z2`, `z2`, `Z3`, `z3`, `Z4`, `z4` | insert and remove a hardware breakpoint and a write, read or access watchpoint |
 | `vCont?`, then `vCont;c` or `c` | resume every CPU |
@@ -876,12 +1021,41 @@ public way to send raw bytes. It reads each reply as the manual defines
 it: the empty reply means the stub does not support the request, which
 the tool reports as unsupported, and a stub without `Z1` has no
 breakpoints, since the tool never falls back to a software one; `E NN`
-means refused; a run of `x` in a `g` reply marks a register unavailable;
+means refused; a run of `x` in a register's place marks it unavailable;
 an `m` reply shorter than asked marks the rest "not here"; a stop reply
 names the CPU and the event, `replaylog` among them for a replay that has
 reached its beginning or its end. It keeps acknowledgement mode on,
 checks every checksum, and undoes the protocol's escapes and run-length
 encoding before it reads a payload.
+
+**The description is read within bounds.** The `target.xml` of QEMU's
+stub holds no register. It names the architecture and includes one annex
+for each feature, the core registers' among them, and the stub serves
+each annex under its name ([References](#references), QEMU's
+`gdbstub.c`). So the tool reads `target.xml`, then each annex it
+includes, and no further: an include inside an annex refuses the target.
+It reads at most `stub_annexes_max` (16) annexes of at most
+`stub_annex_max` (1 MiB) each, and sends back an annex's name only if it
+is at most 64 characters of ASCII letters, digits, `.`, `_` and `-`. A
+description past any of these bounds, or one without the architecture's
+core registers, refuses the target.
+
+**Registers are negotiated, never assumed.** The architecture binding
+lists the registers the tool uses: the core set, which every target must
+have, and each other register beside the command that needs it, of which
+the first is the translation root of the space a stopped CPU was in
+([design-arch-aarch64.md](design-arch-aarch64.md#stopping-every-cpu)).
+The core registers are the lowest-numbered and lead the `g` reply, so the
+tool reads them from it by the description's sizes and looks at nothing
+after them. QEMU registers its system registers as a feature of their
+own, outside the set the `g` reply carries, so the tool reads such a
+register alone, by the number its annex gives it, with `p`. A register
+the description does not list, or whose `p` is answered with the empty
+reply, an error or a run of `x`, is unavailable, and a command that needs
+it is refused with the register named: `watch` on an address of a space
+other than the kernel's, for one, since the tool could not tell which
+space a stop was in. Nothing is inferred from a register the tool could
+not read.
 
 A developer who wants source-level stepping attaches `lldb` to the same
 stub instead; one stub serves one client.
@@ -903,7 +1077,10 @@ are the programs' own output, not text the tool attributes
 
 **The console line.** While the machine runs, the line is its driver's.
 A stop takes it, by the order of [The stop](#the-stop), and nothing gives
-it back, so it never has two users. The kernel writes it by polling, and
+it back. After a complete census it has one user, the stop; after an
+incomplete one a CPU that did not answer may still write it, and the
+stop's output is best effort and says so. The kernel writes it by
+polling, and
 reads it only in the hold, also by polling, taking none of its
 interrupts. A hold's frames are printable ASCII lines, so a terminal that
 shows the line sees text and nothing that moves its cursor. The hold is
@@ -951,7 +1128,7 @@ Raspberry Pi 4's JTAG pins are routed
 ([design-header-io.md](design-header-io.md)), and a probe whose software
 serves the GDB remote protocol with physical reads is a target like
 QEMU's stub. Whether the probe at hand does is unverified
-([Open decisions](#open-decisions), P5); until it is settled the tool
+([Unverified facts](#unverified-facts), P5); until it is settled the tool
 reports a probe's target as unsupported. A board that is probed is booted
 attended, so no watchdog resets it while the probe holds it.
 
@@ -990,10 +1167,12 @@ The routes into the stop:
 | --- | --- | --- |
 | `panic` (`kern/kernel_panic.cc`) | prints, then `Thread::system_abort` | the message formatted into a bounded buffer, cause `panic` |
 | `assert_fail` (`kern/assertion.cpp`) | prints, then `Thread::system_abort` | the expression, file and line, cause `panic` |
-| `kdb_ke` (`kern/kdb_ke.cpp`), from "DEAD SCHED" and "I'm dead" (`kern/thread.cpp`) and "BUG in KU memory mapping" (`kern/task.cpp`) | with JDB enters it; without, prints `NO JDB` and goes on | the message, cause `panic`, in every build ([Open decisions](#open-decisions), 5) |
+| `kdb_ke` (`kern/kdb_ke.cpp`), from "DEAD SCHED" and "I'm dead" (`kern/thread.cpp`) and "BUG in KU memory mapping" (`kern/task.cpp`) | with JDB enters it; without, prints `NO JDB` and goes on | the message, cause `panic`, in every build ([Decisions](#decisions), 5) |
 | a kernel trap, `Thread::call_nested_trap_handler` (`kern/arm/thread-jdb.cpp`), and the three trap reports that end in a panic: the two kernel-mode abort checks (`kern/arm/64/thread-arm-64.cpp`) and `sigma0`'s exception (`kern/thread-ipc.cpp`) | with JDB the first enters it, and without it prints the trap state, ends the current thread and returns to the faulting instruction; the three reports print the trap state with `Trap_state::dump` and panic, while the other CPUs run | the trap state as the leader's registers and the exception in the fault field, with nothing printed before the census |
 | the debug inter-processor interrupt, `Thread::handle_debug_remote_requests_irq` (`kern/arm/thread-arm.cpp`), which every multiprocessor kernel attaches and only JDB sent | a breakpoint instruction into the nested trap handler | the stop request: publish the interrupted registers as `stopped` and park |
 | a spinlock's wait (`kern/arm/64/spin_lock-arm-64.cpp`, and the cores' ticket lock) | waits | the check of the stop word after each wake; `waiting` |
+| a secondary CPU's start, `App_cpu_thread::bootstrap` (`kern/app_cpu_thread.cpp`) | marks the CPU online near its beginning, sets up its timer and scheduler state, unmasks interrupts, prints and enters its idle loop | the admission, as the last step before interrupts are unmasked: the CPU sets its bit and, if the stop word is set, parks as `starting`. The boot CPU is admitted where the glue sets the stop up |
+| the console path's lock, Fiasco's printf lock (`kern/libc_backend_lock.cc`) | a take that loops without bound | a bounded take beside it, which the leader calls once and never undoes |
 | the root's request for a reset after its own crash record, an argument of the platform control object's shutdown that names the cause (`kern/platform_control_object.cpp`) | resets | the stop from its census on, with no record of the kernel's: the root wrote one |
 
 `Thread::system_abort` and the exit question go, since nothing reaches
@@ -1013,14 +1192,53 @@ the same word with the same parser, to leave the hardware watchdog
 unarmed in an attended boot
 ([design-fiasco.md](design-fiasco.md#the-watchdog)).
 
-**The hold on Fiasco.** The glue reads the console UART through its
-driver's polled read, which needs no console input of the kernel's
-(unverified until the glue is written, P10). The anchor's RAM ranges are
-the conventional-memory descriptors of Fiasco's kernel information page.
+**The console's lock on Fiasco.** The printf lock is one word that holds
+its owner's CPU or all ones. A take masks interrupts and loops on a
+compare-and-swap without bound, and a second take by the owner nests
+(`kern/libc_backend_lock.cc`). Every print of the kernel's takes it
+(`lib/libc/glue/`, `lib/libc/src/stdio/vfprintf.c`). The word is private
+to its file, so the fork adds the bounded take there: the same
+compare-and-swap, a fixed number of times.
+
+**The hold's reader on Fiasco.** With `CONFIG_INPUT` off, as it is in
+every build, `src/Modules.generic` defines `UART_WITHOUT_INPUT` for the
+whole kernel, and that macro removes the UART library's receive members,
+`char_avail` and `get_char` among them, from its base class
+(`lib/uart/uart_base.h`) and from both drivers erXos's boards use
+(`uart_pl011.cc`, `uart_16550.cc`). The console class's own reader, the
+`input` part of `drivers/uart.cpp`, is a layer above them and stays out
+of every build. The fork changes the one line of `Modules.generic`: the
+macro is defined unless `CONFIG_ERX_HOLD` is on. The hold's reader thus
+has one build condition, the option that builds the hold. A development
+kernel has the two polling members, and the glue calls them on the
+console's UART object; a release kernel has neither, so code that called
+one would not compile there. A source check keeps the hold's glue their
+only caller.
+
+**The hold's map on Fiasco.** The boot map is the kernel information
+page's memory descriptors, each a range, a type, a sub-type and a flag
+that says whether the range is of virtual addresses (`abi/kip.cpp`).
+Fiasco itself publishes one such virtual descriptor, conventional, over
+the whole user address space (`kern/arm/kip_init-arm.cpp`,
+`Kip_init::init`), and its own allocator skips virtual descriptors and
+takes reserved ranges out of conventional ones before it uses any
+(`kern/kmem_alloc.cpp`, `Kmem_alloc::create_free_map`). The fork's table,
+a pure function of the cores, classifies every descriptor for
+[Readable RAM](#readable-ram):
+
+| Descriptor | Class | Why |
+| --- | --- | --- |
+| any virtual descriptor; `Undefined` | `ignored` | it describes address space, or nothing |
+| physical `Conventional` | `ram` | what the boot stage gives as RAM |
+| physical `Reserved` of sub-type `Reserved_kernel` or `Reserved_heap`; `Kernel_tmp`; `Dedicated`; `Bootloader` | `used` | the kernel's image and heap, `sigma0`'s memory and the boot modules, the root's among them, which the kernel maps to them as memory (`kern/std_workload.cpp`, `map_all_segs`) |
+| physical `Reserved` of sub-type `Reserved_mmio`; `Shared`; `Arch`; `Info`; `Kmem`; any other type or sub-type | `excluded` | a device's registers, firmware's tables, or a kind nothing in erXos's configuration vouches for as memory |
+
 Fiasco maps only its own memory, so the glue reads a physical page
 through one page of kernel address space, the window JDB's temporary
 mappings used, mapped for the copy and unmapped after it. The end is
-Fiasco's platform reset, which every build takes.
+Fiasco's platform reset, which every build takes. Which type the boot
+stage gives the device tree's reservations, the firmware's own memory on
+the Raspberry Pi 4 among them, was not read for this design and is P11.
 
 **What changes for the backend.** Capability slot 10 is empty in every
 build, as the release kernel's already is; an invocation of it fails as
@@ -1034,11 +1252,15 @@ closes for every end that passes the stop, since that CPU is parked
 before the end ([design-fiasco.md](design-fiasco.md#the-watchdog)).
 
 **What Fiasco's stop lacks.** Fiasco's wait loops other than its
-spinlock's, a cross-CPU call's among them, do not check the stop word, so
-a CPU stuck in one with interrupts masked is `unanswered`. A CPU inside a
-print holds the printf lock with interrupts masked for the length of a
-line and takes the request when it has finished; the leader's bounded
-tries of that lock cover it.
+spinlock's, a cross-CPU call's and the printf lock's among them, do not
+check the stop word, so a CPU stuck in one with interrupts masked is
+`unanswered`. A CPU inside a print holds the printf lock with interrupts
+masked for the length of a line, about 5 ms
+([design-fiasco.md](design-fiasco.md#the-kernels-lines)), and takes the
+request when it has finished, well inside the census. A CPU that holds
+the lock and never lets go, stuck in a print or printing in a loop with
+interrupts masked, is `unanswered`: the leader's bounded take fails, and
+the stop's output is best effort, as [The stop](#the-stop) says.
 
 ## On erXos's kernel
 
@@ -1048,9 +1270,18 @@ on the same core: its first three steps are the claim, the stack and the
 request, the ticket lock's wait carries the check of the stop word, and
 its report is the record's. The crash buffer survives a warm reset where
 the platform has a region, so a board's record is also read after the
-reset at `/proc/kernel/crash`. The hold reads RAM through the kernel's
-direct map, whose ranges are the anchor's, and is the one place the
-kernel reads its console UART.
+reset at `/proc/kernel/crash`. Its boot map for
+[Readable RAM](#readable-ram) is the map its pool plan already reads
+([design-kernel.md](design-kernel.md#the-startup-plan-and-its-charge-evidence)):
+the conventional
+ranges are `ram`, the firmware's reservations, the device tree's
+`/reserved-memory` entries among them, are `excluded`, and what the
+kernel placed itself, its segments, the boot image and the device tree's
+copy, is `used`. The hold reads through the kernel's direct map, and
+through the kernel's own mapping of a page the direct map leaves out, and
+is the one place the kernel reads its console UART. Its secondary CPUs'
+start ends in the admission, and its console lock is the one the
+leader's bounded take is tried on.
 
 The ledger's row "Kernel debugger" keeps its answer, none, with its
 reason, less code and less to attack in kernel mode, and gains what
@@ -1066,7 +1297,9 @@ refuses a medium whose command line holds it. A kernel stop on one writes
 the full record on the console, which shows registers, a backtrace and
 the log's last lines, already escaped, reads nothing, and resets.
 Nobody at the console reaches kernel memory, and the images carry no GPL
-kernel file.
+kernel file. Their kernels do link the hold's code, as every development
+kernel does; a release kernel links none
+([Security](#security)).
 
 ## Failure handling
 
@@ -1074,15 +1307,18 @@ kernel file.
 | --- | --- | --- | --- |
 | a fault inside the stop on the leader, the hold included | the claim's depth | the machine ends; what was printed stays printed | `erx: nested stop` at depth two; at a greater depth nothing more |
 | two CPUs stop at once | the stop word | one record | the other CPU as `concurrent` |
-| a CPU does not answer | the census bound | the others' slots | the CPU as `unanswered`; under QEMU or a probe, its registers from outside |
+| a CPU does not answer | the census bound | the others' slots; a report printed best effort | the CPU as `unanswered`, named in the report's first line; under QEMU or a probe, its registers from outside |
+| a CPU finishes starting after the stop | the stop word, at its admission | its slot | nothing on the console; `offline` in the record if the census had ended, and `starting` in its slot |
 | CPUs deadlock on spinlocks | each one's wait loop, once any CPU stops the machine; if none can, the board's watchdog or the harness's deadline | each waiter's slot | each as `waiting`, with its lock; from a hang's image, each CPU's registers in the wait |
-| the console's lock is held by a CPU that will not release it | the bounded tries | the report, written without the lock | the report's first line says the lock was not taken |
+| the console's lock is held by a CPU that will not release it | the bounded take | the report, written without the lock | the report's first line says the lock was not taken; a frame the other writer damaged is reported as damaged |
 | the UART never becomes ready to send | the polled write's bound a byte | a truncated frame | the reader reports the frame truncated, never parses it as whole |
 | the host falls silent, the cable is pulled, or the tool dies | the hold's silence bound | the record already printed, and what the tool had saved | the machine ends by itself |
 | a request is damaged | its length, magic and CRC | the hold, unchanged | nothing: the tool sends it again |
 | a reply is damaged | its CRC, at the tool | the hold | the tool asks again, and after three tries marks the range "not here" |
 | a `read` outside RAM | the range check | the hold | `range`; the tool shows the address as not memory |
+| a `read` inside the map faults | the claim's depth | what the tool had read and saved | `erx: nested stop`, and the machine ends; the tool names the address it had asked for |
 | the board's watchdog is running in a boot that carries `erx.hold=1` | the hold decision | the stop, without a hold | a line at boot saying the boot will not hold, and why |
+| the readable-RAM map is refused | the core, at boot | the stop, without a hold; an anchor with no range | a line at boot saying the boot will not hold, and which entry or bound refused the map |
 | a record that fails its check | the crash core's check; the readers' | nothing trusted | the check's reason |
 | a memory image without register notes | the image reader | memory | CPUs from the stop slots, if the machine stopped itself; otherwise registers unavailable |
 | two pages that look like an anchor | the anchor search | nothing trusted | both addresses, and a refusal to choose |
@@ -1098,8 +1334,14 @@ kernel file.
 from the console, the host link or a domain: its causes are the kernel's
 own failures and the root task's ends, which exist without this design.
 
-**Who may read a stopped machine.** In a release build and in a published
-image, nobody: no build of those kinds reads its console in kernel mode.
+**Who may read a stopped machine.** In a release build, nobody: a release
+kernel links no code that reads its console. A published image is a
+development build, so its kernel does link the hold, and what keeps it
+unused is the boot's command line, which carries no `erx.hold`
+([Published images](#published-images)). The two are different
+guarantees: the first is a property of the link, the second of a file on
+the medium, and whoever can rewrite that file holds the medium and could
+as well write a kernel of their own to it.
 In a development build booted with `erx.hold=1`, whoever holds the
 console wire, for as long as the hold lasts: every byte of RAM, the
 vault's keys and every domain's memory among it. That is total authority
@@ -1120,7 +1362,7 @@ answer.
 
 **Images and full records hold secrets.** A memory image holds everything
 the machine held, and a full record may hold what the interrupted code
-held in its registers. Images and saved sessions stay in the run's log
+held in its registers. Images and saved moments stay in the run's log
 directory on the host and never enter the repository; a release build
 writes the brief record, which holds no register but the program counter
 and no CPU entry.
@@ -1138,29 +1380,38 @@ Each test is paired with the seeded fault that proves it ran.
 
 | Test | What passes | Seeded fault that must make it fail |
 | --- | --- | --- |
-| the stop core, exhaustive, on the host | for up to 4 CPUs, every interleaving of entries into the stop, request deliveries, CPUs in a lock's wait, CPUs that never unmask, CPUs coming online late and the bound: exactly one leader; every CPU in exactly one state; registers only where a slot was published; a nested stop never waits; the census ends by the bound | the claim treating its own CPU's word as another's, so a nested stop waits on itself; the census marking an asked CPU `stopped` without its slot |
+| the stop core, exhaustive, on the host | for up to 4 CPUs, every interleaving of entries into the stop, request deliveries, CPUs in a lock's wait, CPUs that never unmask, CPUs at each step of their admission before, during and after the census, and the bound: exactly one leader; every CPU in exactly one state; every CPU that passes its admission is in the leader's set or parked `starting`; registers only where a slot was published; a nested stop never waits; the census ends by the bound | the claim treating its own CPU's word as another's, so a nested stop waits on itself; the census marking an asked CPU `stopped` without its slot; the admission loading the stop word before it sets its bit, so one interleaving lets a CPU run on unasked |
+| the admission's ordering, a litmus test at the milestone gate | under the architecture's memory model, never both at once: the leader's load missing a CPU's bit, and that CPU's load missing the stop word | the barrier removed from either side |
 | the hold's machine, exhaustive, on the host | over every state and event: a reply only to a line that passed every check; no reply to a damaged line; `range` for every range that leaves the map, over maps of one to 16 ranges and ranges that straddle, touch and wrap; the hold ends at `end` and at the silence bound and at no other time | the range check comparing the range's start alone; the silence clock restarted by a damaged line |
-| the hold decision | over every development flag, word, boot value, lease and watchdog state: a hold only when all five allow it | the trial's refusal removed |
+| the readable-RAM map, on the host | over boot maps the test builds: a virtual entry that spans every `ram` range changes nothing; an `excluded` entry inside a `ram` range splits it, rounded outward; overlapping and touching `ram` ranges join; a map of 17 ranges, an entry whose end overflows and a `used` entry that leaves the result are each refused, never cut; and over random maps, every page of the result lies in a `ram` entry and in no `excluded` one, and the result is sorted, disjoint and whole pages | the subtraction skipped: the interior exclusion is readable; a 17th range dropped without a refusal |
+| Fiasco's classification, on the host | every descriptor type and sub-type of the kernel information page, physical and virtual, gets the class of [On Fiasco](#on-fiasco)'s table, and a value the table does not list is `excluded` | a virtual `Conventional` descriptor classed `ram`; the default changed to `ignored` |
+| the hold decision | over every development flag, word, boot value, lease and watchdog state: a hold is allowed only when all five allow it; and over both verdicts on the map: a stop in an allowed boot holds only with a map that was not refused | the trial's refusal removed; the map's verdict ignored |
 | the slot's publication, a litmus test at the milestone gate | a reader never sees a published state with stale registers | the state stored without release ordering |
 | the crash core and its readers | records with CPU entries round-trip through `crash.c`, `crash_read.c` and `crash_frame.rb`, which agree case by case; the brief form carries no entry whatever the stop hands the writer | an entry with a state outside the enum accepted by one reader; entries copied into the brief form |
 | the boot arguments' parser (`boot_args.c`) and the root's arming of the board's watchdog (`test/host/pm_wdt_test.rb`) | a release build refuses a boot whose command line carries `erx.hold=1`; the watchdog is armed in every boot but a deterministic one and one that may hold | the refusal removed; an attended boot armed |
 | `native_machine_stop`, a QEMU cell on a development test kernel with a seeded panic on CPU 2 of 4, under TCG and HVF | one crash frame of cause `panic`, CPU 2 `leader` and the others `stopped`; the image's `report` symbolizes the leader's backtrace to the seeded function | the request's send removed: three `unanswered` |
 | the same cell with CPU 1 waiting for a spinlock that CPU 3 holds, interrupts masked on both, CPU 3 spinning | CPU 1 `waiting` with the seeded lock's address, CPU 3 `unanswered`; the image shows CPU 3's program counter in the seeded loop, and `whatis` names the lock | the check removed from the wait loop: CPU 1 `unanswered` |
 | the same cell with CPUs 1 and 2 panicking at once | one frame; one `leader`, one `concurrent` | the claim by a plain store: two frames |
+| the same cell with CPU 3 held in its start until the census has ended, then released | the record gives CPU 3 as `offline`; no line of CPU 3's follows the crash frame; the image's slot for CPU 3 is `starting`, with its program counter in the admission | the admission's check removed: CPU 3's start-up lines follow the frame, and the image shows it in its idle loop |
+| the same cell with CPU 3 held between its admission and its unmasking of interrupts while CPU 0 stops the machine | CPU 3 `stopped` | the CPU's bit set after it unmasks interrupts and not at its admission: CPU 3 is not in the leader's set, is not asked, and runs on |
+| the same cell with CPU 3 printing in a loop with interrupts masked | CPU 3 `unanswered`; the report's first line names it and says whether the console's lock was taken; the harness's reader gives the crash frame whole or reports it damaged, never a record with another writer's bytes in it; the tool's report from the image is headed by its warning | the first line's statement removed; the reader's check of the frame skipped, so a damaged frame parses |
 | the same cell with a fault seeded inside the record's writer | `erx: nested stop` and the end within the run's deadline | the depth check removed: the run never ends |
 | the same cell on a release test kernel, whose test image's command line carries the word | the record, no `--erx-held`, no reply to the requests the harness sends after the frame, and a reset | the release kernel built with the hold, which the configuration check refuses before the cell runs |
-| `native_hold`, the cell with `erx.hold=1`: the tool reads the held machine through the console's socket, then the harness takes QEMU's own image of the same stopped machine | every range the tool read is byte for byte the image's; a `read` of the UART's own register page is answered `range`; the tool's `report` from the held machine equals its `report` from the image; after `end` the machine resets, and with no request it resets within the silence bound | the glue's window mapping the page before the one asked: the bytes differ; the range check removed: the register page is read |
+| `native_hold`, the cell with `erx.hold=1`: the tool reads the held machine through the console's socket, then the harness takes QEMU's own image of the same stopped machine | every range the tool read is byte for byte the image's; every range of the anchor's map lies inside the RAM the image holds; a `read` of the UART's own register page, and one of an address that only the kernel information page's virtual descriptor covers, are answered `range`; the tool's `report` from the held machine equals its `report` from the image; after `end` the machine resets, and with no request it resets within the silence bound | the glue's window mapping the page before the one asked: the bytes differ; the range check removed: the register page is read; the virtual descriptor classed `ram`: the second `read` is answered, or faults |
+| `native_ram_sweep`, a development test kernel that, once its map is built, reads one word of every page of the map through the hold's window and prints how many it read | the count is the map's number of pages, and the boot goes on to the root's first line | the sweep stepping two pages at a time: the count is half the map's |
 | the same cell without the word | no `--erx-held`; requests sent after the frame draw no reply | the hold decision ignoring the word |
 | `inspect` against `/proc` | on an image taken right after the cell reads `/proc/budgets`, `/proc/domains` and `/proc/cpus`, `export` gives the same value for every attribute both report | one walker's field mapped to its neighbour |
 | walker resolution at build time | every walker's kinds, keys, reporters and fields resolve | a walker naming a field the image does not have fails the build at its line |
 | `audit` | clean on an image of a healthy machine; on an image in which the test has overwritten one handle's slot in the root's table, exactly that row, by path and address | the reference check skipped: the corrupt image audits clean |
-| `tools/erx debug --stub` on a TCG run | attaches, stops, lists 4 CPUs, reads a kernel symbol's memory, sets `watch` on a budget's `used`, continues, and reports the stop at the charging funnel | the physical mode request removed: the symbol's bytes no longer match the image's |
+| `tools/erx debug --stub` on a TCG run | attaches, stops, lists 4 CPUs, reads a kernel symbol's memory, reads a stopped CPU's translation root by its own register and finds the root its space's record gives, sets `watch` on a budget's `used`, continues, and reports the stop at the charging funnel | the physical mode request removed: the symbol's bytes no longer match the image's |
+| the stub client against a scripted stub, on the host | a description whose `target.xml` only includes annexes is read whole; the core registers come from `g` and a register outside it from `p`; an annex past its size bound, a seventeenth annex, an include inside an annex and an annex name with a character outside the allowed set each refuse the target; with no annex that lists the translation root, `watch` on an address of another space is refused with the register named, and `watch` on a kernel address still works | the size bound removed: the long annex is read; the refusal removed: the watch is set, and a stop in the wrong space is reported as the one meant |
+| moments, against the same scripted stub | an address read before and after `continue` across a write gives the old value and then the new; `save` after the second read holds the second moment's page alone and names that moment; on a scripted replay, `at` an earlier count discards what was read | the pages kept across `continue`: the second read gives the old value |
 | a recorded run | a case that seeds one stray write to a budget's record and panics later is recorded, replayed to its stop, and `when budgets/N used` ends at the seeded store, at the same instruction count on every replay | the watchpoint set on the neighbouring field: `when` ends at the replay's beginning |
 | the views' statuses | on an image with a hole where an attribute lies the attribute is `unknown`; one no walker reads is `unsupported`; a value outside its type is `{error, invalid}` with its bits beside it; a walk that meets its own row again is marked cyclic | an unreadable range answered with zero bytes: the attribute reads `ok` |
 | the anchor search | an image with the kernel's anchor is accepted without the bundle's address; one with a second page that passes every check is refused, both addresses named | the search returning its first match |
 | the tool's printer | a record whose text holds ESC, a C1 control, a bidirectional override, a newline and invalid UTF-8 prints escaped from `report`, `log`, `inspect` and `print` | the escape left out of one command's path: the source check on the tool's output calls fails, and the raw byte reaches the transcript |
 | the tool's requests | the stub client and the hold client have a constructor for each listed request and no other, checked over their public methods | a constructor for the `M` packet added: the test names it |
-| the configuration check | no kernel's resolved configuration has `CONFIG_INPUT`; a release kernel's has no `CONFIG_ERX_HOLD` | a resolved file with either: refused |
+| the configuration check, and the source check of the hold's reader | no kernel's resolved configuration has `CONFIG_INPUT`; a release kernel's has no `CONFIG_ERX_HOLD`, and its build defines `UART_WITHOUT_INPUT`; in the fork's sources only the hold's glue names the UART library's `char_avail` and `get_char` | a resolved file with either option: refused; a second caller of `get_char`: the source check names it |
 | the license audit | no kernel build, development or release, links a source under a license that is not permissive | compile records that name a source its import record gives as GPL-2.0-only: a development build is refused as a release build is |
 
 **Fuzz targets**, each landing with its decoder: the hold's request line
@@ -1170,22 +1421,25 @@ existing crash targets (`tools/fuzz/crash_fuzz.c`,
 `tools/fuzz/crash_frame.rb`); the anchor reader and the anchor search;
 the ELF core reader (headers, segments, notes); the protocol client's
 packet decoder (framing, checksums, escapes, run-length encoding, stop
-replies, error replies) and the target description reader; the machine
+replies, error replies) and the target description reader, over
+`target.xml` and its annexes; the machine
 protocol's replies for the commands the harness adds; and the walkers
 over arbitrary memory: every command on a random image ends within its
 bounds and prints only escaped text.
 
 The cells run at the landing gate when a change touches the stop, the
 hold, the harness's end handling or the tool, and in the full QEMU suite
-at the milestone gate. The Raspberry Pi 4's manual checklist gains one
-item: an attended boot of a test kernel with a seeded panic holds, the
-tool's report names the seeded function, and the board resets five
-seconds after the tool exits.
+at the milestone gate. The Raspberry Pi 4's manual checklist gains two
+items. The sweep kernel boots and prints the map's page count, which
+settles P11 for the board. And an attended boot of a test kernel with a
+seeded panic holds, the tool's report names the seeded function, and the
+board resets five seconds after the tool exits.
 
 ## Performance
 
-The stop runs once. On the paths that run always, the change is one load
-of the stop word on each pass of a contended spinlock's wait, and on
+The stop runs once, and a CPU's admission, one store, one barrier and one
+load, once at its start. On the paths that run always, the change is one
+load of the stop word on each pass of a contended spinlock's wait, and on
 Fiasco one pointer kept per CPU at each interrupt's dispatch; the change
 to the interrupt entry lands with before and after numbers from
 `tools/erx bench` for the IPC and interrupt benchmarks, as changes to the
@@ -1217,7 +1471,7 @@ The survey of [References](#references) cites each.
 | --- | --- |
 | Keep JDB in development builds | 28% of the kernel's code in kernel mode for a prompt nobody uses, a GPL file in every development image, no breakpoints on AArch64, a stop that cannot reach a CPU that masks interrupts, a resume that gives the console line two users, a board that resets four seconds into a session, and a published image whose console reads and writes kernel memory |
 | No hold: a board without a probe has its record and nothing else | the record is 16 KiB by design; the failures only hardware shows are the ones QEMU's image cannot help with; the hold is one loop, one fixed-size request and a range check, in development kernels alone |
-| A stub in the kernel that resumes: breakpoints, stepping and a break-in key on a board | it needs a line the kernel owns for the whole boot, which the Raspberry Pi 4's shared UART page does not give; a resume path; and debug exceptions taken in kernel mode, which Fiasco's AArch64 kernel has never had; QEMU's stub and a probe give all three from outside, with nothing in the kernel. Revisit only if P5 shows the probe cannot halt and read a Raspberry Pi 4 |
+| A stub in the kernel that resumes: breakpoints, stepping and a break-in key on a board | QEMU's stub and a JTAG probe give breakpoints and watchpoints with no code in the kernel. A stub of the kernel's own needs a line the kernel owns for the whole boot, which the Raspberry Pi 4's shared UART page does not give; a pause and a continue of the whole machine, which Fiasco does not have and which would have to restore every CPU's timers, the devices and the console line's one owner; a path by which input from a line writes kernel memory and registers; debug exceptions taken in kernel mode, which Fiasco's AArch64 kernel has never had; and for software breakpoints, kernel text that is writable, against the rule that no mapping is writable and executable ([Decisions](#decisions), 6) |
 | The GDB remote protocol in the kernel | dozens of packets where two requests serve, and a promise to behave as `gdb` and `lldb` expect; the protocol's client is on the host, where a mistake costs a session, not a machine |
 | A line of its own for the hold | a second cable and a second UART for what the console, which the stop already owns, carries; see [Transports](#transports-and-the-console-line) |
 | The kernel pushes a fixed dump after its record, with no input at all | it cannot know what the host will ask, so it sends everything it might: minutes of output at every stop, attended or not |
@@ -1232,36 +1486,37 @@ The survey of [References](#references) cites each.
 | Processes of a stopped runtime as views | the runtime's process tables are ERTS's own structures, a large set of walkers with no consumer yet; the seam is a walker file for the runtime's image |
 | Leave everything to `lldb` on QEMU's stub | no views of the kernel's model, no reading of crash records, boards or images, and no report in the harness; `lldb` stays the choice for source-level stepping |
 | One kernel build for development and release, the hold decided by the image's flag alone | a release kernel would link code that reads its console in kernel mode, kept off by a flag in a file the boot medium holds; built without it, "no release kernel reads its console" is a property of the link, which a check proves |
+| No hold after an incomplete census | the simplest rule, and it would make "a held board has no running CPU" true by construction; but that stop is the one most worth reading, and the harness takes its image of exactly that machine at the hold's line. The hold is entered, its replies' CRC catches a damaged one, and the tool says what the hold no longer promises |
+| The census over the kernel's own account of online CPUs, asking again each round for CPUs that came online | a CPU that comes online after the last round is never asked and runs on; and Fiasco marks a CPU online long before it can take the request. The admitted set and the check at admission need one look and leave no window |
+| An anchor map copied from the boot map, or cut to 16 ranges | Fiasco's boot map holds a conventional descriptor of virtual addresses and reservations laid over RAM, so a copy is not a list of readable memory; and a cut map answers "not memory" for memory that is there |
+| One image for a whole session on a stub | two reads of one address on either side of a `continue` can differ, and pages of two moments together describe a machine that never existed; a save is of one moment |
 
-## Open decisions
+## Decisions
 
-None of these is decided; each carries a recommendation.
+Each of these was a choice between designs, and is settled as stated.
 
-1. **The ledger's row "Kernel debugger"**
-   ([design-kernel.md](design-kernel.md#the-ledger)) changes from "none;
-   Fiasco keeps JDB in development builds" to none on either kernel, with
-   the stop, the record and the hold in its place. The hold is new code
-   in kernel mode, in development kernels: a polled read of the console
-   and a reader of RAM. The alternative is no hold, which leaves a board
-   without a probe its record alone. Recommendation: accept the row with
-   the hold.
-2. **Published images.** [plan.md](plan.md#01-the-preview) records that
-   0.1's images carry the development kernel with JDB and its GPL object,
-   by decision. Under this design no image carries either, a published
-   image's stop prints its record and resets, and the images on the
-   website keep JDB until they are rebuilt. Recommendation: republish
-   once the stop has landed, and change plan.md's two passages then.
-3. **Where the work lands.** [plan.md](plan.md) lists, among 0.2's Fiasco
-   patches, the release kernel's build without `jdb_object.cpp` and the
-   debugger's configuration check. This design replaces both with the
-   debugger out of every build. Recommendation: in 0.2, in that patch's
-   place, in three parts that each land alone: the stop with its record
-   and JDB's removal; the host's tool over records and images, with the
-   harness's reports; the hold. Stubs, replay and the probe follow as
-   their probes settle.
-4. **Debug bundles of published builds.** Recommendation: keep each
-   published build's bundle with its release records outside the
-   repository, so a record a user sends symbolizes.
+1. **No kernel debugger on either kernel, and the hold in a development
+   kernel.** The ledger's row "Kernel debugger"
+   ([design-kernel.md](design-kernel.md#the-ledger)) reads none on either
+   kernel, with the stop, the record and the hold in its place. The hold
+   is code in kernel mode, in development kernels alone: a polled read of
+   the console and a reader of RAM. Without it a board with no probe
+   attached has its record and nothing else.
+2. **Published images.** No image carries JDB or its GPL object, and a
+   published image's stop prints its record and resets. The images the
+   website offers are rebuilt and republished once the stop has landed;
+   until then they are the builds [plan.md](plan.md#01-the-preview)
+   describes, with JDB and its source offered.
+3. **Where the work lands.** In 0.2, in the place of the release kernel's
+   build without `jdb_object.cpp` and of the debugger's configuration
+   check ([plan.md](plan.md)), in three parts that each land alone: the
+   stop with its record and JDB's removal; the host's tool over records
+   and images, with the harness's reports; the hold. Stubs, replay and
+   the probe follow as their probes settle
+   ([Unverified facts](#unverified-facts)).
+4. **Debug bundles of published builds** are kept with each build's
+   release records, outside the repository, so a record a user sends
+   symbolizes.
 5. **`kdb_ke` stops the machine in every build.** Three checks call it
    outside the debugger's own parts: a dead thread that runs again
    ("DEAD SCHED" and "I'm dead", `kern/thread.cpp`) and a mapping insert
@@ -1269,35 +1524,45 @@ None of these is decided; each carries a recommendation.
    `kern/task.cpp`). A kernel without JDB prints `NO JDB` and goes on at
    each; a kernel with it has always stopped there. Stopping is what
    erXos's kernel does at a broken invariant, and going on runs a kernel
-   that has just found its own state wrong; but it turns three checks
-   into ends of the machine in the release, where a Fiasco defect that
-   reaches one from a domain would be a reset and not a line in the log.
-   Recommendation: stop.
-6. **Breakpoints on a board come from a probe alone.** Under QEMU the
-   stub gives breakpoints, watchpoints and, on a recording, running
-   backwards. On a board without a probe the design gives the record and
-   the hold: everything after a stop, and nothing that pauses a running
-   kernel and lets it go on. Giving that from inside is the resuming stub
-   of [Alternatives considered](#alternatives-considered).
-   Recommendation: accept, and revisit only if P5 shows a probe cannot
-   halt and read a Raspberry Pi 4.
-7. **The walker files are a new specification format**, in the style of
-   `abi/inspection.txt`: facts in lines, closed sets, a Ruby generator
-   that validates every row. The alternative is Ruby tables in the tool,
-   which the build could check as well but which put layout knowledge of
-   two kernels inside host code. Recommendation: the text files.
-8. **The research records.** This design cites three records that are not
-   in the tree ([References](#references)). Recommendation: commit them
-   where the project keeps point-in-time records, the survey as a
-   `research-` document and the facts record beside the other clean-room
-   one.
+   that has just found its own state wrong. The cost is stated: the three
+   checks are ends of the machine in the release, where a Fiasco defect
+   that reaches one from a domain is a reset and not a line in the log,
+   so the system-call fuzz campaign counts a stop at any of them as a
+   finding, as it counts any crash of Fiasco
+   ([design-fiasco.md](design-fiasco.md#verification)).
+6. **No stub in the kernel that resumes: breakpoints on a board come from
+   a probe.** Under QEMU the stub gives breakpoints, watchpoints and, on
+   a recording, running backwards, and on a board a JTAG probe gives the
+   first two, each with no code in the kernel. A stub of the kernel's own
+   would need a pause and a continue of the whole machine, which Fiasco
+   lacks, a path by which a line's input writes kernel memory, and
+   writable kernel text for software breakpoints
+   ([Alternatives considered](#alternatives-considered)). A board without
+   a probe has the record and the hold: everything after a stop, and
+   nothing that pauses a running kernel and lets it go on. The question
+   reopens only if P5 shows that a probe cannot halt and read a Raspberry
+   Pi 4.
+7. **The walker files are a specification format of their own**, in the
+   style of `abi/inspection.txt`: facts in lines, closed sets, a Ruby
+   generator that validates every row. Ruby tables in the tool could be
+   checked as well, but would put layout knowledge of two kernels inside
+   host code.
+8. **The research records live in the history repository.** The three
+   records this design cites are point-in-time reports with the sources
+   they read. They are kept in `~/erxos-history`, the repository for
+   records and raw data, and not in this tree, and
+   [References](#references) cites each by its path there.
 
-**Unverified facts and the probe that settles each:**
+## Unverified facts
+
+None of these is a decision. Each is a fact no source or run read for
+this design establishes, with the probe that settles it.
 
 * P1. Whether QEMU's stub, under HVF, stops the machine, reads registers
   and memory, and inserts hardware breakpoints and watchpoints (its
-  documentation says support depends on the accelerator). Probe:
-  `tools/erx debug --stub` on an HVF run.
+  documentation says support depends on the accelerator), and whether its
+  description there lists the translation root's register and `p` reads
+  it. Probe: `tools/erx debug --stub` on an HVF run.
 * P2. Whether QEMU's ELF dump of an AArch64 guest carries one register
   note for each virtual CPU, under TCG and HVF, and whether it carries
   the translation root. The tool needs neither for a machine that stopped
@@ -1320,14 +1585,22 @@ None of these is decided; each carries a recommendation.
 * P6. Whether Fiasco's kernel and the cores keep frame records in every
   function, so a frame-pointer walk gives the whole backtrace. Probe: the
   seeded panic's backtrace in `native_machine_stop`.
-* P7. Whether a spinlock waiter that sleeps for an event wakes when
-  another CPU signals one, or when the stop request becomes pending on
-  its CPU, under HVF and on the boards, and whether a signal sent just
-  before it sleeps still wakes it. Under TCG the fork's own unlock relies
-  on the first, and the case that fails without it is the evidence
+* P7. Whether a spinlock waiter that sleeps for an event finds the stop
+  word when it wakes. The leader stores the word before it signals the
+  event and before it sends the request, so what must hold is an order,
+  the store, then the wake, then the waiter's load seeing the store, and
+  not only that a waiter wakes. It has three parts: that a waiter asleep
+  for an event wakes when another CPU signals one, or when the stop
+  request becomes pending on its CPU, under HVF and on the boards; that a
+  signal sent just before it sleeps still wakes it; and that its load
+  after either wake sees a store made before the signal. Under TCG the
+  fork's own unlock relies on the first, and the case that fails without
+  it is the evidence
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build),
-  "The spin lock's event"). Probe: the cell with a seeded lock wait,
-  repeated under HVF, and the same seed on the board.
+  "The spin lock's event"). Probes: a litmus test of the store, the
+  signal and the waiter's load, at the milestone gate, whose seeded fault
+  is the store moved after the signal; the cell with a seeded lock wait,
+  repeated under HVF; and the same seed on the board.
 * P8. Whether any Fiasco source outside `src/jdb/` needs `jdb_kobject`,
   `jdb_kobject_names`, `jdb_space` or `jabi`'s `jdb_obj_info` when
   `CONFIG_RT_DBG` stays on. Three files name their classes as friends
@@ -1335,43 +1608,83 @@ None of these is decided; each carries a recommendation.
   no definition. Probe: the build.
 * P9. Whether `sigma0` ignores its object-naming calls failing on an
   empty slot 10. Probe: any full boot of a kernel without the object.
-* P10. Whether Fiasco's UART library polls for a received byte with the
-  kernel's console input built out: the console class's own read is in
-  the `input` part (`drivers/uart.cpp`), so the glue would call the
-  library object under it. And whether Fiasco's printf lock, which is
-  taken only by a blocking call (`kern/libc_backend_lock.cc`), can be
-  tried a bounded number of times. Probe: reading both MIT sources when
-  the glue is written.
-* P11. Whether the conventional-memory descriptors of Fiasco's kernel
-  information page leave out every range whose read from kernel mode
-  faults, the firmware's own memory on the Raspberry Pi 4 among them.
-  Probe: the manual checklist's attended boot, with a `read` of each
-  range's first and last page.
+* P10. Whether, on Fiasco, a stop request sent to a secondary CPU that is
+  past its admission and has not yet unmasked interrupts is taken when it
+  unmasks. The admission is the last step of `App_cpu_thread::bootstrap`
+  before interrupts are unmasked, and by then the CPU's interrupt
+  controller interface and the request's handler must be set up; the
+  per-CPU set-up was not read to confirm that they are. Probe: the cell
+  that holds CPU 3 between its admission and its unmasking while CPU 0
+  stops the machine.
+* P11. Whether Fiasco's boot map is right for each board: that no
+  physical `Conventional` descriptor covers anything but RAM, that every
+  range of the device tree's reservations, the firmware's own memory on
+  the Raspberry Pi 4 among them, has a descriptor the table classes
+  `excluded` or lies outside conventional memory, and so that a read from
+  kernel mode of any page of the readable-RAM map neither faults nor
+  touches a device. The boot stage that writes the descriptors was not
+  read for this design. Probe: `native_ram_sweep` under QEMU and on each
+  board's manual checklist, which reads every page of the map and so
+  finds a hole inside a range as surely as one at its edge; a page that
+  faults is a kernel trap whose record names the address.
 
 ## References
 
-* The research records of 2026-11-25 at erXos commit `934479cb7`, which
-  no repository holds: they are files of
-  `~/erxos-scratch/research/debugger/`
-  ([Open decisions](#open-decisions), 8). `jdb-survey.md`, JDB's parts,
-  commands and entry routes and what erXos uses them for;
-  `kernel-debuggers.md`, the survey of FreeBSD's, OpenBSD's and NetBSD's
-  ddb, illumos mdb and kmdb, Windows KD, Linux's kgdb documentation,
-  seL4, QEMU's stub and replay, rr, DTrace and Genera, with each source's
-  SHA-256 under `src/`; and `facts-jdb-object.md`, the clean-room facts
-  record of `jdb_object.cpp`, SHA-256
-  `6a1359080661ea097fae1a9228dc6448c87b95dcaa6e9974c5e5c6ffc87ec3a2`,
-  which was read only by that record's own agent. One statement of the
-  survey is wrong and this design does not rest on it: its command table
-  lists JDB's breakpoints among the commands on AArch64, and the module
-  that implements them is built for 32-bit Arm alone
-  ([Context](#context)).
+* The research records of 2026-11-25 at erXos commit `934479cb7`, kept in
+  the history repository, `~/erxos-history`, and not in this tree
+  ([Decisions](#decisions), 8):
+  * `notes/debugger-2026-11-25/jdb-survey.md`, SHA-256
+    `d3c48e6e36a4f0d7d4befc50fb5f1a56bc5e060f3001c52b0250f3b1dc625010`:
+    JDB's parts, commands and entry routes and what erXos uses them for;
+  * `notes/debugger-2026-11-25/kernel-debuggers.md`, SHA-256
+    `f61d83a2bf47aaf3ebca40f4caadd0c7dd83572f23d6a186f6288b7c16387251`:
+    the survey of FreeBSD's, OpenBSD's and NetBSD's ddb, illumos mdb and
+    kmdb, Windows KD, Linux's kgdb documentation, seL4, QEMU's stub and
+    replay, rr, DTrace and Genera, with every source it read under
+    `notes/debugger-2026-11-25/src/` and each one's SHA-256 in
+    `SHA256SUMS` there;
+  * `cleanroom/facts-jdb-object.md`, SHA-256
+    `205ac306284f1c94f40cd949289be4f2b1b86a04a81095541e656ed7b7de119c`:
+    the clean-room facts record of `jdb_object.cpp`, whose own SHA-256 is
+    `6a1359080661ea097fae1a9228dc6448c87b95dcaa6e9974c5e5c6ffc87ec3a2`
+    and which only that record's own agent read.
+
+  One statement of the survey is wrong and this design does not rest on
+  it: its command table lists JDB's breakpoints among the commands on
+  AArch64, and the module that implements them is built for 32-bit Arm
+  alone ([Context](#context)).
 * QEMU v10.1.0, `docs/system/gdb.rst`, SHA-256
   `a662a2961a3a9bbcfac02fae58facaf4d879cd9a56ae86db63b6a2fb66f6bbe1`: the
   stub on a UNIX socket, one thread a CPU, physical memory mode, hardware
   breakpoints on TCG and by accelerator elsewhere, the socket's security.
   `docs/system/replay.rst` of the same release, in the survey's sources:
   record and replay, snapshots, running backwards.
+* QEMU v10.1.0's stub, fetched from `github.com/qemu/qemu` at that tag
+  and kept under `notes/debugger-2026-11-25/src/qemu-v10.1.0/` of the
+  history repository. `gdbstub/gdbstub.c`, SHA-256
+  `1e38995194d62fcc9e2add943b54daff7cfb1dd658305c15da24cfc84d118dc1`:
+  `target.xml` built as an architecture and one `xi:include` for each
+  registered feature, each feature's XML served as an annex under its
+  name (lines 369 to 406); the `g` reply over the registers below
+  `gdb_num_g_regs`, which a feature registered with a `g` position of
+  zero does not raise (lines 604 to 631, 1335 to 1351); and `p`, which
+  reads any one register and answers `E14` for one it cannot (lines 1230
+  to 1253). `target/arm/gdbstub.c`, SHA-256
+  `d265abbf32b54c8044ec62e176bb8fbb8c5e8b2b3ec855eead917a33085b0f6d`:
+  the system registers as the generated feature `system-registers.xml`,
+  each under its own name, registered with a `g` position of zero (lines
+  264 to 323, 591 to 593). `gdb-xml/aarch64-core.xml`, SHA-256
+  `93fa15f79f4545af6b78de55740bff3ece0e653d8149b8e25c1c657bb5f3642f`:
+  the core feature, `x0` to `x30`, `sp`, `pc` and `cpsr`.
+* The Fiasco fork's own sources, read in this tree: the kernel
+  information page's descriptor types and sub-types (`abi/kip.cpp`,
+  `Mem_desc`), the virtual conventional descriptor
+  (`kern/arm/kip_init-arm.cpp`, `Kip_init::init`), the allocator's
+  reading of the descriptors (`kern/kmem_alloc.cpp`,
+  `Kmem_alloc::create_free_map`), a secondary CPU's start
+  (`kern/app_cpu_thread.cpp`, `App_cpu_thread::bootstrap`), the printf
+  lock (`kern/libc_backend_lock.cc`), and the receive members' guard
+  (`src/Modules.generic`, `lib/uart/uart_base.h`).
 * QEMU's QMP reference and invocation pages, `qemu.org/docs/master`,
   fetched 2026-11-25 (unpinned), SHA-256
   `e38890d98e59cba3b7d5856d60c2daa25fda4d5080687734506e282b13eff040` and

@@ -498,11 +498,11 @@ map routes INTA to INTD to SPIs 143 to 146, interrupt ids 175 to 178.
 ### Stopping every CPU
 
 The stop of [design-debugger.md](design-debugger.md#the-stop) reaches a
-CPU in three ways. This section says what each is on AArch64, what none
+CPU in four ways. This section says what each is on AArch64, what none
 of them reaches, and what stops such a CPU from outside. Facts marked
 *unverified* rest on no source or measurement read for this design; each
 names the probe that settles it, and the P numbers are those of
-[design-debugger.md](design-debugger.md#open-decisions).
+[design-debugger.md](design-debugger.md#unverified-facts).
 
 **The request.** `ERX_IPI_STOP` is an SGI in non-secure group 1, so it
 arrives as an IRQ: a CPU takes it at EL0, in the idle loop's `wfi` and at
@@ -537,10 +537,30 @@ evidence under TCG for both wakes
 spin lock's event"). A `sev` executed between a waiter's load and its
 `wfe` is not lost if an event stays latched until a `wfe` consumes it,
 the latch a lock's own `sevl` relies on for its first `wfe` to return;
-the manual's rule was not re-read for this design. That either wake
-reaches every waiter under HVF and on the boards' cores is *unverified*
-(P7; probe: the QEMU cell with a seeded lock wait, repeated under HVF,
-and the same seed on the board).
+the manual's rule was not re-read for this design. What the stop needs is
+an order and not only a wake: the claim's store, then the `sev`, then the
+waiter's load seeing that store. That either wake reaches every waiter
+under HVF and on the boards' cores, and that the load after it sees the
+store, is *unverified* (P7; probes: a litmus test of the claim, the `sev`
+and the waiter's load, which fails with the `sev` moved before the
+claim; the QEMU cell with a seeded lock wait, repeated under HVF; and the
+same seed on the board).
+
+**The admission.** A CPU's admission and the leader's claim are each a
+store followed by a load of the other side's word: the CPU sets its bit
+of the admitted set and loads the stop word, and the leader swaps the
+stop word and loads the set. That is the shape in which the
+architecture's memory model lets both loads run ahead of both stores, so
+that each side misses the other. Each side therefore executes `dmb ish`
+between its store and its load. A litmus test of `make check-litmus`
+checks under the architecture's memory model that the two loads never
+both miss, and fails with the barrier removed from either side. Whether a
+store with release ordering followed by a load with acquire ordering
+would order them without the barrier was not checked against the manual,
+and the design does not rest on it. On erXos's kernel the admission is
+the last step of a secondary CPU's boot before it clears `PSTATE.I`;
+where it sits in the Fiasco fork, and what must be set up before it, is
+[design-debugger.md](design-debugger.md#on-fiasco)'s, and P10.
 
 **What neither reaches** is a CPU at EL1 with `PSTATE.I` set that waits
 for no lock. erXos's kernel bounds every such stretch (K13), so there it
@@ -575,7 +595,13 @@ stub implements them in the emulator under TCG, any number of them (its
 reports, which the tool reads and never assumes. A watchpoint is on a
 virtual address under whichever translation is current, so the tool reads
 the stopped CPU's `TTBR0_EL1` and continues past a stop outside the space
-it meant.
+it meant. The register is not among those a stub's `g` reply carries:
+QEMU's stub lists it, as `TTBR0_EL1`, in its `system-registers.xml`
+annex, and the tool reads it by the number given there, with `p`
+([design-debugger.md](design-debugger.md#the-gdb-remote-protocol-subset)).
+A stub that does not list it gives no such watchpoint, and whether QEMU's
+does under HVF is *unverified* (P1). The registers every target must have
+are the core feature's: `x0` to `x30`, `sp`, `pc` and `cpsr`.
 
 **Reading a stopped machine.** The anchor's `translation` word is
 `TCR_EL1`, its `kernel_root` is `TTBR1_EL1` and its `root_task_root` the

@@ -140,7 +140,11 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   board's GPL-2.0 device tree, so the page links that source on github.com
   beside each download, and `boot.json` records it. These
   are the images CLAUDE.md lets leave the project, each with its source
-  offered. The card's device tree ships with its source, Linux's GPL-2.0
+  offered. Once the stop of
+  [design-debugger.md](../docs/design-debugger.md#decisions) has landed,
+  the image and the card are rebuilt and republished without Fiasco's
+  kernel debugger and its GPL-2.0 file. The card's device tree ships
+  with its source, Linux's GPL-2.0
   text and a notice of erXos's one edit, dated by the commit's date.
 * `terminal.js`, `libv86.mjs`, `v86-arm64.wasm`, `xterm.js` and `xterm.css` are published under
   names that carry their digests. `index.html` names the script and

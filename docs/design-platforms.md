@@ -1740,11 +1740,18 @@ event to BL31's banner of the next boot in the console log:
 * **An attended boot holds.** With `erx.hold=1` on the card's command
   line the root's line reads `board watchdog off: attended boot`. The
   same test kernel's stop then prints `--erx-held` after its frame,
-  `tools/erx debug --tty DEVICE report` names the seeded function, a
-  `read` of the first and of the last page of each RAM range the anchor
-  lists is answered, and BL31's banner follows about 5 s after the tool
-  exits ([design-debugger.md](design-debugger.md#the-hold)). A board that
+  `tools/erx debug --tty DEVICE report` names the seeded function, and
+  BL31's banner follows about 5 s after the tool exits
+  ([design-debugger.md](design-debugger.md#the-hold)). A board that
   resets while the tool is attached had a watchdog running, and fails.
+* **The hold's map reads.** The sweep kernel of
+  [design-debugger.md](design-debugger.md#verification-and-testing) in
+  place of the card's kernel reads one word of every page of its
+  readable-RAM map and prints how many it read, the map's number of
+  pages, before the root's first line. A page that faults is a kernel
+  trap whose crash frame names the address, and fails: the board's boot
+  map gave as RAM a page that is not
+  ([design-debugger.md](design-debugger.md#unverified-facts), P11).
 * **A requested off becomes a reset.** `erlang:halt().` ends with `erx: end
   off`; the board halts in the firmware and the armed watchdog resets it,
   with BL31's banner within about 5 s. The sources read predict otherwise:

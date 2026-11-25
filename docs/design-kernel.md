@@ -7563,7 +7563,14 @@ the core `kernel/core/machine_stop.c`, and it never returns:
    request, `waiting` when it finds the stop word in a spinlock's wait
    loop with interrupts masked. The leader waits at most 100 ms, and a CPU
    that has published nothing by then is `unanswered`
-   ([design-debugger.md](design-debugger.md#stopping-every-cpu)).
+   ([design-debugger.md](design-debugger.md#stopping-every-cpu)). The
+   CPUs it asks are the admitted set: a secondary CPU's boot ends in its
+   admission, where it sets its bit and loads the stop word, and a CPU
+   that finds the word set there parks as `starting` before it runs
+   anything, so a CPU that comes up after the claim is stopped too. A
+   report that follows a census with an `unanswered` CPU is best effort,
+   since that CPU may still write the console, and says so in its first
+   line.
 4. **Record and report**, on the early console: the message; the CPU, its
    exception's class, cause, faulting address and return address, as the
    binding names them, and registers; a
@@ -7955,7 +7962,7 @@ arithmetic.
 | `erx.cpus=N` | start at most `N` CPUs | every CPU in the device tree |
 | `erx.sched=` | the scheduler's configuration cap ([design-scheduler.md](design-scheduler.md#configuration)) | `c2` |
 | `erx.panic=halt`, `reset`, `off` | the end of a panic, and of the root task's fault, halt or missed watchdog deadline ([The root task](#the-root-task)); `reset` while a machine lease is held | `halt` in development builds, `reset` in release builds |
-| `erx.hold=1` | hold after a stop: before it ends, the stop answers requests to read RAM on the console until the host ends the hold or falls silent for 5 s ([design-debugger.md](design-debugger.md#the-hold)); a boot under a machine lease, and one whose firmware started the board's watchdog, does not hold and says so on the early console; a release build refuses it and stops | off |
+| `erx.hold=1` | hold after a stop: before it ends, the stop answers requests to read RAM on the console until the host ends the hold or falls silent for 5 s ([design-debugger.md](design-debugger.md#the-hold)); a boot under a machine lease, one whose firmware started the board's watchdog and one whose readable-RAM map the kernel refused do not hold, and say so on the early console; a release build refuses it and stops | off |
 | `erx.watchdog=P,D,B` | the watchdog's period, deadline and boot deadline in seconds, which the machine page carries: the root task pets every `P` seconds, a deadline `D` seconds after a pet that passes without the next ends the machine, and a root task that has not pet within `B` seconds of its start ends it the same way; `P` from 1 to 60, `D` from `2P` to 600 and `B` from `D` to 600 ([The watchdog](#the-watchdog)) | `1,5,60` |
 
 The boot image carries the build's flags: `ERX_PACK_DEVELOPMENT`, which

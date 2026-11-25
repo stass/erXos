@@ -942,7 +942,8 @@ log service:
   which each take drains into the log as kernel records, and reach the
   UART only when the machine stops
   ([design-fiasco.md](design-fiasco.md#the-kernels-lines)). A kernel
-  stop parks every CPU that answers before it prints, but on Fiasco the
+  stop parks every CPU that answers before it prints, and prints best
+  effort when one does not, but on Fiasco the
   root's own end of the machine stops no thread first
   ([design-fiasco.md](design-fiasco.md#the-end-path)), so that end's
   crash frame and last lines can fall among a driver write still

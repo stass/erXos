@@ -101,17 +101,20 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      `fiasco/kernel/src/erx/erx_machine_stop.cpp`, the anchor and the stop slots in `abi/kernel.txt`, the CPU
      entries of the crash record in the writer and both readers, the routes from `panic`, `assert_fail`,
      `kdb_ke` and the four trap reports, the park in the debug inter-processor interrupt's handler, the check
-     in the spinlock's wait, and with it the removal of `src/jdb`, `jdb_object.cpp`, `CONFIG_INPUT` and the
+     in the spinlock's wait, the admission at the end of a secondary CPU's start, the bounded take of the printf
+     lock, and with it the removal of `src/jdb`, `jdb_object.cpp`, `CONFIG_INPUT` and the
      `LicenseCheck::TABLE` row; a boot of a kernel without the object, which the release kernel already is
      (`Modules.generic` lists `jdb_object.cpp` only for a kernel built with the debugger), checks that `sigma0`
      ignores its object-naming calls failing (P9), and no such boot has run;
   2. `tools/erx debug` over crash records and memory images, the debug bundle with its layout table and
      walkers, and the harness's image and report on a failing QEMU run;
-  3. the hold and `erx.hold=1`, in the kernel, the root's watchdog arming and the card writer;
+  3. the hold and `erx.hold=1`, in the kernel, with its readable-RAM map, the classification of Fiasco's memory
+     descriptors and the `Modules.generic` line that keeps the UART's polling members for it, the root's watchdog
+     arming and the card writer;
   4. stubs, recorded runs and a probe, each after the probe of design-debugger.md that it rests on (P1 to P5).
 
-  The design's open decisions come first: the hold as code in kernel mode, `kdb_ke` as a stop in every build,
-  breakpoints on a board from a probe alone, and where the research records it cites are committed.
+  The design's decisions are made ([design-debugger.md](design-debugger.md#decisions)). What waits is its unverified
+  facts, each with the probe that settles it, P10 and P11 with parts 1 and 3.
 * [Medium] 0.2 on Fiasco, `fiasco/kernel`: Fiasco's map refuses a user mapping writable and executable at
   once, with a test whose seeded failure removes the check; an estimate of tens of lines, unverified
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
@@ -1170,8 +1173,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   console input and `jdb_object.cpp` (GPL-2.0-only), by decision, with their source offered
   ([plan.md](plan.md#01-the-preview), [site/README.md](../site/README.md)).
   [design-debugger.md](design-debugger.md#published-images) takes all three out of every build: a published
-  image's kernel stop prints its record and resets, and its command line never carries `erx.hold`. Its open
-  decision on published images settles when: once the stop lands, the images are rebuilt and republished,
+  image's kernel stop prints its record and resets, and its command line never carries `erx.hold`. Its
+  decision on published images says when: once the stop lands, the images are rebuilt and republished,
   the closed table's `jdb_object.cpp` row is deleted, and plan.md's passages on 0.1's kernel and on 0.2's
   release build without `jdb_object.cpp`, with the site's account of the GPL file, change in the same commit.
   Until then anyone at the console of a published image's panicked machine

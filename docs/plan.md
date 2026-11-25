@@ -408,7 +408,10 @@ from 0.2's release build
 CLAUDE.md's rule for release components requires. The kernel debugger's
 `jdb_object.cpp`, which a kernel with the debugger compiles, goes out
 only in 0.1's images, under CLAUDE.md's exception for the website's
-images with its source offered; the release kernel leaves it out.
+images with its source offered, until the stop of
+[design-debugger.md](design-debugger.md#decisions) has landed and the
+images are republished without it; no kernel build compiles it after
+that.
 `lld` installed.
 
 ## M1: The system boots on Fiasco
@@ -1623,8 +1626,10 @@ website's browser demo runs 0.1's image.
   watchdog, so there a kernel panic stops in the debugger until the
   run's deadline or the user ends it. The debugger's `jdb_object.cpp`
   (GPL-2.0-only) goes out with its source offered, under CLAUDE.md's
-  exception for the website's images. Leaving the debugger out is the
-  release kernel's, in 0.2.
+  exception for the website's images. The stop of
+  [design-debugger.md](design-debugger.md#decisions) takes the debugger
+  and that file out of every build, in 0.2, and 0.1's images are rebuilt
+  and republished once it has landed.
 * **A distributable closure.** The shipped images' link closure is
   distributable under the license allowlist of
   [design.md](design.md#licenses-and-notices), which admits Fiasco's
@@ -1726,9 +1731,11 @@ neighbour answering. The release notes carry the downsides table.
   behind an IOMMU and MSIs where the platform has them, though no
   device of 0.2's platforms is behind an IOMMU, so a DMA-capable
   device's domain is in the trusted base (FD12); the release's
-  Fiasco build (the debugger off and its configuration check, the
-  MIT clean-room `kobject_rpc.h` in the GPL original's place, the release kernel's
-  build without `jdb_object.cpp`, the writable-or-executable patch, and the check that the image's link
+  Fiasco build (the debugger's replacement of
+  [design-debugger.md](design-debugger.md#decisions), in three parts that each land alone: the stop with
+  its record and the debugger's removal from every build, the host's tool over records and images, and
+  the hold; the
+  MIT clean-room `kobject_rpc.h` in the GPL original's place, the writable-or-executable patch, and the check that the image's link
   closure is all permissive, and the eager FP switch); the system-call
   fuzz campaign; and the upstream security watch. The build also
   hardens Fiasco's entry against branch-predictor injection only if the
