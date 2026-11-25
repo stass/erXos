@@ -3,14 +3,21 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/core_archive'
+require_relative '../fixtures/generated_tree'
 
 # The C17 cores' archive as Fiasco links it: its members, its
 # build records, its seam copy, its undefined-symbol allowlist, and its
 # reuse of an unchanged build.
 class CoreArchiveTest < Minitest::Test
+  # Seam headers that still fail the C++17 seam check (docs/todo-kernel.md,
+  # "Seam headers the glue cannot include"). The list only shrinks: a listed header that
+  # passes fails the test until it is taken off.
+  SEAM_UNCLEAN = %w[bcm2711_pins.h debug_log.h pm_wdt.h vc_mailbox.h vc_property.h].freeze
+
   def setup
     @compiler = ENV.fetch('ERX_CLANG', '')
     @directory = File.realpath(Dir.mktmpdir('erx-core-archive-test-'))
@@ -102,7 +109,42 @@ class CoreArchiveTest < Minitest::Test
     refute File.exist?(output)
   end
 
+  # The glue is C++ and its include path reaches only the seam: each seam header of the
+  # tree, laid out as the archive copies it, compiles alone as C++17, and every function
+  # it declares with external linkage sits inside extern "C", so the glue links against
+  # the cores. A header that includes erx/abi.h, or declares a function outside the
+  # guards, fails here.
+  def test_every_seam_header_compiles_alone_as_cxx17_with_c_linkage
+    compiler!
+    root = File.expand_path('../..', __dir__)
+    seam = File.join(@directory, 'seam')
+    FileUtils.mkdir_p(File.join(seam, 'erx/core'))
+    headers = Erx::CoreArchive.seam_headers(root)
+    refute_empty headers
+    headers.each { |header, relative| FileUtils.cp(File.join(root, relative), File.join(seam, 'erx/core', header)) }
+    outside = /\A[|`]-FunctionDecl .* external-linkage\Z/
+    # A positive control: a compiler whose dump names no linkage would pass every header.
+    probe = File.join(seam, 'erx/core/zz_bare.h')
+    File.write(probe, "int zz_bare(int);\n")
+    assert_equal 1, seam_dump(seam, 'zz_bare.h').first.lines.grep(outside).size, 'the AST dump names no linkage'
+    File.delete(probe)
+    failing = headers.keys.sort.filter_map do |header|
+      dump, status = seam_dump(seam, header)
+      next "#{header}: #{dump.lines.grep(/error:/).first&.strip}" unless status.success?
+
+      "#{header}: declares functions outside extern \"C\"" if dump.lines.grep(outside).any?
+    end
+    assert_equal SEAM_UNCLEAN, failing.map { |line| line.split(':', 2).first }, failing.join("\n")
+  end
+
   private
+
+  # The AST dump of a seam header compiled alone as C++17, and the compile's status.
+  def seam_dump(seam, header)
+    Open3.capture2e('gtimeout', '-k', '10', '60', @compiler, '-x', 'c++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                    '-pedantic', '-fsyntax-only', '-Xclang', '-ast-dump', '-I', seam, '-',
+                    stdin_data: "#include \"erx/core/#{header}\"\n")
+  end
 
   def compiler!
     skip 'ERX_CLANG is not set: the cores need the LLVM 23 clang and its binary tools' if @compiler.empty?

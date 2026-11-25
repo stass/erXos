@@ -622,6 +622,30 @@ module Erx
          '', '#endif /* ERX_CORE_ABI_BOOT_H */', ''].join("\n")
       end
 
+      # What the stop core's seam (include/erx/core/machine_stop.h) needs of
+      # the ABI: the CPU limit, the census bound, the readable-RAM map's
+      # capacity and page size, the stop states and RAM classes with their
+      # types, which stop states carry registers, and the readable-RAM range's layout, which the stop core pins
+      # its own range struct to. Spelled as include/erx/abi.h spells each, so
+      # a file that includes both redefines nothing differently, and valid C
+      # and C++, so the glue includes it.
+      def stop_seam(schema)
+        state = schema.types.fetch('stop_cpu_state')
+        enums = [state, schema.types.fetch('ram_class')]
+        members = enums.flat_map do |type|
+          type.members.keys.sort.map { |member| schema.constants.fetch("#{Model.constant_prefix(type.name)}_#{member}") }
+        end
+        constants = %w[cpu_limit debug_ram_ranges page_size stop_census_ms].map { |name| schema.constants.fetch(name) }
+        range = schema.types.fetch('erx_ram_range')
+        [CEmitter::NOTICE, '#ifndef ERX_CORE_ABI_STOP_H', '#define ERX_CORE_ABI_STOP_H', '',
+         '#include <stdbool.h>', '#include <stdint.h>', '',
+         *(constants + members).map { |item| CEmitter.constant_definition(item) },
+         *CEmitter.layout_extent(range), *CEmitter.layout_offsets(range), '',
+         *enums.flat_map { |type| CEmitter.type_declaration(type) }, '',
+         *CEmitter.enum_attribute_predicate(state, 'registers', state.attributes.fetch('registers')),
+         '#endif /* ERX_CORE_ABI_STOP_H */', ''].join("\n")
+      end
+
       def frame_index(register)
         raise SchemaError, "trap register #{register} has no frame index" unless (match = /\Ax([0-9]{1,2})\z/.match(register))
 

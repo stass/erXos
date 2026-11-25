@@ -318,7 +318,7 @@ class AbiGenerationTest < Minitest::Test
     end
   end
 
-  # The boot and crash seams spell each value as include/erx/abi.h does, so C that
+  # The boot, crash and stop seams spell each value as include/erx/abi.h does, so C that
   # includes all three builds warning-free, and the boot seam stays valid C++ for
   # bootstrap; the handoff's cpu_id has one word per cpu_id_word member.
   def test_boot_seam_matches_the_abi_header
@@ -331,9 +331,11 @@ class AbiGenerationTest < Minitest::Test
       File.write(File.join(directory, 'erx/abi.h'), @plan.files.fetch('include/erx/abi.h'))
       File.write(File.join(directory, 'erx/core/abi_boot.h'), seam)
       File.write(File.join(directory, 'erx/core/abi_crash.h'), @plan.files.fetch('include/erx/core/abi_crash.h'))
-      File.write(File.join(directory, 'both.c'), "#include <erx/abi.h>\n#include <erx/core/abi_boot.h>\n#include <erx/core/abi_crash.h>\n" \
-                                                 "_Static_assert(ERX_BOOT_HANDOFF_SIZE == sizeof(erx_boot_handoff_t), \"size\");\n")
-      File.write(File.join(directory, 'seam.cc'), "#include <erx/core/abi_boot.h>\n" \
+      File.write(File.join(directory, 'erx/core/abi_stop.h'), @plan.files.fetch('include/erx/core/abi_stop.h'))
+      File.write(File.join(directory, 'both.c'), "#include <erx/abi.h>\n#include <erx/core/abi_boot.h>\n#include <erx/core/abi_crash.h>\n#include <erx/core/abi_stop.h>\n" \
+                                                 "_Static_assert(ERX_BOOT_HANDOFF_SIZE == sizeof(erx_boot_handoff_t), \"size\");\n" \
+                                                 "_Static_assert(ERX_RAM_RANGE_SIZE == sizeof(erx_ram_range_t), \"range\");\n")
+      File.write(File.join(directory, 'seam.cc'), "#include <erx/core/abi_boot.h>\n#include <erx/core/abi_stop.h>\n" \
                                                   "static_assert(ERX_CPU_ID_WORD_COUNT == #{words}, \"words\");\n")
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'), timeout_program: 'gtimeout')
       begin

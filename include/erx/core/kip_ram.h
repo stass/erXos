@@ -10,6 +10,10 @@
 
 #include "erx/core/machine_stop.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * The Fiasco fork's table for the readable-RAM map (docs/design-debugger.md, "On
  * Fiasco", "The hold's map"): one memory descriptor of the kernel information page,
@@ -24,10 +28,16 @@
  * Any virtual descriptor and `Undefined` are `ignored`; physical `Conventional` is
  * `ram`; `Reserved` of sub-type `Reserved_kernel` or `Reserved_heap`, `Kernel_tmp`,
  * `Dedicated` and `Bootloader` are `used`; every other type or sub-type is `excluded`.
- * A physical descriptor whose end lies below its start gives an entry whose end
- * overflows, so the map refuses it rather than read it as a range; an `ignored` one
- * takes no part in the map whatever its range.
+ * The entry is stored only for ERX_RAM_MAP_OK. A descriptor that is not `ignored` and
+ * whose end lies below its start, or that spans the whole address space, has a length
+ * no entry holds: it is refused with ERX_RAM_MAP_OVERFLOW, the reason the glue then
+ * gives for refusing the map, never shortened. An `ignored` one takes no part in the
+ * map whatever its range.
  */
-erx_ram_entry_t	erx_kip_ram_entry(uint64_t lo, uint64_t hi);
+erx_ram_map_status_t	erx_kip_ram_entry(uint64_t lo, uint64_t hi, erx_ram_entry_t *entry);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ERX_CORE_KIP_RAM_H */

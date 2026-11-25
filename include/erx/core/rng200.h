@@ -31,6 +31,10 @@
 /* The longest the boot read waits, in nanoseconds. */
 #define ERX_RNG200_WAIT_NS	UINT64_C(100000000)
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct erx_rng200_read erx_rng200_read_t;
 
 /*
@@ -65,5 +69,9 @@ erx_rng200_action_t	erx_rng200_next(const erx_rng200_read_t *read, uint32_t coun
 			    uint32_t *take);
 /* Adds one word the FIFO gave. A word past ERX_RNG200_WORDS is dropped. */
 void			erx_rng200_take(erx_rng200_read_t *read, uint32_t word);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ERX_CORE_RNG200_H */

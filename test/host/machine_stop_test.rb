@@ -51,7 +51,15 @@ class MachineStopTest < Minitest::Test
       [KIP, 'KIP_SUB_TYPE(lo) == KIP_RESERVED_KERNEL || KIP_SUB_TYPE(lo) == KIP_RESERVED_HEAP',
        'KIP_SUB_TYPE(lo) != 3', 'kip table'],
     'a virtual descriptor read as RAM' =>
-      [KIP, "if ((lo & KIP_VIRTUAL) != 0)\n\t\treturn (ERX_RAM_CLASS_IGNORED);\n", '', 'kip table']
+      [KIP, "if ((lo & KIP_VIRTUAL) != 0)\n\t\treturn (ERX_RAM_CLASS_IGNORED);\n", '', 'kip table'],
+    'the census keeps published states only when complete' =>
+      [STOP, "\tif (erx_machine_stop_published(published))\n", "\tif (leader->complete && erx_machine_stop_published(published))\n",
+       'stop 3 cpus'],
+    'a census asked at the last clock reading never runs out' =>
+      [STOP, 'return (now_ns < since_ns || now_ns - since_ns >= CENSUS_NS);',
+       'return (since_ns < 2 * CENSUS_NS && (now_ns < since_ns || now_ns - since_ns >= CENSUS_NS));', 'stop 2 cpus'],
+    'the whole address space cut to a length an entry holds' =>
+      [KIP, '(end < start || end - start == UINT64_MAX)', 'end < start', 'kip table']
   }.freeze
 
   # A mutant may leave a parameter or helper unused.

@@ -118,6 +118,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Low] Seam headers the glue cannot include, `include/erx/core/`: `bcm2711_pins.h`,
+  `vc_mailbox.h` and `vc_property.h` include `erx/abi.h`, `debug_log.h` includes
+  `erx/log.h` and `pm_wdt.h` includes `erx/watchdog.h`, none of which the core archive
+  copies into the seam, so Fiasco C++ glue cannot include them, and each declares
+  functions outside extern "C". Give each the generated seam header it needs, as
+  `abi_stop.h` serves `machine_stop.h`, wrap its prototypes, and take it off
+  `SEAM_UNCLEAN` in `test/host/core_archive_test.rb`.
 * [Medium] crash fuzz, `tools/fuzz/crash_frame.rb`: the Ruby reader's target mutates
   framed bytes without fixing the CRC, so its record checks (registers, frames, CPU
   entries, text) and `report` are never reached. Add a full seed with entries and a mode

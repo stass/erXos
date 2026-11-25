@@ -81,7 +81,7 @@ module Erx
     MEMBERS = '.erx-archive-inputs'
     SEAM = 'seam'
     SEAM_SOURCE = 'include/erx/core'
-    # The seam's generated headers (abi_trap.h, abi_crash.h, abi_boot.h).
+    # The seam's generated headers (abi_trap.h, abi_crash.h, abi_boot.h, abi_stop.h).
     SEAM_GENERATED = 'build/gen/include/erx/core'
     # The only symbols the archive may leave undefined: the effects its
     # host provides and Fiasco's memcpy and memset. Anything else would be

@@ -286,13 +286,16 @@ module Erx
               .flat_map { |type| type.attributes.flat_map { |attribute, holders| enum_attribute_predicate(type, attribute, holders) } }
       end
 
+      # Guarded as enum_name_lookup is, so a seam header of include/erx/core/
+      # that carries a predicate too can sit beside this header.
       def enum_attribute_predicate(type, attribute, holders)
         prefix = Model.constant_prefix(type.name)
         cases = holders.sort_by { |member| [type.members.fetch(member), member] }
                        .map { |member| "\tcase #{constant("#{prefix}_#{member}")}:" }
-        ["/* Whether a #{type.name} value is a member that carries #{attribute}. */",
+        guard = "#{constant("#{type.name}_#{attribute}")}_PREDICATE"
+        ["#ifndef #{guard}", "#define #{guard}", "/* Whether a #{type.name} value is a member that carries #{attribute}. */",
          'static inline bool', "#{name(type.name)}_#{attribute}(#{c_type(type.base)} value)", '{',
-         "\tswitch (value) {", *cases, "\t\treturn (true);", "\tdefault:", "\t\treturn (false);", "\t}", '}', '']
+         "\tswitch (value) {", *cases, "\t\treturn (true);", "\tdefault:", "\t\treturn (false);", "\t}", '}', "#endif /* #{guard} */", '']
       end
 
       # The signal table's lookups by number. Each table is indexed by

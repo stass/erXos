@@ -30,7 +30,7 @@
 #include "erx/core/machine_stop.h"
 
 #define	MAX_CPUS	4
-#define	TICKS		2	/* the clock reads 0, 1 or 2 census bounds */
+#define	TICKS		2	/* a census starts at 0, 1 or 2 census bounds, so the clock reads up to 3 */
 #define	CENSUS_NS	((uint64_t)ERX_STOP_CENSUS_MS * 1000000u)
 #define	DEPTH_CAP	3	/* where a CPU's count of entries stops; one fault again reaches 2 */
 
@@ -82,7 +82,7 @@ fail(const char *why)
 /* The world's state, packed for the visited set; every field that steps can change. */
 _Static_assert(ERX_STOP_CPU_STATE_UNANSWERED < 8, "a slot state packs in 3 bits");
 _Static_assert(ERX_STOP_STEP_RECORD < 16, "a step packs in 4 bits");
-_Static_assert(PHASE_RECORDED < 8 && MAX_CPUS <= 4 && TICKS < 4 && DEPTH_CAP < 4, "the key's other widths");
+_Static_assert(PHASE_RECORDED < 8 && MAX_CPUS <= 4 && TICKS + 1 < 4 && DEPTH_CAP < 4, "the key's other widths");
 typedef struct key {
 	uint64_t	w[3];
 } key_t;
@@ -91,6 +91,9 @@ static key_t
 world_key(const world_t *w)
 {
 	key_t k = { { 0, 0, 0 } };
+
+	if (w->ticks > TICKS + 1)
+		fail("the clock passed the last census bound, past the key's width");
 	uint64_t a = w->word | (w->admitted << 4) | ((uint64_t)w->ticks << 8) | ((uint64_t)w->faulted << 26);
 
 	for (unsigned i = 0; i < w->ncpus; i++) {
@@ -168,10 +171,12 @@ check_record(const world_t *w, const cpu_t *lead)
 				fail("the leader is not `leader` in the record");
 			continue;
 		}
-		if (erx_stop_cpu_state_registers(final) && w->slot[j] != final)
-			fail("registers claimed for a CPU whose slot does not hold them");
-		if ((lead->leader.asked & bit(j)) == 0 && final != ERX_STOP_CPU_STATE_OFFLINE)
-			fail("a CPU outside the census is not `offline`");
+		if ((lead->leader.asked & bit(j)) == 0) {
+			if (final != ERX_STOP_CPU_STATE_OFFLINE)
+				fail("a CPU outside the census is not `offline`");
+		} else if (erx_machine_stop_published(w->slot[j]) ? final != w->slot[j] : final != ERX_STOP_CPU_STATE_UNANSWERED) {
+			fail("an asked CPU's final state is not its published one, or `unanswered`");
+		}
 		if (lead->leader.complete && (lead->leader.asked & bit(j)) != 0 && !erx_machine_stop_published(final))
 			fail("a complete census with a CPU that did not publish");
 	}
@@ -356,6 +361,24 @@ leader_step(world_t *w, unsigned i)
  */
 #define	SUCCESSORS_MAX	(4 * MAX_CPUS + 1)
 
+/*
+ * A census asked at any clock reading still runs to its bound: past TICKS the clock
+ * advances while a leader looks and its bound lies ahead, so every census meets its
+ * expiry.
+ */
+static bool
+census_waits(const world_t *w)
+{
+	for (unsigned i = 0; i < w->ncpus; i++) {
+		const cpu_t *c = &w->cpu[i];
+
+		if (c->phase == PHASE_LEAD && c->leader.step == ERX_STOP_STEP_LOOK &&
+		    (uint64_t)w->ticks * CENSUS_NS < c->leader.since_ns + CENSUS_NS)
+			return (true);
+	}
+	return (false);
+}
+
 static unsigned
 successors(const world_t *w, world_t *next)
 {
@@ -411,7 +434,7 @@ successors(const world_t *w, world_t *next)
 			break;
 		}
 	}
-	if (w->ticks < TICKS) {
+	if (w->ticks < TICKS || census_waits(w)) {
 		next[n] = *w;
 		next[n++].ticks++;
 	}
@@ -581,7 +604,7 @@ typedef struct ram_case {
 	erx_ram_entry_t		 entries[24];
 	erx_ram_map_status_t	 status;
 	uint32_t		 nranges;
-	erx_ram_range_t		 ranges[4];
+	erx_ram_map_range_t	 ranges[4];
 } ram_case_t;
 
 static const ram_case_t ram_cases[] = {
@@ -782,6 +805,16 @@ kip_expected(unsigned type, unsigned sub_type, bool virt)
 	return (ERX_RAM_CLASS_EXCLUDED);
 }
 
+/* The entry of a descriptor the conversion must accept; a refusal leaves class 0, which no check expects. */
+static erx_ram_entry_t
+kip_entry(uint64_t lo, uint64_t hi)
+{
+	erx_ram_entry_t entry = { .ram_class = 0 };
+
+	(void)erx_kip_ram_entry(lo, hi, &entry);
+	return (entry);
+}
+
 static void
 check_kip(void)
 {
@@ -792,25 +825,27 @@ check_kip(void)
 	for (unsigned type = 0; type < 16; type++)
 		for (unsigned sub_type = 0; sub_type < 16; sub_type++)
 			for (int virt = 0; virt < 2; virt++)
-				if (erx_kip_ram_entry(kip_lo(0x40000000, type, sub_type, virt), 0x7fffffff).ram_class !=
+				if (kip_entry(kip_lo(0x40000000, type, sub_type, virt), 0x7fffffff).ram_class !=
 				    kip_expected(type, sub_type, virt))
 					why = "a descriptor classified against the design's table";
-	e = erx_kip_ram_entry(kip_lo(0x40000000, 0x1, 0, false), 0x7ffffc00);
+	e = kip_entry(kip_lo(0x40000000, 0x1, 0, false), 0x7ffffc00);
 	if (e.base != 0x40000000 || e.length != 0x40000000)
 		why = "a descriptor's range misread";
-	e = erx_kip_ram_entry(kip_lo(0, 0x2, 2, false), UINT64_MAX);
-	if (e.base != 0 || e.length != UINT64_MAX || e.ram_class != ERX_RAM_CLASS_EXCLUDED)
-		why = "the whole address space misread";
+	/* The whole address space has a length no entry holds: refused, never cut by a page. */
+	if (erx_kip_ram_entry(kip_lo(0, 0x1, 0, false), UINT64_MAX, &e) != ERX_RAM_MAP_OVERFLOW ||
+	    erx_kip_ram_entry(kip_lo(0, 0x2, 2, false), UINT64_MAX, &e) != ERX_RAM_MAP_OVERFLOW)
+		why = "the whole address space was not refused";
+	if (kip_entry(kip_lo(0, 0x1, 0, true), UINT64_MAX).ram_class != ERX_RAM_CLASS_IGNORED)
+		why = "a virtual descriptor over the whole address space was refused";
+	if (erx_kip_ram_entry(kip_lo(0x50000000, 0x2, 2, false), 0x40000000, &e) != ERX_RAM_MAP_OVERFLOW)
+		why = "a descriptor ending below its start was not refused";
 	/* Fiasco's own virtual descriptor over the user address space, beside a bank and the kernel. */
-	entries[0] = erx_kip_ram_entry(kip_lo(0, 0x1, 0, true), UINT64_C(0x0000ffffffffffff));
-	entries[1] = erx_kip_ram_entry(kip_lo(0x40000000, 0x1, 0, false), 0x7fffffff);
-	entries[2] = erx_kip_ram_entry(kip_lo(0x40080000, 0x2, 0, false), 0x4017ffff);
+	entries[0] = kip_entry(kip_lo(0, 0x1, 0, true), UINT64_C(0x0000ffffffffffff));
+	entries[1] = kip_entry(kip_lo(0x40000000, 0x1, 0, false), 0x7fffffff);
+	entries[2] = kip_entry(kip_lo(0x40080000, 0x2, 0, false), 0x4017ffff);
 	if (erx_machine_stop_ram_map(entries, 3, &map) != ERX_RAM_MAP_OK || map.nranges != 1 ||
 	    map.range[0].base != 0x40000000 || map.range[0].length != 0x40000000)
 		why = "a KIP map misread";
-	entries[2] = erx_kip_ram_entry(kip_lo(0x50000000, 0x2, 2, false), 0x40000000);
-	if (erx_machine_stop_ram_map(entries, 3, &map) != ERX_RAM_MAP_OVERFLOW)
-		why = "a descriptor ending below its start was not refused";
 	printf("kip table: %s%s\n", why == NULL ? "ok" : "FAIL ", why == NULL ? "" : why);
 }
 

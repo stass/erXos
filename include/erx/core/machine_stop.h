@@ -10,7 +10,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "erx/abi.h"
+#include "erx/core/abi_stop.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * The decisions of the stop of the machine (docs/design-debugger.md, "The stop"), as
@@ -166,10 +170,19 @@ typedef struct erx_ram_entry {
 	erx_ram_class_t		ram_class;
 } erx_ram_entry_t;
 
+/*
+ * One range of the readable-RAM map, the fields of the ABI's erx_ram_range_t;
+ * kernel/core/machine_stop.c pins each one.
+ */
+typedef struct erx_ram_map_range {
+	uint64_t		base;
+	uint64_t		length;
+} erx_ram_map_range_t;
+
 /* The readable-RAM map: whole pages, sorted by base, disjoint and never touching. */
 typedef struct erx_ram_map {
 	uint32_t		nranges;
-	erx_ram_range_t		range[ERX_DEBUG_RAM_RANGES];
+	erx_ram_map_range_t	range[ERX_DEBUG_RAM_RANGES];
 } erx_ram_map_t;
 
 typedef enum erx_ram_map_status {
@@ -192,5 +205,9 @@ erx_ram_map_status_t	erx_machine_stop_ram_map(const erx_ram_entry_t *entries, si
 
 /* The boot line's words for a refusal; NULL for ERX_RAM_MAP_OK. */
 const char	*erx_machine_stop_ram_map_reason(erx_ram_map_status_t status);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ERX_CORE_MACHINE_STOP_H */

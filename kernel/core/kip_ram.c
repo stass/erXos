@@ -50,20 +50,19 @@ kip_class(uint64_t lo)
 }
 
 /*
- * The length of [start, end] is end - start + 1, which only the whole address space
- * cannot hold; it is then one byte short, which moves no page of an entry rounded
- * outward and drops only the top page of one rounded inward. An end below the start
- * wraps to a length that, from a start above zero, the map refuses as an overflow.
+ * The length of [start, end] is end - start + 1. The whole address space has a length
+ * no entry holds, and a range whose end lies below its start has none, so a descriptor
+ * with either range is refused as an overflow, never shortened. An `ignored` descriptor
+ * takes no part in the map, so its range is not judged.
  */
-erx_ram_entry_t
-erx_kip_ram_entry(uint64_t lo, uint64_t hi)
+erx_ram_map_status_t
+erx_kip_ram_entry(uint64_t lo, uint64_t hi, erx_ram_entry_t *entry)
 {
 	uint64_t start = lo & ~KIP_ADDR_LOW, end = hi | KIP_ADDR_LOW;
-	uint64_t span = end - start;
+	erx_ram_class_t ram_class = kip_class(lo);
 
-	return ((erx_ram_entry_t){
-		.base = start,
-		.length = span == UINT64_MAX ? span : span + 1,
-		.ram_class = kip_class(lo),
-	});
+	if (ram_class != ERX_RAM_CLASS_IGNORED && (end < start || end - start == UINT64_MAX))
+		return (ERX_RAM_MAP_OVERFLOW);
+	*entry = (erx_ram_entry_t){ .base = start, .length = end - start + 1, .ram_class = ram_class };
+	return (ERX_RAM_MAP_OK);
 }
