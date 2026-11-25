@@ -23,6 +23,7 @@ include services/pcie.txt
 include services/ble.txt
 include services/login.txt
 include services/drive.txt
+include services/media.txt
 include manifest.txt
 include formats/elf64.txt
 include formats/virtio.txt

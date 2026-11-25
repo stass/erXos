@@ -110,8 +110,7 @@ two_volumes() ->
 
 %% Cases -----------------------------------------------------------------
 
-%% The tree's name is `media`: the namespace's nofollow mark is derived from that
-%% name (erx_facets:table/1), so a tree of another name would follow a stick's links.
+%% The tree's name is `media`, the name every mount of the media facet asks.
 the_tree_is_named_media_test() ->
     ?assertMatch({ok, <<"media">>, root, _}, erx_media_tree:root(media)).
 

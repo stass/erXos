@@ -223,21 +223,22 @@ grant pid's do. A facet's mount names the facet, never a pid, so a re-grant
 serves the next lookup and nothing has to follow the registry. Every other
 entry is as `Mounts` holds it, except that
 
-* every entry of the media tree, a drive's volumes, carries the `nofollow`
-  mark: an entry whose provider names the facet `media`, whatever tree it
-  asks, or a grant's tree named `media`, the tree of the facet's name, which
-  a mount of a media grant by its pid names (`erx_ns:mount_own(media, _)`'s
-  among them). So a mount of the facet, a bind of one, a program's table
-  taken from one, and a mount by pid alike carry it, whether or not the
-  registry holds the facet. The mark is derived here, from those names at
-  each resolution, and stored in no table, so no writer of a table has to
-  keep it, and the resolver follows no link a stranger's stick holds
-  (erx_path; docs/design-drives.md, "Links and rights").
+* every entry on a facet the registry holds as one of the `media`
+  interface, a drive's volumes, carries the `nofollow` mark, whatever the
+  facet is named and whatever tree the entry asks. So a mount of the facet,
+  a bind of one and a program's table taken from one alike carry it once
+  the registry holds the facet; before that the entry is `ended`. The mark
+  is derived here at each resolution, from the interface number the system
+  domain set with the facet, and is stored in no table and taken from no
+  name, so no writer of a table has to keep it, and the resolver follows no
+  link a stranger's stick holds (erx_path; docs/design-drives.md, "Links
+  and rights"). No grant of another domain is mounted by pid, so outside
+  the media domain every entry on a media grant is a facet's.
 """.
 -spec table(erx_path:table()) -> erx_path:table().
 table(Mounts) when is_list(Mounts) ->
     Registry = registry(),
-    [marked(Provider, resolved(Entry, Registry)) || #{provider := Provider} = Entry <- Mounts].
+    [marked(interface(Provider, Registry), resolved(Entry, Registry)) || #{provider := Provider} = Entry <- Mounts].
 
 -doc """
 A table a program's path resolves over, `Mounts`, as the one value
@@ -263,17 +264,19 @@ or a tree's name.
 -spec program_table(program()) -> erx_path:table().
 program_table(#program{mounts = Mounts}) ->
     Registry = registry(),
-    [marked(Provider, resolved(Entry, Registry))
-     || #{provider := Provider} = Entry <- Mounts, not on_display(Provider, Registry)].
+    [marked(Interface, resolved(Entry, Registry))
+     || #{provider := Provider} = Entry <- Mounts, Interface <- [interface(Provider, Registry)],
+        Interface =/= ?ERX_SERVICE_WINDOWS].
 
-%% Whether Provider names a facet the registry holds as one of the windows interface.
-on_display({facet, Name, _Tree}, Registry) ->
+%% The interface number of the facet Provider names as the registry holds it, or none
+%% for a provider that names no facet the registry holds.
+interface({facet, Name, _Tree}, Registry) ->
     case Registry of
-        #{Name := {?ERX_SERVICE_WINDOWS, _Facet}} -> true;
-        #{} -> false
+        #{Name := {Interface, _Facet}} -> Interface;
+        #{} -> none
     end;
-on_display(_Provider, _Registry) ->
-    false.
+interface(_Provider, _Registry) ->
+    none.
 
 resolved(#{provider := {facet, Name, Tree}, rights := Asked} = Entry, Registry) ->
     case Registry of
@@ -290,11 +293,10 @@ resolved(Entry, _Registry) ->
 on_grant(Entry, _Pid, _Tree, none) -> Entry#{provider := ended};
 on_grant(Entry, Pid, Tree, Rights) -> Entry#{provider := {grant, Pid, Tree}, rights := Rights}.
 
-%% The resolved Entry of a mount whose provider was Provider, marked nofollow when that
-%% provider lies in the media tree.
-marked({facet, media, _Tree}, Entry) -> Entry#{nofollow => true};
-marked({grant, _Pid, <<"media">>}, Entry) -> Entry#{nofollow => true};
-marked(_Provider, Entry) -> Entry.
+%% The resolved Entry of a mount on a facet of Interface, marked nofollow for the media
+%% interface's.
+marked(?ERX_SERVICE_MEDIA, Entry) -> Entry#{nofollow => true};
+marked(_Interface, Entry) -> Entry.
 
 -doc """
 A file client's handle on the grant of the files facet `Name`, read-only, on

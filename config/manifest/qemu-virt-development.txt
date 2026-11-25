@@ -577,7 +577,7 @@ domain media
   args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
 service media
   server @domain.media
-  interface files
+  interface media
 # media: every drive's files, which root's session mounts at /media (docs/design-drives.md,
 # DR-R8 and "Mounting it"): the system principal's session template holds the one media
 # facet, with the default rights rw, so root may read and change a stick and nothing runs

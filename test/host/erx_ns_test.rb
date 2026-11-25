@@ -60,7 +60,7 @@ class ErxNsTest < Minitest::Test
   # A seeded erx_facets:table/1 that derives no nofollow mark, so a resolution follows a
   # link on a drive: a_media_facet_entry_follows_no_link must catch it.
   FACETS = 'otp/erts/preloaded/src/erx_facets.erl'
-  MEDIA_MARK = "marked({grant, _Pid, <<\"media\">>}, Entry) -> Entry\#{nofollow => true};\n"
+  MEDIA_MARK = "marked(?ERX_SERVICE_MEDIA, Entry) -> Entry\#{nofollow => true};\n"
   # A seeded erx_ns whose app mount also takes a {layout, Place, Layout} source, the
   # place and layout from the caller rather than the agent's record, so an app could
   # mount any file of its grant with a layout it chose: app_mount_refusals must catch it.

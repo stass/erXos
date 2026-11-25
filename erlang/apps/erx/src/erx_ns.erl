@@ -43,7 +43,7 @@
 %% the grant the domain's facet registry (erx_facets) holds for Name at that moment, with
 %% the lesser of the entry's rights and the grant's, or as ended when it holds none
 %% (erx_facets:table/1, through prim_file:erx_table/0). That resolution also marks every
-%% entry of the media tree nofollow, from the facet's name or a grant's tree of that name,
+%% entry on a facet of the media interface nofollow, from the facet's interface number,
 %% so no link on a drive is followed; no entry of this table holds the mark.
 %% This is how a domain reaches a grant of another domain by path: a re-grant, such as
 %% the one a restarted server's domain is given, serves the next lookup with no change

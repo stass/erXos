@@ -372,6 +372,14 @@ class ManifestCheckTest < Minitest::Test
     usb_refused('unit.holder', message, usb_source, usb_platform(pcie: [bridge_row, xhci_row(role: 'configuration', device: 3)]))
   end
 
+  # docs/design-drives.md, "Manifest rows": a media service of the files interface would
+  # hand its grantees a drive's links to follow, since the nofollow mark comes from the
+  # media interface's number.
+  def test_a_media_service_of_another_interface_is_refused
+    usb_refused('service.interface', /the service named media is of the media interface/,
+                media_source.sub("interface media\n", "interface files\n") + drive_window('disk0'))
+  end
+
   def test_the_pcie_domain_holding_a_window_or_a_service_is_refused
     usb_refused('windows', /pcie holds nothing but PCIe bridges' units, and its windows row/,
                 media_source + drive_window('disk0', holder: '@domain.pcie'))
@@ -558,7 +566,7 @@ class ManifestCheckTest < Minitest::Test
   # development manifest's usb domain, renamed media, without its usb_input service and
   # that service's facet (usb_source has taken its unit and its pci facet already), so it
   # holds nothing and serves the media service alone.
-  MEDIA_SERVICE = "service media\n  server @domain.media\n  interface files\n"
+  MEDIA_SERVICE = "service media\n  server @domain.media\n  interface media\n"
 
   def media_source(holders = USB_HOLDERS)
     bare = usb_source(holders).sub(/^service usb_input\n(?:  .*\n)*/, '').sub(/^facet usb_input\n(?:  .*\n)*/, '')
@@ -821,7 +829,7 @@ class ManifestCheckTest < Minitest::Test
 
   # The system domain serves no media: a crafted volume reaches a configured domain alone.
   def test_a_media_service_of_the_system_domain_is_refused
-    served = changed(media_source).sub("server @domain.media\n  interface files", "server system\n  interface files")
+    served = changed(media_source).sub("server @domain.media\n  interface media", "server system\n  interface media")
     usb_refused('service.server', /the media service is served by a configured domain/,
                 served + drive_window('disk0', holder: 'system'))
   end
@@ -868,8 +876,12 @@ class ManifestCheckTest < Minitest::Test
   # Nothing runs from a drive (docs/design-drives.md, "Links and rights"): no media grant is rx.
   def test_a_media_facet_granting_rx_is_refused
     usb_admit(media_source + drive_window('disk0') + files_facet('media', '@session.system', rights: 'ro'))
-    usb_refused('facet.parameter', /facet media grants media rx, whose volumes are a stranger's bytes/,
-                media_source + drive_window('disk0') + files_facet('media', '@session.system', rights: 'rx'))
+    # media_rights has no rx, so the row's parameter is refused as any value outside its
+    # declared members is (abi/services/media.txt).
+    error = assert_raises(Erx::ABI::SchemaError) do
+      usb_admit(media_source + drive_window('disk0') + files_facet('media', '@session.system', rights: 'rx'))
+    end
+    assert_match(/parameter rights is one of ro, rw/, error.message)
   end
 
   # Property 4: budgets, grants and the root startup rule.

@@ -4,9 +4,10 @@
 -module(erx_media_tree).
 -moduledoc """
 The media tree (docs/design-drives.md, "The media tree"): the `erx_fs` callback module
-of the files service `media`, which every session the manifest grants it mounts at
-`/media`. Its tree's name is `media`, which the namespace's nofollow mark is derived
-from (erx_facets:table/1), so no link a medium holds is ever followed through it.
+of the service `media`, of the media interface (abi/services/media.txt), which every
+session the manifest grants it mounts at `/media`. Its tree's name is `media`. The
+namespace marks every entry on a facet of that interface nofollow (erx_facets:table/1),
+so no link a medium holds is ever followed through it.
 
 * The root lists `diskN` for each drive `{drive, N}` the registry holds at the
   request.

@@ -20,14 +20,37 @@ class ErxHostlink9pTest < Minitest::Test
   APPLICATIONS = %w[erx erx_files erx_uart].freeze
   TESTS = %w[test/erlang/erx_fs_test_tree.erl test/erlang/erx_hostlink_9p_tests.erl].freeze
 
+  BRIDGE = 'erlang/apps/erx_uart/src/erx_hostlink_9p.erl'
+  # A seeded bridge that passes a host's walk from NOFID through to the grant of a fid
+  # the host attached, so the host would walk from that grant's root without naming a
+  # fid it holds (docs/design-files.md, "Version and attach"):
+  # a_hosts_walk_from_nofid_is_ebadf_test must catch it.
+  GENERIC_ROUTE = "route(Request, Drawn, #bridge{fids = Fids} = B) ->\n"
+  NOFID_THROUGH = "route({walk, ?ERX_P9_NOFID, _, _} = Request, _Drawn, #bridge{fids = Fids}) when map_size(Fids) > 0 ->\n" \
+                  "    {ok, element(1, hd(maps:values(Fids))), Request};\n"
+
   def test_the_bridge_passes_under_eunit
+    output, status = eunit
+    assert status.success?, output
+    assert_match(/All \d+ tests passed/, output)
+  end
+
+  def test_a_bridge_that_passes_nofid_through_is_caught
+    bridge = File.read(File.join(ROOT, BRIDGE))
+    assert_equal 1, bridge.scan(GENERIC_ROUTE).size, 'erx_hostlink_9p has no generic route clause to seed before'
+    output, status = eunit(BRIDGE => bridge.sub(GENERIC_ROUTE, NOFID_THROUGH + GENERIC_ROUTE))
+    refute status.success?, output
+    assert_match(/a_hosts_walk_from_nofid_is_ebadf_test\.\.\.\*failed\*/, output)
+  end
+
+  private
+
+  def eunit(seeded = {})
     Dir.mktmpdir('erx-hostlink-9p-test') do |work|
-      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
-      output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
-                                       '-eval', 'halt(case eunit:test(erx_hostlink_9p_tests, [verbose]) of ok -> 0; _ -> 1 end)',
-                                       chdir: work, stdin_data: '')
-      assert status.success?, output
-      assert_match(/All \d+ tests passed/, output)
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: seeded)
+      Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
+                      '-eval', 'halt(case eunit:test(erx_hostlink_9p_tests, [verbose]) of ok -> 0; _ -> 1 end)',
+                      chdir: work, stdin_data: '')
     end
   end
 end

@@ -220,8 +220,8 @@ bytes data_service 4 value 64617461
 # domain and to the system principal's session template, whose import reads it.
 bytes login_keys_service 10 value 6c6f67696e5f6b657973
 # The name of the service that serves every drive's volumes (docs/design-drives.md,
-# "Manifest rows"): "media", an instance of files whose server, the media domain,
-# holds every drive window; no grant of it is rx.
+# "Manifest rows"): "media", a service of the media interface (abi/services/media.txt)
+# whose server, the media domain, holds every drive window; no grant of it is rx.
 bytes media_service 5 value 6d65646961
 enum mf_image_format u32
   value erofs_verity 1

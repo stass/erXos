@@ -436,11 +436,6 @@ module Erx
         'liveness' => 'the system domain\'s watchdog pets without reading liveness records, which a later milestone brings'
       }.freeze
 
-      # A well-known service any grantee may hold, but whose rows never state rights rx,
-      # and why, which completes the refusal "grants NAME rx, whose ...": nothing runs
-      # from its tree (abi/services/files.txt, F6).
-      NeverRuns = Data.define(:why)
-
       # Who may hold a granted facet row of a well-known service (check_granted_rows), and
       # why: the system domain, and root's session template, the system principal's,
       # always (root :always) or only in a development build (root :development); with
@@ -468,15 +463,17 @@ module Erx
         end
       end
 
-      # A service of the files interface that the machine knows by a fixed name, and what
+      # A service of a tree interface that the machine knows by a fixed name, and what
       # the manifest check requires of it beyond what it requires of every service:
       #
       # * constant, the abi/manifest.txt constant that holds its name;
-      # * needs, what makes the manifest hold exactly one service of the name, of the
-      #   files interface, and the build derive its rows: an apps row (:apps), the name
+      # * interface, the abi/services interface it is of: files, or media for the media
+      #   service, whose own interface marks its entries nofollow (abi/services/media.txt);
+      # * needs, what makes the manifest hold exactly one service of the name, of its
+      #   interface, and the build derive its rows: an apps row (:apps), the name
       #   being served at all (:served), or nothing (nil), when it derives none;
       # * window, the window role whose holder serves it, when one does: a manifest with
-      #   that window holds exactly one service of the name, of the files interface,
+      #   that window holds exactly one service of the name, of its interface,
       #   served by the holder of every window of the role, and one without it holds
       #   none, so an apps row
       #   that needs the service needs the window too;
@@ -485,14 +482,15 @@ module Erx
       #   row packs the template's packages and system rows in fields of their own
       #   (apps_rows), so a new service with such a row needs a field there too;
       # * source, which granted rows (check_granted_rows) may grant it: :any, :none (only
-      #   the derived rows do), a SourceGrants, or a NeverRuns.
+      #   the derived rows do), or a SourceGrants.
       #
-      # A row with neither needs nor window is not checked to be of the files interface.
-      WellKnown = Data.define(:constant, :needs, :window, :derived, :source) do
-        def initialize(constant:, needs:, window:, derived:, source:)
+      # A row with neither needs nor window is not checked to be of its interface.
+      WellKnown = Data.define(:constant, :interface, :needs, :window, :derived, :source) do
+        def initialize(constant:, needs:, window:, derived:, source:, interface: 'files')
+          raise Erx::Error, "WellKnown #{constant} interface #{interface.inspect}" unless %w[files media].include?(interface)
           raise Erx::Error, "WellKnown #{constant} needs #{needs.inspect}" unless [:apps, :served, nil].include?(needs)
           raise Erx::Error, "WellKnown #{constant} source #{source.inspect}" unless
-            [:any, :none].include?(source) || source.is_a?(SourceGrants) || source.is_a?(NeverRuns)
+            [:any, :none].include?(source) || source.is_a?(SourceGrants)
           raise Erx::Error, "WellKnown #{constant} derives rows that are not Derived" unless derived.all?(Derived)
           raise Erx::Error, "WellKnown #{constant} derives rows it never needs" unless needs || derived.empty?
 
@@ -536,9 +534,10 @@ module Erx
                       source: SourceGrants.new(root: :always, read_only: true, why: 'tree holds root\'s login keys')),
         # Property 8's drive clauses (docs/design-drives.md, "Manifest rows" and "Links and
         # rights"): the media domain, the server of every drive window, serves every
-        # drive's volumes, and no grant runs what a drive holds.
-        WellKnown.new(constant: 'media_service', needs: nil, window: 'drive', derived: [],
-                      source: NeverRuns.new(why: 'volumes are a stranger\'s bytes'))
+        # drive's volumes. Any grantee may hold a row of it, and none runs what a drive
+        # holds, since media_rights has no rx (abi/services/media.txt).
+        WellKnown.new(constant: 'media_service', interface: 'media', needs: nil, window: 'drive', derived: [],
+                      source: :any)
       ])
 
       # The interface, and the name, of the facet the domain service grants every session
@@ -1896,8 +1895,8 @@ module Erx
           interface = service_rows.fetch(matching.first).fetch('interface')
           unsupported("services names #{name}, of the inspect interface, whose scope for an app is not checked", 'apps.services') if
             interface == fetch_interface('inspect')
-          unsupported("services names #{name}, of the files interface, whose grant no tree apps roots yet", 'apps.services') if
-            interface == fetch_interface('files')
+          unsupported("services names #{name}, of a files or media interface, whose grant no tree apps roots yet", 'apps.services') if
+            [fetch_interface('files'), fetch_interface('media')].include?(interface)
           declared = declared_parameters(interface) ||
                      invalid("services names #{name}, whose interface no ABI file declares", 'apps.services')
           required = declared.select { |_key, parameter| parameter.fetch(:cardinality) == 'one' }.keys
@@ -2019,8 +2018,7 @@ module Erx
       # One granted row of the well-known service known, with its resolved parameter
       # values: refused for a service whose rows only the build derives, and for one with
       # SourceGrants unless its grantee is the system domain or a template its root
-      # setting accepts and, for a read_only one, it states ro, and for one with NeverRuns
-      # when it states rx.
+      # setting accepts and, for a read_only one, it states ro.
       def check_granted_row(known, row, stated, tables)
         name = name_of(known)
         case known.source
@@ -2038,9 +2036,6 @@ module Erx
           invalid("facet #{row.fetch('name')} grants #{name}, whose #{why}, to another grantee than #{holders}", 'facet.grantee') unless grantee.first == grantee_kind('system') || root_may
           invalid("facet #{row.fetch('name')} grants #{name} other than read-only", 'facet.parameter') if
             read_only && stated.fetch('rights', 'rw') != 'ro'
-        in NeverRuns(why:)
-          invalid("facet #{row.fetch('name')} grants #{name} rx, whose #{why}", 'facet.parameter') if
-            stated.fetch('rights', 'rw') == 'rx'
         end
       end
 
@@ -2063,14 +2058,14 @@ module Erx
         named = service_rows.each_index.select { |index| service_rows.fetch(index).fetch('name') == name }
         invalid("a manifest with #{required_by} holds one service named #{name}", 'service.name') unless
           named.size == 1
-        invalid("the service named #{name} is of the files interface", 'service.interface') unless
-          service_rows.fetch(named.first).fetch('interface') == fetch_interface('files')
+        invalid("the service named #{name} is of the #{known.interface} interface", 'service.interface') unless
+          service_rows.fetch(named.first).fetch('interface') == fetch_interface(known.interface)
         named.first
       end
 
       # The well-known services' window clauses, those of property 19's eighth and of
       # docs/design-ssh.md, "Who publishes it": for each service with a window, a manifest
-      # with the window holds exactly one service of its name, of the files interface,
+      # with the window holds exactly one service of its name, of its interface,
       # served by the holder of every window of the role, so the domain that mints the
       # tree's grants is the one its windows reach (for drive windows, the media domain,
       # which drives no device); and one without the window holds
@@ -3076,7 +3071,8 @@ module Erx
       end
 
       # Property 16: every domain that receives the files protocol of a facet of an
-      # interface abi/services declares served_as tree (files, windows, line), its
+      # interface abi/services declares served_as tree (files, media, windows, line and
+      # input, compared by number), its
       # grantee (the system domain, a configured domain or a session template) and its
       # server, takes frames of at least files_max_frame_min bytes under its own runtime
       # limits, and the facet's max_request admits a request that long, since a read reply
