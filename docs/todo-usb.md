@@ -162,7 +162,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] USB on the Raspberry Pi 4 (`config/manifest/raspi4b-development.txt`,
   [design-usb.md](design-usb.md#who-holds-a-controller); [plan.md](plan.md#track-u-usb), part (c)): a USB keyboard
   works on the board through the BCM2711 bridge driver, the VL805 and `erx_xhci`. Still open: the PCIe domain's
-  25 MiB is QEMU virt's measurement and the USB domain's 32 MiB is measured nowhere, so measure both on the board;
+  25 MiB is QEMU virt's measurement and the USB domain's 32 MiB and the media domain's 25 MiB and 50 mcpu are
+  measured nowhere, so measure all three on the board;
   the VL805's line against the bridge's `interrupt-map` is not checked at boot (see "a closed place's line against
   the tree" in [todo-liberx.md](todo-liberx.md)); the controller's level-line handling is host-tested
   (`a_level_line_neither_storms_nor_loses_an_event_test`) and not yet seen under load on the board; the

@@ -511,8 +511,13 @@ design does not have, to be deleted so no side-by-side table can show it under s
   root's template's display grant once per slot of the system principal's `domains` quota, but the
   principal's configured domains take slots of that quota too, so each configured domain costs the
   display's outer budget a pixel area and a lane no session can use (QEMU virt's media domain, 8 MiB
-  and 4 KiB of root_memory; about 56 MiB over all the configured domains' slots). Count the quota
-  less the principal's configured domains.
+  and 4 KiB of root_memory on each board; about 56 MiB over all the configured domains' slots). Count
+  the quota less the principal's configured domains.
+* [Medium] build, the media domain's rows (`config/manifest/qemu-virt-development.txt`,
+  `config/manifest/raspi4b-development.txt`): its runtime limits, share, limits, domain, service and
+  `media` facet are copied word for word in both board parts, kept in step by a comment; only the
+  drive windows are a board's own. Move the six rows to the common part, `development.txt`, as the
+  PCIe domain's are, and keep each board's `window diskN` rows in its part.
 * [Low] build, `Manifest::Edit.without_domain` (`tools/lib/erx/manifest_edit.rb`, the drive windows'
   holders): `joined` is a flat list of both holders of each drive window, the removed domain
   included, which only the later `- [reference_of(domain)]` drops and only `.uniq` deduplicates

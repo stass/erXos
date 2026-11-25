@@ -104,7 +104,7 @@ principal system
 # pixel area; and the display and net, which the build grants the app template. The app
 # is a principal with a domains quota of one, so max_domains is the system principal's
 # nine, the one app, ntpd and bleuart. max_connections, 31, holds ntpd's session's two
-# connections and bleuart's three (their comments), the 15 of the network domain's comment and the app's session's four: its system connection, packages,
+# connections and bleuart's three (their comments), the 20 of the network domain's comment and the app's session's four: its system connection, packages,
 # the display and net, and two more for root's session's display connection and its
 # replacement's.
 apps
@@ -412,10 +412,9 @@ facet usb_input
 # The media domain's rows, QEMU virt's row for row (config/manifest/qemu-virt-development.txt,
 # whose comment explains their figures; docs/design-drives.md, "Manifest rows"): the
 # configured domain that serves the service media, and the holder of the USB domain's
-# drive disk0, the one drive on the xhci unit's row, the VL805's function at the bridge's
-# place, so a stick put in takes disk0 (docs/design-usb.md, "Mass storage reaches the file
-# servers"). Its release, media, names erx_fat and erx_media and neither erx_storage nor
-# erx_blk. Its 25 MiB and its share's 50 mcpu on CPU 0 are QEMU virt's, measured on
+# drive disk0, the one drive window on the xhci unit's device, the VL805's function at
+# the bridge's place, so a stick put in takes disk0 (docs/design-usb.md, "Mass storage
+# reaches the file servers"). Its 25 MiB and its share's 50 mcpu on CPU 0 are QEMU virt's, measured on
 # neither board; with them the configured domains' grants take 2,150 mcpu of the 2,325
 # the system share's reserve leaves them. Its three connections beside its system
 # connection are the USB domain's drive grant and root's session's media facet with one
