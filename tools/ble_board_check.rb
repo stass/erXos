@@ -15,7 +15,7 @@
 # or when what the step needs (decision 7's bleuart service, a blew command) is
 # missing, never a guess; Erx::BleBoardCheck holds the verdicts. Logs of every blew
 # run go in --logs. Exits 0 when a step passed and none failed, 1 when a step
-# failed, 3 when none passed, 2 on bad usage or when it cannot run blew or keep its logs.
+# failed, 3 when none passed, 2 on bad usage or when it cannot run blew, feed it or keep its logs.
 #
 #   ruby tools/ble_board_check.rb --name erxos --logs DIR
 
@@ -35,35 +35,26 @@ def blew(runner, step_name, argv, timeout)
   Erx::BleBoardCheck::Run.new(output: output, exit_code: record['state'] == 'timed_out' ? nil : record['exit_status'])
 end
 
-# One bleuart session: blew nus reads the typed lines from a named pipe in the logs,
-# which a thread writes, each line after its pause, and the line's answers go to the
-# run's log. A blew that ends early leaves the thread a broken pipe.
-def nus_session(runner, logs, id, name, typed, timeout)
-  fifo = File.join(logs, "#{name}.in")
-  File.unlink(fifo) if File.exist?(fifo)
-  File.mkfifo(fifo, 0o600)
-  writer = Thread.new do
-    File.open(fifo, 'wb') do |pipe|
-      typed.each do |line|
-        sleep(line.pause)
-        pipe.write(line.text)
-        pipe.flush
-      end
+# One bleuart session: blew nus reads the typed lines from its standard input, which
+# the runner feeds from a writer, each line after its pause; the line's answers go to
+# the run's log. The runner stops the writer when blew ends, and a blew that ends
+# early is no failure of the writer.
+def nus_session(runner, id, name, typed, timeout)
+  writer = lambda do |pipe|
+    typed.each do |line|
+      sleep(line.pause)
+      pipe.write(line.text)
+      pipe.flush
     end
-  rescue Errno::EPIPE
-    nil
   end
   argv = ['blew', '--timeout', timeout.to_s, *Erx::BleBoardCheck.nus_argv(id, linger: NUS_LINGER)]
   record = begin
-    runner.run(argv, name: name, deadline: (timeout * 3) + typed.sum(&:pause) + NUS_LINGER, stdin: fifo)
+    runner.run(argv, name: name, deadline: (timeout * 3) + typed.sum(&:pause) + NUS_LINGER, stdin: writer)
   rescue Erx::CommandError => error
     error.result
   end
   output = File.binread(record.fetch('log')).force_encoding(Encoding::UTF_8).scrub
   Erx::BleBoardCheck::Run.new(output: output, exit_code: record['state'] == 'timed_out' ? nil : record['exit_status'])
-ensure
-  writer&.kill
-  File.unlink(fifo) if fifo && File.exist?(fifo)
 end
 
 def report(step_name, outcome)
@@ -106,8 +97,8 @@ begin
     outcomes += Erx::BleBoardCheck.steps(scan.id).map do |step|
       report(step.name, Erx::BleBoardCheck.step_outcome(step, blew(runner, step.name, step.argv, options[:timeout])))
     end
-    first = nus_session(runner, options[:logs], scan.id, 'bleuart-session', Erx::BleBoardCheck::SESSION, options[:timeout])
-    second = nus_session(runner, options[:logs], scan.id, 'bleuart-reconnection', Erx::BleBoardCheck::RECONNECTION,
+    first = nus_session(runner, scan.id, 'bleuart-session', Erx::BleBoardCheck::SESSION, options[:timeout])
+    second = nus_session(runner, scan.id, 'bleuart-reconnection', Erx::BleBoardCheck::RECONNECTION,
                          options[:timeout])
     outcomes += Erx::BleBoardCheck.bleuart_outcomes(first, second).map { |name, outcome| report(name, outcome) }
   else
