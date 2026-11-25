@@ -243,9 +243,13 @@ its own task, a factory, its pager and Fiasco's platform control
 object, among others
 ([chapter 8](08-kernel-interface.md#83-the-root-service-who-holds-what)).
 
-A development kernel carries JDB, Fiasco's kernel debugger, so a
-kernel panic waits there for the operator; a release kernel, built
-without it, resets the machine through PSCI.
+A kernel panic stops every CPU, prints a crash record and resets the
+machine through PSCI; in a development boot that asked for it, the
+stopped kernel first holds, so that the host's debugger can read its
+memory ([chapter 21](21-live-machine.md#2154-reading-a-stopped-machine)).
+That stop is **Designed**. As built, a release kernel prints the trap's
+state and resets, and a development kernel carries JDB, Fiasco's kernel
+debugger, in which a panic waits for the operator.
 
 ### 24.2.2 The root task's first steps
 
@@ -848,12 +852,15 @@ watchdog watches only the runtime that runs the domain service. The
 designed liveness list adds a few system services, so a deadlock
 inside the system domain is caught too.
 
-**A hardware watchdog on every boot.** The firmware does not start the
-board's watchdog, and nothing before the root's watchdog thread would
-reload it, so the root task arms it on every boot, from that thread,
-attended board or not. A hung board comes back by itself. The cost is
-that an attended board stopped in Fiasco's debugger resets within
-4 seconds.
+**A hardware watchdog on every unattended boot.** The firmware does not
+start the board's watchdog, and nothing before the root's watchdog
+thread would reload it, so the root task arms it from that thread, and a
+hung board comes back by itself. A boot whose command line asks the
+kernel to hold after a stop is attended: a held machine has every CPU
+parked and reloads nothing, so the root leaves the watchdog unarmed, and
+the developer's host is what watches the board. That exception is
+**Designed**. As built, the root arms the watchdog on every boot, and a
+board stopped in Fiasco's debugger resets within 4 seconds.
 
 ## Summary
 

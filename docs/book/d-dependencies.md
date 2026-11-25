@@ -6,8 +6,8 @@
 > provenance; the license rule `LicenseCheck` and its closed table; and
 > the `NOTICES` file that every packed system image carries as
 > `system/NOTICES`. Designed: a copy of `NOTICES` beside the boot image
-> in each slot's boot partition, and the rows below marked as
-> designed.
+> in each slot's boot partition, the removal of Fiasco's kernel debugger
+> with its GPL file, and the rows below marked as designed.
 
 erXos is a small amount of new code standing on a large amount of old
 code. Its Erlang runs on OTP, its native programs link musl, its kernel
@@ -102,7 +102,11 @@ erXos's MIT replacement, written from a description by someone who
 never read the original. The kernel debugger's `jdb_object.cpp` is
 GPL-2.0 too. Only a kernel built with the debugger compiles it, and
 the license rule takes it only in development builds. The images the
-website offers carry it and go out with a link to their source.
+website offers carry it and go out with a link to their source. The
+design takes Fiasco's debugger out of the tree, this file with it, and
+reads a stopped machine from the host instead
+([chapter 21](21-live-machine.md#2154-reading-a-stopped-machine)), after
+which no kernel build compiles a GPL file. That removal is **Designed**.
 
 Fiasco's imported tree leaves out the copyleft parts no build uses: Fiasco's own
 tests, a coverage module and a checksumming console stream that erXos
@@ -256,7 +260,8 @@ kinds of build take it. The table has two rows:
 
 1. Doom's archive, a demo program that is never part of the system,
    in development builds only;
-2. Fiasco's `jdb_object.cpp`, in development builds only.
+2. Fiasco's `jdb_object.cpp`, in development builds only, a row the
+   designed removal of Fiasco's debugger deletes (D.3.2).
 
 The design admits a few more files by name and place, outside every
 program and EROFS image: the Pi 4's device tree, with its source

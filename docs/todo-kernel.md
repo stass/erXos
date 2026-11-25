@@ -16,7 +16,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the kernel debugger's `jdb_object.cpp`, which goes out only in 0.1's
   images, which keep the debugger, with its source offered, and which the
   release kernel's build leaves out (0.1's and
-  0.2's items below, [design.md](design.md#dependencies)). The import also records the
+  0.2's items below, [design.md](design.md#dependencies)); the debugger's
+  replacement takes the file out of the tree
+  ([design-debugger.md](design-debugger.md#on-fiasco), and its item in
+  [todo-fiasco.md](todo-fiasco.md)). Both kernels then link one stop core,
+  `kernel/core/machine_stop.c`, which is the kernel's panic path when
+  erXos's kernel is built. The import also records the
   link closure of L4Re's `bootstrap` and `sigma0`, their `drivers-frst`
   UART support, and the license of each library in it.
 

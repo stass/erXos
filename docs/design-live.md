@@ -934,16 +934,18 @@ log service:
   polling until the log service's first take hands the log to the
   console, before the driver starts, and again at a panic or the
   machine's end; so the kernel and the driver share the UART in time,
-  and while the driver runs it is the UART's only user. On Fiasco the
+  and while the driver runs it is the UART's only user. A stopped
+  development kernel that holds also reads it, by polling, from its stop
+  to its reset, when the driver runs no more
+  ([design-debugger.md](design-debugger.md#the-hold)). On Fiasco the
   kernel's own lines go from that take on to a ring of the kernel's,
   which each take drains into the log as kernel records, and reach the
-  UART only when the machine stops, or when a development build's
-  kernel enters its debugger, which shares the UART with the driver
-  from then on if the operator resumes
-  ([design-fiasco.md](design-fiasco.md#the-kernels-lines)). On Fiasco
-  neither a kernel stop nor the machine's end stops a thread first
-  ([design-fiasco.md](design-fiasco.md#the-end-path)), so a stop's
-  report and the end's last lines can fall among a driver write still
+  UART only when the machine stops
+  ([design-fiasco.md](design-fiasco.md#the-kernels-lines)). A kernel
+  stop parks every CPU that answers before it prints, but on Fiasco the
+  root's own end of the machine stops no thread first
+  ([design-fiasco.md](design-fiasco.md#the-end-path)), so that end's
+  crash frame and last lines can fall among a driver write still
   under way. A test root's
   test tasks, which run with no console driver and no take, write their
   bytes to it unchanged
@@ -4193,6 +4195,11 @@ any difference but a shortcut's own name and arity.
 the `web` facet ([design-web.md](design-web.md#the-host-tools-front-end));
 `files` relays a UNIX socket to the host link's files stream
 ([Files between the host and the machine](#files-between-the-host-and-the-machine)).
+These reach a running machine. A stopped one is `tools/erx debug`'s, which
+opens no host link session: it reads the machine's crash record, a memory
+image, its console during a hold, a stub or a recorded run, and shows the
+same inspection records
+([design-debugger.md](design-debugger.md#the-hosts-debugger)).
 A command that opens a host link session reaches the machine by one of
 `--socket` and `--tty`, and `load` and `watch` also by `--ssh`
 ([One load, three routes](#one-load-three-routes)). Every command

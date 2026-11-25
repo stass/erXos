@@ -6,8 +6,9 @@ live system as it runs; this page is about reading what it left.
 
 Each section says what is built and what is designed only. The designs are
 [design-log.md](../design-log.md), [design-live.md](../design-live.md) (the
-inspector, `/proc` and tracing) and [design-fiasco.md](../design-fiasco.md)
-(the kernel's own debugging aids).
+inspector, `/proc` and tracing), [design-fiasco.md](../design-fiasco.md)
+(the kernel's own lines and its end) and
+[design-debugger.md](../design-debugger.md) (reading a stopped kernel).
 
 ## The boot transcript and the console
 
@@ -135,15 +136,31 @@ console input: a kernel trap or panic stops every CPU in JDB on the console
 and waits, so on QEMU the run waits for you or for a harness's deadline. On
 a Pi 4 the hardware watchdog resets the board once the root has armed it. A
 release kernel is built without JDB and prints the trap state and panics
-([design-fiasco.md](../design-fiasco.md#boot-handoff),
-[plan.md](../plan.md)). The tree has no page on using JDB; its commands are
+([plan.md](../plan.md)). The tree has no page on using JDB; its commands are
 Fiasco's.
+
+Designed, not built ([design-debugger.md](../design-debugger.md)): JDB
+leaves every build. A kernel that fails stops every CPU, prints a crash
+record that says where each CPU was, and resets. `tools/erx debug` then
+reads what the machine left:
+
+* the crash record, from a console log;
+* a memory image, which the harness takes of every failing QEMU run and
+  reports on;
+* a board that holds after its stop, when its command line carries
+  `erx.hold=1`, over the console wire you already have;
+* QEMU's stub or a recorded QEMU run, which add breakpoints, watchpoints
+  and running backwards to the write that made a value.
+
+Its views are the paths of `/proc`: `tools/erx debug FILE inspect
+budgets/7` prints the record the running machine's `/proc/budgets/7` gave.
 
 ## What is not built
 
 * **QEMU's GDB stub.** The harness (`tools/lib/erx/qemu*.rb`) does not pass
-  `-s` or `-gdb`, and no design describes attaching a debugger to a
-  guest or to a native program. The one place the tree uses a stub is a research
+  `-s` or `-gdb`. Attaching to a guest's kernel is designed, as one target
+  of `tools/erx debug` ([The kernel debugger](#the-kernel-debugger)); no
+  design describes attaching a debugger to a native program. The one place the tree uses a stub is a research
   record about the SD host controller model
   ([research-sdhci-qemu-model.md](../research-sdhci-qemu-model.md)).
   `tools/erx boot --medium FILE --print` prints the plain QEMU command, to
@@ -155,6 +172,7 @@ Fiasco's.
   file, which that design has to settle.
 * **JTAG.** The Pi 4's JTAG pins appear in
   [design-fiasco.md](../design-fiasco.md) and
-  [design-header-io.md](../design-header-io.md) as a header assignment;
-  no page describes a probe setup.
+  [design-header-io.md](../design-header-io.md) as a header assignment.
+  A probe is designed as a target of `tools/erx debug` and is unverified
+  on the board; no page describes a probe setup.
 * **Logs that outlive a boot,** and `/proc/kernel/crash`, above.

@@ -2526,7 +2526,7 @@ take ([Alternatives considered](#alternatives-considered)).
 
 **The crash record.** Before any of these ends, and before a kernel
 panic's report, the kernel writes one **crash record**, a layout of the
-ABI file of at most `ERX_CRASH_SIZE` (16 KiB, an estimate: under 1 KiB of
+ABI file of at most `ERX_CRASH_SIZE` (16 KiB, an estimate: under 2 KiB of
 fixed fields and the rest for the log's tail). It has two
 **forms**, and the boot image's `ERX_PACK_DEVELOPMENT` flag
 ([Configuration](#configuration)) chooses which one a build writes:
@@ -2538,7 +2538,8 @@ fixed fields and the rest for the log's tail). It has two
   but the program counter, no stack and no text, so nothing the root task
   held, a passphrase it was checking included, survives a reset in it;
 * the **full** form, a development build's, adds the registers, the
-  backtrace and the text, among it the slogan and the start of the
+  backtrace, each CPU's stop state and location, and the text, among it
+  the slogan and the start of the
   dump that the system domain's runtime writes to the kernel log before
   it stops
   ([design-runtime.md](design-runtime.md#the-root-task-entry)), and so
@@ -2546,19 +2547,26 @@ fixed fields and the rest for the log's tail). It has two
   the system domain shows a record only to the system shell (below).
 
 Its layouts are `erx_crash_brief` and `erx_crash_record` in
-`abi/kernel.txt`: a 120-byte brief form, and a full form whose 904-byte
-fixed prefix adds registers and a backtrace before its text. The header
+`abi/kernel.txt`: a 120-byte brief form, and a full form whose
+1,800-byte fixed prefix adds registers, a backtrace and 16 CPU entries of
+56 bytes (`erx_crash_cpu`) before its text. The header
 carries a magic, the version, the bytes used (`length`), a CRC-32C of
 the bytes after the CRC field up to `length`, the form, the cause
 (`FAULT`, `HALT`, `WATCHDOG` or `PANIC`), the CPU that wrote it, the
 monotonic time at the end, the time since the root task's last pet (or
 its start, before the first), the build identifier, the boot value and
-slot the kernel holds, and the number of backtrace frames (full form and
-`PANIC` only). Its `fault` is the fault record for `FAULT`, the exit
+slot the kernel holds, the number of backtrace frames (full form and
+`PANIC` only), and `ncpus`, the number of CPUs the stop's census covered
+(full form only, and zero in a record written without a census). Its
+`fault` is the fault record for `FAULT`, the exit
 record for `HALT`, the exception's cause, address and program counter
 for `PANIC`, and zero for `WATCHDOG`. The full form adds the thread's
 user registers for `FAULT` or the panicking CPU's for `PANIC`, the
-backtrace for `PANIC`, and text: the panic message, then the kernel
+backtrace for `PANIC`, one entry for each of the first 16 CPUs the census
+covered, with its stop state and, where the CPU published them, its
+program counter, stack pointer, frame pointer, return address and state
+word ([design-debugger.md](design-debugger.md#the-records-cpu-entries)),
+and text: the panic message, then the kernel
 log's last records, newest last, each already escaped. The boot value
 and slot are
 one of the pairs the machine page allows, from the kernel's own data, so a
@@ -2620,13 +2628,15 @@ marker only as a whole line, passes over it:
   reads exactly the lines the length names, and accepts the record only
   if `magic`, `version`, `form` and `length` equal the frame's, the CRC
   matches, `cause` is one of the four, `cpu` is below `ERX_CPU_LIMIT`,
-  `boot_value` and `boot_slot` are one of the machine page's pairs, the
-  padding is zero,
+  `boot_value` and `boot_slot` are one of the machine page's pairs,
   `nframes` is at most 64 and zero unless the form is full and the cause
-  `PANIC`, the fault record's `kind` is a declared kind for `FAULT` and is
+  `PANIC`, `ncpus` is at most `ERX_CPU_LIMIT` and zero in the brief form,
+  the fault record's `kind` is a declared kind for `FAULT` and is
   `exit` for `HALT`, the fault record is zero for `WATCHDOG`, and in the
   full form `regs` is zero unless the cause is `FAULT` or `PANIC`, `frames`
-  is zero past `nframes`, and every byte of `text` is printable ASCII or a
+  is zero past `nframes`, every CPU entry's state is one of the stop
+  states, an entry is zero past `ncpus` and holds no register for a state
+  that has none, and every byte of `text` is printable ASCII or a
   newline, as escaped text is. A frame that ends before its lines or before the end
   line is reported as `truncated`; a line that is not base64 of the
   expected length, a second header line inside a frame, or any failed
@@ -2634,7 +2644,8 @@ marker only as a whole line, passes over it:
   case.
 * The ABI file declares `crash_frame_begin` and `crash_frame_end`, the
   marker strings, `crash_frame_line` (76) and `crash_frame_lines_max`
-  (288), and `cpu_limit`, one more than the highest CPU a cpuset can name;
+  (288), `crash_cpus` (16), the full form's CPU entries, and `cpu_limit`,
+  one more than the highest CPU a cpuset can name;
   `ERX_CRASH_BRIEF_SIZE` and `ERX_CRASH_RECORD_SIZE` are the generated sizes
   of the two layouts.
 
@@ -3684,7 +3695,12 @@ what it protects:
   while it holds it. The time a part spends taking a lock is therefore
   bounded in the execution time of the CPUs involved, by `ncpus - 1`
   critical sections of that lock, whatever the other CPUs do, and every
-  part's bound (K13) counts that for each lock it takes. The inherited
+  part's bound (K13) counts that for each lock it takes. A taker's wait
+  loop also loads the machine's stop word on each pass: a taker that
+  finds it set publishes where it waits, with the lock's address, and
+  parks, so a CPU that waits for a lock with interrupts masked, as each
+  party to a deadlock does, stops with the rest of the machine
+  ([design-debugger.md](design-debugger.md#stopping-every-cpu)). The inherited
   spinlock of Fiasco has no queue, so the C17 cores bring their own
   ([design-fiasco.md](design-fiasco.md#budgets-and-the-ownership-of-pages)).
 
@@ -6501,7 +6517,8 @@ It uses:
 
 * three inter-processor interrupts, `ERX_IPI_REQUEST` (a CPU has
   requests), `ERX_IPI_SYNC` (a synchronisation round) and `ERX_IPI_STOP`
-  (panic), and no others;
+  (the stop's request, at a panic and at every end of the machine), and
+  no others;
 * one per-CPU line for the kernel's timer, programmed one-shot from each
   CPU's timer wheel;
 * the lines of the kernel's own devices (the IOMMU's event queue and the
@@ -7442,8 +7459,10 @@ panic or an end of the machine, and the console's driver in the system
 domain owns the UART otherwise. It writes only by polling: each byte
 waits for room in the UART's transmit holding register for a bounded
 number of polls and is dropped after that, so a UART that a driver reconfigured or that hangs cannot hold the
-kernel up. It reads only the UART's status, never a received byte, and
-takes none of its interrupts. It writes it at two times: during boot,
+kernel up. It reads only the UART's status, and a received byte in one
+place alone, the hold a development kernel enters after a stop in a boot
+that asked for it ([design-debugger.md](design-debugger.md#the-hold)),
+and takes none of its interrupts. It writes it at two times: during boot,
 until the system domain's log service first takes the log
 (`erx_log_take`, below) or the console's driver takes the UART, the
 first `erx_resource_carve` of the UART's device entry from the root
@@ -7525,28 +7544,47 @@ rendering passes everything but the newline through the escaper. A window that a
 
 
 **Panic.** A failed kernel assertion and an exception that violates a
-kernel invariant reach `erx_panic`:
+kernel invariant reach `erx_panic`, as the root task's three ends do
+([The root task](#the-root-task)). It is the **stop** of
+[design-debugger.md](design-debugger.md#the-stop), whose decisions are
+the core `kernel/core/machine_stop.c`, and it never returns:
 
-1. **One panic.** The first CPU to set the machine's panic word proceeds. A
-   CPU that finds the word set by another CPU stops itself; a nested panic
-   on the panicking CPU prints one line and halts, or resets while a
-   machine lease is held.
+1. **One stop.** The first CPU to claim the machine's stop word proceeds,
+   as the stop's leader. A CPU that finds the word claimed by another CPU
+   publishes its registers as `concurrent` and parks; a nested stop on the
+   leader prints one line and halts, or resets while a machine lease is
+   held.
 2. **A fresh stack.** It switches to the CPU's panic stack, found through
    the CPU's hardware identifier and a table written at boot, so it trusts
    no pointer of the failing state.
-3. **Stop the others.** It sends `ERX_IPI_STOP`; each other CPU saves its
-   registers in its per-CPU record and parks with interrupts masked. It
-   waits at most 100 ms for them.
-4. **Report**, on the early console: the message; the CPU, its
+3. **Stop the others.** It sends `ERX_IPI_STOP` and wakes every CPU that
+   waits for a spinlock. Each other CPU publishes its registers in its
+   stop slot and parks with interrupts masked: `stopped` when it takes the
+   request, `waiting` when it finds the stop word in a spinlock's wait
+   loop with interrupts masked. The leader waits at most 100 ms, and a CPU
+   that has published nothing by then is `unanswered`
+   ([design-debugger.md](design-debugger.md#stopping-every-cpu)).
+4. **Record and report**, on the early console: the message; the CPU, its
    exception's class, cause, faulting address and return address, as the
    binding names them, and registers; a
    backtrace by frame pointers, at most 64 frames, each frame pointer
    checked to lie inside the stack it claims; the running thread, its space
-   and group; and each stopped CPU's state. Every piece of text the kernel
+   and group; and each CPU's stop state and location. The crash record,
+   which holds the same, follows in its frame
+   ([The root task](#the-root-task)). Every piece of text the kernel
    did not write itself passes through `erx_log_escape`.
-5. **End**, as `erx.panic` says ([Configuration](#configuration)),
+5. **Hold**, in a development kernel whose boot asked for it with
+   `erx.hold=1`: the leader answers requests to read RAM on the console
+   until the host ends the hold or falls silent
+   ([design-debugger.md](design-debugger.md#the-hold)).
+6. **End**, as `erx.panic` says ([Configuration](#configuration)),
    through the firmware; while a machine lease is held, a reset whatever
    `erx.panic` says.
+
+No debugger runs in the kernel. What a developer asks of a stopped
+machine, `tools/erx debug` answers on the host, from the record, from a
+memory image, or from the machine's memory through the hold or a stub
+([design-debugger.md](design-debugger.md)).
 
 **Ending the machine.** `erx_machine_end(res, how)`, with `POWER`, which
 only the root resource carries, is the orderly end. It stops the other
@@ -7700,7 +7738,11 @@ A run that takes input after it starts, from the host link or a disk,
 reproduces only under QEMU's record and replay, which records each input
 with the instruction count at which it arrived (QEMU's `replay`
 documentation covers serial ports, block devices through `blkreplay` and
-network packets). Broader tests compare structured event traces and check
+network packets). Such a recording is also a debugger's target: `tools/erx
+debug --replay` reads it at any instruction count and runs it backwards
+to the write that made a value
+([design-debugger.md](design-debugger.md#watching-a-value-and-when-it-changed)).
+Broader tests compare structured event traces and check
 invariants, not bytes. HVF and multi-CPU runs are never compared byte for
 byte, and a deterministic run, on one CPU, is no test of concurrency,
 which the host models and the multi-CPU suites cover.
@@ -7913,6 +7955,7 @@ arithmetic.
 | `erx.cpus=N` | start at most `N` CPUs | every CPU in the device tree |
 | `erx.sched=` | the scheduler's configuration cap ([design-scheduler.md](design-scheduler.md#configuration)) | `c2` |
 | `erx.panic=halt`, `reset`, `off` | the end of a panic, and of the root task's fault, halt or missed watchdog deadline ([The root task](#the-root-task)); `reset` while a machine lease is held | `halt` in development builds, `reset` in release builds |
+| `erx.hold=1` | hold after a stop: before it ends, the stop answers requests to read RAM on the console until the host ends the hold or falls silent for 5 s ([design-debugger.md](design-debugger.md#the-hold)); a boot under a machine lease, and one whose firmware started the board's watchdog, does not hold and says so on the early console; a release build refuses it and stops | off |
 | `erx.watchdog=P,D,B` | the watchdog's period, deadline and boot deadline in seconds, which the machine page carries: the root task pets every `P` seconds, a deadline `D` seconds after a pet that passes without the next ends the machine, and a root task that has not pet within `B` seconds of its start ends it the same way; `P` from 1 to 60, `D` from `2P` to 600 and `B` from `D` to 600 ([The watchdog](#the-watchdog)) | `1,5,60` |
 
 The boot image carries the build's flags: `ERX_PACK_DEVELOPMENT`, which
@@ -8003,7 +8046,7 @@ decides when.
 | An asynchronous error the platform's error records attribute to a device | `erx_async_error_classify`, from the records | the device's window quarantined | the device service resets the device or its PCIe segment | a log line naming the source; the quarantine in the window's inspection |
 | A corrected or latent asynchronous error | `erx_async_error_classify` | nothing | none needed | a log line |
 | An uncontainable asynchronous error | the asynchronous error's handler, from what the architecture reports | the machine | none | a panic report |
-| A kernel invariant violated | assertions, the exception entries | the machine | none | a panic report on the console with the cause, the program counter and the fault address; the registers, the backtrace and every CPU's state only in the crash record's full form, which a development build keeps |
+| A kernel invariant violated | assertions, the exception entries | the machine | none | a panic report on the console with the cause, the program counter and the fault address; the registers, the backtrace and every CPU's stop state only in the crash record's full form, which a development build keeps; a development boot that asked for it then holds, and `tools/erx debug` reads the stopped machine's memory ([design-debugger.md](design-debugger.md)) |
 | A device-tree or boot-image error | the validators | no boot | none | the failing check and offset on the console |
 
 **Inspection.** `erx_object_info` answers topics for every object (its type,
@@ -8016,7 +8059,10 @@ object's type and the capability's rights only; an object id needs
 `INSPECT`, and being a keyed permutation of a counter, it reveals nothing
 about objects others create. The inspector presents them as kernel-reported
 records ([design-live.md](design-live.md#inspection)). The trace ring and
-the kernel log complete the picture; the panic report is the last resort.
+the kernel log complete the picture of a running machine. A stopped one
+is read on the host: `tools/erx debug` shows the same records, read from
+its crash record or its memory
+([design-debugger.md](design-debugger.md#the-hosts-debugger)).
 
 A topic is a value of the ABI's topic enum, and each has a report layout
 of its own in `abi/erx_abi.txt`. The topics the inspector and the system
@@ -8386,6 +8432,7 @@ of evidence that checks it:
 | the kernel touches no PCIe configuration space: the generator emits no kernel accessor for a bridge | relocations, the generator |
 | device registers only through generated accessors | syntax trees (`volatile` only in generated headers) |
 | only the early-console writer, which the boot path, `erx_panic` and `erx_machine_end_effect` alone call, writes a UART's registers in the kernel | relocations |
+| only the hold's reader, which `erx_panic` alone calls and a release kernel does not link, reads a UART's received byte in the kernel, and only the hold's copy reads memory at an address taken from a line ([design-debugger.md](design-debugger.md#the-hold)) | relocations; the release link's symbol list |
 | untrusted text reaches the log and the panic report only escaped: the formatting function takes only a literal format and escapes every argument | `log-format-literal`, `log-raw-private`; `hosted-log-sink` for the hosted backend |
 | data holds no code pointer outside the generated handler table | relocations of the linked image |
 | only `liberx`'s `fiasco` backend issues Fiasco calls | syntax trees, disassembly |
@@ -8630,8 +8677,9 @@ are excluded from the import, apart from the configuration tool
 executable a boot image carries, and of Fiasco's code in the Fiasco build
 only two files are GPL-2.0 upstream, by their own notices:
 `src/kern/kobject_rpc.h`, whose place in the tree an erXos-authored, MIT
-clean-room header takes, and the kernel debugger's `jdb_object.cpp`, which a development kernel
-carries and the release kernel's build leaves out ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build),
+clean-room header takes, and the kernel debugger's `jdb_object.cpp`, which
+is excluded from the import with the debugger itself
+([design-debugger.md](design-debugger.md#on-fiasco),
 [dependency table](design.md#dependencies)).
 
 ### The ledger
@@ -8699,7 +8747,7 @@ Fiasco* (erXos takes Fiasco's way), or *decided*. No departure rests on taste al
 | Watchdog | no kernel watchdog; L4Re leaves a board's watchdog to a driver | a kernel watchdog the root task pets, armed when the root task starts, with a boot deadline, whose missed deadline ends the machine after a crash record, and the board's hardware watchdog reloaded by the kernel from its own timer for as long as the kernel runs ([The watchdog](#the-watchdog)) | a hung system runtime is otherwise an up machine that answers nothing; the two timers have one owner each, so a kernel hang and a runtime hang both end in a reset and the runtime's never fires without its record | a hung root task would stay hung until a human resets the board | decided |
 | The ABI | hand-written `l4sys` headers | every call, right, status and layout generated from `abi/erx_abi.txt` into the build tree ([The ABI file](#the-abi-file)) | one source for the kernel, `liberx`, the runtimes and Erlang | headers that drift from the kernel | needed by erXos |
 | Code mappings | a flexpage may carry read, write and execute together, so a pager may map a page writable and executable | no mapping is writable and executable, and no page is executable while another mapping or a confined device can write it (K8): code lives in the boot image's slices and in sealed paged objects, and a JIT object is writable at one address and executable at another of its one space, which no other space and no device can map, its runtime publishing code by an explicit step | no code is writable where it runs, or anywhere else | a pager could map writable code, and a writable alias could change code a mapping executes | needed by erXos |
-| Kernel debugger | JDB, an in-kernel debugger | none in erXos's kernel; inspection through `INSPECT`, the trace ring and the host's tools; Fiasco keeps JDB in development builds | less code and less to attack in kernel mode | interactive debugging in the kernel | defensible |
+| Kernel debugger | JDB, an in-kernel debugger: a prompt on the console that reads and writes kernel memory, entered at a panic, by a key or from user mode | none, on either kernel. A fatal error takes the stop: every CPU it reaches parks in one of a closed set of stop states, the crash record is written and the machine ends, never resuming, and a development kernel whose boot asked for it first holds, answering requests to read RAM on its console. Every command, layout and view is the host's, in `tools/erx debug`, over a crash record, a memory image, a held board, a stub or a recorded run, and JDB with its GPL-2.0 kernel object is out of the Fiasco fork ([design-debugger.md](design-debugger.md)). It gives up the prompt, a resume after a stop, and breakpoints set from inside the machine, which QEMU's stub and a probe set from outside | less code and less to attack in kernel mode; one command set and one schema for a running machine and a stopped one; kernel mode reads input in one state of a development kernel alone | a console that reaches kernel memory after any panic, a debugger and trace buffer that are more than a quarter of the kernel's lines ([research](research-hierarchical-scheduling.md#fiasco-sizes)), and views of the kernel's state that exist only while someone sits at that console | defensible |
 
 Notes:
 
@@ -8771,8 +8819,8 @@ Fiasco's scheduling:
   stop there.
 * *Why it lost.* Fiasco's memory model of flexpages, a mapping database
   and user-level pagers is the opposite of memory objects with ceilings;
-  its C++ is outside the construction rules; and it carries an in-kernel
-  debugger, ACPI, hypervisor support and many options erXos does not use.
+  its C++ is outside the construction rules; and it carries ACPI,
+  hypervisor support and many options erXos does not use.
   erXos has a kernel of its own, written in C17 on Fiasco's
   design: its process model, gates, UTCBs, IRQ objects and vCPU interface.
   Fiasco gets erXos running while that kernel is written behind the
@@ -9291,7 +9339,7 @@ Fiasco's scheduling:
 | hashing each file with portable code at its first slice lengthens the boot and each domain's first start | medium | boot time, in proportion to the bytes the boot uses | each file is hashed once per boot and only when used; the boot benchmark reports the hashing time per platform, and the boot image stays small, with the system release in EROFS images from M6 |
 | a loader places the device tree or another payload inside a large single file, because it ignores the declared image size | low | the boot stops with the locator's overlap check | the file's own extent covers the archive whatever the header says; the boot probe confirms each board's placement before anything depends on it ([design-platforms.md](design-platforms.md#boot)) |
 | Fiasco's modifications grow large (memory objects, sealed paged objects, groups, the stop core in Fiasco's C++) | medium | Fiasco takes longer than expected | the backend carries only the part of the interface that Phase 1's system uses, and every mechanism beyond it lands on erXos's kernel alone ([The current implementation](#the-current-implementation-the-modified-fiasco)); the plan's pilot calibrates the effort |
-| Fiasco carries GPL code: `kobject_rpc.h` and `jdb_object.cpp` in the kernel, and possibly a link dependency of `bootstrap` or `sigma0` | certain for the two files | the tree's `kobject_rpc.h` is an erXos-authored, MIT clean-room replacement of the GPL original, and the release kernel's build leaves `jdb_object.cpp` out ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)); 0.1's images, development builds, carry the development kernel with the debugger and `jdb_object.cpp`, by decision, under CLAUDE.md's exception for the images the website offers, with their source offered | recorded at import; erXos's kernel takes code only from files whose effective license is permissive, judged by Fiasco's `LICENSE.spdx`, each file's own notice and its upstream history, and needs nothing those two files do: its dispatch is generated, and it has no kernel debugger ([design.md](design.md#dependencies)) |
+| Upstream Fiasco carries GPL code: `kobject_rpc.h` and `jdb_object.cpp` in the kernel, and possibly a link dependency of `bootstrap` or `sigma0` | certain for the two files | the tree's `kobject_rpc.h` is an erXos-authored, MIT clean-room replacement of the GPL original, and `jdb_object.cpp` is excluded from the import with the kernel debugger it belongs to ([design-debugger.md](design-debugger.md#on-fiasco)), so no kernel build, development or release, compiles a GPL file; the link audit reads every executable a boot image carries ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)) | recorded at import; erXos's kernel takes code only from files whose effective license is permissive, judged by Fiasco's `LICENSE.spdx`, each file's own notice and its upstream history, and needs nothing those two files do: its dispatch is generated, and it has no kernel debugger ([design.md](design.md#dependencies)) |
 | 8 KiB kernel stacks do not hold the proven worst case with an interrupt on top | low | larger stacks, about 4 KiB more per thread | the stack proof fails the build first; Fiasco runs in 8 KiB with its thread record in the same block |
 | deleting an object that has many capabilities or mappings takes many bounded parts | low | a long call for the deleter | closing makes the object unreachable in the first part, so no other call waits for the rest, and the drain waits only for the one operation that holds the existence lock; each part is bounded and preemptible |
 | a space's existence lock serialises its range calls and maps, as Fiasco's serialises a task's maps | medium | a runtime's threads that change their space's ranges at once wait for each other | faults do not take it, and every part is bounded; if `tools/erx bench` shows contention, a shared mode for operations, with the destroy's close and drain alone exclusive, is a change behind `erx_object_lock_existence` |

@@ -15,7 +15,10 @@
 > system domain refusing code outside installed storage; the host
 > tool's `--tty`; log files under `/var/log`; a crash record that
 > survives the reset; domain crash dumps under `/proc`;
-> the host's tree mounted in the machine.
+> the host's tree mounted in the machine; the kernel's stop with every
+> CPU's state in the crash record, the hold, and `tools/erx debug` over
+> records, memory images, held boards, stubs and recorded runs, in place
+> of Fiasco's kernel debugger, which a development kernel still carries.
 
 **Background needed.** [Chapter 3](03-erlang.md), sections 3.6 and
 3.7: two versions of a module, and looking at a running node.
@@ -806,16 +809,17 @@ each take drains the ring into the log as records whose text begins
 `fiasco: `, escaped like every other kernel line. The ring holds only
 whole lines: a line it cannot hold whole is dropped whole, never cut,
 and counted, and the count becomes a record of its own. The kernel
-writes the UART again only when the machine stops: a panic, a failed
-assertion, a kernel trap, the debugger's entry or the root's end takes
-the UART back before it prints its first byte, so the stop's report
-never waits in the ring, and the ring's lines go out first, escaped as
-a take would give them. So while the console's driver runs it is the
-UART's only user, and no kernel write can hide a lost keystroke
+writes the UART again only when the machine stops: a kernel stop,
+whatever began it (a panic, a failed assertion, a kernel trap), and the
+root's end each take the UART back before the first byte they print, so
+a stop's report never waits in the ring, and the ring's lines go out
+first, escaped as a take would give them. So while the console's driver
+runs it is the UART's only user, and no kernel write can hide a lost
+keystroke
 ([design-fiasco.md, The kernel's lines](../design-fiasco.md#the-kernels-lines)).
-A development build's debugger is the one exception: once resumed, or
-when the boot enters it before user mode, it leaves the kernel writing
-the UART beside the driver until the machine ends. The ring is designed and not built.
+Nothing hands the UART back to the driver afterwards, because nothing
+resumes a stopped kernel ([section 21.5.4](#2154-reading-a-stopped-machine)).
+The ring is designed and not built.
 
 The service, its pure core and its console consumer are **Built**
 (`erlang/apps/erx/src/erx_syslog.erl`, `erx_syslog_core.erl`). The
@@ -877,6 +881,63 @@ writes its dump into the domain's crash area
 Reading that dump at `/proc/domains/ID/crash` is designed and not
 built.
 
+### 21.5.4 Reading a stopped machine
+
+> **Background: kernel debuggers.** A **kernel debugger** lets a
+> developer stop an operating system's kernel and look at its memory.
+> Some run inside the kernel they debug, as a prompt on its console;
+> others keep the commands on a second machine and leave only a small
+> **stub** in the target, which stops it and reads its memory on
+> request. A **breakpoint** stops execution at an instruction, and a
+> **watchpoint** at an access to an address. **Record and replay**
+> saves the inputs of a run so that it can be executed again exactly,
+> and so, in effect, backwards.
+
+The inspector answers for a machine that runs. A kernel that has found
+its own state wrong cannot answer, and should not try: it **stops**.
+One CPU claims the stop. Every other CPU parks and leaves its registers
+where a reader finds them, or is reported as not having answered, never
+shown with stale state. A CPU caught waiting for a lock says which lock,
+and two CPUs that each name the lock they wait for are most of a
+deadlock's diagnosis. The kernel then writes the crash record, with each
+CPU's state in it, and ends the machine. It never resumes, and no
+debugger runs inside it ([design-debugger.md](../design-debugger.md)).
+
+Everything a developer asks next is answered on the Mac, by one tool,
+`tools/erx debug`, from whatever the stopped machine left:
+
+* its crash record, from the console's log;
+* a memory image, which the QEMU harness takes of every failing run;
+* the board itself, which in a development boot that asked for it
+  **holds** after its record and answers requests to read its memory
+  over the console wire, until the tool lets it go;
+* a stub such as QEMU's, which stops the machine from outside and adds
+  breakpoints and watchpoints;
+* a recorded QEMU run, which replays exactly.
+
+The commands are the same for all five, and a command that needs memory
+a record does not hold says so.
+
+What the tool shows are the inspector's records. `tools/erx debug IMAGE
+inspect budgets/7` prints the record that `/proc/budgets/7` gave while
+the machine ran, read this time from memory by a **walker**: a
+declaration that says where the rows of a kind lie and which field holds
+each attribute, checked against the schema and against the build's debug
+information whenever the system is built. Each value still names whose
+state it is, and what could not be read is `unknown`, never a guess
+(21.2). Because every value was read from an address, the tool can also
+say what an address is, check every row of a stopped machine against the
+schema's own types, and stop a machine when a named attribute changes.
+On a recorded run it runs the machine backwards to the write that gave
+an attribute its value, which is the question a corrupted counter poses:
+who wrote this, and when.
+
+The stop, the hold and the tool are **Designed**. A development kernel
+in the tree carries Fiasco's own kernel debugger, a prompt on the
+console in which a kernel panic waits; the design removes it, and with
+it the one GPL file a kernel build compiles
+([appendix D](d-dependencies.md)).
+
 ## 21.6 Attributed text
 
 Text shown under its source's name is **attributed text**: a domain's
@@ -911,6 +972,14 @@ one schema, and `erx:i/1`, `/proc` and
 the browser are views of it behind one facet: the schema must name
 everything, and a new attribute appears in every view at once.
 
+**The kernel stops; the host debugs.** A debugger inside the kernel
+needs console input in kernel mode, its own account of every data
+structure and a way to resume, and after any panic its prompt hands
+kernel memory to whoever holds the console. erXos keeps in the kernel
+only what nothing else can do for it, stopping every CPU and saying
+where each was, and puts the commands, the layouts and the views on the
+host, where the views are the inspector's schema again.
+
 **The receiver traces its frames.** A router between domains could
 record every frame for all of them, but erXos has no router on a
 connection; only the receiver's funnel knows whether a frame was
@@ -938,7 +1007,9 @@ OTP's events and the root service's ring on one clock, within bounds.
 The host link carries modules from the Mac at most once per call, and
 the code service loads them by hash, all or nothing. Logs are one
 attributed, escaped line per record, and crash reports outside the
-system domain carry no term.
+system domain carry no term. A kernel that fails stops every CPU, writes
+its record and ends, and the host's debugger reads what it left in the
+inspector's own records.
 
 ## Where to read next
 
@@ -949,6 +1020,9 @@ system domain carry no term.
   store and the report filter.
 * [design-system.md, The crash record](../design-system.md#the-crash-record):
   the two forms of the crash record.
+* [design-debugger.md](../design-debugger.md): the stop, the hold, and
+  the host's debugger over records, images, held boards, stubs and
+  recorded runs.
 * [design-fiasco.md, Reporting kernel objects](../design-fiasco.md#reporting-kernel-objects)
   and [The trace ring](../design-fiasco.md#the-trace-ring): what the
   root service reports on Fiasco, and why the rest is unsupported.

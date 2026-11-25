@@ -1164,7 +1164,12 @@ watchdog is started in one of two ways. The firmware starts it from
 timeout, only in the `config.txt` of a board that runs unattended; a
 board that is attended, for development, leaves it unset and has no
 hardware watchdog running on erXos's kernel; under Fiasco the root arms it
-on every boot ([design-fiasco.md](design-fiasco.md#the-watchdog)). Or the kernel starts it under a machine
+on every boot but a deterministic one and one whose command line carries
+`erx.hold=1` ([design-fiasco.md](design-fiasco.md#the-watchdog)). An
+attended card carries that word, so a kernel stop on it holds for the
+host's debugger, and a hold never meets a running watchdog: a boot whose
+watchdog runs does not hold, and says so
+([design-debugger.md](design-debugger.md#the-hold)). Or the kernel starts it under a machine
 lease, with a 4 s timeout, as a system update's trial does. Once it
 runs, the platform layer reloads it from the kernel's timer, at least
 once a second, for as long as the kernel runs; it never stops it
@@ -1706,28 +1711,40 @@ and to its ground and dial.
 **The hardware watchdog on a board.** The root's lines hold `erx: root
 task: board watchdog 4` when the tree confirms the power-management
 watchdog's row; `board watchdog none: the tree does not confirm its
-record` means the board runs without it. QEMU's `raspi4b` model checks none
+record` means the board runs without it, and `board watchdog off: attended
+boot` that the card's command line carries `erx.hold=1`
+([design-fiasco.md](design-fiasco.md#the-watchdog)). QEMU's `raspi4b` model checks none
 of it: its tree disables the watchdog's node, and the decision to write and
 the words written are checked on the host, with seeded faults
 (`test/host/pm_wdt_test.rb`). On the board, each check is timed from the
 event to BL31's banner of the next boot in the console log:
 
-* **A hang of the kernel resets.** Stopping the whole machine in the kernel
-  debugger, which development builds keep, reloads the watchdog no more,
-  and BL31's banner follows within about 4 s. How the debugger's entry key
-  reaches it over the console is unverified on the board.
+* **A hang of the kernel resets.** A test kernel whose seeds are a kernel
+  trap and a stop that parks its own CPU where it would end the machine
+  ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build), "Test
+  kernels' seeds") prints its crash frame and then reloads the watchdog no
+  more, since every CPU is parked, and BL31's banner follows within about
+  4 s of the frame's last line.
 * **Seeded: the arming skipped.** With the seeded fault `the arming
   skipped` of `test/host/pm_wdt_test.rb` applied by hand to
   `kernel/core/pm_wdt.c`, the same stop leaves the board stopped for at
   least 30 s. A board that resets anyway is reset by something else, and
   the first check proved nothing.
-* **A kernel trap on a release kernel resets.** The release-configuration
-  test kernel of `tools/lib/erx/native_kernel_trap.rb` in place of the
-  card's kernel prints `erx: kernel trap seed`, the trap's state and one
-  `Panic: kernel trap` line, and BL31's banner follows within about 1 s,
-  since BL31's system reset sets the watchdog to about 153 us
-  ([design-fiasco.md](design-fiasco.md#the-watchdog)). Dumps that repeat,
-  or no banner within 10 s, fail.
+* **A kernel trap resets.** The test kernel of
+  `tools/lib/erx/native_kernel_trap.rb` in place of the card's kernel
+  prints `erx: kernel trap seed`, the stop's report and its crash frame,
+  and BL31's banner follows within about 1 s, since BL31's system reset
+  sets the watchdog to about 153 us
+  ([design-fiasco.md](design-fiasco.md#the-watchdog)). A frame that
+  repeats, or no banner within 10 s, fails.
+* **An attended boot holds.** With `erx.hold=1` on the card's command
+  line the root's line reads `board watchdog off: attended boot`. The
+  same test kernel's stop then prints `--erx-held` after its frame,
+  `tools/erx debug --tty DEVICE report` names the seeded function, a
+  `read` of the first and of the last page of each RAM range the anchor
+  lists is answered, and BL31's banner follows about 5 s after the tool
+  exits ([design-debugger.md](design-debugger.md#the-hold)). A board that
+  resets while the tool is attached had a watchdog running, and fails.
 * **A requested off becomes a reset.** `erlang:halt().` ends with `erx: end
   off`; the board halts in the firmware and the armed watchdog resets it,
   with BL31's banner within about 5 s. The sources read predict otherwise:

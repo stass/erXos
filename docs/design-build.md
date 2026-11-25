@@ -317,7 +317,7 @@ origin inventory, a pinned fetched artifact or an erXos source notice;
 unknown provenance fails. The packer combines that closure with the files
 it packs, checks the appropriate license allowlist and emits `NOTICES`.
 It refuses a release image containing non-permissive code of a stopgap
-or of a release component, including the Fiasco kernel's debugger, as
+or of a release component, as
 [Licenses and notices](design.md#licenses-and-notices) requires.
 Permissive stopgaps and release components pass the same license allowlist
 as permanent dependencies.

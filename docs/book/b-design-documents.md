@@ -145,6 +145,7 @@ gives the question the document settles.
 | [design-shell.md](../design-shell.md) | The command shell: rc's language, the command namespace, text pipelines, job control |
 | [design-vi.md](../design-vi.md) | evi, the screen editor run as `vi` |
 | [design-live.md](../design-live.md) | The live machine: console, ttys, attributed text, the inspector and `/proc`, tracing, the code store, the host link |
+| [design-debugger.md](../design-debugger.md) | The kernel debugger: the kernel's stop and what it leaves of every CPU, the hold, and `tools/erx debug` on the host over crash records, memory images, held boards, stubs and recorded runs |
 | [design-log.md](../design-log.md) | The system log |
 | [design-display.md](../design-display.md) | Composition, input routing, window buffers, the draw protocol, the terminal, widget trees, kiosks, graphics hardware |
 | [design-desktop-programs.md](../design-desktop-programs.md) | The desktop's own programs and the shared visual theme |
@@ -289,7 +290,7 @@ read next" names.
 | [17](17-network.md) | design-network-stack.md; design-time.md |
 | [18](18-wifi.md), [19](19-bluetooth.md) | design-wifi.md; design-bluetooth.md; design-shared-devices.md |
 | [20](20-shell.md) | design-shell.md; design-vi.md; design-ssh.md; design-live.md (ttys); design-apps.md |
-| [21](21-live-machine.md) | design-live.md; design-log.md; design-system.md (the crash record); design-fiasco.md (reporting kernel objects, the trace ring) |
+| [21](21-live-machine.md) | design-live.md; design-log.md; design-system.md (the crash record); design-fiasco.md (reporting kernel objects, the trace ring); design-debugger.md |
 | [22](22-display.md) | design-display.md; design-desktop-programs.md; design-find-act.md; design-web.md |
 | [23](23-apps.md) | design-apps.md; design-packaging.md; design-app-trees.md; design-storage.md |
 | [24](24-startup.md) | design-system.md; design-fiasco.md; design-kernel.md (boot); design-abi.md; design-platforms.md |

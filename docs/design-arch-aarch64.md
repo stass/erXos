@@ -495,6 +495,100 @@ level-sensitive and an SPI cannot be active low; a PPI, an edge, another
 count of cells or a number past 987 gives none. On the Pi 4 the bridge's
 map routes INTA to INTD to SPIs 143 to 146, interrupt ids 175 to 178.
 
+### Stopping every CPU
+
+The stop of [design-debugger.md](design-debugger.md#the-stop) reaches a
+CPU in three ways. This section says what each is on AArch64, what none
+of them reaches, and what stops such a CPU from outside. Facts marked
+*unverified* rest on no source or measurement read for this design; each
+names the probe that settles it, and the P numbers are those of
+[design-debugger.md](design-debugger.md#open-decisions).
+
+**The request.** `ERX_IPI_STOP` is an SGI in non-secure group 1, so it
+arrives as an IRQ: a CPU takes it at EL0, in the idle loop's `wfi` and at
+a preemption point, and not while `PSTATE.I` is set. Its handler writes
+the CPU's stop slot, whose registers are `erx_stop_regs` of
+`abi/arch/aarch64.txt`: `x0` to `x30`, the interrupted stack pointer,
+`ELR_EL1` as the program counter, `SPSR_EL1` as the state, `TTBR0_EL1`,
+by which a reader translates addresses of the space the CPU was in, and
+`ESR_EL1` and `FAR_EL1` for a CPU that came to the stop by an exception,
+zero otherwise. It stores the slot's state last, with `stlr`, sets every
+`DAIF` bit and loops on `wfi`, never ending the interrupt. The stop's
+leader loads each slot's state with `ldar`. A litmus test of `make check-litmus`
+checks, under the architecture's memory model, that a reader never finds a
+published state beside registers written before it, and fails with the
+state stored by a plain `str`.
+
+**The lock's wait.** The stop word is claimed by a compare-and-swap with
+acquire and release ordering, and the ticket lock's wait loop loads it on
+each pass. A waiter that sleeps in `wfe` between passes must wake to find
+the word, and the claim's store does not wake it: it is a store to the
+stop word, not to the lock a waiter's exclusive monitor watches. Two
+things do. The leader executes `sev` after its claim, and the request it
+then sends becomes pending on the waiter's CPU, masked as it is. The
+Fiasco fork's spinlock waits that way (`sevl`, then `wfe`, in
+`fiasco/kernel/src/kern/arm/64/spin_lock-arm-64.cpp`), and its unlock
+executes `sev` because under TCG a waiter with interrupts masked was seen
+asleep in `wfe`, its lock free, until an interrupt became pending. That
+observation, and the case that fails without the unlock's `sev`, the
+native threads suite's `join_loop` in its 4-CPU TCG cell, are the
+evidence under TCG for both wakes
+([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build), "The
+spin lock's event"). A `sev` executed between a waiter's load and its
+`wfe` is not lost if an event stays latched until a `wfe` consumes it,
+the latch a lock's own `sevl` relies on for its first `wfe` to return;
+the manual's rule was not re-read for this design. That either wake
+reaches every waiter under HVF and on the boards' cores is *unverified*
+(P7; probe: the QEMU cell with a seeded lock wait, repeated under HVF,
+and the same seed on the board).
+
+**What neither reaches** is a CPU at EL1 with `PSTATE.I` set that waits
+for no lock. erXos's kernel bounds every such stretch (K13), so there it
+is a defect of one loop. Four routes would reach it from inside the
+machine, and the design takes none:
+
+| Route | What it needs | Why it is not taken | Unverified, and its probe |
+| --- | --- | --- | --- |
+| The request as an FIQ: a group 0 SGI, with the kernel masking `I` and leaving `F` clear | group 0 assignable from non-secure EL1; no kernel path that masks `F` | where firmware runs at EL3, as TF-A does on the Raspberry Pi boards, group 0 belongs to the secure state. The Fiasco fork masks `I` and `F` together (`Proc::cli`, `lib/libk/arm/processor-arm.cpp`), sends FIQs to its IRQ entry (`kern/arm/64/ivt.S`) and puts every interrupt in group 1 (`kern/arm/gic_dist.cpp`), so every masking site would change | whether a write of zero to the SGI's bit of `GICD_IGROUPR0` from EL1 reads back, on the Pi 4 under TF-A and on QEMU `virt`, which the harness runs without EL3, under TCG and under HVF; probe: a test kernel that writes the bit and prints what it reads |
+| Priority masking: the kernel masks interrupts by `ICC_PMR_EL1` and never by `PSTATE.I`, and the request's priority is above the mask | a CPU interface whose mask is cheap to write; an exception entry that clears `PSTATE.I` at once | the Pi boards' GIC-400 has a memory-mapped mask, a device write at every mask and unmask; it replaces the one masking primitive of both kernels | whether HVF's interrupt controller honours `ICC_PMR_EL1`; probe: a guest that raises the mask and counts the timer's interrupts |
+| `FEAT_NMI`: an interrupt with superpriority, masked by `PSTATE.ALLINT` alone | a CPU that reports it in `ID_AA64PFR1_EL1.NMI`, and an interrupt controller that raises such an interrupt | no target of erXos is known to have both, and a route that exists on some machines leaves the others where they are | whether the Pi boards' cores with their GIC-400, QEMU's `max` CPU or HVF have it; probe: `ID_AA64PFR1_EL1.NMI` read by a test kernel on each |
+| SDEI: firmware at EL3 delivers an event to a handler the kernel registered, whatever `DAIF` holds | TF-A built with SDEI for the board, and a secure interrupt to signal the event | QEMU `virt` as the harness runs it has no EL3, and a diagnostic would rest on how each board's firmware was built | whether TF-A's Raspberry Pi 4 port builds with SDEI; probe: its build documentation, then a card with it |
+
+Such a CPU is `unanswered` in the record, and what stops it is outside
+the kernel. QEMU stops every virtual CPU itself, for its stub and for a
+memory image, whatever the guest's `DAIF` holds. On a board a JTAG probe
+halts each core through the external debug interface; the Raspberry Pi
+4's JTAG pins are GPIO 22 to 27 in ALT4 on a development card
+([design-header-io.md](design-header-io.md)). Whether OpenOCD's BCM2711
+configuration halts all four cores, reads physical memory and serves the
+GDB remote protocol with the probe at hand, and whether the kernel must
+clear the OS lock for it, is *unverified* (P5; probe: an attended
+development card halted at a known function).
+
+**Breakpoints and watchpoints.** The kernel programs no breakpoint or
+watchpoint register, and it writes `MDSCR_EL1` whole with `MDE` and `KDE`
+clear (AB2), so no debug exception of theirs is taken at EL1, and a `brk`
+at EL1 is a kernel trap like any other. They are set from outside: QEMU's
+stub implements them in the emulator under TCG, any number of them (its
+`gdb.rst`), and under HVF by what the accelerator supports, *unverified*
+(P1); a probe programs the CPU's own, as many as `ID_AA64DFR0_EL1`
+reports, which the tool reads and never assumes. A watchpoint is on a
+virtual address under whichever translation is current, so the tool reads
+the stopped CPU's `TTBR0_EL1` and continues past a stop outside the space
+it meant.
+
+**Reading a stopped machine.** The anchor's `translation` word is
+`TCR_EL1`, its `kernel_root` is `TTBR1_EL1` and its `root_task_root` the
+root task's `TTBR0_EL1`, each without its ASID field. The tool's walk is
+the walk of [Translation](#translation), with the address sizes and the
+granule taken from `TCR_EL1`, so it assumes neither kernel's layout, and
+its host model covers every descriptor kind at every level, as the model
+of `erx_uword_load` does ([Kernel access to memory](#kernel-access-to-memory)).
+A backtrace follows the procedure call standard's frame records: `x29`
+points at a pair, the caller's `x29` and the return address. That every
+function of the Fiasco fork and of the cores keeps one is *unverified*
+(P6; probe: the seeded panic's backtrace in the stop's QEMU cell).
+
 ### CPU start and machine end
 
 Every firmware call goes through one SMCCC routine, using the conduit,

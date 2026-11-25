@@ -93,17 +93,32 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   programs have no delivery on Fiasco. Build the call table's row as
   [vCPU upcalls on Fiasco](design-fiasco.md#vcpu-upcalls-on-fiasco) states, for Track P
   ([plan.md](plan.md)).
-* [High] 0.2 on Fiasco, the release kernel: `Modules.generic` lists `jdb_object.cpp` only for a kernel built
-  with the debugger, so the release kernel's build leaves the GPL-2.0 file out; a boot of that kernel
-  checks that `sigma0` ignores its object-naming calls failing
-  ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
+* [High] 0.2 on Fiasco, the kernel debugger's replacement ([design-debugger.md](design-debugger.md)): the tree
+  still builds JDB, the kernel's console input and `jdb_object.cpp` (GPL-2.0-only) into every development
+  kernel, where a panic waits in the debugger, and the design documents describe the fork without them. To
+  land, in parts that each stand alone:
+  1. the stop: the core `kernel/core/machine_stop.c` with its exhaustive host test, the glue
+     `fiasco/kernel/src/erx/erx_machine_stop.cpp`, the anchor and the stop slots in `abi/kernel.txt`, the CPU
+     entries of the crash record in the writer and both readers, the routes from `panic`, `assert_fail`,
+     `kdb_ke` and the four trap reports, the park in the debug inter-processor interrupt's handler, the check
+     in the spinlock's wait, and with it the removal of `src/jdb`, `jdb_object.cpp`, `CONFIG_INPUT` and the
+     `LicenseCheck::TABLE` row; a boot of a kernel without the object, which the release kernel already is
+     (`Modules.generic` lists `jdb_object.cpp` only for a kernel built with the debugger), checks that `sigma0`
+     ignores its object-naming calls failing (P9), and no such boot has run;
+  2. `tools/erx debug` over crash records and memory images, the debug bundle with its layout table and
+     walkers, and the harness's image and report on a failing QEMU run;
+  3. the hold and `erx.hold=1`, in the kernel, the root's watchdog arming and the card writer;
+  4. stubs, recorded runs and a probe, each after the probe of design-debugger.md that it rests on (P1 to P5).
+
+  The design's open decisions come first: the hold as code in kernel mode, `kdb_ke` as a stop in every build,
+  breakpoints on a board from a probe alone, and where the research records it cites are committed.
 * [Medium] 0.2 on Fiasco, `fiasco/kernel`: Fiasco's map refuses a user mapping writable and executable at
   once, with a test whose seeded failure removes the check; an estimate of tens of lines, unverified
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
 * [High] 0.2 on Fiasco, `tools/lib/erx/fiasco_config.rb`: the release configuration as an exact allowlist, as
-  the development one is (the debugger off; the fixed-priority scheduler, `EXPLICIT_REPLY_CAPS` and `IOMMU`
+  the development one is (the hold off, and until the debugger's replacement lands the debugger off; the fixed-priority scheduler, `EXPLICIT_REPLY_CAPS` and `IOMMU`
   kept; `PAGEFAULT_TRAMPOLINE`, `ALIEN`, `IRQ_DIRECT_INJECT` and every other option without a
-  consumer off), and its check, which fails an option off the list and a release build with the debugger on;
+  consumer off), and its check, which fails an option off the list and a release build with the hold or the debugger on;
   the landing gate boots the release configuration once, a smoke test, and the milestone gate runs the QEMU
   suites on it ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
 * [High] 0.2 on Fiasco, `test/guest`: the system-call fuzz campaign, a test domain invoking every slot of its
@@ -119,8 +134,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   configuration ([design-fiasco.md](design-fiasco.md#upstream-security-fixes)).
 * [Medium] 0.2 on Fiasco, the release build: a check that fails when any file of the release image's link
   closure (kernel, `bootstrap`, `sigma0`) is recorded with a license that is not permissive, headers
-  included, with two seeded failures: a build with `jdb_object.cpp` listed again in `Modules.generic`, and one with the original
-  `kobject_rpc.h` restored in place of the clean-room header, made without anyone opening it
+  included, with two seeded failures, both the test's own fixtures: a kernel build whose compile records name
+  a source its import record gives as GPL-2.0-only, and a release build whose records name such a header in
+  `kobject_rpc.h`'s place, so no seed needs a GPL file in the tree or anyone to open one
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
 * [High] 0.2 on Fiasco, `liberx/backend/fiasco` and `abi/manifest.txt`: per-domain thread, object and mapping
   limits in the domain-limits record, carried to the root in `domain_space_create` beside the bands and the
@@ -551,9 +567,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   takes one, so a test kernel is a test medium by construction; the image's kernel receipt and
   build facts then name the test kernel too.
 * [Medium] Kernel lines case, `tools/lib/erx/native_console_ring.rb`: the case builds only the
-  release test kernel, so the "Kernel lines" row's development cell (the loss line and the
-  debugger's first output) and its seed, the close at `Jdb::open_debug_console` removed, have no
-  run. A development-kind cell of the same case closes it.
+  release test kernel, so the "Kernel lines" row's development cell (the loss line, then the
+  stop's report and its full crash frame) has no run. A development-kind cell of the same case
+  closes it, once the stop of [design-debugger.md](design-debugger.md#on-fiasco) is in the fork.
 * [Low] Ring console core, `erx_console_ring_write` (`kernel/core/console_ring.c`): once the ring
   is full, the newline that opens each Fiasco warning (`WARNX`) is a line of its own that the core
   counts as lost, and the warning's text is counted again, so the loss line overstates the lines
@@ -727,7 +743,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `kern/arm/startup-arm.cpp`): a panic before `Psci::init` and `Dt::init` in `Startup::stage2`, the handoff
   checks of `erx/erx_handoff.cpp` among them, finds no reset method, since `platform_reset` tries PSCI only once
   it is detected and the device tree's reset only once it is read, and loops forever, so a kernel built without
-  the debugger, as the release kernel is, hangs instead of rebooting. Probe PSCI from the device tree in `platform_reset` when it is not yet initialized; the test boots
+  the debugger, as the release kernel is and as every kernel is under
+  [design-debugger.md](design-debugger.md#on-fiasco), hangs instead of rebooting. Probe PSCI from the device tree in `platform_reset` when it is not yet initialized; the test boots
   under QEMU with `-no-reboot` a kernel whose handoff check fails and expects QEMU to exit after the panic line,
   and its seeded failure leaves the probe out.
 * [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb`: the Kconfig step now builds with `cc`
@@ -1009,15 +1026,19 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   reloading once a second on another CPU, writes 4 s back if its reload lands inside those 153 us, and then keeps
   the board up for good: about one panic in 6,500. Likewise a liberx end on another CPU racing a reload can
   delay its reset by one 4 s timeout, once. Fiasco without JDB has no way to park the other CPUs before the
-  reset: every MP kernel receives the debug IPI, but only JDB sends it and parks the CPUs it stops. A fix
+  reset: every MP kernel receives the debug IPI, but only JDB sends it and parks the CPUs it stops. The stop
+  of [design-debugger.md](design-debugger.md#on-fiasco) is the fix for a kernel stop and for a reset that
+  follows the root's own crash record: it parks every CPU that answers before the reset, and the item stays
+  open until it lands. What it leaves is a liberx end without a record racing a reload; a fix
   in liberx alone: read WDOG before each reload and stop for good when it holds far less than our last
   write can leave, which needs the fact that a WDOG read returns the time left (unverified in the facts
-  record). Whether 0.2 publishes the race as a downside or fixes it is open.
+  record).
 * [Low] Fiasco, the release kernel's fatal trap (`fiasco/kernel/src/kern/arm/thread-jdb.cpp`,
   `[arm-!debug]` `call_nested_trap_handler`): a trap inside its own path, in the console's UART or in
   `platform_reset`'s mapping, enters the handler again without bound until the kernel stack overflows,
-  instead of resetting. JDB guards the same case with `nested_trap_recover`; a flag set on entry that
-  sends a second entry straight to `Psci::system_reset` would close it.
+  instead of resetting. JDB guards the same case with `nested_trap_recover`. The stop's claim closes it: a
+  second entry on the CPU that leads a stop is a nested stop, which ends the machine at once
+  ([design-debugger.md](design-debugger.md#the-stop)); the item stays open until the stop lands.
 * [Medium] Fiasco backend, system domain device access: the system domain's ERTS runs in the root task, so
   `erx_device` may open any physical window (`service_task.c` checks only that the caller is the root)
   and the device NIF's table holds `pm_wdt`'s RSTC and WDOG as generic registers (`ownedByNif false`).
@@ -1075,7 +1096,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     records, so an uncontainable error is not stopped either. No test provokes an SError, since QEMU
     `virt` raises none a guest can cause: only the root's decision is tested
     (`test/host/fiasco_exception_test.rb`);
-  * every SError is counted per CPU (`num_serrors`, which jdb shows), but no log line names one and
+  * every SError is counted per CPU (`num_serrors`, which only a debugger shows: JDB in the tree, the host's
+    `print` over a stopped machine under [design-debugger.md](design-debugger.md)), but no log line names one and
     the inspector has no attribute for the count;
   * a pin read on one CPU while another detaches it (`Irq_chip_gen::detach`) reaches a handler whose
     object is already bound to the software chip, whose acknowledge does nothing, so that CPU's
@@ -1138,15 +1160,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   whose handoff fails, once the early reset is fixed. Still in a release kernel and each a
   question for the release: `CONFIG_RT_DBG`, which adds object naming and the kernel memory
   statistics dump to the console (`jdb_kobject`, `CONFIG_JDB_KMEM_STATS`) to the debugger
-  kernel object `jdb_object`, which only a kernel with the debugger compiles; and
+  kernel object `jdb_object`, which only a kernel with the debugger compiles, and which
+  [design-debugger.md](design-debugger.md#on-fiasco) keeps only for its list of every kernel
+  object, where the host debugger's walkers start; and
   `CONFIG_PERF_CNT_USER`, user-mode access to the performance counters, which Fiasco's Kconfig
   marks for debugging only.
 * [Low] Fiasco, published images (`config/fiasco/kernel.defconfig`, `tools/lib/erx/fiasco_config.rb`,
   `LicenseCheck::TABLE`): 0.1's published images carry the development kernel, with JDB, the kernel's
-  console input and `jdb_object.cpp` (GPL-2.0-only), by decision. Once published images should drop it, a
-  developer-only debugger kernel: a switch that builds a kernel with the debugger for a developer's own image,
-  which the published build refuses, the published kernel built without it, and the closed table's
-  `jdb_object.cpp` row deleted. Until then anyone at the console of a published image's panicked machine
+  console input and `jdb_object.cpp` (GPL-2.0-only), by decision, with their source offered
+  ([plan.md](plan.md#01-the-preview), [site/README.md](../site/README.md)).
+  [design-debugger.md](design-debugger.md#published-images) takes all three out of every build: a published
+  image's kernel stop prints its record and resets, and its command line never carries `erx.hold`. Its open
+  decision on published images settles when: once the stop lands, the images are rebuilt and republished,
+  the closed table's `jdb_object.cpp` row is deleted, and plan.md's passages on 0.1's kernel and on 0.2's
+  release build without `jdb_object.cpp`, with the site's account of the GPL file, change in the same commit.
+  Until then anyone at the console of a published image's panicked machine
   reaches the debugger, which reads and writes kernel memory: on the Pi 4 until the watchdog resets the
   board, on QEMU and the browser demo without limit.
 * [Medium] Fiasco backend, root task, `liberx/backend/fiasco/rng200.c` and every device read of the root: a device read

@@ -567,3 +567,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   writes no core file, so the signal table has no core column and `WCOREDUMP` is never set; decide whether a
   core dump is a file a program's death leaves, an inspector read of a stopped domain, or neither, and edit that
   statement with the design. QEMU's GDB stub (`-s`) debugs the kernel only; the harness passes no such flag.
+  The kernel's side is designed ([design-debugger.md](design-debugger.md)), and its host tool is what this
+  design should build on rather than beside: a target there is a memory, a list of CPUs with their registers and
+  a build identifier, read through one interface, with an ELF core reader, a GDB remote protocol client and
+  views in the inspection schema, so a program's core file and a stub in a domain are two more targets of
+  `tools/erx debug`, not a second debugger.

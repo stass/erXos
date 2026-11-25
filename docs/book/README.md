@@ -1748,7 +1748,7 @@ marked with who reported it, and code loads into the running machine.
 **Background needed.** Chapters 3, 5, 9 and 11.
 
 **Background boxes.** How the BEAM traces a process. Module identity and
-what a code hash names. Logging and crash dumps.
+what a code hash names. Logging and crash dumps. Kernel debuggers.
 
 **Status.** Built: `erx:i/0,1` and `erx:inspect/2`, with a reporter and
 a status on every value, unsupported and partial ones on Fiasco
@@ -1762,7 +1762,10 @@ tracing other domains and the frames between them; the host link's
 inspect, trace, source and console commands; loading code into other
 domains, with overlays; refusing code outside installed storage; log
 files under `/var/log`; a crash record that survives the reset; domain
-crash dumps under `/proc`; the host's tree mounted in the machine.
+crash dumps under `/proc`; the host's tree mounted in the machine; the
+kernel's stop with every CPU's state in the crash record, the hold, and
+`tools/erx debug` over records, memory images, held boards, stubs and
+recorded runs, in place of Fiasco's kernel debugger.
 
 1. **The machine is an object.** `erx:i()` shows CPUs, threads, groups,
    domains, budgets and processes; `erx:source(Pid)` opens the line a
@@ -1787,9 +1790,12 @@ crash dumps under `/proc`; the host's tree mounted in the machine.
 5. **Logs and crash reports.** The system log renders every record as one
    attributed, escaped line; crash reports carry no term, so a report
    never leaks process state; the kernel's crash record survives to the
-   next boot.
+   next boot. A kernel that fails stops every CPU and never resumes, and
+   the host's debugger reads what it left, a record, a memory image or
+   the held board, in the inspector's own records.
    *Draws on:* [design-log.md, Reports carry no term](../design-log.md#reports-carry-no-term),
-   [design-system.md, The crash record](../design-system.md#the-crash-record).
+   [design-system.md, The crash record](../design-system.md#the-crash-record),
+   [design-debugger.md](../design-debugger.md).
 6. **Attributed text.** Text from a source carries its source, and every
    sink escapes it; the console and the host terminal are the first
    sinks to protect.
