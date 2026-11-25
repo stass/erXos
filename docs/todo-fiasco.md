@@ -489,23 +489,44 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   pinned archive is cached. The re-attribution of the file-notice precedence was made by a
   scratch script from the tree's bytes and the kernel archive; 68 rows of files erXos
   modified in `l4re-core` (31), `bootstrap` (22), `mk` (9), `libfdt` (3) and
-  `drivers-frst` (3) keep their earlier attribution; re-deriving them from the modified
-  bytes gives the same license except for `bootstrap`'s `server/src/build.pl` and `mk`'s
-  `mk/prog.mk` and `tool/lib/L4/Image.pm`, which it leaves unrecognised. A re-attribution mode that keeps every other field is the fix.
-* [Medium] Notice-form coverage, `tools/lib/erx/origin.rb` (`Attribution.notice`): a
-  notice block that `config/imports/notices.txt` does not list and that is not a GNU
-  notice leaves a file `LicenseRef-unrecognized-notice`. That is 37 kernel `src/lib`
-  files, the `README.md` of each part, three embedded musl files and some 10 build-tool
-  and documentation files. None is in a link closure; a reviewed table row, or a reviewed rule
-  naming the file, records each one's license.
-* [Medium] Notice reading leftovers, `tools/lib/erx/origin.rb`: GNU boilerplate and the GCC
-  exception sentence match by their opening words, so a license named later in such a
-  sentence is covered (the result stays non-permissive but incomplete). Only a block that
-  holds a word of `LICENSE_MARK` is a notice, so a restriction worded without one in a
-  comment of its own beside a reviewed notice, or in a file with no such word, is not
-  read, and the file takes the notice's license or the package rule's; a `*/` in a
-  comment's text (as in `lib/*/README`) ends the comment there, and the rest of it is a
-  block of its own.
+  `drivers-frst` (3) keep their earlier attribution. Re-deriving them from the modified
+  bytes gives the same license for 58 and leaves 10 unrecognised, each holding a block
+  with a license word that `config/imports/notices.txt` does not list: `bootstrap`'s
+  `server/src/build.pl`, `init_kip.cc`, `init_kip.h`, `platform-arm.h`,
+  `platform/arm_virt.cc`, `platform_dt.h`, `startup.cc` and
+  `ARCH-arm64/bootstrap.efi.ld.in`, and `mk`'s `mk/prog.mk` and `tool/lib/L4/Image.pm`.
+  A re-derivation lists those blocks first, or the audit refuses each file in any
+  closure that holds it. Their rows describe the upstream bytes, so the check that
+  settles them reads the pinned archives, of which only the kernel's is cached; the
+  `bootstrap` sources among the ten are likely in its link closure (unverified). A
+  re-attribution mode that keeps every other field is the fix.
+* [Medium] Notice-form coverage, `tools/lib/erx/origin.rb` (`Attribution.for_file`): a
+  read block that `config/imports/notices.txt` does not list, that is not a stock GNU
+  notice and that holds a legal word leaves a file `LicenseRef-unrecognized-notice`, and
+  so does a second SPDX mention. That is 104 files: the kernel's 56 (35 in
+  `src/lib/disasm`, 9 in `src/lib/gzip`, 6 in `tool/kconfig`, 2 in `tool/preprocess`,
+  one each in `src/lib/libc`, `src/lib/libk` and `src/kern`, and `README.md`),
+  `l4re-core`'s 30 (21 linker scripts under `ldscripts`, 7 embedded musl files, one in
+  `l4util/lib/src` and `README.md`), `mk`'s 14 (5 in `doc/source`, 6 in `tool/kconfig`,
+  one each in `tool/gendep` and `tool/vim`, and `README.md`), and two each in
+  `bootstrap` and `libfdt`. None is in the development audit's link closure; a reviewed
+  table row, or a reviewed rule naming the file and its SHA-256, records each one's
+  license.
+* [Medium] Notice reading scope, `tools/lib/erx/origin.rb` (`read_blocks`): the reader
+  reads every block holding a license mark, every comment block of the header (the
+  comment blocks before the first line of code) and every comment block beside a marked
+  one. A restriction worded without a license mark in a line of code, a string, or a
+  comment block below the header that does not touch a marked block is not read, and
+  the file takes its notices' license or the package rule's. A `*/` in a comment's
+  text (as in `lib/*/README`) ends the comment there, and the rest of it is a block of
+  its own. Comment blocks are those of the syntaxes `COMMENT_LINE` and `LINE_COMMENT`
+  know: in a file whose comments are `@`, `<!-- -->`, a Python docstring or plain
+  text (`.txt`, `.md`), the header ends at the first line, so a restriction there
+  without a license mark is not read either. `LEGAL_WORD` misses common restriction
+  wording (`reproduc`, `resold`, `resell`, "for internal use", "use only", export
+  control), and "All rights reserved" is taken out with the copyright phrases before
+  it is matched. Treating a file's first block as header whatever its kind, and
+  widening `LEGAL_WORD` after measuring how many Fiasco header blocks it flips, close both.
 
 * [Medium] Kernel lines case, `tools/lib/erx/fiasco.rb` (`Fiasco.new(kernel:)`, `kernel_path`):
   a Fiasco object given a test kernel packs it into any medium built through it, and only

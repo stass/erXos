@@ -13,21 +13,17 @@ module Erx
   # are package rules, which cover files without a notice of their own;
   # Attribution reads a file's own SPDX line or license notice first.
   module FiascoOrigins
-    # L4Re's thread library is LinuxThreads ported to L4Re: its files of
-    # LinuxThreads' names are LGPL, some of them without a notice of their
-    # own, and L4Re's glue beside them falls to L4Re's root declaration.
-    # Both rules are package rules, chosen by file name alone, so a file's
-    # own notice still records its exact license. LGPL-2.1-or-later is the
-    # license every LinuxThreads notice in the package (LGPL-2.0-or-later
-    # or LGPL-2.1-or-later) allows.
-    LIBPTHREAD_GLUE = 'libpthread/{Control,Makefile,include/{Makefile,pthread-l4.h},' \
-                      'src/{Makefile,l4.cc,l4.h,libc-api.h,libc-glue.h,pi_mutex_mem.cc,pi_mutex_mem.h,pthread-api.h,tramp-*.S}}'
-    LIBPTHREAD_RULES = [
-      { 'pattern' => LIBPTHREAD_GLUE, 'license' => 'MIT', 'kind' => 'package',
-        'evidence' => "L4Re's glue in libpthread, by file name; LICENSE.spdx root package declaration" },
-      { 'pattern' => 'libpthread/**/*', 'license' => 'LGPL-2.1-or-later', 'kind' => 'package',
-        'evidence' => "LinuxThreads in L4Re's libpthread, by file name; the LGPL its notices state" }
-    ].freeze
+    # The SHA-256 of the imported jdb_object.cpp the debugger row names.
+    JDB_OBJECT = '6a1359080661ea097fae1a9228dc6448c87b95dcaa6e9974c5e5c6ffc87ec3a2'
+    # The SHA-256 of each part's LICENSE.spdx, whose DataLicense was read.
+    LICENSE_SPDX = {
+      'bootstrap' => '3c32105532f6401644a9286ae3ab893b86d5ba5772e0938e2f54659c9da48c6f',
+      'drivers-frst' => '75e6ac7d0937f58a6009008a4d712a56b9299b0f50e9f83177471980b53b8af1',
+      'kernel' => 'e37cecd652b8236b0f13f789e4039d25be28b0d28c04a12f2ad45f0380dcf301',
+      'l4re-core' => '551dd862b2d63b5bc6a920d40b02f359c7eaffca84037e01a35232013df30825',
+      'libfdt' => 'dd0991471a8a22455c8daa40b679d25fd85576f4e4c39a974c2a209bfd3470c3',
+      'mk' => '5b801397513b4b8ae49f154dfe25064116bc25233853ef9c38203f80f49da5e2'
+    }.freeze
 
     # The parts of the frozen pins, each with its own inventory.
     PARTS = %w[kernel l4re-core mk bootstrap libfdt drivers-frst].freeze
@@ -57,19 +53,25 @@ module Erx
           'evidence' => 'reviewed exact header declaration; standard GPL version selected; no custom grant asserted' }
       end
       rules = corrections
+      if part == 'kernel'
+        # The one GPL file a kernel with the debugger compiles
+        # (LicenseCheck's debugger row), GPL-2.0-only by its own notice as
+        # docs/design-kernel.md records; its notice is not in a stock GNU wording.
+        rules << { 'files' => { 'src/kern/jdb_object.cpp' => JDB_OBJECT }, 'license' => 'GPL-2.0-only',
+                   'evidence' => "reviewed: Fiasco's GPL-2.0-only debugger object, LicenseCheck's debugger row" }
+      end
       if part == 'l4re-core'
         rules.concat(ImportOrigins.musl_license_rules.map do |rule|
-          rule.merge('pattern' => 'libc/musl/contrib/musl/' + rule.fetch('pattern'),
+          rule.merge('files' => rule.fetch('files').transform_keys { |path| 'libc/musl/contrib/musl/' + path },
                      'evidence' => "reviewed musl 1.2.5 grant: #{rule.fetch('evidence')}")
         end)
         rules << { 'pattern' => 'libc/musl/**/*', 'license' => 'MIT', 'kind' => 'package',
                    'evidence' => 'reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule' }
-        rules.concat(LIBPTHREAD_RULES)
       end
       rules.concat(package_rules(directory))
-      rules.unshift('pattern' => 'LICENSE.spdx', 'license' => 'CC0-1.0',
+      rules.unshift('files' => { 'LICENSE.spdx' => LICENSE_SPDX.fetch(part) }, 'license' => 'CC0-1.0',
                     'evidence' => 'LICENSE.spdx DataLicense: CC0-1.0')
-      { 'default_license' => 'MIT',
+      { 'import' => part, 'default_license' => 'MIT',
         'default_evidence' => 'reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence',
         'rules' => rules }
     end
@@ -87,21 +89,19 @@ module Erx
       listed = Attribution.listed_notices
       found = PARTS.each_with_object({}) do |part, blocks|
         directory = File.join(project, 'fiasco', part)
-        review = profile(directory, part: part)
+        review = Attribution.review(profile(directory, part: part))
         Origin.new(root: directory).inventory.fetch('files').each do |path, row|
           bytes = recorded_bytes([directory, originals[part]].compact.map { |base| File.join(base, path) },
                                  row: row)
           next unless bytes && Attribution.for_file(path, bytes: bytes, sidecar: nil, review: review,
                                                           notices: {}).fetch('license') == Attribution::UNRECOGNIZED_NOTICE
 
-          Attribution.notice_blocks(bytes).each do |block|
-            next unless block.match?(Attribution::LICENSE_MARK) && !Attribution.gnu_notice?(block)
-
+          Attribution.unread_blocks(bytes).each do |block|
             (blocks[Digest::SHA256.hexdigest(block)] ||= []) << "#{part}/#{path}"
           end
         end
       end
-      found.sort.map { |sha256, paths| [sha256, paths.size, paths.min, listed.fetch(sha256, '-')].join(' ') }
+      found.sort.map { |sha256, paths| [sha256, paths.size, paths.min, listed[sha256]&.license || '-'].join(' ') }
     end
 
     # A row's bytes from the first candidate path holding them; nil for a

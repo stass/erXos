@@ -32788,7 +32788,7 @@ Third-party notices remain in their original files.
     },
     "README.md": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "3019ace9fd5bf0fa84bc47b68c0fbceba0f2cff7a7f492079f09117b912786f1",
       "kind": "file",
@@ -37625,7 +37625,7 @@ Third-party notices remain in their original files.
     },
     "l4util/lib/src/base64.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "616f1ee1a421d2859e70a278123541103a68508f91bf898d7271fb57224bab83",
       "kind": "file",
@@ -37761,33 +37761,33 @@ Third-party notices remain in their original files.
       ]
     },
     "ldscripts/ARCH-amd64/main_dyn.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "b8d48fbbb7c3844d3736b1c6e71573900da080fd1416edf072f9fa40d47ea432",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-amd64/main_pie.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "6313fb1f102774c0b4e4e5cc359596628cbe6539a67d709c3f960bbc70d42f2b",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-amd64/main_rel.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "92d395bd7e233a1b6553e8852f0bc73f2e4a28e5ba71b7a73f9dc8e05def7b99",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-amd64/main_stat.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "1dec148dc69bec6297972ebb8c7a2eef5a49f4b075a0506f438b348bed38b72d",
       "kind": "file",
       "non_ascii_lines": []
@@ -37801,137 +37801,137 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-arm/main_dyn.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "5deabac58266a31056b7f670e54c5fe9b8739b5977d4430ea050a491cc56c94f",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-arm/main_pie.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "d37c966a1e81a19a0bff896bb891ed7ec59a44a8deff3c0a8dc7481ee0feafc6",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-arm/main_rel.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "b5a50f1ffdb9bed63677dd03be216a5fc5e621d06c7d091682ce75ab11b746a8",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-arm/main_stat.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "313fd5e1c1f2e66afd6638554480e645dc70033c75d6e8f9f5dd6da99bb2cebe",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-arm64/main_dyn.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "ccdd0cfa3722d4128275b1a936da588a11c73523ac4e84f1a027f2e3caf0d2cd",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-arm64/main_pie.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "2c4450bfc187c53b87d8f13765103454eac7d2e9ebbec2f3b365305377938fb9",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-arm64/main_rel.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "2d11649eeec571f54266abf9cf4a6e320f5c061cd78dde7bc67513843a21da89",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-arm64/main_stat.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "9b123605fb1414fb591e37a8920acc9a75dcd5332a6321b4100fe298dc3e4f60",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-mips/main_dyn.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "ce48299cef897aa203ac1064bbc6a2241172da5b83d26565a92902a211448d9f",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-mips/main_rel.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "2c2e3d8956c440ca58bf933f2e7df6d0fa1b5c44bad651e1fcc71fbb00529c5b",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-mips/main_stat.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "303d5557d8d105ae6b0615322b0727dd7d1cbafdf8e4dc629b92c12e6a8bcf1c",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-riscv/main_dyn.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "84f24f9a1e0caba008624f94eadffa5a4601d3b45ff377e7f819c120cac9e6f3",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-riscv/main_rel.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "e8b22664b159190c08338958568fe34faeea202cd036a9b7c905be93edcd364f",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-riscv/main_stat.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "b86dd4e916c85fd3fbcb79a463ce86c465d876dc208f67b806d706b28e334c78",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-x86/main_dyn.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "746e90f599df7f6ae56155e179e60cc489c23167cd4233835402b216209ec656",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-x86/main_rel.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "479af1a47536bb6d2dc3a3744c4f0d1437f1f0e0d7202a67e6a223f7f02a8f93",
       "kind": "file",
       "non_ascii_lines": []
     },
     "ldscripts/ARCH-x86/main_stat.ld": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "5de7facadcb1ff2f03877809ca8b4f2b688c330af41c0945af6fe3e654a1f8f1",
       "kind": "file",
       "non_ascii_lines": []
@@ -38118,7 +38118,7 @@ Third-party notices remain in their original files.
     },
     "libc/musl/contrib/musl/README": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "99be6432b41de50d702dbee423149c8abcd52d06e29dc1715013c25865a2eda8",
       "kind": "file",
@@ -38134,7 +38134,7 @@ Third-party notices remain in their original files.
     },
     "libc/musl/contrib/musl/WHATSNEW": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "9f9f1b45a27f0fed463e151f26784ab1fdeaddb4ca3d3b5bc7fe2dd36d538182",
       "kind": "file",
@@ -49536,8 +49536,8 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "libc/musl/contrib/musl/src/math/log10l.c": {
-      "license": "ISC",
-      "evidence": "file notice",
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "d23e3d61fe4111628efdef794ae7cd614e3443a81f70742e29070f99fdd078c4",
       "kind": "file",
@@ -49616,8 +49616,8 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "libc/musl/contrib/musl/src/math/log2l.c": {
-      "license": "ISC",
-      "evidence": "file notice",
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "c3294ef6fcf96c061c4511fb3f6cd2886b2f513938deadcfb16fc19fb2a9ff03",
       "kind": "file",
@@ -49688,8 +49688,8 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "libc/musl/contrib/musl/src/math/logl.c": {
-      "license": "ISC",
-      "evidence": "file notice",
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "e1612b2bb9a010c1914beb93fa242981f69f323392bd9816415cafaaec0d94b0",
       "kind": "file",
@@ -50176,8 +50176,8 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "libc/musl/contrib/musl/src/math/powl.c": {
-      "license": "ISC",
-      "evidence": "file notice",
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "be5f736310432efadcab58189a207f79f790d35a5ad11df778711ea5570f5bba",
       "kind": "file",
@@ -55849,7 +55849,7 @@ Third-party notices remain in their original files.
     },
     "libc/musl/contrib/musl/src/string/arm/memcpy.S": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "f963aa07a7e5296c62dbe892b9e3e8383a95683bb282e68d75a3c0553ba184ee",
       "kind": "file",

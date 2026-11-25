@@ -22,6 +22,9 @@ module Erx
   # requests an image. External files require exact reviewed registry entries.
   class PackProvenance
     MAX_METADATA = 64 * 1024 * 1024
+    # The review of a file outside every import tree: no rules, and no
+    # default, so a file without an SPDX line or a stock GNU notice is refused.
+    OUTSIDE_IMPORTS = Attribution.review('rules' => [], 'default_license' => 'NOASSERTION', 'default_evidence' => '')
     # One input a link loaded, as LLD's --trace names it (lld/ELF/InputFiles.cpp,
     # doParseFile, and toStr): a file as the link names it, or an archive member as
     # archive(member). Printable ASCII without spaces, so every later message and
@@ -474,10 +477,12 @@ module Erx
           # Build outputs have no stable staging directory. Content identifies
           # a generated source while preserving its readable file name.
           label = "build/generated/#{hash}/#{File.basename(path)}" if label.start_with?('build/')
-          license = Attribution.for_file(label, bytes: bytes, sidecar: nil,
-                                         review: { 'rules' => [], 'default_license' => 'NOASSERTION',
-                                                   'default_evidence' => '' }).fetch('license')
-          evidence = 'file SPDX'
+          # A file outside every import tree states its license by its SPDX
+          # line or a stock GNU notice; the notice table reviews imported
+          # notices only, so it lists none here.
+          attribution = Attribution.for_file(label, bytes: bytes, sidecar: nil, review: OUTSIDE_IMPORTS, notices: {})
+          license = attribution.fetch('license')
+          evidence = attribution.fetch('evidence')
           license_document = File.join(@root, 'LICENSE')
           own_notice = leading_notice(bytes)
           document_references << notice_document('path' => license_document,

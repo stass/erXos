@@ -63,7 +63,7 @@ Third-party notices remain in their original files.
     },
     "README.md": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "b66f00b16a866b03e6d3b2334a18d12f3dcb9f8d77f39e9bc947ee0dbecfad5e",
       "kind": "file",
@@ -311,15 +311,15 @@ Third-party notices remain in their original files.
     },
     "doc/source/doxygen-awesome-css/LICENSE": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "e3da754c3f657cc78594fa2e8a3283665f78c743df2485fa9e498a8973051191",
       "kind": "file",
       "non_ascii_lines": []
     },
     "doc/source/doxygen-awesome-css/doxygen-awesome-darkmode-toggle.js": {
-      "license": "MIT",
-      "evidence": "file SPDX",
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "11951aeb28a182af457a354073b8c05c9bb3c39121e5704e44eabaca8d86d5ff",
       "kind": "file",
@@ -342,8 +342,8 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "doc/source/doxygen-awesome-css/doxygen-awesome-paragraph-link.js": {
-      "license": "MIT",
-      "evidence": "file SPDX",
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "fb6fd1075dedc8cada45dc522e0d206acc72e8cd1a3452ea03905a3e942c5795",
       "kind": "file",
@@ -446,9 +446,9 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "doc/source/intro.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "d8339bc5cf39479510735be2f243103a0da8b1e5bd8746fa3c03694aca0deea1",
       "kind": "file",
       "non_ascii_lines": []
@@ -462,9 +462,9 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "doc/source/l4_ipc.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "2004d04d783afb16b1a90680c4b576773e61fd90588d05ca3cb36162802290ee",
       "kind": "file",
       "non_ascii_lines": []
@@ -1957,7 +1957,7 @@ Third-party notices remain in their original files.
     },
     "tool/gendep/COPYING": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "d5e738cd78e3452658ea66a90f7fbe2e03e9e1dfa249ed4f2bd88de7b5bbbb89",
       "kind": "file",
@@ -2156,17 +2156,17 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "tool/kconfig/COPYING": {
-      "license": "GPL-2.0-only WITH Linux-syscall-note",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (1 SPDX mentions; one declaration line in the header is read); review the file",
+      "reviewed": false,
       "sha256": "fb5a425bd3b3cd6071a3a9aff9909a859e7c1158d54d32e07658398cd67eb6a0",
       "kind": "file",
       "non_ascii_lines": []
     },
     "tool/kconfig/Makefile": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "545868dab5990f042d72ecd2733cb1120f1c64d633168ecb9130a1e097f81ce5",
       "kind": "file",
       "non_ascii_lines": []
@@ -2260,9 +2260,9 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "tool/kconfig/scripts/Makefile.modpost": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "1816d5dc8cfa39f33cac7c17d28579b04453b979ebf863a334113be907e58b76",
       "kind": "file",
       "non_ascii_lines": []
@@ -2285,7 +2285,7 @@ Third-party notices remain in their original files.
     },
     "tool/kconfig/scripts/basic/fixdep.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "53a9e1a710120a71b094a6de2f10f328cc15b6e24e6adf7543b0bad72432762a",
       "kind": "file",
@@ -2404,16 +2404,16 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "tool/kconfig/scripts/kconfig/gconf.c": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "fcc7fddd99d6f2fa0ae3433eb46606a8a2f8ef2aaadb4cf57605bdc6f3b385d0",
       "kind": "file",
       "non_ascii_lines": []
     },
     "tool/kconfig/scripts/kconfig/gconf.ui": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "ccb10be947b636701f568a65b31bfa201ad9bb2e7f1cb28a589d77de719d5d48",
       "kind": "file",
@@ -3037,7 +3037,7 @@ Third-party notices remain in their original files.
     },
     "tool/vim/syntax/simics.vim": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "016e1822afb9fd58a627e6373933e4ceb906bb82ebf5cb75c7d146f676cd3610",
       "kind": "file",

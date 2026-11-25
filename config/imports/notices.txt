@@ -3,11 +3,15 @@
 # Each row is the SHA-256 of one notice block's normalised text, one file
 # that holds it and the license the block grants, or POINTER for a pointer
 # to the package declaration in LICENSE.spdx, which grants nothing itself.
-# A block holding a license word is read as a permissive notice only when
+# A block holding a legal word is read as a permissive notice only when
 # its hash is listed here, so a row is added only after its text was read
-# whole and found to state no condition beyond the license named. List the
-# blocks to review with `ruby tools/fiasco_origins.rb --notices`. Rows are
-# sorted by hash.
+# whole and found to state no condition beyond the license named. A
+# POINTER row counts only in the import its file's first path component
+# names (bootstrap, kernel, l4re-core, ...), so the same pointer text
+# reviewed in two imports has one row for each, and a pointer listed for
+# one import leaves a file of another unrecognised. List the blocks to
+# review with `ruby tools/fiasco_origins.rb --notices`. Rows are sorted by
+# hash.
 001424187820ffbcdd6ead3e999a058b3685abc77f3a07e28216fe921dd85d8b l4re-core/libc/musl/contrib/musl/src/complex/csqrt.c BSD-2-Clause
 015fa216b29db54c36750a032173775967ce061853f50351f69a5072d1e3bc69 bootstrap/server/src/memcpy_aligned.c POINTER
 0171330ab7f4888cd9de6fbf01a337308b3af4f22dd056da6249292486ac32b0 bootstrap/server/src/ARCH-arm/reboot.cc POINTER
@@ -20,6 +24,7 @@
 07ce678f64b74b25bb734855b2c1139d6a1f35ccc367537103efeb01a1062fda l4re-core/l4re/include/random POINTER
 08d6814c4d626de7083f5633e36498e11047027be745e438fdcd057170e3df1d l4re-core/libc/musl/contrib/musl/src/regex/regcomp.c BSD-2-Clause
 095d10f4a6365349fa607df2ce2e69e2e6e029dd1386de37bfda349fa01befb2 kernel/src/lib/libk/cxx/std_alloc POINTER
+095d10f4a6365349fa607df2ce2e69e2e6e029dd1386de37bfda349fa01befb2 l4re-core/cxx/lib/base/include/exceptions POINTER
 09f3967dfe6d04f541f35d4c15f1f61bfbfa5ae61dd3640ab4e67b2086bae9e5 l4re-core/l4sys/include/ARCH-mips/linkage.h POINTER
 0afd8399879f61a11e08aeb7dc5581678c9253f794f2f6805d8bd580fdf2eb96 l4re-core/l4util/include/ARCH-x86/perform.h POINTER
 0c65e43313e4a124fba80b6a3dcd8bd9e8d7b5d474ff275bc13e1f9a03f3ddae l4re-core/l4re/util/include/counting_cap_alloc POINTER
@@ -49,6 +54,7 @@
 2cbfab031688f878ef72dac45a944b5453d3b98ba3034541d3e488f2f416065b kernel/src/lib/libc/src/setjmp/x86_64/longjmp.S MIT
 3324b21850aa4c4174d4dd2351306dadf033d98b08513fa2969badaf7d4c3fb4 l4re-core/l4sys/lib/src/ARCH-x86/syscalls_direct.S POINTER
 3326eab152c73a168803284b8fe8a1403d63b0654582e54bb576278f839d1d99 bootstrap/server/src/dt.cc POINTER
+3326eab152c73a168803284b8fe8a1403d63b0654582e54bb576278f839d1d99 kernel/src/lib/uart/uart_sifive.cc POINTER
 33f51a47319da36dc21dc8d4cbeb7728720440d0ebb11f52de5e4255b3573dfd l4re-core/l4util/include/ARCH-amd64/cpu.h POINTER
 340a28c4a09cac606d10bb4539452ec1d35e2b58b5394aec2aee70b4bd342437 l4re-core/cxx/lib/ipc/include/ipc_timeout_queue POINTER
 3591f57831aee759376a598f6c8d28c2fc3749c1961a0b90c92c98b3fead115b l4re-core/libc/musl/contrib/musl/src/stdlib/qsort.c MIT
@@ -89,17 +95,23 @@
 5bb1836b5a75dd5d964b55db91f787e0c25f4ba6543c4cd852559490d5b22709 bootstrap/server/src/ARCH-amd64/boot32/boot_idt.S POINTER
 5c84951936e44aa12890cfff4be7130f1f38facf486e00e4db63958d2c6b46dc l4re-core/l4util/lib/src/parse_cmdline.c POINTER
 5e17af93f83aecfb5a965ec237eab16669e6646695f2e2f98232a19bdfee407f kernel/src/lib/uart/uart_linflex.cc POINTER
+5e17af93f83aecfb5a965ec237eab16669e6646695f2e2f98232a19bdfee407f l4re-core/libc_backends/lib/misc/posix_fadvise.c POINTER
 5edeb8bcc4afa6994ca68814af9183346d1cd0901604ef0e0b83161408fd8c6b l4re-core/libc/musl/contrib/musl/src/math/cbrt.c SunPro
 5f6c88f3ca06fb4a26c0459526ce73d1e0f91861b48d9b2d1f878043fa0932d4 bootstrap/server/src/platform/s32z-crt0.S POINTER
+5f6c88f3ca06fb4a26c0459526ce73d1e0f91861b48d9b2d1f878043fa0932d4 l4re-core/l4sys/include/ARCH-arm/arch/platform_control.h POINTER
 5f916283de8904d8d617e5cbef43ec9a8f25273735efa8b4cacb488f92b15e29 l4re-core/libc_backends/lib/misc/uidgid.c POINTER
 5fddfdba8e1154ccf16896d6b87dae7d3adabb23b66e00ec906ba247a63f1264 l4re-core/cxx/lib/io/include/iostream POINTER
 5ff4090d3afc27d13c2a8facf5a1162c6c85c068004709f74f6ecedd00b9b0a8 bootstrap/server/src/ARCH-riscv/crt0.S POINTER
+5ff4090d3afc27d13c2a8facf5a1162c6c85c068004709f74f6ecedd00b9b0a8 kernel/src/lib/uart/uart_sbi.cc POINTER
+5ff4090d3afc27d13c2a8facf5a1162c6c85c068004709f74f6ecedd00b9b0a8 l4re-core/l4sys/include/ARCH-riscv/arch/ipc.h POINTER
 607a2d2519d4019811964efe7de5cf6d3b94857b7aadeebf060e99a422280927 l4re-core/libc_backends/lib/misc/sysconf.cc POINTER
 6151a535e45d600ba386553d31df2e04b056fe314208a138a290b95a55d534f1 drivers-frst/uart/include/uart_bcm2835.h POINTER
+6151a535e45d600ba386553d31df2e04b056fe314208a138a290b95a55d534f1 kernel/src/lib/uart/uart_bcm2835.cc POINTER
 61dc14f91317570b40ea5bfef39a397e6be3c1ee240c9eae6ab161b472faf753 bootstrap/server/src/platform/sbsa.cc POINTER
 62144589d2b7e1021dac6285eb4efb18928d6352855e6bbbc3ad2139d6372edb l4re-core/libc/musl/contrib/musl/src/math/fmaf.c BSD-2-Clause
 6232b177c68a4279587cd02cf7ee03ea859379edb6a16f94004cb8f553534d29 l4re-core/l4sys/doc/l4sys-l4f-groups.dox POINTER
 639ffa091e59c2f5c9cc94cdb643cfdee09aca334e215dd0b99d99e1640d2f1e drivers-frst/uart/include/uart_base.h POINTER
+639ffa091e59c2f5c9cc94cdb643cfdee09aca334e215dd0b99d99e1640d2f1e kernel/src/lib/uart/uart_base.h POINTER
 63bde61c2dcb823ac20003456638b5f7f45505577c7d2996375d9580c52c02e9 l4re-core/cxx/lib/tl/include/static_container POINTER
 6513cc40c51ab90e82a108106718454a73c4de5ec7e86f0bfbcc16a85adf92e9 l4re-core/l4re/include/dataspace POINTER
 658ac2998ae9d823ee5643cea2b7b88fc2223d69ed3388587768706b9ae8bb7d l4re-core/libstdc++-v3/contrib/libstdc++-v3-12/src/libbacktrace/Makefile.am BSD-3-Clause
@@ -117,6 +129,7 @@
 6e78ba3c30da6f4800a90eeef67052620fcc34866d091fc455af7a9adbd0c5a4 bootstrap/server/src/platform/zynq.cc POINTER
 71332973672b2749f672e01aa1df5105a10e6530067cb8970d732e463c1ef209 l4re-core/l4sys/include/ARCH-arm/arch/cache.h POINTER
 714d3181d6af4dcdf37a1a50f58b1946ad7198597047f573516ac895ed328cf7 bootstrap/server/src/platform/orin.cc POINTER
+714d3181d6af4dcdf37a1a50f58b1946ad7198597047f573516ac895ed328cf7 kernel/src/lib/uart/uart_tegra-tcu.cc POINTER
 71a52a1b2a5aca71a8ec49746c4526546b739190171f022da4641c6c80d34cd9 l4re-core/cxx/lib/tl/include/weak_ref POINTER
 722eaaeacaee9c98f3d2881eae63f5c881f500ddedbaf992dbb3a5f1d419a244 l4re-core/libc/musl/contrib/musl/src/regex/tre.h BSD-2-Clause
 737c75fd254b491c7a33485e0f3bd05f465e920ee719df5401500635ce202c96 l4re-core/l4sys/include/thread_group POINTER
@@ -124,6 +137,7 @@
 74e8d596e385d248503d629fc68f93d1730fc43f55f5a4067e7a8de7f15cd538 l4re-core/sigma0/server/src/mem_man.cc POINTER
 7511867f51ca485a5ef9b766fe3fbcb8e470cda785bcc112e22f18680c0513a3 l4re-core/l4sys/include/snd_destination POINTER
 798658f9e31968a24b9226b7806f2fd55331aca6fcf1129e3ffe080cd17d42d7 bootstrap/server/src/ARCH-riscv/isa_parser.h POINTER
+798658f9e31968a24b9226b7806f2fd55331aca6fcf1129e3ffe080cd17d42d7 l4re-core/l4sys/include/ARCH-riscv/arch/kip.h POINTER
 79e86284b13530ae6f07257f24f1fee41c36ece92b88f89e4b08eeebfe03ffb4 l4re-core/cxx/lib/tl/include/unique_ptr_list POINTER
 7bfb799cce575c270e22cc1380dd9655729565d2ebc0d1b430657f109821813c l4re-core/l4re/util/include/kumem_alloc POINTER
 7f6ef99db8f891da35b9febc50a26b39c82e11bb5c8a419ed3f2fbae1f310d66 l4re-core/l4sys/include/cxx/ipc_epiface POINTER
@@ -136,6 +150,7 @@
 8365a18937f3196195ac0a5ece84befc028388d5e18765d3930ed94d3ae1bc08 bootstrap/server/src/gcc_lib.c POINTER
 83b40244afb99a826b8d4fad0d562a2ee80d396c659563875045876d48d7705e l4re-core/cxx/lib/tl/include/bitmap POINTER
 83b537547ed0aac0511245faea51af8c3eb5f6b923aed6b0ad245731f6a450d6 drivers-frst/uart/include/uart_pl011.h POINTER
+83b537547ed0aac0511245faea51af8c3eb5f6b923aed6b0ad245731f6a450d6 kernel/src/lib/uart/uart_dcc-v6.cc POINTER
 83cddd06e384625cfb94e6ab883760f9fa11c88497e4d33386fcd720f9a19003 l4re-core/l4util/lib/src/thread.c POINTER
 84943fb789ac1d24271154bf6281d857b629733a5b4accabe321a96df8807432 bootstrap/server/src/platform/layerscape.cc POINTER
 85131bf7a851fb1d70add9d77538339da547dbc4c32e88d476bb512a2e315a25 l4re-core/l4util/include/ARCH-amd64/bitops_arch.h POINTER
@@ -143,11 +158,13 @@
 87a044c6265484d558ecbe40fe658e8db64f6bfa0230a74859c837ae831c2a98 l4re-core/libc/musl/contrib/musl/src/regex/tre-mem.c BSD-2-Clause
 886da3ee664e75ab99595b6fd49f386b20e66b4557c64444a4789389c1fe8413 drivers-frst/include/ARCH-arm64/asm_access.h POINTER
 892808b0c7375dbfbcdaeb9056537e01d03cf27a3835204c2bfff971d35f67da drivers-frst/uart/include/uart_16550_dw.h POINTER
+892808b0c7375dbfbcdaeb9056537e01d03cf27a3835204c2bfff971d35f67da kernel/src/lib/uart/uart_16550_dw.cc POINTER
 89381ee02ff3eb2d646caaab38988ddb9f6c2e0915b6c649016ed3c9e2ff6cc8 l4re-core/cxx/lib/tl/include/slab_alloc POINTER
 8a1af85c80ac3f00357927c4e5b272f98b3f73b39e31093f30ba4e3365a575da l4re-core/l4sys/include/ARCH-amd64/__kip-arch.h POINTER
 8b233765e082295934789963899dd3fffc2c293164161c7fb7f3b499a62d57cc l4re-core/l4re/util/include/vcon_svr POINTER
 8b7e53368d752f00416a7827e477d7bec327a2ef2f6e4f1347c6fa3fad91eb5b kernel/src/lib/libk/quad/quad.h BSD-3-Clause
 8d257e71fd0aed603d6df2ab7b223a17f8f9c01298998785952fafbad2db57d6 kernel/src/lib/libk/cxx/avl_set POINTER
+8d257e71fd0aed603d6df2ab7b223a17f8f9c01298998785952fafbad2db57d6 l4re-core/cxx/lib/tl/include/avl_set POINTER
 8dc781742cbb69909494b237b7c8fec4048b712b25b3b28f13e5c29b2358e9f0 l4re-core/cxx/lib/base/src/cxa_pure_delete.cc POINTER
 8ff76c6b8c6677dcebdf448983977c2e554e65e18871a1b21c1d4f0bc9a88352 l4re-core/libc/musl/contrib/musl/src/math/__tanl.c SunPro
 8ffbf792939cdc06cdba520fa49f66d0f5b1cfe140b99173588f39b2fd561186 l4re-core/libc_backends/lib/l4re/lib/clock_nanosleep.c POINTER
@@ -176,9 +193,11 @@ a33ad798fab7c603342d775bcd021c5fceb355d1969a25fa44c21aef2cb070ad l4re-core/libst
 a5a8f35d92031481bf4f41eadec0fbf3933eb4347da39c93df31a7dcd59d6c18 l4re-core/cxx/lib/io/src/iob_write.cc POINTER
 a65a40b5005d5e3ef7a15551f3c61018cbc0f9daa87fea8e15757bf23f048b12 l4re-core/l4util/include/ARCH-amd64/irq.h POINTER
 a6840255a747391ad4a748cda8d0ac274e643e30bb857c210f9f67b307943c90 kernel/src/kern/ia32/idt_vectors.cpp POINTER
+a6840255a747391ad4a748cda8d0ac274e643e30bb857c210f9f67b307943c90 l4re-core/cxx/lib/tl/include/numeric POINTER
 a6bf39a0b0d288946730bc2d7f8c9bf71e9ab37a8a16d22624c208bd8172a559 bootstrap/server/src/platform/armada38x.cc POINTER
 a728fad849bff612866cb693c6abaa62e1a3d0dc2548f03de334d4f31d0e5048 l4re-core/l4sys/include/ARCH-mips/__vcpu-arch.h POINTER
 a7392a933dca4906c2799a1b003c7cd71fa06738c1826b53f595698ae55d951e drivers-frst/include/io_regblock.h POINTER
+a7392a933dca4906c2799a1b003c7cd71fa06738c1826b53f595698ae55d951e kernel/src/lib/uart/io_regblock.h POINTER
 a7bb8f18083d8e8aa70a70014e2679764c96f01a916bb964fb56a2cb99228a30 bootstrap/server/src/ARCH-amd64/boot32/support.c POINTER
 a82beab11be509e2bb8f35810a09f642c57448d4e62e4e9b6cb2b2c9511c3d4f kernel/src/lib/libk/quad/adddi3.c BSD-3-Clause
 a8d221bd5638be9df1764c117d8f2b24cd031cccb2ad9c49579c1f2b4f5d1fe9 kernel/src/lib/uart/uart_sh.cc POINTER
@@ -187,12 +206,15 @@ ac7bddd7e94d25165b51de40e23d70a4ba6fe8f1bc259e15960437e4a9d3fc66 l4re-core/l4sys
 aee4eb86ca6059160305126d7411604aa2db95f69d6f9be3156f6bbc14c8b25a l4re-core/l4sys/include/ARCH-amd64/arch/ipc.h POINTER
 af3b4ac38773065dfbddcc4b5b1e4ee1138b618edc369c17cd504116f3c9a21c l4re-core/libc/musl/contrib/musl/src/math/__rem_pio2.c SunPro
 af40168e1b8192701c490e0ea51e5c3d48ad06a999188df801d4eabfa486cd1b kernel/src/lib/libk/cxx/bits/type_traits.h POINTER
+af40168e1b8192701c490e0ea51e5c3d48ad06a999188df801d4eabfa486cd1b l4re-core/cxx/lib/tl/include/bits/type_traits.h POINTER
 afa7d69913d84af44fc0b7c29a169739dc029dfe2bc88ce1b4d5f395692eafc5 bootstrap/server/src/qemu_fw_cfg.cc POINTER
 afb1b8fe4980b8bf99f9d571648b6647aaceff58b93d703e1d8cc76e29adcc39 l4re-core/l4util/include/ARCH-amd64/arch/thread.h POINTER
 b1c2d8594783230b721cb58032142cc3676de4b51bd804a15ddd04093e80c383 l4re-core/l4util/include/ARCH-x86/bitops_arch.h POINTER
 b239a3da4ca41ec6e5ca1ab3d6057cd01a5ca4b21dc6a3a74f99afc886ce769f l4re-core/libc_backends/lib/misc/secure_getenv.c POINTER
 b23a0e75f5ad64c4557f16b5f5efd843c4fd9623c29a55d8ec2de28b633f0306 kernel/src/lib/libk/cxx/avl_map POINTER
+b23a0e75f5ad64c4557f16b5f5efd843c4fd9623c29a55d8ec2de28b633f0306 l4re-core/cxx/lib/base/include/string POINTER
 b2e0a927b3b784fe3f4f564314d65fe6f1bfd8ee0314371d889895dc7e4a7b29 drivers-frst/uart/src/uart_16550.cc POINTER
+b2e0a927b3b784fe3f4f564314d65fe6f1bfd8ee0314371d889895dc7e4a7b29 kernel/src/lib/uart/uart_16550.cc POINTER
 b2eed44bcdbf52b100b969b03116a4838385ba4c15691b4fdec9a4f59cdf9e7a bootstrap/server/src/platform/kirkwood.cc POINTER
 b3ba085da17e53dfef802a500937dba5a8788f990a2f1839256385009ef64aba l4re-core/l4re/util/include/icu_svr POINTER
 b54d8c68583b37f39c657d1f569b1556c40345bc492a4dafa9e0ad944ec9152e bootstrap/server/src/ARCH-x86/mb2.S POINTER
@@ -204,6 +226,7 @@ baa1dc091354d8ee814764819af288caf7734630815563fa8b29134ad1effffa bootstrap/serve
 baf528e3a311213451e74a51637a9c938e531a84005265ba85485157ff0623d0 l4re-core/l4util/include/ARCH-x86/spin.h POINTER
 bb75a923f130cb5cef3359c49b9bf7466865e357102e1ab79d5d30a50ad30b8b kernel/src/lib/uart/uart_sh.h POINTER
 bc525d71c07b3c336692edc57b8e8d643b1f1aaa8c8fa2c44429edfd845e5ba5 kernel/src/lib/libk/cxx/bitfield POINTER
+bc525d71c07b3c336692edc57b8e8d643b1f1aaa8c8fa2c44429edfd845e5ba5 l4re-core/cxx/lib/tl/include/bitfield POINTER
 bc7e69a1b49f658cb0ddc92febd49a44df3e1e2b823f724c33259099800d5460 l4re-core/l4sys/include/debugger.h POINTER
 bd1e56e4f79825006a0923468614bbb8422874d9c9ff356fbf2a0310fa9ae329 l4re-core/l4re/include/env POINTER
 c070133919b74e20599aba908d9de7f7233eceb9262ab2d5220e614cb0ab5f52 l4re-core/l4sys/include/kobject POINTER
@@ -219,6 +242,7 @@ c91bab3876697d1a4d5de54ee2416f10e61e68a6fe575fb390053a48b0143018 l4re-core/libc_
 c968ca94361095b4b2f3f520e91d5ed65e14708d1120beb6db790819ceb5d669 l4re-core/l4sys/include/ipc_gate POINTER
 c98716f3021ce9f269cfaf1d5dba0a128cad0ae2129e6171815115be02b92e3f bootstrap/server/src/ARCH-arm/platform.cc POINTER
 ca1f9ff4304e72161299373aae03dabc7a608cf47ed322ed4691ab31a314f440 drivers-frst/uart/include/uart_16550.h POINTER
+ca1f9ff4304e72161299373aae03dabc7a608cf47ed322ed4691ab31a314f440 kernel/src/lib/uart/uart_16550.h POINTER
 ca2e9f1997b5115bd2becbcaaf107c06bc66934861fab0cb1e3c6584ae679235 kernel/src/lib/uart/uart_dummy.h POINTER
 ceb29df0cdc409dd8085b421115648b6eff2871f02b5d4a9a3ccc42f7ca8eabb kernel/src/lib/uart/uart_imx.cc POINTER
 ceb6ed97b618256780cddcdc6b8517c71c825f854f093e3ab3d42b9effa4cef6 bootstrap/server/src/efi-support.cc POINTER
@@ -238,6 +262,7 @@ de2d7dbef9e8a22e2cf185d67e27ea1da1c519a3b05f998f6d41481e04e05c08 l4re-core/l4sys
 df5903efb1ff8ff84721d8c557042df54dd1e162e7b42d5913505626bf996538 l4re-core/l4util/include/list_alloc.h POINTER
 e09df386cc3b9de46d679985ce81aed3982d79fbeab69c72c883764718aa3927 l4re-core/libstdc++-headers/include/thread-l4 POINTER
 e195e0bc074ed436ef4329c0bffb36bf270c07531978a4ee4485ce6299c3f73e kernel/src/lib/libk/cxx/bits/list_basics.h POINTER
+e195e0bc074ed436ef4329c0bffb36bf270c07531978a4ee4485ce6299c3f73e l4re-core/cxx/lib/tl/include/bits/list_basics.h POINTER
 e5506faff10af1203d3c5e635742b526d00c61559392d635b5a83e5b10abcf1d l4re-core/libc/musl/contrib/musl/src/math/__tan.c SunPro
 e658ffedd78276acbc170ac364c9f4754a3e5275ef114e193d3016e05c40d5fe l4re-core/l4re/include/remote_access POINTER
 e7fdd4544d944334d0cec1abe62167be57bfff2f4b3014eab54b6c9af72121eb l4re-core/l4sys/include/ARCH-x86/arch/ipc.h POINTER

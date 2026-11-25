@@ -1151,6 +1151,22 @@ design does not have, to be deleted so no side-by-side table can show it under s
   the ids `device_give.rb`, `system_domain.rb` and `system_domain_regrant.rb` count from them): hand-kept from the
   rows' name order (erts, network, storage), so a domain the site manifest keeps that sorts before storage moves them.
   Derive them from the manifest each cell boots, as `SessionDomain::Ids` does.
+* [Low] notice reader, `tools/lib/erx/origin.rb` (`read_notices`): a file holding a NUL byte is not read, and
+  a compressed one (OTP holds 24 `.gz`, `.bz2`, `.xz` and `.zip` files) holds no license mark a scan of its
+  bytes can find, so it takes its package rule's license or the default whatever the files inside it say.
+  Refuse a compressed file that no reviewed rule names, or read it decompressed.
+* [Medium] notice reader, `tools/lib/erx/origin.rb` (`attached`, `spdx`): a `.license` sidecar is read only for
+  its first SPDX line, so a second declaration or a restriction in the sidecar is not read, and a file's own
+  declaration silently wins over a sidecar that disagrees. OTP holds 10 sidecars. Read a sidecar as a file
+  is read (one declaration, every other block plain or listed), and leave the file unrecognised when the
+  file and its sidecar both declare and disagree.
+* [Low] notice reader, `tools/lib/erx/origin.rb` (`PATTERN_FLAGS`): without `File::FNM_DOTMATCH` a package
+  rule or correction pattern skips dotfiles and dot directories, which take the default instead
+  (`.gitignore` files under Fiasco's `tool/kconfig` and `libfdt/lib/contrib`). Add the flag and re-derive.
+* [Low] notice table, `config/imports/notices.txt`: a POINTER row's scope is its import, not the package
+  rule its example falls under, and nothing checks that a row's example file still exists and holds the
+  block: 13 rows name files of the dropped `libstdc++-v3` and `libstdc++-headers`. Scope a pointer to its
+  package, and have `--notices` refuse a row whose example is gone.
 
 ## Security residuals
 

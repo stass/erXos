@@ -91,7 +91,7 @@ Third-party notices remain in their original files.
     },
     "README.md": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "219cab2773facb9e0c8288987b21ee16eecdc64c1a405d2a86c63b1014af888a",
       "kind": "file",
@@ -106,9 +106,9 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "doc/bootstrap.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
+      "reviewed": false,
       "sha256": "87b0e69d1aee96c8b7111a2103fe0ac2c850f4149c74039c6fc1c1e855ceb1ec",
       "kind": "file",
       "non_ascii_lines": []

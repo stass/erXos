@@ -31,15 +31,15 @@ module Erx
     # one only when config/imports/notices.txt lists it.
     def musl_license_rules
       explicit = {
-        'COPYRIGHT' => 'MIT',
-        'src/crypt/crypt_blowfish.c' => 'LicenseRef-musl-Solar-Designer',
-        'src/crypt/crypt_md5.c' => 'LicenseRef-musl-public-domain AND BSD-2-Clause',
-        'src/crypt/crypt_sha256.c' => 'LicenseRef-musl-public-domain',
-        'src/crypt/crypt_sha512.c' => 'LicenseRef-musl-public-domain',
-        'src/misc/fmtmsg.c' => 'LicenseRef-musl-public-domain'
+        'COPYRIGHT' => ['MIT', 'b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b'],
+        'src/crypt/crypt_blowfish.c' => ['LicenseRef-musl-Solar-Designer', '0f9054739e295e3e981e7aa29c8f287a190aef065b84a82a4c6817120d5da05d'],
+        'src/crypt/crypt_md5.c' => ['LicenseRef-musl-public-domain AND BSD-2-Clause', '85d1d364c100fc982e99adb0d176e1d4475d175fc5c12bba696cda9c62d62c6b'],
+        'src/crypt/crypt_sha256.c' => ['LicenseRef-musl-public-domain', '26f3ae83a89a52640f3979df81eb50a431e75c83d5c18f1487325a39ee84fb73'],
+        'src/crypt/crypt_sha512.c' => ['LicenseRef-musl-public-domain', '7148156d195d9bef7eb57a1b2108439679a02372d0fac418004722513bd7b95c'],
+        'src/misc/fmtmsg.c' => ['LicenseRef-musl-public-domain', '27354c57b1827561585a73dbe9f2d7f97cd73563d4043cf2907912c8faaebb6e']
       }
-      explicit.map do |path, license|
-        { 'pattern' => path, 'license' => license,
+      explicit.map do |path, (license, sha256)|
+        { 'files' => { path => sha256 }, 'license' => license,
           'evidence' => "reviewed grant of #{path}, which no notice form Attribution reads states; full notice retained" }
       end
     end

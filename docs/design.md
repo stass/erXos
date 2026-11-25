@@ -2019,15 +2019,22 @@ hold by construction:
   imported tree is under its tree's `ORIGIN.md`; a fetched artifact has
   its `deps.lock` entry; a generated file takes the provenance of the
   inputs its build rule records. Each file's license is recorded with its
-  provenance: an imported file's entry in its `ORIGIN.md` holds the SPDX
-  identifier of its header; or the license its own notice grants, where
-  each notice in the file is a GNU notice or a text listed by hash in the
-  reviewed table `config/imports/notices.txt`, any other notice recording
-  the file as unrecognised, which no build admits; or, for a file without
-  either, the license its
-  tree's manifest declares for its package, such as Fiasco's
-  `LICENSE.spdx`, or the license the import's review assigned, marked as
-  reviewed; a fetched artifact's
+  provenance: an imported file's entry in its `ORIGIN.md` holds the
+  license a reviewed rule of its import's review assigned to exactly those
+  bytes, pinned by their SHA-256; or the SPDX identifier of the one
+  declaration line of its header (or of its `.license` sidecar), which
+  holds nothing but a valid expression and its comment marks and must
+  name every license the file's notices grant, any other declaration
+  recording the file as unrecognised; or the license its own notices grant, where each
+  notice, each comment block of the header and each comment block beside
+  a notice is a stock GNU notice, a text listed by hash in the reviewed
+  table `config/imports/notices.txt` (a pointer to the package's
+  declaration counting only in the import it was reviewed in), or free of
+  legal words, anything else recording the file as unrecognised, which no
+  build admits; or, for a file with neither a declaration nor a notice,
+  the license its tree's manifest declares for its package, such as
+  Fiasco's `LICENSE.spdx`, or the license the import's review assigned,
+  marked as reviewed; a fetched artifact's
   license is in its `deps.lock` entry. The packer takes each image's
   closure from the linker's map of every object and archive each
   executable links, the compiler's dependency files of each object, and

@@ -215,15 +215,18 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [Medium] Import inventories under the old precedence, `otp/ORIGIN.md`, `musl/ORIGIN.md`,
-  `openssl/ORIGIN.md`: they were written when a pattern rule or the default came before a
-  file's own license notice, and before notices were read whole and refused unless
-  recognised in full (`Attribution.for_file`). They are not re-derived with the Fiasco
-  trees: OTP's and OpenSSL's checked-in profiles have no `package` rules yet, so each of
-  their pattern rules would still precede the files' notices. Mark their package
-  declarations as `package` rules, then re-derive them, or survey their pattern-attributed
-  files for notices. Re-deriving musl's with `config/imports/musl.json` changes three rows
-  (`README`, `WHATSNEW` and `src/string/arm/memcpy.S`) to `LicenseRef-unrecognized-notice`.
+* [Medium] Import inventories from the earlier notice reader, `otp/ORIGIN.md`,
+  `musl/ORIGIN.md`, `openssl/ORIGIN.md`: they were derived when a pattern rule came before a
+  file's own notice and a permissive notice was recognised by its wording, not by a row of
+  `config/imports/notices.txt` (`Attribution.for_file`). Their profiles are in the current
+  form (OTP's vendored trees are `package` rules; the single-file judgements of OTP and
+  musl name each file's SHA-256), but the inventories were not re-derived from them, and
+  the notice table lists only Fiasco's blocks: a re-derivation records every OTP, musl and
+  OpenSSL file whose notice holds a legal word as `LicenseRef-unrecognized-notice` until
+  its block is reviewed and listed, OpenSSL's Apache-2.0 header, which nearly every
+  OpenSSL file carries, first. List those blocks (`fiasco_origins.rb --notices` reads only
+  the Fiasco trees), review them, then re-derive the three inventories and run the link
+  audit.
 
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device_nif.c` (`status_error`): a hand-kept copy of the ABI's
   status-to-atom table; a status it lacks reaches Erlang as `{error, {status, N}}`. Generate it from

@@ -54,24 +54,20 @@ class FiascoOriginsTest < Minitest::Test
   end
 
   def test_a_files_own_notice_precedes_the_package_declaration
-    assert_equal({ 'LICENSE.spdx' => 'CC0-1.0',
+    # The reviewed LICENSE.spdx rule judged bootstrap's own bytes, not these.
+    assert_equal({ 'LICENSE.spdx' => 'LicenseRef-unrecognized-notice',
                    'lib/notice.c' => 'LGPL-2.1-or-later',
                    'lib/declared.c' => 'LGPL-2.1-only',
                    'lib/gpl2.cpp' => 'GPL-2.0-only',
                    'lib/unversioned.c' => 'LicenseRef-unrecognized-notice',
                    'lib/pointer.c' => 'MIT',
                    'lib/pointer_plus.c' => 'LicenseRef-unrecognized-notice',
-                   'lib/plain.c' => 'MIT' }, licenses(FILES, part: 'mk'))
+                   'lib/plain.c' => 'MIT' }, licenses(FILES, part: 'bootstrap'))
   end
 
-  # LinuxThreads' files in libpthread are LGPL with or without a notice, and
-  # L4Re's glue beside them follows L4Re's root declaration.
-  def test_libpthread_is_lgpl_but_for_l4res_glue
-    files = { 'LICENSE.spdx' => "DataLicense: CC0-1.0\n", 'libpthread/src/signals.c' => "int s;\n",
-              'libpthread/src/notice.c' => LGPL_NOTICE.sub('2.1', '2'), 'libpthread/src/l4.cc' => "int l;\n",
-              'libpthread/include/pthread-l4.h' => "int p;\n" }
-    assert_equal({ 'LICENSE.spdx' => 'CC0-1.0', 'libpthread/src/signals.c' => 'LGPL-2.1-or-later',
-                   'libpthread/src/notice.c' => 'LGPL-2.0-or-later', 'libpthread/src/l4.cc' => 'MIT',
-                   'libpthread/include/pthread-l4.h' => 'MIT' }, licenses(files, part: 'l4re-core'))
+  # A pointer counts only in the import it was reviewed in.
+  def test_a_pointer_of_another_import_is_unrecognized
+    assert_equal 'LicenseRef-unrecognized-notice',
+                 licenses(FILES.slice('LICENSE.spdx', 'lib/pointer.c'), part: 'mk').fetch('lib/pointer.c')
   end
 end

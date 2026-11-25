@@ -5,32 +5,44 @@
   "default_evidence": "reviewed musl COPYRIGHT package grant and no-notice original-file clause",
   "rules": [
     {
-      "pattern": "COPYRIGHT",
+      "files": {
+        "COPYRIGHT": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"
+      },
       "license": "MIT",
       "evidence": "reviewed grant of COPYRIGHT, which no notice form Attribution reads states; full notice retained"
     },
     {
-      "pattern": "src/crypt/crypt_blowfish.c",
+      "files": {
+        "src/crypt/crypt_blowfish.c": "0f9054739e295e3e981e7aa29c8f287a190aef065b84a82a4c6817120d5da05d"
+      },
       "license": "LicenseRef-musl-Solar-Designer",
       "evidence": "reviewed grant of src/crypt/crypt_blowfish.c, which no notice form Attribution reads states; full notice retained"
     },
     {
-      "pattern": "src/crypt/crypt_md5.c",
+      "files": {
+        "src/crypt/crypt_md5.c": "85d1d364c100fc982e99adb0d176e1d4475d175fc5c12bba696cda9c62d62c6b"
+      },
       "license": "LicenseRef-musl-public-domain AND BSD-2-Clause",
       "evidence": "reviewed grant of src/crypt/crypt_md5.c, which no notice form Attribution reads states; full notice retained"
     },
     {
-      "pattern": "src/crypt/crypt_sha256.c",
+      "files": {
+        "src/crypt/crypt_sha256.c": "26f3ae83a89a52640f3979df81eb50a431e75c83d5c18f1487325a39ee84fb73"
+      },
       "license": "LicenseRef-musl-public-domain",
       "evidence": "reviewed grant of src/crypt/crypt_sha256.c, which no notice form Attribution reads states; full notice retained"
     },
     {
-      "pattern": "src/crypt/crypt_sha512.c",
+      "files": {
+        "src/crypt/crypt_sha512.c": "7148156d195d9bef7eb57a1b2108439679a02372d0fac418004722513bd7b95c"
+      },
       "license": "LicenseRef-musl-public-domain",
       "evidence": "reviewed grant of src/crypt/crypt_sha512.c, which no notice form Attribution reads states; full notice retained"
     },
     {
-      "pattern": "src/misc/fmtmsg.c",
+      "files": {
+        "src/misc/fmtmsg.c": "27354c57b1827561585a73dbe9f2d7f97cd73563d4043cf2907912c8faaebb6e"
+      },
       "license": "LicenseRef-musl-public-domain",
       "evidence": "reviewed grant of src/misc/fmtmsg.c, which no notice form Attribution reads states; full notice retained"
     }

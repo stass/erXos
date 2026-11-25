@@ -12,13 +12,15 @@ require_relative '../../tools/import_origins'
 class OracleImportsTest < Minitest::Test
   APPLICATION_REASON = 'outside the shipped OTP application set in the runtime design'
 
-  def fixture_import(project, bad_notice:, extra: {})
+  def fixture_import(project, bad_file:, extra: {})
     FileUtils.mkdir_p(File.join(project, 'config/imports'))
     FileUtils.copy_file(File.expand_path('../../config/imports/otp.json', __dir__), File.join(project, 'config/imports/otp.json'))
     original = File.join(project, 'original/otp_src_29.1.2')
     FileUtils.mkdir_p(File.join(original, 'lib/kernel'))
     FileUtils.mkdir_p(File.join(original, 'lib/megaco'))
-    File.write(File.join(original, 'lib/kernel/keep.erl'), bad_notice ? "%% SPDX-License-Identifier: NOASSERTION\n" : "%% SPDX-License-Identifier: Apache-2.0\n")
+    File.write(File.join(original, 'lib/kernel/keep.erl'), "%% SPDX-License-Identifier: Apache-2.0\n")
+    # A name the inventory cannot record fails the write after the selection.
+    File.write(File.join(original, "lib/kernel/bad\x01name.erl"), "%% SPDX-License-Identifier: Apache-2.0\n") if bad_file
     File.write(File.join(original, 'lib/megaco/not-selected'), 'original')
     extra.each do |path, bytes|
       FileUtils.mkdir_p(File.dirname(File.join(original, path)))
@@ -54,7 +56,8 @@ class OracleImportsTest < Minitest::Test
   def test_nested_vendor_file_keeps_reviewed_license
     profile = JSON.parse(File.read(File.expand_path('../../config/imports/otp.json', __dir__)))
     attribution = Erx::Attribution.for_file('lib/stdlib/test/re_SUITE_data/old_pcre1/testoutput1',
-                                           bytes: 'fixture without a header', sidecar: nil, review: profile)
+                                           bytes: 'fixture without a header', sidecar: nil,
+                                           review: Erx::Attribution.review(profile))
     assert_equal 'BSD-3-Clause', attribution.fetch('license')
   end
 
@@ -194,7 +197,7 @@ class OracleImportsTest < Minitest::Test
   # An excluded directory leaves the import whole, as an excluded file does.
   def test_an_excluded_directory_leaves_the_import
     Dir.mktmpdir('erx-otp-excluded-') do |project|
-      fixture_import(project, bad_notice: false, extra: { 'erts/ebin/prim_file.beam' => 'prebuilt' })
+      fixture_import(project, bad_file: false, extra: { 'erts/ebin/prim_file.beam' => 'prebuilt' })
       Erx::ImportOrigins.write(root: project, component: 'otp')
       refute File.exist?(File.join(project, 'otp/erts/ebin'))
       excluded = Erx::Origin.new(root: File.join(project, 'otp')).inventory.fetch('exclusions')
@@ -210,7 +213,7 @@ class OracleImportsTest < Minitest::Test
     asn1 = 'lib/public_key/asn1'
     source = 'lib/public_key/src'
     Dir.mktmpdir('erx-otp-asn1-') do |project|
-      fixture_import(project, bad_notice: false,
+      fixture_import(project, bad_file: false,
                               extra: { "#{asn1}/New-2030.asn1" => "-- SPDX-License-Identifier: Apache-2.0\n",
                                        "#{asn1}/Member.asn1" => "-- SPDX-License-Identifier: Apache-2.0\n",
                                        "#{asn1}/Frame.set.asn" => "#{notice}\nMember.asn1\n",
@@ -273,9 +276,9 @@ class OracleImportsTest < Minitest::Test
     end
   end
 
-  def test_attribution_failure_does_not_prune_existing_import
+  def test_a_failed_inventory_does_not_prune_existing_import
     Dir.mktmpdir('erx-otp-atomic-') do |project|
-      fixture_import(project, bad_notice: true)
+      fixture_import(project, bad_file: true)
       assert_raises(Erx::Error) { Erx::ImportOrigins.write(root: project, component: 'otp') }
       assert File.file?(File.join(project, 'otp/lib/megaco/not-selected'))
       refute File.exist?(File.join(project, 'otp/ORIGIN.md'))
@@ -284,7 +287,7 @@ class OracleImportsTest < Minitest::Test
 
   def test_missing_required_source_is_refused
     Dir.mktmpdir('erx-otp-missing-') do |project|
-      fixture_import(project, bad_notice: false)
+      fixture_import(project, bad_file: false)
       File.unlink(File.join(project, 'otp/lib/kernel/keep.erl'))
       assert_raises(Erx::Error) { Erx::ImportOrigins.write(root: project, component: 'otp') }
       refute File.exist?(File.join(project, 'otp/ORIGIN.md'))

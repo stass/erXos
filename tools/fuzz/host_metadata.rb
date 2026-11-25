@@ -68,8 +68,8 @@ module Erx
         Origin.new(root: root).check
       when 'attribution'
         Attribution.for_file('fixture.c', bytes: bytes, sidecar: nil,
-                             review: { 'rules' => [], 'default_license' => 'MIT',
-                                       'default_evidence' => 'reviewed fuzz fixture' })
+                             review: Attribution.review('rules' => [], 'default_license' => 'MIT',
+                                                        'default_evidence' => 'reviewed fuzz fixture'))
       when 'dependencies'
         DependencySchema.parse(bytes)
       when 'svd'

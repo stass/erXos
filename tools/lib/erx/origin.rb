@@ -20,17 +20,41 @@ module Erx
     ERXOS_COPYRIGHT = /Copyright \(c\) \d{4}(?:-\d{4})?, Stanislav Sedov <stas@deglitch\.com>/n
     # The comment forms attribution reads a license from. A declaration in any
     # other form is not read here; erxos_addition? refuses it by counting.
-    SPDX_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--)[ \t]*)?SPDX-License-Identifier:[ \t]*([^\r\n]+)/n
+    # A declaration line holds its expression and at most a comment closer:
+    # text after the closer would be a block the notice reader never sees.
+    SPDX_LINE = %r{^[ \t]*(?:(?:[#%*;/]+|--)[ \t]*)?SPDX-License-Identifier:[ \t]*((?:(?!\*/|-->)[^\r\n])*?)[ \t]*(?:(?:\*/|-->)[ \t]*)?\r?$}n
     ERXOS_DECLARATION_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--|<!--)[ \t]*)?#{ERXOS_NOTICE}[ \t]*(?:(?:\*\/|-->)[ \t]*)?\r?$/n
     # The license recorded for a file whose own notice names a license this
     # module does not recognise. It is not permissive, so the file enters no
     # build until a reviewed rule names it.
     UNRECOGNIZED_NOTICE = 'LicenseRef-unrecognized-notice'
-    # What a review rule is. A reviewed rule records a judgement about the
-    # files it names, by path or a brace list of paths but never a wildcard,
-    # and precedes their own notices; a package rule carries a package's
-    # declared license to the files of a whole tree that state none of their own.
-    RULE_KINDS = %w[reviewed package].freeze
+    # A review profile, validated whole when it is read (Attribution.review):
+    # the import it reviews (which scopes the notice table's pointers),
+    # corrections of exact upstream SPDX declarations, judgements of single
+    # files, each pinned to the SHA-256 of the bytes that were read, and
+    # package rules, which carry a package's declared license to the files
+    # of a tree that state none of their own. A judgement names its files and
+    # their bytes, never a pattern, so it covers no file nobody read.
+    Review = Data.define(:import, :corrections, :judgements, :packages, :default_license, :default_evidence)
+    Correction = Data.define(:pattern, :declared, :license, :evidence)
+    Judgement = Data.define(:sha256, :license, :evidence)
+    Package = Data.define(:pattern, :license, :evidence)
+    # One block of a file as the notice reader sees it: its normalised text
+    # without SPDX declaration lines, whether it is a comment, whether it
+    # lies in the file's header (before its first line of code), and the
+    # SPDX declarations it held.
+    Block = Data.define(:text, :comment, :header, :declarations)
+    # What a file's blocks say: its one SPDX declaration, if any, and the
+    # licenses its notices grant.
+    Reading = Data.define(:declaration, :licenses)
+    # A notice table entry: the license the block grants, or POINTER with
+    # the imports in which it was reviewed as a pointer to the package
+    # declaration, one row each.
+    Notice = Data.define(:license, :imports)
+    # The notice reader's one failure route, caught in for_file, which
+    # records the file as UNRECOGNIZED_NOTICE with the reason.
+    class Unrecognized < StandardError; end
+    private_constant :Unrecognized
 
     # A notice is read in blocks: each /* comment that spans lines, whole
     # with its blank lines; each run of line comments (one-line /* comments
@@ -69,29 +93,52 @@ module Erx
     POINTER = 'POINTER'
     NOTICE_ROW = %r{\A([0-9a-f]{64}) ([!-~]+) ([!-~](?:[ -~]*[!-~])?)\z}n
 
+    # The block shapes that are not notices: copyright lines and a file's
+    # description, which hold no word of a grant, a condition or a
+    # restriction once the copyright phrases are taken out. Every comment
+    # block in a file's header and every comment block beside a notice must
+    # be a listed notice, a stock GNU notice or of this shape, so a
+    # restriction worded without a license word is still a notice to read.
+    COPYRIGHT_PHRASE = /\bCopyright\b|\(c\)|\bAll rights reserved\b\.?/in
+    # Only words a technical description does not use: "permission", "must
+    # not" or "forbid" describe capabilities and protocols in a kernel's
+    # comments, so a restriction is caught by what it restricts instead.
+    LEGAL_WORD = Regexp.union(
+      LICENSE_MARK, /distribut|\bsell|\bsale|\bsold\b|resale|royalt|warrant|liab|indemn|patent|trademark/in,
+      /sublicens|prohibit|\ball rights\b|terms and conditions|\bterms of (?:use|sale|this)|without (?:prior |written |express )*(?:permission|consent)/in
+    )
+    SPDX_MENTION = /SPDX-License-Identifier/in
+
     # A GNU notice is read sentence by sentence, a period ending a sentence
-    # only before a space (not in "2.1", "gnu.org" or "Inc.,").
+    # only before a space (not in "2.1", "gnu.org" or "Inc.,"). Its grant
+    # and every other sentence holding a legal word must be one of the stock
+    # wordings below, word for word, so a restriction, an exception or a
+    # negated "any later version" added to one leaves the file unrecognised.
     SENTENCE = /(?:[^.]|\.(?! ))+\.?/n
-    GNU_NAMES = {
-      'General' => Regexp.union(/GNU General Public License/in, /\bGPL/n),
-      'Lesser' => Regexp.union(/GNU Lesser General Public License/in, /\bLGPL/n),
-      'Library' => /GNU Library General Public License/in
+    GNU_NAME = /GNU (?:General|Lesser General|Library General) Public License/n
+    GNU_SUBJECT = /This (?:program|library|file)/n
+    GNU_FREE = /#{GNU_SUBJECT} is free software; you can redistribute it and\/or modify it under the terms of the (#{GNU_NAME})/n
+    # Each stock grant with the term it gives: the name, then the version.
+    GNU_GRANTS = {
+      /\A#{GNU_FREE} as published by the Free Software Foundation; either version (\d(?:\.\d)?)(?: of the License)?, or \(at your option\) any later version\.?\z/n => 'or-later',
+      /\A#{GNU_FREE} as published by the Free Software Foundation; version (\d(?:\.\d)?)(?: of the License)?\.?\z/n => 'only',
+      /\A#{GNU_FREE},? version (\d(?:\.\d)?),? as published by the Free Software Foundation\.?\z/n => 'only',
+      /\AThis file is distributed under the terms of the (#{GNU_NAME}),?(?: version)? (\d(?:\.\d)?)\.?\z/n => 'only'
     }.freeze
-    GNU_NAME = Regexp.union(GNU_NAMES.values)
-    GNU_VERSION = /(?:\bversion|Public License,?|GPL)[ -]?v?(\d(?:\.\d)?)\b/in
-    GNU_LATER = /any later version|or later|\dv?(?:\.\d)?\+/in
     GNU_LICENSES = {
       ['General', '1'] => 'GPL-1.0', ['General', '2'] => 'GPL-2.0', ['General', '3'] => 'GPL-3.0',
       ['Library', '2'] => 'LGPL-2.0', ['Lesser', '2'] => 'LGPL-2.0', ['Lesser', '2.1'] => 'LGPL-2.1',
       ['Lesser', '3'] => 'LGPL-3.0'
     }.freeze
-    # The sentences of a GNU notice that grant nothing beside its grant.
-    GNU_BOILERPLATE = %r{\A ?(?:See the GNU|You should have received a copy of the GNU|If not, see <?https?://www\.gnu\.org/licenses/?>?\.?\z)}in
-    # The GCC Runtime Library Exception is the one exception recognised; any
-    # other exception leaves the file unrecognised.
-    GCC_EXCEPTION = /\A ?Under Section 7 of GPL version 3, you are granted additional permissions described in the GCC Runtime Library Exception, version 3\.1/in
-    OTHER_EXCEPTION = /special exception|additional permission|Library Exception|linking exception/in
-
+    # The stock sentences of a GNU notice that grant nothing beside its
+    # grant; the FSF's postal address, the one free part, holds no legal word.
+    GNU_BOILERPLATE = [
+      /\A#{GNU_SUBJECT} is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY(?:; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE)?\.?\z/n,
+      /\ASee the #{GNU_NAME} for more details\.?\z/n,
+      /\AYou should have received a copy of the #{GNU_NAME} along with this (?:program|library|file)(?:; if not, write to the Free Software Foundation, Inc\., (?<address>[0-9A-Za-z ,-]+))?\.?\z/n,
+      %r{\AIf not, see <https?://www\.gnu\.org/licenses/>\.?\z}n,
+      /\APlease see the COPYING-GPL-\d file for details\.?\z/n
+    ].freeze
 
     module_function
 
@@ -137,94 +184,213 @@ module Erx
       expression
     end
 
-    # The order of evidence: a correction of the file's exact upstream SPDX
-    # declaration, the file's SPDX line, its sidecar's, a reviewed rule, the
-    # file's own license notice, then a package rule and the default. A
-    # package declaration covers only files without a notice of their own.
-    # Notices are those of the reviewed table unless a caller names others.
+    # A review profile read and validated whole: every rule's kind, shape
+    # and license, before any file is attributed with it.
+    def review(profile)
+      corrections = []
+      judgements = {}
+      packages = []
+      profile.fetch('rules').each do |rule|
+        kind = rule.key?('declared_license') ? 'correction' : rule.fetch('kind', 'reviewed')
+        license = validate_expression(rule.fetch('license'))
+        evidence = rule.fetch('evidence')
+        case kind
+        when 'correction'
+          corrections << Correction.new(pattern: rule.fetch('pattern'), declared: rule.fetch('declared_license'),
+                                        license: license, evidence: evidence)
+        when 'package'
+          packages << Package.new(pattern: rule.fetch('pattern'), license: license, evidence: evidence)
+        when 'reviewed'
+          judged(rule).each do |path, sha256|
+            raise Error, "two reviewed rules judge #{path}" if judgements.key?(path)
+
+            judgements[path] = Judgement.new(sha256: sha256, license: license, evidence: evidence)
+          end
+        else
+          raise Error, "unknown review rule kind #{kind}"
+        end
+      end
+      Review.new(import: profile['import'], corrections: corrections.freeze, judgements: judgements.freeze,
+                 packages: packages.freeze, default_license: profile.fetch('default_license'),
+                 default_evidence: profile.fetch('default_evidence'))
+    end
+
+    # A reviewed rule's files, each with the SHA-256 of the bytes judged.
+    def judged(rule)
+      files = rule['files']
+      unless !rule.key?('pattern') && files.is_a?(Hash) && !files.empty? &&
+             files.all? { |path, sha256| path.is_a?(String) && sha256.is_a?(String) && sha256.match?(/\A[0-9a-f]{64}\z/) }
+        raise Error, "reviewed rule #{rule.fetch('evidence')[0, 60].inspect} must name each file it judged " \
+                     'with the SHA-256 of its bytes; a rule for a tree is a package rule'
+      end
+      files
+    end
+    private_class_method :judged
+
+    # The order of evidence: a reviewed judgement of the file's exact bytes;
+    # the file's one SPDX declaration (or its correction), or its sidecar's,
+    # which must name every license the file's notices grant; the file's own
+    # notices; a package rule; the default. A package declaration covers only
+    # files without a notice of their own. Notices are those of the reviewed
+    # table unless a caller names others.
     def for_file(path, bytes:, sidecar:, review:, notices: nil)
-      explicit = spdx(bytes)
-      correction = review.fetch('rules').find do |rule|
-        rule['declared_license'] && rule.fetch('declared_license') == explicit && matches_path?(rule, path)
-      end
-      return reviewed(correction) if correction
-      if explicit
-        validate_expression(explicit)
-        return { 'license' => explicit, 'evidence' => 'file SPDX', 'reviewed' => false }
+      judgement = review.judgements[path]
+      if judgement
+        raise Unrecognized, 'a reviewed rule judged other bytes' unless judgement.sha256 == Digest::SHA256.hexdigest(bytes)
+
+        return { 'license' => judgement.license, 'evidence' => judgement.evidence, 'reviewed' => true }
       end
 
-      attached = spdx(sidecar)
-      if attached
-        validate_expression(attached)
-        return { 'license' => attached, 'evidence' => "#{path}.license", 'reviewed' => false }
+      reading = read_notices(bytes, notices: notices || listed_notices, import: review.import)
+      declared = declaration(path, reading.declaration, review: review) || attached(path, sidecar)
+      return within(declared, licenses: reading.licenses) if declared
+      return notice_attribution(reading.licenses) unless reading.licenses.empty?
+
+      package = review.packages.find { |candidate| File.fnmatch?(candidate.pattern, path, PATTERN_FLAGS) }
+      return { 'license' => package.license, 'evidence' => package.evidence, 'reviewed' => true } if package
+
+      { 'license' => review.default_license, 'evidence' => review.default_evidence, 'reviewed' => true }
+    rescue Unrecognized => e
+      unrecognized(e.message)
+    end
+
+    PATTERN_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
+
+    # The attribution of a file's SPDX declaration: its correction when a
+    # reviewed one names the exact text, else the declaration itself.
+    def declaration(path, expression, review:)
+      return nil unless expression
+
+      correction = review.corrections.find do |candidate|
+        candidate.declared == expression && File.fnmatch?(candidate.pattern, path, PATTERN_FLAGS)
       end
+      return { 'license' => correction.license, 'evidence' => correction.evidence, 'reviewed' => true } if correction
 
-      by_kind = review.fetch('rules').reject { |candidate| candidate.key?('declared_license') }
-                      .group_by { |candidate| candidate.fetch('kind', 'reviewed') }
-      raise Error, "unknown review rule kind #{(by_kind.keys - RULE_KINDS).first}" unless (by_kind.keys - RULE_KINDS).empty?
-
-      wildcard = by_kind.fetch('reviewed', []).find { |candidate| candidate.fetch('pattern').match?(/[*?\[]/) }
-      raise Error, "reviewed rule #{wildcard.fetch('pattern')} has a wildcard; a rule for a tree is a package rule" if wildcard
-
-      named = by_kind.fetch('reviewed', []).find { |candidate| matches_path?(candidate, path) }
-      return reviewed(named) if named
-
-      own = notice(bytes, notices: notices || listed_notices)
-      return own if own
-
-      package = by_kind.fetch('package', []).find { |candidate| matches_path?(candidate, path) }
-      return reviewed(package) if package
-
-      { 'license' => review.fetch('default_license'),
-        'evidence' => review.fetch('default_evidence'), 'reviewed' => true }
+      { 'license' => declared_license(expression), 'evidence' => 'file SPDX', 'reviewed' => false }
     end
+    private_class_method :declaration
 
-    def matches_path?(rule, path)
-      File.fnmatch?(rule.fetch('pattern'), path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+    def attached(path, sidecar)
+      expression = spdx(sidecar)
+      expression && { 'license' => declared_license(expression), 'evidence' => "#{path}.license", 'reviewed' => false }
     end
-    private_class_method :matches_path?
+    private_class_method :attached
 
-    def reviewed(rule)
-      { 'license' => validate_expression(rule.fetch('license')), 'evidence' => rule.fetch('evidence'),
-        'reviewed' => true }
+    # A license expression a file declares: one that does not parse is the
+    # file's to answer for, so it leaves the file unrecognised rather than
+    # failing the whole inventory.
+    def declared_license(expression)
+      validate_expression(expression)
+    rescue Error
+      raise Unrecognized, 'an SPDX declaration that is not a license expression'
     end
-    private_class_method :reviewed
+    private_class_method :declared_license
 
-    # The license a file's own notice grants: nil when the file has no
-    # notice, or only pointers to a package declaration; UNRECOGNIZED_NOTICE
-    # when a notice block is neither in the table nor read as a GNU notice;
-    # otherwise every license granted, joined by AND, the listed notices'
-    # first. A file holding a NUL byte (a binary, or UTF-16 text) is not
-    # read: one whose text, with its NUL bytes removed, holds a license mark
-    # is unrecognised.
-    def notice(bytes, notices:)
+    # A declaration stands only if it names every license the file's
+    # notices grant.
+    def within(declared, licenses:)
+      outside = licenses.flat_map { |license| license_ids(license) } - license_ids(declared.fetch('license'))
+      raise Unrecognized, "a notice grants #{outside.first}, which the SPDX declaration does not name" unless outside.empty?
+
+      declared
+    end
+    private_class_method :within
+
+    def license_ids(expression) = expression.scan(/[A-Za-z0-9][A-Za-z0-9.+_:-]*/n) - %w[AND OR WITH]
+    private_class_method :license_ids
+
+    # The licenses of a file's notices joined by AND, each compound one
+    # bracketed so its OR or WITH never reaches across the AND.
+    def notice_attribution(licenses)
+      expression = if licenses.size == 1
+                     licenses.first
+                   else
+                     licenses.map { |license| license.match?(/\A[A-Za-z0-9.+_:-]+\z/n) ? license : "(#{license})" }.join(' AND ')
+                   end
+      { 'license' => validate_expression(expression), 'evidence' => 'file notice', 'reviewed' => false }
+    end
+    private_class_method :notice_attribution
+
+    # What a file's own blocks say (Reading). A file holding a NUL byte (a
+    # binary, or UTF-16 text) is not read: one whose text, with its NUL
+    # bytes removed, holds a license mark is unrecognised. A file may hold
+    # one SPDX declaration, on a line of its own in its header, and no other
+    # mention of one. Every block that holds a license mark, every comment
+    # block of the header and every comment block beside a marked one is
+    # read (block_licenses).
+    def read_notices(bytes, notices:, import:)
       bytes = bytes.b
       if bytes.include?("\0")
         words = bytes.delete("\0").scan(LICENSE_MARK).size
-        return words.positive? ? unrecognized("#{words} license words in a file holding NUL bytes") : nil
+        raise Unrecognized, "#{words} license words in a file holding NUL bytes" if words.positive?
+
+        return Reading.new(declaration: nil, licenses: [])
       end
 
-      marked = notice_blocks(bytes).select { |block| block.match?(LICENSE_MARK) }
-      # The table's license of each listed block, POINTER included; nil collects the unlisted.
-      by_license = marked.group_by { |block| notices[Digest::SHA256.hexdigest(block)] }
-      unlisted = by_license.delete(nil) || []
-      gnu = unlisted.map { |block| gnu_licenses(block) }
-      return unrecognized("#{gnu.count(nil)} notice blocks neither reviewed nor GNU") if gnu.include?(nil)
+      blocks = notice_blocks(bytes)
+      declarations = blocks.flat_map(&:declarations)
+      mentions = bytes.scan(SPDX_MENTION).size
+      unless mentions == declarations.size && mentions <= 1 && blocks.all? { |block| block.header || block.declarations.empty? }
+        raise Unrecognized, "#{mentions} SPDX mentions; one declaration line in the header is read"
+      end
 
-      licenses = (by_license.keys - [POINTER] + gnu.flatten).uniq
-      return nil if licenses.empty?
-
-      # Each license is one operand, so an OR in one never reaches across the AND.
-      expression = licenses.map { |license| license.include?(' OR ') ? "(#{license})" : license }.join(' AND ')
-      { 'license' => validate_expression(expression), 'evidence' => 'file notice', 'reviewed' => false }
+      licenses = read_blocks(blocks).flat_map { |block| block_licenses(block.text, notices: notices, import: import) }
+      Reading.new(declaration: declarations.first, licenses: licenses.uniq)
     end
-    private_class_method :notice
+    private_class_method :read_notices
 
-    # The normalised text of each block of a file (COMMENT_LEADER above).
-    # Each line is labelled with its block's kind: the number of the
-    # multi-line comment it lies in, :line_comments, :text, or :blank for a
-    # blank line that ends a multi-line comment's block or opens the file;
-    # every other blank line continues the run before it.
+    # The blocks the reader must account for: each holding a license mark,
+    # each comment block of the header and each comment block beside a
+    # marked one.
+    def read_blocks(blocks)
+      marked = blocks.map { |block| block.text.match?(LICENSE_MARK) }
+      blocks.each_with_index.select do |block, index|
+        beside = (index.positive? && marked[index - 1]) || marked[index + 1]
+        marked[index] || (block.comment && (block.header || beside))
+      end.map(&:first)
+    end
+    private_class_method :read_blocks
+
+    # The licenses one read block grants: a listed notice's, none for a
+    # pointer reviewed in this import or a block of no legal word, a stock
+    # GNU notice's; any other block leaves the file unrecognised.
+    def block_licenses(text, notices:, import:)
+      row = notices[Digest::SHA256.hexdigest(text)]
+      if row
+        return [row.license] unless row.license == POINTER
+        return [] if row.imports.include?(import)
+
+        raise Unrecognized, 'a pointer not reviewed in this import'
+      end
+      gnu = gnu_licenses(text)
+      return gnu if gnu
+      return [] if plain?(text)
+
+      raise Unrecognized, 'a block neither a reviewed notice, a stock GNU notice nor free of legal words'
+    end
+    private_class_method :block_licenses
+
+    # The texts of a file's read blocks that only the notice table can
+    # account for: neither stock GNU notices nor free of legal words. These
+    # are what a reviewer reads before listing a row.
+    def unread_blocks(bytes)
+      return [] if bytes.b.include?("\0")
+
+      read_blocks(notice_blocks(bytes)).map(&:text).reject { |text| gnu_licenses(text) || plain?(text) }
+    end
+
+    # Whether a block or sentence holds no legal word once its copyright
+    # phrases are taken out.
+    def plain?(text) = !text.gsub(COPYRIGHT_PHRASE, '').match?(LEGAL_WORD)
+    private_class_method :plain?
+
+    # A file's blocks (Block). Each line is labelled with its block's kind:
+    # the number of the multi-line comment it lies in, :line_comments,
+    # :text, or :blank for a blank line that ends a multi-line comment's
+    # block or opens the file; every other blank line continues the run
+    # before it. A C preprocessor line (#define, #include) opens with a
+    # comment leader and is labelled a comment line, so a block it joins is
+    # read whole, which can only leave a file unrecognised.
     def notice_blocks(bytes)
       inside = false
       comments = 0
@@ -233,17 +399,24 @@ module Erx
         started_inside = inside
         inside = line.scan(COMMENT_DELIMITER).reduce(inside) { |open, mark| open ? mark != '*/' : mark == '/*' }
         comments += 1 if inside && !started_inside
-        kind = case line
-               when ->(_) { started_inside || (inside && line.match?(COMMENT_LINE)) } then comments
-               when LINE_COMMENT then :line_comments
-               when /\S/n then :text
-               else kind.is_a?(Integer) ? :blank : kind
+        kind = if started_inside || (inside && line.match?(COMMENT_LINE)) then comments
+               elsif line.match?(LINE_COMMENT) then :line_comments
+               elsif line.match?(/\S/n) then :text
+               elsif kind.is_a?(Integer) then :blank
+               else kind
                end
         [kind, line]
       end
+      header = true
       labelled.slice_when { |(before, _), (after, _)| before != after }
               .reject { |run| run.first.first == :blank }
-              .map { |run| normalise(run.map(&:last).join) }
+              .map do |run|
+                comment = run.first.first != :text
+                header &&= comment
+                declared, lines = run.map(&:last).partition { |line| line.match?(SPDX_LINE) }
+                Block.new(text: normalise(lines.join), comment: comment, header: header,
+                          declarations: declared.map { |line| declared_expression(line) })
+              end
     end
 
     # A block's words without comment leaders, closers, box characters or
@@ -259,21 +432,32 @@ module Erx
     end
     private_class_method :unrecognized
 
-    # The reviewed notice table, read once: SHA-256 to license.
+    # The reviewed notice table, read once: SHA-256 to Notice.
     def listed_notices
       @listed_notices ||= notice_table(BoundedFile.read(NOTICE_TABLE, maximum: 1_048_576))
     end
 
     # A notice table's rows, refused whole at the first malformed, unsorted
-    # or repeated one.
+    # or repeated one. A license is kept in canonical spacing. A pointer
+    # belongs to the import its example names first, and the same pointer
+    # text has one row for each import it was reviewed in.
     def notice_table(bytes)
       rows = bytes.b.lines.map(&:chomp).reject { |line| line.empty? || line.start_with?('#') }
       table = rows.each_with_object({}) do |row, read|
-        sha256, _example, license = NOTICE_ROW.match(row)&.captures
+        sha256, example, license = NOTICE_ROW.match(row)&.captures
         raise Error, "malformed notice table row: #{row[0, 80].inspect}" unless sha256
-        raise Error, "notice table repeats #{sha256}" if read.key?(sha256)
 
-        read[sha256] = license == POINTER ? POINTER : validate_expression(license)
+        known = read[sha256]
+        if license == POINTER && (known.nil? || known.license == POINTER)
+          imports = (known&.imports || []) + [example.split('/').first]
+          raise Error, "notice table repeats #{sha256} for #{imports.last}" unless imports.uniq == imports
+
+          read[sha256] = Notice.new(license: POINTER, imports: imports.freeze)
+        else
+          raise Error, "notice table repeats #{sha256}" if known
+
+          read[sha256] = Notice.new(license: canonical(validate_expression(license)), imports: [].freeze)
+        end
       end
       raise Error, 'notice table rows are not sorted by hash' unless rows.sort == rows
 
@@ -281,50 +465,49 @@ module Erx
     end
     private_class_method :notice_table
 
-    # The licenses of one block's GNU notice, or nil unless every sentence
-    # holding a license mark is a grant naming one GNU license and one
-    # version, with "any later version" or not, and nothing else, a
-    # boilerplate sentence, or the GCC Runtime Library Exception to the
-    # block's GPL-3.0-or-later grants.
-    def gnu_licenses(block)
-      grants = []
-      exception = false
-      block.scan(SENTENCE).each do |sentence|
-        if sentence.match?(GCC_EXCEPTION)
-          exception = true
-        elsif sentence.match?(GNU_BOILERPLATE)
-          next
-        elsif sentence.match?(OTHER_EXCEPTION)
-          return nil
-        elsif sentence.match?(LICENSE_MARK)
-          license = gnu_license(sentence)
-          return nil unless license
+    # A license expression with one space between operands and operators
+    # and none inside brackets.
+    def canonical(expression)
+      expression.scan(/[A-Za-z0-9][A-Za-z0-9.+_:-]*|[()]/n).join(' ').gsub('( ', '(').gsub(' )', ')')
+    end
+    private_class_method :canonical
 
-          grants << license
+    # The licenses of one block's GNU notice, or nil unless it holds a stock
+    # grant and every other sentence is a stock one or holds no legal word.
+    def gnu_licenses(block)
+      grants = block.scan(SENTENCE).map(&:strip).each_with_object([]) do |sentence, found|
+        grant = gnu_grant(sentence)
+        if grant
+          found << grant
+        elsif !gnu_boilerplate?(sentence) && !plain?(sentence)
+          return nil
         end
       end
-      return nil if grants.empty? || (exception && grants.any? { |grant| grant != 'GPL-3.0-or-later' })
-
-      exception ? grants.map { |grant| "#{grant} WITH GCC-exception-3.1" } : grants
+      grants.empty? ? nil : grants
     end
     private_class_method :gnu_licenses
 
-    # Whether one notice block reads as a GNU notice.
-    def gnu_notice?(block) = !gnu_licenses(block).nil?
+    # The license of one stock GNU grant sentence, or nil.
+    def gnu_grant(sentence)
+      GNU_GRANTS.each do |form, term|
+        match = form.match(sentence)
+        next unless match
 
-    # The license of one GNU grant sentence, or nil when it names no GNU
-    # license, more than one GNU license or version, or a pair GNU_LICENSES
-    # does not hold.
-    def gnu_license(sentence)
-      names = GNU_NAMES.select { |_, name| sentence.match?(name) }.keys
-      versions = sentence.scan(GNU_VERSION).map { |(version)| version.delete_suffix('.0') }.uniq
-      return nil unless names.size == 1 && versions.size == 1
-      return nil if sentence.gsub(GNU_NAME, '').gsub(/\blicen[cs]e[ds]?\b/in, '').match?(LICENSE_MARK)
-
-      base = GNU_LICENSES[[names.first, versions.first]]
-      base && "#{base}-#{sentence.match?(GNU_LATER) ? 'or-later' : 'only'}"
+        family = match[1][/Lesser|Library/n] || 'General'
+        base = GNU_LICENSES[[family, match[2].delete_suffix('.0')]]
+        return base && "#{base}-#{term}"
+      end
+      nil
     end
-    private_class_method :gnu_license
+    private_class_method :gnu_grant
+
+    def gnu_boilerplate?(sentence)
+      GNU_BOILERPLATE.any? do |form|
+        match = form.match(sentence)
+        match && (!match.names.include?('address') || match[:address].nil? || plain?(match[:address]))
+      end
+    end
+    private_class_method :gnu_boilerplate?
 
     # Whether a file in an imported tree with no inventory row is erXos's own
     # code: its header holds erXos's notice, and neither a license declaration
@@ -373,14 +556,16 @@ module Erx
       false
     end
 
+    # The expression of an SPDX declaration line, without a comment closer.
+    def declared_expression(line) = line[SPDX_LINE, 1].sub(/[ \t]*(?:\*\/|-->).*\z/n, '').strip
+    private_class_method :declared_expression
+
+    # A sidecar's SPDX declaration.
     def spdx(bytes)
       return nil if bytes.nil? || bytes.include?("\0")
 
-      match = bytes.match(SPDX_LINE)
-      return nil unless match
-
-      expression = match[1].sub(/[ \t]*(?:\*\/|-->).*\z/n, '').strip
-      expression
+      line = bytes.b[SPDX_LINE]
+      line && declared_expression(line)
     end
     private_class_method :spdx
   end
@@ -415,6 +600,7 @@ module Erx
       raise Error, "origin already exists: #{output}" if File.exist?(output) || File.symlink?(output)
       raise Error, 'invalid import SHA-256' unless /\A[0-9a-f]{64}\z/.match?(archive_sha256)
 
+      review = Attribution.review(review)
       inventory = files.to_h do |path|
         [path, inventory_entry(path, review: review)]
       end

@@ -42,7 +42,7 @@ Third-party notices remain in their original files.
     },
     "README.md": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 notice blocks neither reviewed nor GNU); review the file",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "d18cac7fe8deda9127353a18743fcb82d679730bb797a9c11ff7e1c4079dfcc6",
       "kind": "file",
@@ -233,8 +233,8 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     },
     "lib/contrib/sbom.cdx.json": {
-      "license": "GPL-2.0-only",
-      "evidence": "file notice",
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "48833f865f6d49358d7c6306e2c35840c775828e258619c4919bba5f474621a3",
       "kind": "file",

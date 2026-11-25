@@ -9,8 +9,8 @@ require_relative '../../tools/lib/erx/origin'
 class OriginTest < Minitest::Test
   def setup
     @directory = Dir.mktmpdir('erx-origin-')
-    @review = { 'default_license' => 'MIT', 'default_evidence' => 'reviewed COPYRIGHT',
-                'rules' => [{ 'pattern' => 'special.c', 'license' => 'BSD-2-Clause',
+    @review = { 'import' => 'fixture', 'default_license' => 'MIT', 'default_evidence' => 'reviewed COPYRIGHT',
+                'rules' => [{ 'files' => { 'special.c' => Digest::SHA256.hexdigest(GPL_LINE) }, 'license' => 'BSD-2-Clause',
                               'evidence' => 'reviewed file notice' }] }
     @origin = Erx::Origin.new(root: @directory)
   end
@@ -29,16 +29,18 @@ class OriginTest < Minitest::Test
   end
 
   def attribution(path, bytes:, sidecar: nil, notices: Erx::Attribution.listed_notices)
-    Erx::Attribution.for_file(path, bytes: bytes, sidecar: sidecar, review: @review, notices: notices)
+    Erx::Attribution.for_file(path, bytes: bytes, sidecar: sidecar, review: Erx::Attribution.review(@review),
+                                    notices: notices)
   end
 
   # A notice table listing the one notice block of each file's bytes.
-  def self.table_of(licenses)
+  def self.table_of(licenses, import = 'fixture')
     licenses.to_h do |bytes, license|
-      blocks = Erx::Attribution.notice_blocks(bytes).grep(Erx::Attribution::LICENSE_MARK)
+      blocks = Erx::Attribution.notice_blocks(bytes).map(&:text).grep(Erx::Attribution::LICENSE_MARK)
       raise "#{blocks.size} notice blocks" unless blocks.size == 1
 
-      [Digest::SHA256.hexdigest(blocks.first), license]
+      [Digest::SHA256.hexdigest(blocks.first),
+       Erx::Attribution::Notice.new(license: license, imports: license == 'POINTER' ? [import] : [])]
     end
   end
 
@@ -56,7 +58,7 @@ class OriginTest < Minitest::Test
   def test_sidecar_and_reviewed_exception
     attached = attribution('data', bytes: "\0data", sidecar: "SPDX-License-Identifier: Zlib\n")
     assert_equal 'Zlib', attached.fetch('license')
-    reviewed = attribution('special.c', bytes: 'no SPDX')
+    reviewed = attribution('special.c', bytes: GPL_LINE)
     assert_equal 'BSD-2-Clause', reviewed.fetch('license')
     assert reviewed.fetch('reviewed')
   end
@@ -71,7 +73,7 @@ class OriginTest < Minitest::Test
     assert_equal 'GPL-2.0-only', result.fetch('license')
     assert result.fetch('reviewed')
     changed = bytes.sub('or License-Ref', 'or Different-Ref')
-    assert_raises(Erx::Error) { attribution('upstream.c', bytes: changed) }
+    assert_equal UNRECOGNIZED, attribution('upstream.c', bytes: changed).fetch('license')
   end
 
   # Made-up notices, and forms that must stay unknown rather than fall to
@@ -125,6 +127,8 @@ class OriginTest < Minitest::Test
     details.
   TEXT
   GPL_LINE = "/* Licensed under the GPLv2. */\n"
+  GPL_NOTICE = "/* This program is free software; you can redistribute it and/or modify it under the terms of " \
+               "the GNU General Public License as published by the Free Software Foundation; version 2 of the License. */\n"
 
   NOTICES = {
     'LGPL library' => [comment(<<~TEXT), 'LGPL-2.0-or-later'],
@@ -134,7 +138,7 @@ class OriginTest < Minitest::Test
       option) any later version.  See the GNU Library General Public License for
       more details.
     TEXT
-    'GCC exception' => [comment(<<~TEXT, leader: '# '), 'GPL-3.0-or-later WITH GCC-exception-3.1'],
+    'GCC exception' => [comment(<<~TEXT, leader: '# '), Erx::Attribution::UNRECOGNIZED_NOTICE],
       This file is free software; you can redistribute it and/or modify it under
       the terms of the GNU General Public License as published by the Free
       Software Foundation; either version 3, or (at your option) any later version.
@@ -150,8 +154,9 @@ class OriginTest < Minitest::Test
     TEXT
     'GPL by number' => ["// This file is distributed under the terms of the GNU General Public License 2.\n" \
                         "// Please see the COPYING-GPL-2 file for details.\n", 'GPL-2.0-only'],
-    'bare GPLv2' => [GPL_LINE, 'GPL-2.0-only'],
-    'bare GPLv2 or later' => ["/* Licensed under GPLv2 or later. */\n", 'GPL-2.0-or-later'],
+    'bare GPLv2' => [GPL_LINE, Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'bare GPLv2 or later' => ["/* Licensed under GPLv2 or later. */\n", Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'stock GPL' => [GPL_NOTICE, 'GPL-2.0-only'],
     'LGPL in %% comments' => [LGPL_TEXT.lines.map { |line| "%% #{line}" }.join, 'LGPL-2.1-or-later'],
     'LLVM' => ["//===- Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.\n" \
                "// See https://llvm.org/LICENSE.txt for license information.\n", 'Apache-2.0 WITH LLVM-exception'],
@@ -274,24 +279,120 @@ class OriginTest < Minitest::Test
   def test_a_dual_license_row_is_one_operand
     dual = self.class.comment(MIT_TEXT + "\n" + MIT_DISCLAIMER)
     table = self.class.table_of(dual => 'MIT OR GPL-2.0-only')
-    bytes = dual + "int x;\n" + GPL_LINE
+    bytes = dual + "int x;\n" + GPL_NOTICE
     assert_equal '(MIT OR GPL-2.0-only) AND GPL-2.0-only', attribution('upstream.c', bytes: bytes, notices: table).fetch('license')
   end
 
-  # A GNU grant sentence names its license and nothing more, and the GCC
-  # exception covers only the grant of its own block.
-  def test_a_gnu_notice_is_read_block_by_block
-    restricted = "/* Licensed under the GPLv2 and is proprietary otherwise. */\n"
-    assert_equal Erx::Attribution::UNRECOGNIZED_NOTICE, attribution('upstream.c', bytes: restricted).fetch('license')
-    gcc = NOTICES.fetch('GCC exception').first
-    plain = "/* Licensed under GPLv3 or later. */\n"
-    assert_equal 'GPL-3.0-or-later WITH GCC-exception-3.1 AND GPL-3.0-or-later',
-                 attribution('upstream.c', bytes: gcc + "int x;\n" + plain).fetch('license')
+  # A GNU notice is read only in its stock wordings: a grant or a
+  # boilerplate sentence with words added, a negated "any later version" or
+  # an exception leaves the file unrecognised.
+  def test_a_gnu_notice_is_read_only_in_its_stock_wordings
+    free = 'This program is free software; you can redistribute it and/or modify it under the terms of the ' \
+           'GNU General Public License as published by the Free Software Foundation;'
+    {
+      "/* #{free} either version 2 of the License, or (at your option) any later version. */\n" => 'GPL-2.0-or-later',
+      "/* #{free} version 2 of the License. See the GNU General Public License for more details. */\n" => 'GPL-2.0-only',
+      "/* #{free} version 2, but you may not sell it. */\n" => UNRECOGNIZED,
+      "/* #{free} version 3. You should have received a copy of the GNU General Public License, " \
+      "but this file is proprietary and confidential. */\n" => UNRECOGNIZED,
+      "/* #{free} version 2. You should have received a copy of the GNU General Public License along with " \
+      "this program; if not, write to the Free Software Foundation, Inc., but you may not sell it. */\n" => UNRECOGNIZED,
+      "/* This file is distributed under version 2 of the GNU General Public License, and not any later version. */\n" =>
+        UNRECOGNIZED,
+      "/* Licensed under the GPLv2 and is proprietary otherwise. */\n" => UNRECOGNIZED
+    }.each do |bytes, license|
+      assert_equal license, attribution('upstream.c', bytes: bytes).fetch('license'), bytes
+    end
+  end
+
+  UNRECOGNIZED = Erx::Attribution::UNRECOGNIZED_NOTICE
+  LISTED_MIT = comment(MIT_TEXT + "\n" + MIT_DISCLAIMER)
+
+  # Every comment block of the header, and every comment block beside a
+  # notice, is a listed notice, a stock GNU notice or free of legal words,
+  # so a restriction written without a license word is still read.
+  def test_a_block_in_the_header_or_beside_a_notice_is_read
+    table = self.class.table_of(LISTED_MIT => 'MIT')
+    described = "/*\n * Copyright (c) 2001 A. Author. All rights reserved.\n * The scheduler's run queues.\n */\n" \
+                "#include <stdint.h>\n\n#{LISTED_MIT}\nint x;\n/* sell nothing here */\n"
+    {
+      described => 'MIT',
+      "#{LISTED_MIT}/* You may not redistribute or sell this file. */\nint x;\n" => UNRECOGNIZED,
+      "/* Not for redistribution. */\n\n#include <stdint.h>\n#{LISTED_MIT}\nint x;\n" => UNRECOGNIZED,
+      "int x;\n#{LISTED_MIT}// Do not sell.\nint y;\n" => UNRECOGNIZED,
+      "// #{MIT_TEXT.lines.first}#define X 1\n// Not for redistribution or sale\n" => UNRECOGNIZED
+    }.each do |bytes, license|
+      assert_equal license, attribution('upstream.c', bytes: bytes, notices: table).fetch('license'), bytes
+    end
+  end
+
+  # A file may hold one SPDX declaration, on its own line in its header,
+  # and it must name every license the file's notices grant.
+  def test_one_spdx_declaration_in_the_header_names_every_notice
+    table = self.class.table_of(LISTED_MIT => 'MIT')
+    {
+      "// SPDX-License-Identifier: MIT\n#{LISTED_MIT}int x;\n" => 'MIT',
+      "// SPDX-License-Identifier: GPL-2.0-only OR MIT\n#{GPL_NOTICE}int x;\n" => 'GPL-2.0-only OR MIT',
+      "// SPDX-License-Identifier: MIT\n#{GPL_NOTICE}int x;\n" => UNRECOGNIZED,
+      "#{GPL_NOTICE}print <<X\nSPDX-License-Identifier: MIT\nX\n" => UNRECOGNIZED,
+      "// SPDX-License-Identifier: MIT\n// SPDX-License-Identifier: ISC\nint x;\n" => UNRECOGNIZED,
+      "// SPDX-License-Identifier: MIT\nconst char *s = \"SPDX-License-Identifier\";\n" => UNRECOGNIZED,
+      "/* SPDX-License-Identifier: MIT */\nint x;\n" => 'MIT',
+      # Text after a declaration's comment closer is a block the reader
+      # never sees, so the line is no declaration and the file is refused.
+      "/* SPDX-License-Identifier: MIT */ /* Proprietary; GPL-3.0-only applies. */\nint x;\n" => UNRECOGNIZED,
+      "/* SPDX-License-Identifier: MIT */ int x;\n" => UNRECOGNIZED,
+      # A declaration that is no license expression refuses the file, not
+      # the whole inventory.
+      "/* SPDX-License-Identifier: MIT (see LICENSE) */\nint x;\n" => UNRECOGNIZED,
+      "# SPDX-License-Identifier: MIT #\nx = 1\n" => UNRECOGNIZED
+    }.each do |bytes, license|
+      assert_equal license, attribution('upstream.c', bytes: bytes, notices: table).fetch('license'), bytes
+    end
+  end
+
+  # A listed license is kept in canonical spacing and bracketed when it is
+  # joined to another, however its row spaces it.
+  def test_a_compound_listed_license_is_bracketed
+    row = "#{Digest::SHA256.hexdigest(Erx::Attribution.notice_blocks(LISTED_MIT).first.text)} fixture/a.c MIT OR(Apache-2.0)\n"
+    table = Erx::Attribution.send(:notice_table, row)
+    assert_equal '(MIT OR (Apache-2.0)) AND GPL-2.0-only',
+                 attribution('upstream.c', bytes: "#{LISTED_MIT}int x;\n#{GPL_NOTICE}", notices: table).fetch('license')
+  end
+
+  # A reviewed rule judges the bytes it pins; other bytes at its path are
+  # unrecognised, and a rule without pinned files is refused at load.
+  def test_a_reviewed_rule_judges_only_its_pinned_bytes
+    assert_equal 'BSD-2-Clause', attribution('special.c', bytes: GPL_LINE).fetch('license')
+    assert_equal UNRECOGNIZED, attribution('special.c', bytes: GPL_LINE + "/* no sale */\n").fetch('license')
+  end
+
+  # A profile is refused whole when it is read, before any file's own
+  # declaration could make a bad rule unreachable.
+  def test_a_review_profile_is_refused_whole_at_load
+    [{ 'pattern' => '*', 'license' => 'MIT', 'evidence' => 'a tree' },
+     { 'files' => { 'a.c' => 'x' }, 'license' => 'MIT', 'evidence' => 'no hash' },
+     { 'pattern' => 'a.c', 'license' => 'MIT', 'kind' => 'guess', 'evidence' => 'none' },
+     { 'pattern' => 'a/**/*', 'license' => 'NOASSERTION', 'kind' => 'package', 'evidence' => 'none' }].each do |rule|
+      @review['rules'] = [rule]
+      assert_raises(Erx::Error, rule.inspect) { attribution('a.c', bytes: "// SPDX-License-Identifier: MIT\n") }
+    end
+  end
+
+  # A pointer to a package declaration counts only in the import it was
+  # reviewed in.
+  def test_a_pointer_counts_only_in_its_own_import
+    pointer = "/* License: see LICENSE */\n"
+    table = self.class.table_of({ pointer => 'POINTER' })
+    assert_equal 'MIT', attribution('upstream.c', bytes: pointer, notices: table).fetch('license')
+    @review['import'] = 'other'
+    assert_equal UNRECOGNIZED, attribution('upstream.c', bytes: pointer, notices: table).fetch('license')
   end
 
   def test_a_malformed_notice_table_is_refused
     row = "#{'a' * 64} a.c MIT\n"
-    assert_equal({ 'a' * 64 => 'MIT' }, Erx::Attribution.send(:notice_table, "# header\n#{row}"))
+    assert_equal({ 'a' * 64 => Erx::Attribution::Notice.new(license: 'MIT', imports: []) },
+                 Erx::Attribution.send(:notice_table, "# header\n#{row}"))
     ["#{'a' * 63} a.c MIT\n", "#{'A' * 64} a.c MIT\n", "#{'a' * 64} a.c MIT \n", row + row, "#{'b' * 64} b.c MIT\n#{row}", "#{'a' * 64} a.c NOASSERTION\n"].each do |table|
       assert_raises(Erx::Error) { Erx::Attribution.send(:notice_table, table) }
     end
@@ -301,7 +402,7 @@ class OriginTest < Minitest::Test
     @review.fetch('rules') << { 'pattern' => 'package/**/*', 'license' => 'LGPL-2.1-or-later', 'kind' => 'package',
                                 'evidence' => 'package declaration' }
     assert_equal 'BSD-2-Clause', attribution('special.c', bytes: GPL_LINE).fetch('license')
-    assert_equal 'GPL-2.0-only', attribution('package/a.c', bytes: GPL_LINE).fetch('license')
+    assert_equal 'GPL-2.0-only', attribution('package/a.c', bytes: GPL_NOTICE).fetch('license')
     assert_equal 'LGPL-2.1-or-later', attribution('package/b.c', bytes: "int b;\n").fetch('license')
     @review.fetch('rules') << { 'pattern' => 'x', 'license' => 'MIT', 'kind' => 'guess', 'evidence' => 'none' }
     assert_raises(Erx::Error) { attribution('package/b.c', bytes: "int b;\n") }
@@ -311,9 +412,8 @@ class OriginTest < Minitest::Test
   end
 
   def test_unknown_permission_is_refused
-    assert_raises(Erx::Error) do
-      attribution('fixture', bytes: "# SPDX-License-Identifier: NOASSERTION\n")
-    end
+    assert_equal UNRECOGNIZED,
+                 attribution('fixture', bytes: "# SPDX-License-Identifier: NOASSERTION\n").fetch('license')
   end
 
   def test_complete_license_expression_is_required
