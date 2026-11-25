@@ -149,10 +149,20 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   only by the test's extraction with fsimg itself. A long-name and subdirectory walk in `FatVolume` closes it.
 * [Medium] benchmarks, the board walk (`BoardWalk`, `BoardConsole`, `BoardRun`,
   [design-bench.md](design-bench.md#the-walk)): the walk, the console, the ssh calls and `tools/erx bench NAME
-  --env pi4-4gb-erxos` are built and tested on the host with fakes; what remains is (1) `--profile full`, refused
-  because `NativeBench::BoardSets` builds only the landing form; (2) the first run on the desk's board, which checks
-  `BoardConsole.set_line`'s `stty` on the macOS serial device (unverified) and is seeded with the last entry made
-  from the first. One implementer.
+  --env pi4-4gb-erxos` walk the desk's board end to end (a pty from the Glasgow UART relay as `--console`, `stty`
+  accepted); what remains is (1) `--profile full`, refused because `NativeBench::BoardSets` builds only the landing
+  form; (2) the ssh calls never succeed on the board: its development host key is new on every boot, so
+  `ssh -o BatchMode=yes` against the user's known_hosts fails, the reboot is typed on the console by hand and both
+  sensor readings are `unknown`; the walk needs a per-boot known-hosts file as `DevKey` keeps for QEMU guests, and its
+  own key, which is a security choice to settle first; (3) a bad `--http` link is refused only under the lock, after
+  the set is built, though the command's comment says every refusal comes before the build.
+* [High] benchmarks, the board's console drops the tail of every line over 1,023 bytes: on the Pi 4 the bench root's
+  `BENCH` lines for `nullcall`'s `other-cpu` cells (wide histograms, about 2-3 KiB) end after exactly 1,023 bytes with
+  the next naming line where their newline belongs, so those cells are `rejected` (record
+  `~/erxos-history/bench/pi4-4gb-erxos/20261125T200107Z-af9b3afc3c2c-dirty-8206ee98ebba`); QEMU boots carry 9.5 KiB lines
+  whole. `erx_fiasco_console_write` (`liberx/backend/fiasco/console.c`) stops at the first `l4_vcon_write` that
+  fails, which fits a write refused after 1,023 bytes; where (the vcon call, `Vlog::log_string`, the board's UART
+  driver or the host's Glasgow relay) is unverified. Needs a regression test on the board that prints a 4 KiB line.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
 other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a

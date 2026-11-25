@@ -1158,7 +1158,9 @@ erXos's ticks times 128 are counts of the same clock. TCG was not run.
 ### The walk
 
 `tools/erx bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST
---key FILE [--runs N] [--profile landing|full] [--set DIR ...]` runs it:
+--key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR ...]` runs it,
+with `--http DIR` the served link that `tools/erx netboot --http` stages and
+`tools/erx netboot serve --http` serves (`~/erxos-http` when not given):
 
 1. **Before anything is served**, every refusal of
    [Refusals and error results](#refusals-and-error-results) is checked,
