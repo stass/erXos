@@ -1,0 +1,496 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+-module(erx_fat).
+-moduledoc """
+The FAT server's read path (docs/design-storage.md, "Removable media: FAT", and
+docs/design-drives.md, "FAT"): one FAT16 or FAT32 volume of a drive, read through
+the function it is handed, which reads one 512-byte sector of the volume's
+placement. It holds no device and no process; the volume process
+(erx_media_volume) holds what mount/2 answers and runs each operation on it. Every
+byte of the volume is untrusted input.
+
+* **The mount.** The boot sector's type is erx_fat_read:boot_sector/1's, the
+  decoder the drives' probe used; FAT16 and FAT32 are admitted, with 512-byte
+  sectors, a power-of-two cluster of at most 128 sectors, every region inside
+  the placement, and a FAT that holds an entry for every cluster of the data
+  area. Anything else is `not_its_volume`. The FAT read is the first copy, or the
+  one FAT32's mirroring flags name active; its second entry's clean bit is the
+  volume's dirty flag.
+* **Directories.** A directory is read entry by entry to its end marker or its
+  last entry: FAT16's root as its fixed region, every other directory as its
+  cluster chain, at most 65,536 entries (2 MiB), the specification's bound. A
+  long name counts only when its entries run in order from the last to the first,
+  each with the checksum of the short entry that follows them, and its UTF-16 is
+  valid and fits 255 bytes of UTF-8; otherwise the entry is listed under its short
+  name, decoded as code page 437 with the case flags Windows writes. A name the
+  specification forbids (a `/`, a control, `.` or `..` among them) is never
+  listed, so no name a medium supplies reaches outside its directory. Deleted
+  entries, volume labels and the `.` and `..` entries are not listed.
+* **Lookups.** A name is found by its bytes, or else by the same letters with
+  ASCII case ignored; the first entry that matches is the file.
+* **Reads.** A chain is followed at most as many steps as the read needs and the
+  volume has clusters, each link a cluster of the data area not seen before in
+  the chain; a link out of the data area, a cluster seen twice and an end of
+  chain before the clusters needed are `does_not_read`. A read answers at most
+  the bytes the directory entry's size gives.
+
+A sector the function does not answer with 512 bytes is `read_failed`, about the
+medium's reading and not the volume's form. Each finding leaves through one
+throw, `{erx_fat, Finding}`, caught at each exported entry; anything else the read
+function raises propagates.
+""".
+
+-export([mount/2, info/1, root/1, walk/3, attr/1, list/2, read/4, key/1]).
+-export_type([fat/0, fat_node/0, finding/0, read_sector/0]).
+
+-define(SECTOR, 512).
+-define(ENTRY, 32).
+-define(ENTRIES_PER_SECTOR, (?SECTOR div ?ENTRY)).
+%% A directory holds at most 65,536 entries (the FAT specification, section 6).
+-define(DIR_ENTRIES_MAX, 65536).
+-define(NAME_BYTES_MAX, 255).
+%% Directory entry markers and attributes (sections 6 and 7).
+-define(END_OF_DIRECTORY, 16#00).
+-define(DELETED, 16#e5).
+-define(KANJI_E5, 16#05).
+-define(READ_ONLY, 16#01).
+-define(VOLUME_ID, 16#08).
+-define(DIRECTORY, 16#10).
+-define(LONG_NAME, 16#0f).
+-define(LONG_NAME_MASK, 16#3f).
+-define(ORDER_MASK, 16#3f).
+-define(LAST_LONG_ENTRY, 16#40).
+%% The case flags of a short entry's NTRes byte, as Windows writes them.
+-define(LOWER_BASE, 16#08).
+-define(LOWER_EXTENSION, 16#10).
+%% The boot sector's extended signature, behind which its serial and label lie.
+-define(EXTENDED_BOOT, 16#29).
+%% 1980-01-01T00:00:00Z, FAT's first time, in seconds since the UNIX epoch.
+-define(FAT_EPOCH, 315532800).
+%% The least entry that ends a chain (section 4.1).
+-define(END_MARK_16, 16#fff8).
+-define(END_MARK_32, 16#0ffffff8).
+
+-type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
+-type finding() :: not_its_volume | does_not_read | read_failed.
+
+%% The volume as its boot sector lays it out, in sectors from the placement's start.
+%% root is FAT16's fixed root region, {fixed, FirstSector, Entries}, or FAT32's root
+%% cluster.
+-record(fat, {read :: read_sector(),
+              type :: 16 | 32,
+              per_cluster :: pos_integer(),
+              fat_start :: pos_integer(),
+              data_start :: pos_integer(),
+              clusters :: pos_integer(),
+              root :: {fixed, pos_integer(), pos_integer()} | pos_integer(),
+              label :: binary() | none,
+              serial :: non_neg_integer() | none,
+              clean :: boolean()}).
+
+%% A file or directory: which it is, its key (root; a directory by its first
+%% cluster, so two entries naming one directory name one key; a file by where its
+%% entry lies, {file, ParentKey, Index}); its first cluster (0 for an empty file),
+%% its size and its modification time.
+-type key() :: root | {dir, pos_integer()} | {file, root | {dir, pos_integer()}, non_neg_integer()}.
+-record(fat_node, {key :: key(),
+                   kind :: dir | file,
+                   first :: non_neg_integer() | root,
+                   size :: non_neg_integer(),
+                   mtime :: non_neg_integer(),
+                   read_only :: boolean()}).
+
+-opaque fat() :: #fat{}.
+-opaque fat_node() :: #fat_node{}.
+
+%% ---------------------------------------------------------------------------
+%% The read path
+%% ---------------------------------------------------------------------------
+
+-doc """
+The volume of a placement of Sectors sectors, read through Read: its admission
+from the boot sector and its FAT's second entry.
+""".
+-spec mount(read_sector(), non_neg_integer()) -> {ok, fat()} | {error, finding()}.
+mount(Read, Sectors) ->
+    guarded(fun() -> admit(Read, Sectors, sector(Read, 0)) end).
+
+-doc "What the volume's status shows of it: its type, label, serial and dirty flag.".
+-spec info(fat()) -> #{type := 16 | 32, label := binary() | none, serial := non_neg_integer() | none,
+                       clean := boolean(), cluster_bytes := pos_integer(), clusters := pos_integer()}.
+info(#fat{type = Type, label = Label, serial = Serial, clean = Clean, per_cluster = PerCluster,
+          clusters = Clusters}) ->
+    #{type => Type, label => Label, serial => Serial, clean => Clean,
+      cluster_bytes => PerCluster * ?SECTOR, clusters => Clusters}.
+
+-doc "The volume's root directory.".
+-spec root(fat()) -> fat_node().
+root(_Fat) ->
+    #fat_node{key = root, kind = dir, first = root, size = 0, mtime = ?FAT_EPOCH, read_only = false}.
+
+-doc "Which file or directory a node is, the same for as long as the volume is mounted.".
+-spec key(fat_node()) -> key().
+key(#fat_node{key = Key}) -> Key.
+
+-doc "A node's kind, size, modification time in UNIX seconds, and read-only attribute.".
+-spec attr(fat_node()) -> #{kind := dir | file, size := non_neg_integer(), mtime := non_neg_integer(),
+                            read_only := boolean()}.
+attr(#fat_node{kind = Kind, size = Size, mtime = Mtime, read_only = ReadOnly}) ->
+    #{kind => Kind, size => Size, mtime => Mtime, read_only => ReadOnly}.
+
+-doc "The entry of directory Dir named Name (see the module's doc), or `not_found`.".
+-spec walk(fat_node(), binary(), fat()) -> {ok, fat_node()} | {error, not_found | not_dir | finding()}.
+walk(#fat_node{kind = dir} = Dir, Name, Fat) ->
+    guarded(fun() ->
+                    Entries = entries(Dir, Fat),
+                    Upper = ascii_upper(Name),
+                    case lists:keyfind(Name, 1, Entries) of
+                        {Name, Node} -> Node;
+                        false -> found([Node || {Other, Node} <- Entries, ascii_upper(Other) =:= Upper])
+                    end
+            end);
+walk(#fat_node{kind = file}, _Name, _Fat) ->
+    {error, not_dir}.
+
+found([Node | _]) -> Node;
+found([]) -> throw({?MODULE, not_found}).
+
+-doc "Directory Dir's entries, each name with its node, in the order the volume holds them.".
+-spec list(fat_node(), fat()) -> {ok, [{binary(), fat_node()}]} | {error, not_dir | finding()}.
+list(#fat_node{kind = dir} = Dir, Fat) ->
+    guarded(fun() -> entries(Dir, Fat) end);
+list(#fat_node{kind = file}, _Fat) ->
+    {error, not_dir}.
+
+-doc "At most Count bytes of file File from Offset, none past its size.".
+-spec read(fat_node(), non_neg_integer(), non_neg_integer(), fat()) ->
+          {ok, binary()} | {error, is_dir | finding()}.
+read(#fat_node{kind = dir}, _Offset, _Count, _Fat) ->
+    {error, is_dir};
+read(#fat_node{size = Size}, Offset, Count, _Fat) when Offset >= Size; Count =:= 0 ->
+    {ok, <<>>};
+read(#fat_node{first = First, size = Size}, Offset, Count, Fat = #fat{per_cluster = PerCluster}) ->
+    guarded(fun() ->
+                    Bytes = PerCluster * ?SECTOR,
+                    End = min(Size, Offset + Count),
+                    Skip = Offset div Bytes,
+                    Chain = lists:nthtail(Skip, chain(Fat, First, (End - 1) div Bytes + 1)),
+                    Data = iolist_to_binary([cluster(Fat, Cluster) || Cluster <- Chain]),
+                    binary:copy(binary:part(Data, Offset - Skip * Bytes, End - Offset))
+            end).
+
+guarded(Fun) ->
+    try {ok, Fun()}
+    catch throw:{?MODULE, Finding} -> {error, Finding}
+    end.
+
+fail(Finding) -> throw({?MODULE, Finding}).
+
+%% ---------------------------------------------------------------------------
+%% The volume
+%% ---------------------------------------------------------------------------
+
+sector(Read, Index) ->
+    case Read(Index) of
+        {ok, <<Bytes:?SECTOR/binary>>} -> Bytes;
+        _ -> fail(read_failed)
+    end.
+
+%% The BIOS parameter block (section 3.1), then FAT16's tail or FAT32's (sections
+%% 3.2 and 3.3), each destructured once. A FAT32 volume states its size and its
+%% FAT's only in their 32-bit fields.
+admit(Read, Sectors, <<_:11/binary, ?SECTOR:16/little, PerCluster, Reserved:16/little, Fats,
+                       RootEntries:16/little, Total16:16/little, _Media, FatSize16:16/little, _:8/binary,
+                       Total32:32/little, Tail/binary>> = Boot) ->
+    Total = case Total16 of 0 -> Total32; _ -> Total16 end,
+    Type = case erx_fat_read:boot_sector(Boot) of
+               {fat, 16} -> 16;
+               {fat, 32} when FatSize16 =:= 0, Total16 =:= 0 -> 32;
+               _ -> fail(not_its_volume)
+           end,
+    #{fat_size := FatSectors, active := Active, root := RootCluster, serial := Serial, label := Label} =
+        tail(Type, FatSize16, Tail),
+    RootSector = Reserved + Fats * FatSectors,
+    DataStart = RootSector + (RootEntries * ?ENTRY + ?SECTOR - 1) div ?SECTOR,
+    Clusters = (Total - DataStart) div max(PerCluster, 1),
+    admitted(lists:member(PerCluster, [1, 2, 4, 8, 16, 32, 64, 128])
+             andalso Reserved >= 1 andalso Fats >= 1 andalso Active < Fats
+             andalso Total =< Sectors andalso DataStart < Total andalso Clusters >= 1
+             andalso FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)),
+    Fat = #fat{read = Read, type = Type, per_cluster = PerCluster, fat_start = Reserved + Active * FatSectors,
+               data_start = DataStart, clusters = Clusters, root = {fixed, RootSector, RootEntries},
+               label = Label, serial = Serial, clean = true},
+    Root = case {Type, RootCluster} of
+               {16, none} when RootEntries >= 1 -> {fixed, RootSector, RootEntries};
+               {32, Cluster} when RootEntries =:= 0 -> data_cluster(Fat, Cluster);
+               _ -> fail(not_its_volume)
+           end,
+    Fat#fat{root = Root, clean = clean(Fat)};
+admit(_Read, _Sectors, _Boot) ->
+    fail(not_its_volume).
+
+admitted(true) -> ok;
+admitted(false) -> fail(not_its_volume).
+
+%% FAT16's tail holds its serial and label; FAT32's its FAT size, mirroring flags
+%% and root cluster before them. A FAT32 volume whose flags turn mirroring off
+%% reads the FAT they name.
+tail(16, FatSize16, <<_Drive, _, Signature, Serial:32/little, Label:11/binary, _/binary>>) ->
+    identity(Signature, Serial, Label, #{fat_size => FatSize16, active => 0, root => none});
+tail(32, _FatSize16, <<FatSize32:32/little, Flags:16/little, _Version:16, Root:32/little, _Info:16, _Backup:16,
+                       _:12/binary, _Drive, _, Signature, Serial:32/little, Label:11/binary, _/binary>>) ->
+    Active = case Flags band 16#80 of 0 -> 0; _ -> Flags band 16#0f end,
+    identity(Signature, Serial, Label, #{fat_size => FatSize32, active => Active, root => Root}).
+
+%% The serial and label behind the extended signature. The label is text a status
+%% line shows, so one holding a control character is none, as an empty one is.
+identity(?EXTENDED_BOOT, Serial, Label, Tail) ->
+    Text = short_text(Label),
+    Shown = Text =/= <<>> andalso Text =/= <<"NO NAME">>
+        andalso not lists:any(fun(C) -> C < 16#20 end, unicode:characters_to_list(Text)),
+    Tail#{serial => Serial, label => case Shown of true -> Text; false -> none end};
+identity(_Signature, _Serial, _Label, Tail) ->
+    Tail#{serial => none, label => none}.
+
+%% The clean bit of the FAT's second entry (section 4.2): set while the volume was
+%% unmounted cleanly.
+clean(Fat = #fat{type = 16}) -> raw_entry(Fat, 1) band 16#8000 =/= 0;
+clean(Fat = #fat{type = 32}) -> raw_entry(Fat, 1) band 16#08000000 =/= 0.
+
+raw_entry(#fat{read = Read, type = Type, fat_start = FatStart}, Cluster) ->
+    Offset = Cluster * (Type div 8),
+    <<_:(Offset rem ?SECTOR)/binary, Entry:Type/little, _/binary>> = sector(Read, FatStart + Offset div ?SECTOR),
+    Entry.
+
+%% Cluster, when it is a cluster of the data area, the one check every cluster a
+%% walk reaches passes: a directory entry's first and every link. A free, reserved
+%% or bad entry is none, and breaks its chain.
+data_cluster(#fat{clusters = Clusters}, Cluster) when is_integer(Cluster), Cluster >= 2, Cluster < Clusters + 2 ->
+    Cluster;
+data_cluster(_Fat, _Cluster) ->
+    fail(does_not_read).
+
+%% Cluster's link: end of chain, or the next cluster of the data area.
+next_link(Fat = #fat{type = Type}, Cluster) ->
+    case raw_entry(Fat, Cluster) band mask(Type) of
+        Mark when Type =:= 16, Mark >= ?END_MARK_16; Type =:= 32, Mark >= ?END_MARK_32 -> end_of_chain;
+        Next -> data_cluster(Fat, Next)
+    end.
+
+mask(16) -> 16#ffff;
+mask(32) -> 16#0fffffff.
+
+%% Exactly Count clusters of the chain from First, none seen before in it, so a
+%% chain that loops or ends before them is does_not_read.
+chain(#fat{clusters = Clusters}, _First, Count) when Count > Clusters ->
+    fail(does_not_read);
+chain(Fat, First, Count) ->
+    walk_chain(Fat, data_cluster(Fat, First), {exactly, Count}, #{}, []).
+
+%% A directory's whole chain, to its end of chain, within the entries' bound.
+dir_chain(Fat = #fat{per_cluster = PerCluster, clusters = Clusters}, First) ->
+    Max = min(Clusters, (?DIR_ENTRIES_MAX * ?ENTRY) div (PerCluster * ?SECTOR)),
+    walk_chain(Fat, data_cluster(Fat, First), {at_most, Max}, #{}, []).
+
+%% The one walk of a chain: Bound is {exactly, Left}, the clusters still to take, or
+%% {at_most, Left}, the clusters it may still take before its end of chain.
+walk_chain(_Fat, Cluster, _Bound, Seen, _Got) when is_map_key(Cluster, Seen) ->
+    fail(does_not_read);
+walk_chain(_Fat, Cluster, {exactly, 1}, _Seen, Got) ->
+    lists:reverse([Cluster | Got]);
+walk_chain(_Fat, _Cluster, {at_most, 1}, _Seen, _Got) ->
+    fail(does_not_read);
+walk_chain(Fat, Cluster, {Kind, Left}, Seen, Got) ->
+    case {next_link(Fat, Cluster), Kind} of
+        {end_of_chain, at_most} -> lists:reverse([Cluster | Got]);
+        {end_of_chain, exactly} -> fail(does_not_read);
+        {Next, _} -> walk_chain(Fat, Next, {Kind, Left - 1}, Seen#{Cluster => true}, [Cluster | Got])
+    end.
+
+cluster_sectors(#fat{data_start = DataStart, per_cluster = PerCluster}, Cluster) ->
+    First = DataStart + (Cluster - 2) * PerCluster,
+    lists:seq(First, First + PerCluster - 1).
+
+cluster(Fat = #fat{read = Read}, Cluster) ->
+    [sector(Read, Sector) || Sector <- cluster_sectors(Fat, Cluster)].
+
+%% ---------------------------------------------------------------------------
+%% Directories
+%% ---------------------------------------------------------------------------
+
+%% The sectors of a directory, with how many entries each holds: FAT16's fixed
+%% root region, or a directory's cluster chain.
+dir_sectors(#fat_node{first = root}, #fat{root = {fixed, First, Count}}) ->
+    [{First + Index, min(?ENTRIES_PER_SECTOR, Count - Index * ?ENTRIES_PER_SECTOR)}
+     || Index <- lists:seq(0, (Count - 1) div ?ENTRIES_PER_SECTOR)];
+dir_sectors(#fat_node{first = root}, Fat = #fat{root = Cluster}) ->
+    chain_sectors(Fat, Cluster);
+dir_sectors(#fat_node{first = First}, Fat) ->
+    chain_sectors(Fat, First).
+
+chain_sectors(Fat, First) ->
+    [{Sector, ?ENTRIES_PER_SECTOR} || Cluster <- dir_chain(Fat, First), Sector <- cluster_sectors(Fat, Cluster)].
+
+%% A directory's entries, read a sector at a time through one cursor: Long is the
+%% long name being gathered across entries and sectors, none or
+%% {long, Next, Sum, Parts}, the order number the next entry must carry, the
+%% checksum all carry and the parts read so far, first part first.
+entries(Dir = #fat_node{key = Parent}, Fat) ->
+    Cursor = #{fat => Fat, parent => Parent, index => 0, long => none, got => []},
+    lists:reverse(sectors(dir_sectors(Dir, Fat), Cursor)).
+
+sectors([], #{got := Got}) ->
+    Got;
+sectors([{Sector, Count} | Rest], Cursor = #{fat := #fat{read = Read}}) ->
+    case sector_entries(sector(Read, Sector), Count, Cursor) of
+        {done, Got} -> Got;
+        {next, Next} -> sectors(Rest, Next)
+    end.
+
+sector_entries(_Bytes, 0, Cursor) ->
+    {next, Cursor};
+sector_entries(<<?END_OF_DIRECTORY, _/binary>>, _Left, #{got := Got}) ->
+    {done, Got};
+sector_entries(<<Entry:?ENTRY/binary, Rest/binary>>, Left, Cursor = #{index := Index, long := Long}) ->
+    Next = entry(Entry, Long, Cursor),
+    sector_entries(Rest, Left - 1, Next#{index := Index + 1}).
+
+entry(<<?DELETED, _/binary>>, _Long, Cursor) ->
+    Cursor#{long := none};
+entry(<<Order, Part1:10/binary, Attributes, Type, Sum, Part2:12/binary, LongCluster:16/little,
+        Part3:4/binary>>, Long, Cursor)
+  when Attributes band ?LONG_NAME_MASK =:= ?LONG_NAME ->
+    case Type =:= 0 andalso LongCluster =:= 0 of
+        true -> Cursor#{long := long_part(Order, Sum, <<Part1/binary, Part2/binary, Part3/binary>>, Long)};
+        false -> Cursor#{long := none}
+    end;
+entry(<<Short:11/binary, Attributes, Case, _:7/binary, High:16/little, Time:16/little, Date:16/little,
+        Low:16/little, Size:32/little>>, Long, Cursor = #{fat := Fat, parent := Parent, index := Index,
+                                                         got := Got}) ->
+    Named = case Attributes band ?VOLUME_ID =:= 0 andalso binary:first(Short) =/= $. of
+                true -> name(Short, Case, Long);
+                false -> none
+            end,
+    case Named of
+        none ->
+            Cursor#{long := none};
+        Name ->
+            Kind = case Attributes band ?DIRECTORY of 0 -> file; _ -> dir end,
+            First = case Fat of #fat{type = 32} -> (High bsl 16) bor Low; _ -> Low end,
+            Node = #fat_node{key = node_key(Fat, Kind, First, Parent, Index), kind = Kind, first = First,
+                             size = case Kind of file -> Size; dir -> 0 end,
+                             mtime = mtime(Date, Time), read_only = Attributes band ?READ_ONLY =/= 0},
+            Cursor#{long := none, got := [{Name, Node} | Got]}
+    end.
+
+node_key(#fat{root = First}, dir, First, _Parent, _Index) -> root;
+node_key(_Fat, dir, First, _Parent, _Index) -> {dir, First};
+node_key(_Fat, file, _First, Parent, Index) -> {file, Parent, Index}.
+
+%% A long name's entries run from its last, flagged, down to order number 1, each
+%% with the same checksum; any other entry starts the gathering again or drops it.
+long_part(Order, Sum, Part, _Long) when Order band ?LAST_LONG_ENTRY =/= 0, Order band ?ORDER_MASK >= 1 ->
+    {long, Order band ?ORDER_MASK - 1, Sum, [Part]};
+long_part(Order, Sum, Part, {long, Order, Sum, Parts}) when Order >= 1 ->
+    {long, Order - 1, Sum, [Part | Parts]};
+long_part(_Order, _Sum, _Part, _Long) ->
+    none.
+
+%% The entry's name: its long name when one complete, matching and valid precedes
+%% it, else its short name, and none when neither is a name the volume may serve.
+name(Short, Case, {long, 0, Sum, Parts}) ->
+    case Sum =:= checksum(Short) andalso long_name(iolist_to_binary(Parts)) of
+        Name when is_binary(Name) -> Name;
+        _ -> name(Short, Case, none)
+    end;
+name(Short, Case, _Long) ->
+    valid(short_name(Short, Case)).
+
+%% Section 7.2: the sum, rotated right one bit before each byte is added.
+checksum(Short) ->
+    lists:foldl(fun(Byte, Sum) -> (((Sum band 1) bsl 7) + (Sum bsr 1) + Byte) band 16#ff end, 0,
+                binary_to_list(Short)).
+
+%% The UTF-16 code units up to the terminating zero, as UTF-8.
+long_name(Units) ->
+    Text = take_units(Units, <<>>),
+    case unicode:characters_to_binary(Text, {utf16, little}, utf8) of
+        Name when is_binary(Name), byte_size(Name) =< ?NAME_BYTES_MAX -> valid(Name);
+        _ -> none
+    end.
+
+take_units(<<0:16, _/binary>>, Got) -> Got;
+take_units(<<Unit:2/binary, Rest/binary>>, Got) -> take_units(Rest, <<Got/binary, Unit/binary>>);
+take_units(<<>>, Got) -> Got.
+
+%% An 8.3 name: its base and extension, trailing spaces dropped, each lower-cased
+%% when its case flag says so, and joined by a period when the extension is not
+%% empty. A first byte 0x05 stands for 0xE5.
+short_name(<<?KANJI_E5, Rest:10/binary>>, Case) ->
+    short_name(<<?DELETED, Rest/binary>>, Case);
+short_name(<<Base:8/binary, Extension:3/binary>>, Case) ->
+    B = cased(short_text(Base), Case band ?LOWER_BASE),
+    case cased(short_text(Extension), Case band ?LOWER_EXTENSION) of
+        <<>> -> B;
+        E -> <<B/binary, $., E/binary>>
+    end.
+
+cased(Text, 0) -> Text;
+cased(Text, _) -> << <<(case C of _ when C >= $A, C =< $Z -> C + 32; _ -> C end)/utf8>> || <<C/utf8>> <= Text >>.
+
+%% Bytes of a short name or label as code page 437, trailing spaces and NULs dropped.
+short_text(Bytes) ->
+    Trimmed = trim_spaces(Bytes, byte_size(Bytes)),
+    << <<(cp437(Byte))/utf8>> || <<Byte>> <= Trimmed >>.
+
+-define(CP437_HIGH,
+        {16#00c7, 16#00fc, 16#00e9, 16#00e2, 16#00e4, 16#00e0, 16#00e5, 16#00e7, 16#00ea, 16#00eb, 16#00e8,
+         16#00ef, 16#00ee, 16#00ec, 16#00c4, 16#00c5, 16#00c9, 16#00e6, 16#00c6, 16#00f4, 16#00f6, 16#00f2,
+         16#00fb, 16#00f9, 16#00ff, 16#00d6, 16#00dc, 16#00a2, 16#00a3, 16#00a5, 16#20a7, 16#0192, 16#00e1,
+         16#00ed, 16#00f3, 16#00fa, 16#00f1, 16#00d1, 16#00aa, 16#00ba, 16#00bf, 16#2310, 16#00ac, 16#00bd,
+         16#00bc, 16#00a1, 16#00ab, 16#00bb, 16#2591, 16#2592, 16#2593, 16#2502, 16#2524, 16#2561, 16#2562,
+         16#2556, 16#2555, 16#2563, 16#2551, 16#2557, 16#255d, 16#255c, 16#255b, 16#2510, 16#2514, 16#2534,
+         16#252c, 16#251c, 16#2500, 16#253c, 16#255e, 16#255f, 16#255a, 16#2554, 16#2569, 16#2566, 16#2560,
+         16#2550, 16#256c, 16#2567, 16#2568, 16#2564, 16#2565, 16#2559, 16#2558, 16#2552, 16#2553, 16#256b,
+         16#256a, 16#2518, 16#250c, 16#2588, 16#2584, 16#258c, 16#2590, 16#2580, 16#03b1, 16#00df, 16#0393,
+         16#03c0, 16#03a3, 16#03c3, 16#00b5, 16#03c4, 16#03a6, 16#0398, 16#03a9, 16#03b4, 16#221e, 16#03c6,
+         16#03b5, 16#2229, 16#2261, 16#00b1, 16#2265, 16#2264, 16#2320, 16#2321, 16#00f7, 16#2248, 16#00b0,
+         16#2219, 16#00b7, 16#221a, 16#207f, 16#00b2, 16#25a0, 16#00a0}).
+
+trim_spaces(Bytes, Size) when Size > 0, binary_part(Bytes, Size - 1, 1) =:= <<" ">>;
+                              Size > 0, binary_part(Bytes, Size - 1, 1) =:= <<0>> ->
+    trim_spaces(Bytes, Size - 1);
+trim_spaces(Bytes, Size) ->
+    binary_part(Bytes, 0, Size).
+
+%% Code page 437's upper half, from Unicode's mapping table
+%% (https://www.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/PC/CP437.TXT, SHA-256
+%% 6bad4dabcdf5940227c7d81fab130dcb18a77850b5d79de28b5dc4e047b0aaac); the lower half
+%% is ASCII.
+cp437(Byte) when Byte < 16#80 -> Byte;
+cp437(Byte) -> element(Byte - 16#7f, ?CP437_HIGH).
+
+%% A name the volume may serve (docs/design-storage.md, "Names"): not empty, not
+%% `.` or `..`, no character the specification forbids, and not starting with a
+%% space or ending with a space or a period. Anything else is none.
+valid(Name) ->
+    Forbidden = fun(C) -> C < 16#20 orelse lists:member(C, "\"*/:<>?\\|") end,
+    Chars = unicode:characters_to_list(Name),
+    case Chars =/= [] andalso not lists:any(Forbidden, Chars)
+         andalso hd(Chars) =/= $\s andalso lists:last(Chars) =/= $\s andalso lists:last(Chars) =/= $. of
+        true -> Name;
+        false -> none
+    end.
+
+ascii_upper(Name) -> << <<(case C of _ when C >= $a, C =< $z -> C - 32; _ -> C end)>> || <<C>> <= Name >>.
+
+%% A directory entry's date and time (section 6.1) in seconds since the UNIX epoch,
+%% read as UTC; a date or time no calendar holds is FAT's first time.
+mtime(Date, Time) ->
+    Day = {1980 + (Date bsr 9), (Date bsr 5) band 16#0f, Date band 16#1f},
+    {Hour, Minute, Second} = Clock = {Time bsr 11, (Time bsr 5) band 16#3f, (Time band 16#1f) * 2},
+    case calendar:valid_date(Day) andalso Hour < 24 andalso Minute < 60 andalso Second < 60 of
+        true -> calendar:datetime_to_gregorian_seconds({Day, Clock}) - 62167219200;
+        false -> ?FAT_EPOCH
+    end.

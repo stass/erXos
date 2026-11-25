@@ -3,12 +3,13 @@
 
 %% The FAT server's application (docs/design-storage.md, "Removable media: FAT"):
 %% FAT's pure read core, erx_fat_read, which the storage domain's reader of the
-%% record volume and the drives' probe call as functions. It is a library
+%% record volume and the drives' probe call as functions, and the read path of the
+%% FAT server, erx_fat, which a media volume's process holds. It is a library
 %% application and starts no process, so a release that names it runs nothing of it.
 {application, erx_fat,
  [{description, "erXos FAT"},
   {vsn, "1"},
-  {modules, [erx_fat_read]},
+  {modules, [erx_fat, erx_fat_read]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.

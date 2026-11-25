@@ -91,8 +91,17 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      domain's of 2 hold the one drive connection between them beside the display's `usb_input`;
      a peer's restart, while its old row is still closing, needs one more on each, 2 and 3, which
      the manifest's rows for other configured peers do not reckon either.
-  5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume: its read path, then its batches, dirty flag
-     and finish.
+  5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume. Its read path is built (mount,
+     directories, lookups and reads, with `erx_fat`'s fuzz target); what remains: its batches, dirty
+     flag and finish; lookups through the generated simple-uppercase case table of
+     design-storage.md's "Names", where they ignore only ASCII case today, so a name differing from
+     a stored one only in a non-ASCII letter's case is `not_found`; the root directory's label
+     entry as `sN_label` beside the boot sector's; and `erx_fat_read:root_file/3` reading through
+     `erx_fat`'s core, so that FAT has one volume model and design-storage.md's "the pure read core
+     ... that the FAT server reads through too" holds (today the server shares only
+     `boot_sector/1`); before the write path, FAT32's version field and its largest count of
+   clusters checked at the mount against the specification. A volume whose sectors are not 512
+   bytes is `not_its_volume`.
   6. EROFS: `erx_erofs` reading through its mount's source function, with `mount_source/2` beside
      `mount/2`; `erx_media_blocks` and `erx_media_erofs`; `erx_erofs_tree` factored out of
      `erx_storage_system`; the compression refusal by name; `Erx::ErofsReads` extended to the two callers
