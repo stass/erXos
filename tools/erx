@@ -828,7 +828,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE [--runs N] [--profile landing|full] [--set DIR]... | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE [--runs N] [--profile landing|full] [--set DIR]... | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
       0
     end
 
@@ -1471,6 +1471,7 @@ module Erx
     def self.bench(input_arguments)
       arguments = input_arguments.dup
       name = arguments.shift
+      return bench_import(arguments) if name == 'import'
       return bench_net(name, arguments) if name.to_s.start_with?('net-')
       return bench_board(name, arguments) if arguments.any? { |argument| argument == '--env' || argument.start_with?('--env=') }
 
@@ -1540,6 +1541,8 @@ module Erx
       raise Error, 'bench: --runs is below 1' unless options[:runs].positive?
       raise Error, 'bench: --profile full: the board sets are built only in the landing form' if options[:profile] == 'full'
 
+      history = BenchRecord.history
+      BenchRecord::Destination.new(history: history, erxos_root: ROOT)
       shell = BoardRun::Ssh.new(options[:ssh])
       NetbootEntry.signing_key(options[:key])
       subjects = options[:sets].map { |directory| BoardRun.directory_subject(directory) }
@@ -1557,9 +1560,49 @@ module Erx
         prepare: ->(**queue) { Netboot.prepare(**queue, runner: runner, fsimg: fsimg) },
         console: ->(log:) { BoardConsole.open(options[:console], log: log, clock: clock) },
         clock: clock, out: Terminal.method(:puts), codec: ABI::Codec.new(ABI::Generator.plan(root: ROOT).schema),
-        record: ->(ran) { Terminal.puts("bench: the board run's record is not built yet; its log, #{BoardFiles::QUEUE} and #{BoardFiles::WALK} are in #{ran.directory}") }
+        record: ->(ran) { bench_board_record(name, ran, history) }
       ).call(benchmark: name, subjects: subjects, runs: options[:runs], key: options[:key])
       walk.ending == 'returned' ? 0 : 1
+    end
+
+    # The records of a board walk that ended (BoardRecord), one per set, written under
+    # history; when they cannot be, the walk's files stay for `tools/erx bench import`.
+    def self.bench_board_record(name, ran, history)
+      require_relative 'lib/erx/board_record'
+      log = BoundedFile.read(File.join(ran.directory, BoardRun::LOG), maximum: BoardLog.max_bytes(ran.queue))
+      made = BoardRecord.recorded(log, queue: ran.queue, walk: ran.walk, readings: { 'before' => ran.before&.text, 'after' => ran.after.text },
+                                       started_by: 'manual', root: ROOT)
+      BoardRecord.write(made, history: history, root: ROOT).each { |run| Terminal.puts("bench: recorded #{run}") }
+    rescue Error => e
+      Terminal.puts("bench: the board run's record was not written (#{LineEscape.escape(e.message)}); import it with: " \
+                    "tools/erx bench import #{name} --env #{BoardRun::ENVIRONMENT} --queue #{File.join(ran.directory, BoardFiles::QUEUE)} " \
+                    "#{File.join(ran.directory, BoardRun::LOG)}")
+      raise
+    end
+
+    # tools/erx bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG
+    # (docs/design-bench.md, "Importing a log"): the records of a board walk made from its
+    # console log, its queue file and the walk.json beside it when there is one.
+    def self.bench_import(arguments)
+      require_relative 'lib/erx/board_record'
+      require_relative 'lib/erx/board_run'
+      options = {}
+      OptionParser.new do |flags|
+        flags.on('--env NAME') { |value| options[:env] = value }
+        flags.on('--queue FILE') { |value| options[:queue] = value }
+        flags.on('--profile NAME', %w[landing full]) { |value| options[:profile] = value }
+      end.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'usage: tools/erx bench import NAME --env ENV --queue FILE [--profile landing] LOG' unless
+        arguments.size == 2 && options[:queue]
+      raise Error, "bench import: --env #{options[:env]} is not #{BoardRun::ENVIRONMENT}, the one environment a board log is imported into" unless
+        options[:env] == BoardRun::ENVIRONMENT
+      raise Error, 'bench import: --profile full: the board sets are built only in the landing form' if options[:profile] == 'full'
+
+      name, log = arguments
+      BenchSuite.benchmark(name)
+      BoardRecord.import(name, queue: options[:queue], log: log, root: ROOT, history: BenchRecord.history)
+                 .each { |run| Terminal.puts("bench: recorded #{run}") }
+      0
     end
 
     # A comparison session (docs/design-bench.md, "A comparison session"): each listed

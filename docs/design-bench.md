@@ -1244,10 +1244,14 @@ of its record and makes the comparison inconclusive:
   and the SHA-256 of every firmware file from the build record of the
   set the record is of;
 * **subject**: the source revision, the SHA-256 of the set's
-  `kernel8.img` and of its build record, the root's flags and the
-  compiler;
-* **run**: the sensor readings before the run and after the return, each
-  named for when it was read; how the walk ended; and two facts kept
+  `kernel8.img` and of its build record, the root's flags as the queue
+  names them (absent for a set handed to the walk with `--set`, whose
+  flags the walk does not know) and the compiler the set's build record
+  names;
+* **run**: the date the queue was made; the sensor readings before the
+  run and after the return, each named for when it was read and kept
+  line by line through `LineEscape` (unknown in an import, which has
+  none); how the walk ended; and two facts kept
   apart: `restored`, whether the link named the found target again at
   the run's end (on the host), and `returned`, what the board booted
   after the last entry (`booted`, `unexpected` with the banner's build
@@ -1270,14 +1274,19 @@ of its record and makes the comparison inconclusive:
 P] LOG` makes the record of a walk from its log, when the walk's own
 record was not written (a history root refused, a host that died). The
 queue's file, `queue.json`, which the walk writes beside its log under
-`build/bench-board/` before it serves the queue, names each entry's
-name, its position, its `boot.img` SHA-256 and the set it was made from
-(the set's directory and its build record's SHA-256), and the found
+`build/bench-board/` before it serves the queue, names when it was made,
+each entry's name, its position, its `boot.img` SHA-256 and the set it
+was made from (the set's directory, its build record's SHA-256 and its
+root's flags, which the build record does not hold), and the found
 pair's return identity; the walk's outcomes, `walk.json`, are written
 beside it as the walk ends: each entry's outcome (`ended`,
 `ended_unseen`, `stopped` by the walk's ending, or `not_run`), how the
-walk ended, `restored` and `returned` (`BoardFiles`). A log of boots that print no names has nothing that
-ties a line to a boot, and is refused.
+walk ended, `restored` and `returned` (`BoardFiles`); without it, how
+the walk ended, `restored` and each entry's outcome are recorded as
+unknown. A log of boots that print no names has nothing that ties a
+line to a boot, and is refused. A set's build record that is no longer
+the one the queue names is refused, so a record never pairs a walk's
+boots with another build's facts.
 
 The reader is `BoardLog`, a pure function of the log's bytes, the queue,
 the sets' asked cells and the walk's outcomes when it has them. It

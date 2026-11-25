@@ -128,17 +128,9 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   disposable task's gate, start, stop and join are written twice (`cycles.c`, `vm.c`'s `protect_faults`) and
   want one helper in `guest.c`; the fault branch has no seed (a trapping read in `MODE_CYCLES`), nor does the
   design's "system counter read twice" seed run on QEMU, where it would give exactly 1.000.
-* [Medium] benchmarks, the board run's record and `tools/erx bench import` for erXos logs
-  ([design-bench.md](design-bench.md#the-record-of-a-board-run)): the reader (`BoardLog`) and the queue's and
-  walk's files (`BoardFiles`) are built; what remains is the `pi4` record made from `BoardLog.read`'s boots, with
-  the entry's set's firmware hashes (the set's build record, `inputs.firmware`'s file names, `listed_files`'
-  SHA-256), the subject's facts, per-boot logs, the sensor readings, each entry's outcome, `restored` and
-  `returned`, and the `bench import NAME --env pi4-4gb-erxos --queue FILE [--profile P] LOG` command around it.
-  Blocked on one question: `BenchRecord::Record` holds one clock group and each cell once
-  (`bench_record.rb:281-289`), and `BenchCompare` takes one record as one run, while a board run's record is "one
-  per subject" holding every boot of its set (design-bench.md, "The record of a board run"); whether a walk's N
-  boots of one set are N records or one record of N boots (and then how its cells and clocks are held) is
-  undecided, and `BenchRecord::Run` has no field for the board's run facts. One implementer once decided.
+* [Low] benchmarks, a paired board walk's comparison ([design-bench.md](design-bench.md#the-record-of-a-board-run)):
+  a walk writes one record per set (`BoardRecord`), but not the comparison the design puts beside a paired walk's
+  records, and no command compares two run directories by hand.
 * [Low] tooling, the HTTP form's read-back (`NetbootEntry.check`, `FatVolume`): `FatVolume` reads no long name
   and no subdirectory, so an entry's `boot.img` is checked by a reader independent of fsimg only for `kernel8.img`'s
   placement and its root files with short names; the device tree, `overlays/` and other long-named files are checked
@@ -146,14 +138,12 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
 * [Medium] benchmarks, the board walk (`BoardWalk`, `BoardConsole`, `BoardRun`,
   [design-bench.md](design-bench.md#the-walk)): the walk, the console, the ssh calls and `tools/erx bench NAME
   --env pi4-4gb-erxos` are built and tested on the host with fakes; what remains is (1) `--profile full`, refused
-  because `NativeBench::BoardSets` builds only the landing form; (2) the record, handed to `BoardRun`'s seam and
-  blocked on the record's shape (the record item above); (3) the first run on the desk's board, which checks
+  because `NativeBench::BoardSets` builds only the landing form; (2) the first run on the desk's board, which checks
   `BoardConsole.set_line`'s `stty` on the macOS serial device (unverified) and is seeded with the last entry made
   from the first. One implementer.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
-  board walk's record (one per set, from `BoardLog`, its run and boot facts typed from their closed sets:
-  `returned`, `restored`, each entry's outcome) and the other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
+  other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
   landing gate, so a change to the guests' line library that breaks it fails there, and its FreeBSD
   side's first compile; FreeBSD's way for the `wake` handshake's A to see B asleep, without which
   `erx_peer_bench` reports both wake cells unsupported there; which operations have a Linux counterpart is

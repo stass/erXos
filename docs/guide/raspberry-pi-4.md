@@ -24,7 +24,12 @@ Wire the console adapter to the 40-pin header: its ground to pin 6, its
 receive line to pin 8 (GPIO 14, the Pi's transmit) and its transmit line
 to pin 10 (GPIO 15). Open it at 115200 baud, 8N1, no flow control, for
 example `screen -L /dev/cu.usbserial-XXXX 115200`; `-L` logs everything
-to `screenlog.0`. A second adapter on UART3, the host link, is optional:
+to `screenlog.0`. A Glasgow Interface Explorer's UART applet can be the
+adapter instead; it serves the console as a TCP port, port 2300 in the
+setup this guide was checked with, which `nc localhost 2300` opens. The
+board benchmarks' walk (`tools/erx bench NAME --env pi4-4gb-erxos
+--console DEVICE`) opens a serial device and cannot read a TCP port.
+A second adapter on UART3, the host link, is optional:
 ground to pin 9, receive to pin 7 (GPIO 4), transmit to pin 29 (GPIO 5),
 also 115200 8N1. A development card's `cmdline.txt` holds `erx.hostlink=1`,
 which turns the host link on; keep the file one line with no newline
@@ -63,7 +68,16 @@ Build it from a checkout:
 make pack PLATFORM=raspi4b
 ```
 
-This writes `build/production-image/raspi4b/`:
+This builds the card the website offers, the kiosk and the Doom example
+on it, so it needs `tools/erx fetch --example doom` first. The
+development card, which takes your own apps and is the one to netboot,
+is
+
+```sh
+tools/erx pack --platform raspi4b --medium
+```
+
+Either writes `build/production-image/raspi4b/`:
 
 * `sdcard.img`, the card, 718 MiB;
 * `sdcard.img.xz`, the same card compressed (about 38 MB), the form to
@@ -315,6 +329,12 @@ the kiosk among them, are absent. `/data`, root's `authorized_keys` and
 the boot-selection record's volume still come from the card. A/B slots and
 trials are tried only with the card first in the boot order.
 
+A fresh checkout or git worktree builds nothing until its sources are
+fetched and its tools bootstrapped: `tools/erx fetch` (with `--cache DIR`
+it takes them from another checkout's `build/downloads` instead of the
+network; `ERX_SOURCE_CACHE=DIR` points the setup steps at the same
+directory), then `make oracle-bootstrap`.
+
 You need the board, adapter and written card above, an Ethernet cable from
 the Pi to the Mac (a USB Ethernet adapter on a Mac without a port) and
 Homebrew's `dnsmasq` (`brew install dnsmasq`), which serves TFTP only.
@@ -360,7 +380,7 @@ Homebrew's `dnsmasq` (`brew install dnsmasq`), which serves TFTP only.
    with the Mac's address on the cable; check that it is the `TFTP_IP` of
    step 1.
 
-3. **Stage each build.** After `make pack PLATFORM=raspi4b`, run
+3. **Stage each build.** After `tools/erx pack --platform raspi4b --medium`, run
 
    ```sh
    tools/erx netboot
@@ -391,7 +411,7 @@ A board whose EEPROM boots over HTTP (boot order `0xf17`) fetches
 `boot.sig` and then `boot.img` from `HTTP_HOST` under `HTTP_PATH`, and
 boots the image only when the signature verifies against the public key
 the EEPROM holds. Setting up that EEPROM is not covered here. With it in
-place, after `make pack PLATFORM=raspi4b`:
+place, after `tools/erx pack --platform raspi4b --medium`:
 
 ```sh
 tools/erx netboot --key ~/keys/private.pem
