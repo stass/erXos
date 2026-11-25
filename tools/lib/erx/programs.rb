@@ -534,32 +534,68 @@ ERLANG
        *typed, node.call('last-node').freeze].freeze
     end
 
-# The command shell's cases, typed at root_1's command shell before erl
-# (docs/design-shell.md, "Starting programs"): rcio (test/guest/programs/rcio.c)
-# writes to standard output, which reaches the terminal, and exits 3; reads standard
-# input through a pipe from echo, an Erlang command; and loops until Ctrl-C, after
-# which the line's status is not empty. Each pattern is a line the program or echo
-# writes, which the typed line's echo after the prompt cannot match, and each point
-# types the next case.
-RC_FIRST = "rcio hello one two; echo hello-status $status\r"
+    # The command shell's cases, typed at root_1's command shell before erl
+    # (docs/design-shell.md, "Starting programs"): rcio (test/guest/programs/rcio.c)
+    # writes to standard output, which reaches the terminal, and exits 3; reads standard
+    # input through a pipe from echo, an Erlang command; and loops until Ctrl-C, after
+    # which the line's status is not empty. Each pattern is a line the program or echo
+    # writes, which the typed line's echo after the prompt cannot match, and each point
+    # types the next case.
+    RC_FIRST = "rcio hello one two; echo hello-status $status\r"
 
-def rc_points
-  [{ name: 'rc-hello', pattern: /\Arcio: one two/n },
-   { name: 'rc-hello-status', pattern: /\Ahello-status 3/n,
-     type: "echo piped text | rcio upcase; echo upcase-done\r" },
-   { name: 'rc-upcase', pattern: /\APIPED TEXT/n },
-   { name: 'rc-upcase-done', pattern: /\Aupcase-done/n, type: "rcio loop\r" },
-   { name: 'rc-loop', pattern: /\Arcio: looping/n, type: "\x03" },
-   { name: 'rc-interrupted', pattern: /\^C/n, type: "echo loop-status $status\r" },
-   { name: 'rc-loop-status', pattern: /\Aloop-status \S/n, type: ProductionImage::Run::ERL_LINE }]
-    .map { |point| { seconds: 60 }.merge(point).freeze }
-end
+    def rc_points
+      [{ name: 'rc-hello', pattern: /\Arcio: one two/n },
+       { name: 'rc-hello-status', pattern: /\Ahello-status 3/n,
+         type: "echo piped text | rcio upcase; echo upcase-done\r" },
+       { name: 'rc-upcase', pattern: /\APIPED TEXT/n },
+       { name: 'rc-upcase-done', pattern: /\Aupcase-done/n, type: "rcio loop\r" },
+       { name: 'rc-loop', pattern: /\Arcio: looping/n, type: "\x03" },
+       { name: 'rc-interrupted', pattern: /\^C/n, type: "echo loop-status $status\r" },
+       { name: 'rc-loop-status', pattern: /\Aloop-status \S/n, type: ProductionImage::Run::ERL_LINE }]
+        .map { |point| { seconds: 60 }.merge(point).freeze }
+    end
 
     def answer_point(each)
       expected = SessionDomain.answer(each.answer)
       { name: each.name, pattern: /\A#{SessionDomain::PROMPT}(?:\{#{each.name},|\*\* exception)/n, seconds: each.seconds,
         type: NODE,
         verify: ->(text) { raise Error, "the #{each.name} case answers #{text.inspect}" unless expected.match?(text) } }.freeze
+    end
+
+    # The production image with programs (name => its C source) added to the domain
+    # release, each linked over NativeRoot::PROGRAM and musl's libc.a, the one the
+    # runtime images link, with flags beyond the tree's, as a release file of the
+    # session's: no system mark, since only the system release's files carry it. Built
+    # under build, on machine, from manifest_source, with domains' boot scripts in the
+    # release. The suite's own image, which it lends to the posix benchmark (PosixBench).
+    # Answers the image (ProductionImage's built image) and each program as
+    # NativeRoot#build_task_receipted gives it, by name.
+    def test_image(root:, runner:, compiler:, linker:, machine:, fiasco:, build:, programs:, manifest_source:,
+                   domains: [], flags: [])
+      runtime = NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco,
+                                  platform: machine.platform)
+      directory = ProductionImage.clear_directory(root: root, path: File.join(build, 'image'))
+      # The image's build builds the runtime again; make finds nothing left to do.
+      libc = runtime.build.libc
+      linked = Runtime.reading(root: root) do
+        native = NativeRoot.new(root: root, runner: runner, compiler: compiler, linker: linker, platform: machine.platform,
+                                fiasco: fiasco)
+        archives = [libc, CompilerRt.archive(root: root, runner: runner, compiler: compiler)]
+        programs.to_h do |name, source|
+          [name, native.build_task_receipted(name: name, sources: [*NativeRoot::PROGRAM, source],
+                                             directory: File.join(build, name), archives: archives, flags: flags)]
+        end
+      end
+      codec = ABI::Codec.new(ABI::Generator.plan(root: root).schema)
+      added = ProductionImage::Added.new(
+        entries: linked.map { |name, program| ProductionImage.program_entry(name, program, codec: codec) }.freeze,
+        inputs: linked.values.flat_map { |program| program.fetch(:inputs) }.uniq.freeze, imports: {}.freeze
+      )
+      built = ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker, machine: machine,
+                                  fiasco: fiasco, runtime: runtime)
+                             .build_test_image(directory: directory, added: added, domains: domains,
+                                               manifest_source: manifest_source)
+      [built, linked.freeze]
     end
 
     # Builds the programs and the test image once, then boots it under HVF at each CPU
@@ -594,36 +630,14 @@ end
 
       private
 
-      # The production image with PROGRAMS added to the domain release, under the
-      # development manifest, session template and all, and with the client script
-      # (TOOLKIT_BOOT), whose erx_ui brings erx-lvgl into the release's bin/.
+      # The suite's test image (Programs.test_image): PROGRAMS under the development
+      # manifest, session template and all, and with the client script (TOOLKIT_BOOT),
+      # whose erx_ui brings erx-lvgl into the release's bin/.
       def image(fiasco)
-        runtime = NativeRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco,
-                                    platform: @machine.platform)
-        directory = ProductionImage.clear_directory(root: @root, path: File.join(@build, 'image'))
-        # The image's build builds the runtime again; make finds nothing left to do.
-        libc = runtime.build.libc
-        programs = Runtime.reading(root: @root) { added(fiasco, libc: libc) }
-        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
-                            fiasco: fiasco, runtime: runtime)
-                       .build_test_image(directory: directory, added: programs,
-                                         domains: [TOOLKIT_BOOT], manifest_source: @manifest)
-      end
-
-      # Each program linked over musl's libc.a, the one the runtime images link, as a
-      # release file of the session's: no system mark, since only the system release's
-      # files carry it.
-      def added(fiasco, libc:)
-        native = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
-                                fiasco: fiasco)
-        archives = [libc, CompilerRt.archive(root: @root, runner: @runner, compiler: @compiler)]
-        programs = PROGRAMS.map do |name, source|
-          [name, native.build_task_receipted(name: name, sources: [*NativeRoot::PROGRAM, source], directory: File.join(@build, name),
-                                             archives: archives)]
-        end
-        entries = programs.map { |name, program| ProductionImage.program_entry(name, program, codec: @codec) }
-        ProductionImage::Added.new(entries: entries.freeze, inputs: programs.flat_map { |_, program| program.fetch(:inputs) }.uniq.freeze,
-                                   imports: {}.freeze)
+        built, _programs = Programs.test_image(root: @root, runner: @runner, compiler: @compiler, linker: @linker,
+                                               machine: @machine, fiasco: fiasco, build: @build, programs: PROGRAMS,
+                                               manifest_source: @manifest, domains: [TOOLKIT_BOOT])
+        built
       end
 
       def boot(accel, count, remote, built)
