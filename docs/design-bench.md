@@ -1441,13 +1441,15 @@ the expected flavour is refused.
 
 ### L4Re's guest
 
-**Sources.** L4Re's repositories, at the commits each was at on
-2026-10-14T14:13:14Z, the commit date of upstream Fiasco
-`50bbe8a981199e17865e8553a4eb02c387b339cf`, the revision erXos's fork
-came from (`fiasco/kernel/ORIGIN.md`); Fiasco itself at exactly that
-revision, unpatched; and ipcbench (`github.com/l4re/ipcbench`) at
-`148682322103a984ddf84eb1a28e67a3d50c0b28`, its last commit before that
-date. Each is a `git` source in `deps.lock`, fetched by the fetch step
+**Sources.** Upstream Fiasco at exactly the revision erXos's fork came
+from, the `Revision` line of `fiasco/kernel/ORIGIN.md`, unpatched, so
+the fork's one pin moves both kernels; L4Re's repositories at the
+commits each was at on that revision's commit date; and ipcbench
+(`github.com/l4re/ipcbench`) at
+`148682322103a984ddf84eb1a28e67a3d50c0b28`, the commit its facts record
+read, its last commit before the commit date of the fork's revision
+`50bbe8a9`; a later revision re-checks that ipcbench has no newer commit
+before its date. Each is a `git` source in `deps.lock`, fetched by the fetch step
 into its own directory under the build tree, laid out at the paths
 L4Re's manifest (`github.com/L4Re/manifest`, `default.xml`) gives them:
 `l4` for `mk`, `l4/pkg/<name>` for packages, `fiasco` for the kernel,
