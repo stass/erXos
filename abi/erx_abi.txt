@@ -364,6 +364,16 @@ enum crash_cause u32
   value halt 2
   value watchdog 3
   value panic 4
+# Each CPU's state in a stop of the machine (docs/design-debugger.md, "CPU stop
+# states"). Zero is a stop slot nothing has published.
+enum stop_cpu_state u32
+  value offline 1
+  value leader 2
+  value stopped 3
+  value waiting 4
+  value concurrent 5
+  value starting 6
+  value unanswered 7
 
 bytes pack_magic 8 value 4552585041434b00
 bytes boot_locator_magic 8 value 455258424f4f5400

@@ -38,6 +38,23 @@ right entropy 31 "credit entropy from an authorized source"
 # root (docs/design-device-tree.md, "On Fiasco").
 limit boot_tree_max u32 1048576
 
+# The stop of the machine (docs/design-debugger.md, "The stop"): how long its
+# leader waits for the CPUs it asked, and the ranges the anchor's readable-RAM
+# map holds at most.
+limit stop_census_ms u32 100
+limit debug_ram_ranges u32 16
+# What one entry of a kernel's boot memory map says about physical memory
+# (docs/design-debugger.md, "Readable RAM").
+enum ram_class u32
+  value ram 1
+  value used 2
+  value excluded 3
+  value ignored 4
+# One range of the readable-RAM map: whole pages from base, length bytes long.
+layout erx_ram_range wire_le 8 16
+  field base u64 0
+  field length u64 8
+
 # erx.watchdog=P,D,B, in seconds: P from 1 to 60, D from 2P to 600, B from D
 # to 600, and 1,5,60 when the key is absent or malformed.
 limit watchdog_period_min u32 1
