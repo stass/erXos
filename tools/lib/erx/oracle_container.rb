@@ -39,10 +39,19 @@ module Erx
                    '--log-driver', 'none', '--restart', 'no', '--no-healthcheck'].freeze
     FLAVOURS = %w[emu jit].freeze
     SUITES = %w[emulator kernel stdlib compiler].freeze
+    # Where each run of the oracle lands: RUNS/FLAVOUR/OPERATION-*, holding its
+    # RESULT and the WORKSPACE the container wrote, which an export reads.
+    RUNS = 'build/oracle/linux'
+    RESULT = 'result.json'
+    WORKSPACE = 'work'
+
+    # The result files of every run of operation in flavour under root.
+    def self.results(root:, flavour:, operation:) = Dir.glob(File.join(root, RUNS, flavour, "#{operation}-*", RESULT))
+
     RESOURCES = { 'cpus' => 4, 'memory_bytes' => 8 * 1024**3,
                   'pids' => 4096, 'shm_bytes' => 256 * 1024**2 }.freeze
-    GUEST_ENV = { 'HOME' => '/tmp/erx-oracle/home', 'XDG_CONFIG_HOME' => '/tmp/erx-oracle/xdg',
-                  'TMPDIR' => '/tmp/erx-oracle/tmp',
+    GUEST_ENV = { 'HOME' => "#{OracleExport::GUEST_ROOT}/home", 'XDG_CONFIG_HOME' => "#{OracleExport::GUEST_ROOT}/xdg",
+                  'TMPDIR' => "#{OracleExport::GUEST_ROOT}/tmp",
                   'TS_EXTRA_PLATFORM_LABEL' => 'Docker',
                   'PATH' => '/usr/local/bin:/usr/bin:/bin', 'LANG' => 'C.UTF-8',
                   'LC_ALL' => 'C.UTF-8', 'USER' => 'erx', 'LOGNAME' => 'erx' }.freeze
@@ -135,7 +144,7 @@ module Erx
     # Read-only running-status check for the exact fixture this adapter started.
     def fixture_witness(record)
       directory = File.realpath(record.fetch('directory'))
-      prefix = File.join(@root, 'build/oracle/linux') + '/'
+      prefix = File.join(@root, RUNS) + '/'
       unless record['operation'] == 'detached' && record['context'] == @context &&
              directory.start_with?(prefix) && /\A[0-9a-f]{64}\z/.match?(record.fetch('owner'))
         raise Error, 'invalid fixture identity for running-status check'
@@ -186,7 +195,7 @@ module Erx
       raise Error, 'invalid Linux oracle flavour' unless FLAVOURS.include?(flavour)
       raise Error, 'invalid Linux oracle parallelism' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
       validate_selection(test_suite, testcase: testcase)
-      parent = OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/oracle/linux', flavour))
+      parent = OutputDirectory.prepare(root: @root, path: File.join(@root, RUNS, flavour))
       directory = Dir.mktmpdir("#{operation}-", parent)
       ownership = SecureRandom.hex(32).freeze
       cid_path = File.join(directory, 'container.cid')
@@ -320,7 +329,7 @@ module Erx
         if cleanup_error
           result.merge!('state' => 'cleanup_error', 'cleanup_diagnostic' => cleanup_error.message)
         end
-        result['report'] = File.join(directory, 'result.json')
+        result['report'] = File.join(directory, RESULT)
         File.write(result.fetch('report'), JSON.pretty_generate(result) + "\n")
         write_manifest(directory, result)
       end
@@ -421,7 +430,7 @@ module Erx
 
     def prepare_files(directory, archive:, source:)
       inputs = File.join(directory, 'inputs')
-      workspace = File.join(directory, 'work')
+      workspace = File.join(directory, WORKSPACE)
       Dir.mkdir(inputs, 0o700)
       Dir.mkdir(workspace, 0o700)
       FileUtils.copy_file(archive, File.join(inputs, 'otp.tar.gz'))
@@ -670,8 +679,8 @@ module Erx
       record['upstream_log'] = original
       record['log'] = nil
       record['log_status'] = 'unknown'
-      return unless original.is_a?(String) && original.start_with?('/tmp/erx-oracle/')
-      relative = original.delete_prefix('/tmp/erx-oracle/')
+      return unless original.is_a?(String) && original.start_with?("#{OracleExport::GUEST_ROOT}/")
+      relative = original.delete_prefix("#{OracleExport::GUEST_ROOT}/")
       return if relative.split('/').any? { |part| ['', '.', '..'].include?(part) }
       return unless exported_files.include?(relative)
       candidate = File.join(workspace, relative)

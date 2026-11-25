@@ -1568,27 +1568,52 @@ repository for aarch64 offers `erlang27` 27.3.4.19 and `erlang28`
 28.5.0.8, and no OTP 29 ([References](#references)).
 
 **The initramfs.** The exported tree at its own prefix, so nothing is
-relocated; the libraries at the paths the loader listed; `/etc/hosts`
-with the IPv4 loopback line; and a launcher of its own as `/init`. Process 1 brings the loopback interface up, mounts
-`/proc` and `/sys`, starts `epmd -daemon`, then starts two nodes by
-executing `erlexec` directly with the environment the `erl` script would
-give it (`ROOTDIR`, `BINDIR`, `EMU`, `PROGNAME`), since the guest has no
-shell, waits for the client node to exit and powers the machine off.
-Whether any part of a node's start needs `/bin/sh`, or ERTS needs `/sys`,
-is unverified; if a shell is needed, the image's `/bin/sh` and its
-libraries join the initramfs by the same listing.
+relocated; the libraries at the paths the loader listed; the bench
+modules' beams under `/bench/ebin`; `/etc/hosts` with the IPv4 loopback
+line; `/dev/console` and `/dev/null`; and a launcher of its own as `/init`, `bench/linux/erlang_init.c`,
+which shares its wait and power-off with the C guest's `/init`
+(`bench/linux/launch.h`) and is built the same way, with the export's
+ERTS directory and the beams' directory passed as build flags. The
+export's logs and evidence stay out. Execute bits are derived, not
+recorded: `/init`, the five programs of the export's ERTS directory and
+the interpreter their `PT_INTERP` program header names, the dynamic
+loader the kernel executes with each of them, get them; every other
+member is `0644`, and `/tmp` is `1777`. An interpreter the export does
+not hold, or a program that is not a 64-bit little-endian ELF file or
+whose program headers name more than one interpreter or one outside
+the file, refuses the build; a program that names none is static. Process 1 mounts `/proc` and
+`/sys`, brings the loopback interface up, starts `epmd -address
+127.0.0.1` as its own child and waits until it accepts a connection or
+ends,
+then starts two nodes by executing `erlexec` directly with the
+environment the `erl` script would give it (`ROOTDIR`, `BINDIR`, `EMU`,
+`PROGNAME`) and nothing else, since the guest has no shell; epmd's and
+the echo node's output go to `/dev/null`, so the console carries only the
+client's lines and `/init`'s. It waits for the client under its deadline
+(`LinuxErlangGuest::DEADLINE_SECONDS`), says how the client ended unless
+it exited with 0, prints `erx: bench: done`, the line the host's last
+checkpoint waits for, and powers the machine off.
 
 **The nodes.** `bench_echo@127.0.0.1` and `bench_client@127.0.0.1`, long
 names given as an address so no resolver is asked, one cookie,
-`-start_epmd false`, and the scheduler count of the erXos domain each is
-set beside, recorded. The carrier is distribution's default, TCP over
+`-start_epmd false`, `-kernel inet_dist_use_interface {127,0,0,1}`, and
+the scheduler count of the erXos domain each is set beside: `+S N:N`,
+N the boot's CPU count, which the host passes as `/init`'s second
+argument and records as the run's `erts_schedulers`.
+The guest has no network device, so the cookie guards nothing but the
+design's seeded fault, whose `/init` gives the echo node another one. The carrier is distribution's default, TCP over
 loopback (`inet_tcp_dist`; the kernel application's carriers are TCP over
 IPv4 and IPv6, as read in the tree's copy, `otp/lib/kernel/src/`, and
 TLS is the `ssl` application's). The client connects, makes
 one untimed round trip, and runs `local-rtt` against an echo process of
 its own node and `xdomain-pingpong` against the echo process registered
 on the other node, one request outstanding at a time, the same 64-byte
-`{echo, B}` as on erXos. Its standard output is process 1's console.
+`{echo, B}` as on erXos. Its standard output is process 1's console. Its
+one argument, the benchmark's guest modules and their arguments as an
+Erlang term (`XdomainBench.guests`, the echo `{erx_xdomain_echo,
+'bench_echo@127.0.0.1'}`), is what the kernel hands `/init` from after
+`--` on its command line, a single word without spaces or double quotes,
+so the initramfs does not depend on the cells a boot asks.
 
 **The same modules.** `bench/erx_xdomain_bench.erl`, `bench/erx_bench_hist.erl`
 and the Erlang line writer are the ones erXos's image runs, compiled for

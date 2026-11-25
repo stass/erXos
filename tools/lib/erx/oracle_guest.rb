@@ -15,6 +15,8 @@ module Erx
   # This is host tooling inside the isolated Linux oracle, not erXos code.
   # A container owns the entire invocation and every stock fixture it starts.
   class ContainerOracleJob
+    # The directory the oracle's container works in; it installs OTP at its install/.
+    ROOT = OracleExport::GUEST_ROOT
     TOOLS = %w[ruby timeout make gcc g++ perl tar ar ranlib ld pkg-config sed awk grep m4 df dpkg-query].freeze
     FLAVOURS = %w[emu jit].freeze
     SUITES = %w[emulator kernel stdlib compiler].freeze
@@ -77,16 +79,16 @@ module Erx
 
     def initialize(plan)
       @plan = plan
-      Dir.mkdir('/tmp/erx-oracle', 0o700)
-      @runner = Runner.new(owner_root: '/tmp/erx-oracle', log_dir: '/tmp/erx-oracle/logs', timeout_program: '/usr/bin/timeout')
+      Dir.mkdir(ROOT, 0o700)
+      @runner = Runner.new(owner_root: ROOT, log_dir: "#{ROOT}/logs", timeout_program: '/usr/bin/timeout')
       @environment = plan.fetch('environment')
-      @source = '/tmp/erx-oracle/source'
-      @install = '/tmp/erx-oracle/install'
+      @source = "#{ROOT}/source"
+      @install = "#{ROOT}/install"
     end
 
     def call(startup_marker_exists: File.method(:exist?), read_memory_events: File.method(:binread))
       result = execute_plan
-      result.merge('operator_startup_marker' => startup_marker_exists.call('/tmp/erx-oracle/operator-startup-executed'),
+      result.merge('operator_startup_marker' => startup_marker_exists.call("#{ROOT}/operator-startup-executed"),
                    'memory_events' => memory_events(read_memory_events))
     end
 
@@ -103,9 +105,9 @@ module Erx
 
     def execute_plan
       verify_plan
-      FileUtils.mkdir_p('/tmp/erx-oracle/home', mode: 0o700)
-      FileUtils.mkdir_p('/tmp/erx-oracle/xdg', mode: 0o700)
-      FileUtils.mkdir_p('/tmp/erx-oracle/tmp', mode: 0o700)
+      FileUtils.mkdir_p("#{ROOT}/home", mode: 0o700)
+      FileUtils.mkdir_p("#{ROOT}/xdg", mode: 0o700)
+      FileUtils.mkdir_p("#{ROOT}/tmp", mode: 0o700)
       context = prove_context
       operation = @plan.fetch('operation')
       if operation == 'probe'
@@ -124,7 +126,7 @@ module Erx
       end
 
       suite = @plan.fetch('suite')
-      hooks = '/tmp/erx-oracle/hooks'
+      hooks = "#{ROOT}/hooks"
       Dir.mkdir(hooks)
       @runner.run([File.join(@install, 'bin/erlc'), *REPORTER_FLAGS, '-I',
                    File.join(@source, 'lib/common_test/include'), '-o', hooks,
@@ -133,7 +135,7 @@ module Erx
       selection = @plan['test_suite'] ? "-suite #{@plan.fetch('test_suite')}" : ''
       selection += " -case #{@plan.fetch('testcase')}" if @plan['testcase']
       extra = "-ct_hooks cth_surefire -event_handler erx_oracle_events -pa #{hooks}"
-      environment = @environment.merge('ERL_TOP' => @source, 'ERX_ORACLE_EVENTS' => '/tmp/erx-oracle/events.jsonl',
+      environment = @environment.merge('ERL_TOP' => @source, 'ERX_ORACLE_EVENTS' => "#{ROOT}/events.jsonl",
                                         'CT_NODENAME' => 'erx_oracle')
       argv = ['/usr/bin/make', "#{suite}_test", *self.class.suite_flavour_options(suite: suite, flavour: @plan.fetch('flavour')),
               'MAKE=/usr/bin/make', "ARGS=#{selection}", "EXTRA_ARGS=#{extra}"]
@@ -152,7 +154,7 @@ module Erx
     # Stock port_SUITE executes a native helper after removing read access.
     # Admission tests those exact filesystem semantics as the workload user.
     def execute_only_files
-      Dir.mktmpdir('erx-execute-only-', '/tmp/erx-oracle') do |directory|
+      Dir.mktmpdir('erx-execute-only-', ROOT) do |directory|
         path = File.join(directory, 'true')
         FileUtils.cp('/usr/bin/true', path)
         File.chmod(0o111, path)
@@ -180,7 +182,7 @@ module Erx
         raise Error, 'container workload environment differs from its explicit plan'
       end
       raise Error, 'oracle workload must not run as root' if Process.uid.zero?
-      workspace = File.stat('/tmp/erx-oracle')
+      workspace = File.stat(ROOT)
       unless workspace.uid == Process.uid && (workspace.mode & 0o777) == 0o700
         raise Error, 'native oracle workspace differs from its private ownership plan'
       end
@@ -235,7 +237,7 @@ module Erx
         'numeric_external' => external, 'native_external_dns' => dns, 'ipv6' => ipv6,
         'effective_limits' => limits, 'tools' => tools,
         'execute_only_files' => execute_only_files,
-        'private_startup_empty' => !File.exist?('/tmp/erx-oracle/home/.erlang') && !File.exist?('/tmp/erx-oracle/xdg/erlang/.erlang') }
+        'private_startup_empty' => !File.exist?("#{ROOT}/home/.erlang") && !File.exist?("#{ROOT}/xdg/erlang/.erlang") }
     end
 
     def verify_cgroups
@@ -299,7 +301,7 @@ module Erx
                           name: 'oracle-image-packages', deadline: 10, env: @environment)
       rows = File.binread(query.fetch('log'), 1024 * 1024 + 1)
       raise Error, 'oracle image package inventory exceeds bound' if rows.bytesize > 1024 * 1024
-      destination = '/tmp/erx-oracle/image-licenses'
+      destination = "#{ROOT}/image-licenses"
       Dir.mkdir(destination)
       packages = rows.lines.map do |row|
         name, version, architecture = row.strip.split("\t", -1)
@@ -313,7 +315,7 @@ module Erx
           raise Error, 'oracle package copyright evidence exceeds bound' if bytes.bytesize > 2 * 1024 * 1024
           hash = Digest::SHA256.hexdigest(bytes)
           path = "image-licenses/#{hash}.copyright"
-          File.binwrite(File.join('/tmp/erx-oracle', path), bytes)
+          File.binwrite(File.join(ROOT, path), bytes)
           text = bytes.dup.force_encoding(Encoding::UTF_8)
           labels = text.valid_encoding? ? text.lines.grep(/\ALicense:/).map(&:strip).uniq : nil
           evidence = { 'status' => 'recorded', 'source' => source, 'artifact' => path,
@@ -341,7 +343,7 @@ module Erx
 
     def build_stock
       Sources.unpack(archive: '/inputs/otp.tar.gz', sha256: @plan.fetch('source_sha256'),
-                     destination: @source, owner_root: '/tmp/erx-oracle',
+                     destination: @source, owner_root: ROOT,
                      source_directory: 'otp_src_29.1.2', runner: @runner)
       reporting_source = install_reporting_source if @plan.fetch('operation') == 'run'
       flavour = @plan.fetch('flavour')
@@ -365,7 +367,7 @@ module Erx
       unless File.read(verification.fetch('log')).lines.include?("ERX_ORACLE 29.1.2 #{flavour}\n")
         raise Error, 'container oracle version or flavour mismatch'
       end
-      distribution = 'Opts=#{name=>erx_probe_peer,exec=>"/tmp/erx-oracle/install/bin/erl",connection=>standard_io,' \
+      distribution = 'Opts=#{name=>erx_probe_peer,exec=>"' + File.join(ROOT, 'install/bin/erl') + '",connection=>standard_io,' \
                      'args=>["-boot","no_dot_erlang","-setcookie","erx_oracle_probe"]},' \
                      '{ok,P,N}=peer:start_link(Opts),pong=net_adm:ping(N),N=erpc:call(N,erlang,node,[]),' \
                      'ok=peer:stop(P),io:format("ERX_DISTRIBUTION passed~n"),halt().'
@@ -391,7 +393,7 @@ module Erx
         listing = @runner.run(['/usr/bin/ldd', object.path], name: object.name, deadline: 30, env: @environment)
         self.class.loader_paths(File.read(listing.fetch('log')))
       end.uniq.sort
-      File.open('/tmp/erx-oracle/libraries.json', File::WRONLY | File::CREAT | File::EXCL, 0o600) do |output|
+      File.open("#{ROOT}/libraries.json", File::WRONLY | File::CREAT | File::EXCL, 0o600) do |output|
         output.write(JSON.generate('version' => 1, 'libraries' => paths) + "\n")
       end
     end
@@ -420,10 +422,10 @@ module Erx
         Process.setsid
         fork do
           server = TCPServer.new('127.0.0.1', 12_321)
-          File.write('/tmp/erx-oracle/detached-ready', Process.pid.to_s)
+          File.write("#{ROOT}/detached-ready", Process.pid.to_s)
           heartbeat = 0
           loop do
-            File.write('/tmp/erx-oracle/detached-heartbeat', heartbeat.to_s)
+            File.write("#{ROOT}/detached-heartbeat", heartbeat.to_s)
             if (heartbeat % 10).zero?
               puts "ERX_ORACLE_HEARTBEAT #{heartbeat}"
               STDOUT.flush
@@ -438,11 +440,11 @@ module Erx
       end
       Process.wait(child)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
-      until File.file?('/tmp/erx-oracle/detached-ready')
+      until File.file?("#{ROOT}/detached-ready")
         raise Error, 'detached fixture did not become ready' if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
         sleep 0.05
       end
-      File.write('/tmp/erx-oracle/parent-finished', 'parent exited; detached child holds port 12321')
+      File.write("#{ROOT}/parent-finished", 'parent exited; detached child holds port 12321')
       puts 'ERX_ORACLE_DETACHED_READY'
       STDOUT.flush
       loop { sleep 1 }

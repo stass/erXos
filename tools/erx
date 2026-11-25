@@ -54,6 +54,7 @@ begin
   require_relative 'lib/erx/l4re_fetch'
   require_relative 'lib/erx/linux_guest'
   require_relative 'lib/erx/posix_bench'
+  require_relative 'lib/erx/linux_erlang_guest'
   require_relative 'lib/erx/bench_web'
   require_relative 'lib/erx/net_bench_freebsd'
   require_relative 'lib/erx/toolchain_provenance'
@@ -829,7 +830,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE [--runs N] [--profile landing|full] [--set DIR]... | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe|install | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE [--runs N] [--profile landing|full] [--set DIR]... | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
       0
     end
 
@@ -1228,8 +1229,8 @@ module Erx
       action = arguments.shift
       return oracle_hosted(arguments, hosted_class: hosted_class) if action == 'hosted'
       return oracle_qemu(arguments, qemu_class: qemu_class) if action == 'qemu'
-      unless %w[build run probe].include?(action)
-        raise OptionParser::InvalidArgument, 'usage: oracle build|run SUITE|probe [--docker-context NAME] [--flavour emu|jit] | ' \
+      unless %w[build run probe install].include?(action)
+        raise OptionParser::InvalidArgument, 'usage: oracle build|run SUITE|probe|install [--docker-context NAME] [--flavour emu|jit] | ' \
                                            'oracle hosted [--out DIR] [--deadline SECONDS] [--suites LIST] | ' \
                                            'oracle qemu [--out DIR] [--deadline SECONDS] [--accel tcg|hvf] [--cpus N] [--suites LIST]'
       end
@@ -1268,6 +1269,8 @@ module Erx
                  backend.build(flavours: [options.fetch(:flavour)], jobs: options.fetch(:jobs)).first
                when 'probe'
                  backend.probe(flavour: options.fetch(:flavour))
+               when 'install'
+                 backend.install(flavour: options.fetch(:flavour), jobs: options.fetch(:jobs))
                when 'run'
                  backend.run(suite, flavour: options.fetch(:flavour), jobs: options.fetch(:jobs),
                              deadline: options.fetch(:deadline), test_suite: options[:test_suite], testcase: options[:testcase])
@@ -1627,7 +1630,8 @@ module Erx
                                      qemu: Qemu.new(root: ROOT, runner: runner), platform: Platform.development(ROOT)),
                 LinuxGuest::Guest.new(root: ROOT, runner: runner),
                 LinuxGuest::Guest.new(root: ROOT, runner: runner, boot: 'posix'),
-                PosixBench::Guest.new(root: ROOT, runner: runner)]
+                PosixBench::Guest.new(root: ROOT, runner: runner),
+                LinuxErlangGuest::Guest.new(root: ROOT, runner: runner)]
       write = ->(record, logs) { BenchRecord.write(record, history: history, erxos_root: ROOT, logs: logs) }
       session = BenchSession::Run.new(guests: guests, host: BenchSystem.host(kind: BenchSession::KIND, root: ROOT, runner: runner),
                                       write: write, load: -> { QemuGate.one_minute_load })

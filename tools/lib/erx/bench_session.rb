@@ -46,14 +46,18 @@ module Erx
     end
 
     # The session's plan for benchmark over systems at profile with guests, refused
-    # whole, before any boot, when a system is not one, has no guest under HVF, or has
-    # a guest that refuses the profile, in the guest's own words.
+    # whole, before any boot, when a system is not one, has no guest under HVF, or a
+    # guest the plan boots refuses the profile, in the guest's own words. A guest of a
+    # boot the benchmark does not ask is never asked.
     def plan(benchmark, systems:, profile:, guests:)
       rounds = ROUNDS.fetch(profile) { raise Error, "bench: profile #{profile} is not landing or full" }
-      check_systems(systems, guests, profile)
+      check_systems(systems, guests)
       guest = ->(system, boot) { guests.find { |candidate| candidate.system == system && candidate.boot == boot } }
       wanted = systems.product(benchmark.landing.keys).reject { |system, boot| cells(benchmark, boot, system).empty? }
       booted, missing = wanted.partition { |system, boot| guest.call(system, boot) }
+      refusal = booted.lazy.filter_map { |system, boot| guest.call(system, boot).refusal(profile) }.first
+      raise Error, "bench: #{refusal}" if refusal
+
       steps = order(systems, rounds: rounds).each_with_index.flat_map do |turned, round|
         turned.flat_map { |system| booted.select { |entry| entry.first == system } }.flat_map do |system, boot|
           chosen = guest.call(system, boot)
@@ -66,7 +70,7 @@ module Erx
       Plan.new(steps: steps, missing: missing)
     end
 
-    def check_systems(systems, guests, profile)
+    def check_systems(systems, guests)
       raise Error, 'bench: --systems lists no system' if systems.empty?
 
       twice = systems.find { |system| systems.count(system) > 1 }
@@ -78,11 +82,7 @@ module Erx
         raise Error, "bench: #{LineEscape.escape(system)} is not a system: #{SYSTEMS.join(', ')}" unless
           SYSTEMS.include?(system)
 
-        own = guests.select { |guest| guest.system == system }
-        raise Error, "bench: #{system} has no guest under HVF yet" if own.empty?
-
-        refusal = own.filter_map { |guest| guest.refusal(profile) }.first
-        raise Error, "bench: #{refusal}" if refusal
+        raise Error, "bench: #{system} has no guest under HVF" if guests.none? { |guest| guest.system == system }
       end
     end
     private_class_method :check_systems

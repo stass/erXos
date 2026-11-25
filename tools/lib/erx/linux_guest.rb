@@ -155,7 +155,7 @@ module Erx
 
     def compiler = ENV.fetch('ERX_CLANG') { raise Error, 'linux guest: set ERX_CLANG to the LLVM clang' }
 
-    private_class_method :pin_of, :c_flags, :compile, :compiler
+    private_class_method :pin_of, :c_flags, :compiler
 
     # Linux's guest for one boot (BenchSystem), native or posix: one boot of the kernel and its
     # initramfs, whose erx_peer_bench prints a BENCH line for every cell of the boot, a

@@ -86,6 +86,20 @@ class BenchSessionTest < Minitest::Test
     assert_equal 'bench: erxos offers no full profile', error.message
   end
 
+  # Only the guests of the boots the plan makes are asked whether they refuse: a guest of
+  # a boot the benchmark does not have, which would refuse, never stops the session.
+  def test_only_the_guests_the_plan_boots_are_asked_to_refuse
+    nullcall = Erx::BenchSuite.benchmark('nullcall')
+    guests = [Guest.new('erxos'), Guest.new('linux'), Guest.new('linux', boot: 'xdomain', profiles: [])]
+    plan = Session.plan(nullcall, systems: %w[erxos linux], profile: 'landing', guests: guests)
+    assert_equal [%w[erxos native], %w[linux native]], plan.steps.map { |step| [step.system, step.boot] }.uniq
+    error = assert_raises(Erx::Error) do
+      Session.plan(Erx::BenchSuite.benchmark('xdomain'), systems: %w[erxos linux], profile: 'landing',
+                                                         guests: guests + [Guest.new('erxos', boot: 'xdomain')])
+    end
+    assert_equal 'bench: linux offers no landing profile', error.message
+  end
+
   # Each boot is written as it ends, so a guest that fails leaves the runs before it and
   # the session goes on with the next.
   def test_each_boot_is_one_run_and_a_failed_boot_does_not_end_the_session
