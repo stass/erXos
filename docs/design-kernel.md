@@ -1810,7 +1810,12 @@ holds its message and buffer registers, and its **vCPU state area**
 thread-pointer register that user mode can read but not write holds the
 page's address, as Fiasco keeps its UTCB's; the binding names it. The page
 is charged with the thread, its mapping is of kind `ERX_MAP_KERNEL`, which
-no range call changes, and it goes with the thread.
+no range call changes, and it goes with the thread. The address it picks is
+congruent modulo 16 KiB with the page's address in the kernel's own
+mapping, because the kernel picks it from that address: where a data cache
+is indexed by the bits above the page offset, a mismatch slows every kernel
+call of the thread ([design-fiasco.md](design-fiasco.md), "Congruent UTCB
+areas", where Fiasco refuses an area that could mismatch).
 
 ```text
   erx_thread_create        erx_thread_start          pick

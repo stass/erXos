@@ -214,7 +214,7 @@ case_irq_refused(void)
 
 /*
  * Fiasco refuses a UTCB area whose kernel alias could differ from its user address in bits
- * 12 and 13 (docs/design-fiasco.md, "A congruent UTCB area"): a one-page area, and a 16 KiB
+ * 12 and 13 (docs/design-fiasco.md, "Congruent UTCB areas"): a one-page area, and a 16 KiB
  * area at an address aligned only to a page. It grants a 16 KiB area aligned to its size.
  * Each probe lies UTCB_PROBE_STEP apart at UTCB_PROBE, far above the root's managed memory
  * (vm.c's object area ends at 512 GiB), so an area granted overlaps nothing the root uses.

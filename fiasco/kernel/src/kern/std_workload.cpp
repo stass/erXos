@@ -23,7 +23,7 @@ static constexpr Cap_index C_factory = Cap_index(Initial_kobjects::Factory);
 static constexpr Cap_index C_pager   = Cap_index(Initial_kobjects::Pager);
 
 // The boot threads' UTCB area is 16 KiB, not one page (docs/design-fiasco.md,
-// "A congruent boot UTCB area"). The buddy allocator aligns its kernel alias to
+// "Congruent UTCB areas"). The buddy allocator aligns its kernel alias to
 // 16 KiB, as the user address is aligned, so the two agree in bits 12 and 13. A
 // one-page area's kernel alias differs from the user address in bit 12 or 13 in
 // three of four placements, and on Apple silicon under HVF every kernel call from

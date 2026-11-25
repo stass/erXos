@@ -252,7 +252,7 @@ null_call_helper(uint64_t arg)
 /*
  * The root's first thread, which the kernel made at boot, pays for a null call what
  * a thread the factory made pays on the same CPU, within a quarter, under HVF
- * (docs/design-fiasco.md, "A congruent boot UTCB area").
+ * (docs/design-fiasco.md, "Congruent UTCB areas").
  */
 static bool
 case_first_thread_null_call(void)

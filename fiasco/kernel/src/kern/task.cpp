@@ -1,3 +1,4 @@
+// Modified by erXos: alloc_ku_mem refuses a UTCB area under 16 KiB or not aligned to its size, so its kernel alias is congruent with its user address.
 INTERFACE:
 
 #include "context.h"
@@ -346,7 +347,8 @@ Task::insert_ku_mem(L4_fpage *ku_area, Ku_mem *ku_mem, User_ptr<void> u_addr,
  * \retval 0                 Allocation and mapping succeeded.
  * \retval -L4_err::ENomem   Memory allocation failed.
  * \retval -L4_err::EExists  Memory already mapped.
- * \retval -L4_err::EInval   Invalid flexpage and other error conditions.
+ * \retval -L4_err::EInval   Invalid flexpage, an area under 16 KiB or not
+ *                           aligned to its size, and other error conditions.
  */
 PUBLIC
 int
@@ -358,6 +360,15 @@ Task::alloc_ku_mem(L4_fpage *ku_area, bool need_remote_tlb_flush)
 
   size_t size = check_ku_area_size(ku_area);
   if (size == 0)
+    return -L4_err::EInval;
+
+  // erXos: the area's kernel alias, which the buddy allocator aligns to the
+  // area's size, agrees with its user address in bits 12 and 13 only when the
+  // area is at least 16 KiB and its user address is aligned to its size, so any
+  // other area is refused (docs/design-fiasco.md, "Congruent UTCB areas").
+  constexpr unsigned Congruent_order = 14;
+  if (ku_area->order() < Congruent_order
+      || (cxx::int_value<Virt_addr>(ku_area->mem_address()) & (size - 1)) != 0)
     return -L4_err::EInval;
 
   Ku_mem *ku_mem = new (ram_quota()) Ku_mem();
