@@ -3,7 +3,9 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'fileutils'
 require_relative 'bounded_file'
+require_relative 'fsimg'
 require_relative 'pcie_domain'
 
 module Erx
@@ -41,7 +43,9 @@ module Erx
   # holds the medium, a window proxy its facet {drive, 0} answers, and through the proxy
   # reads the harness's sectors equal, writes a pattern, reads it back equal and flushes:
   # the medium's path from the stick to the media domain (docs/design-drives.md, "How the
-  # grant reaches the media domain"), before any volume of it mounts. Then
+  # grant reaches the media domain"), in the gap before its one volume, a FAT16 volume
+  # the ask that got the proxy mounted. Last, in root's session, it lists the volume at
+  # /media/disk0/s1 and reads its one file (root_body). Then
   # the harness ejects the stick's medium through QMP, and a fourth line (ended_line)
   # waits for its transport to end while the function runs on; then it unplugs the stick
   # through device_del, and a fifth (gone_line) waits for the function to end. After QEMU
@@ -78,7 +82,7 @@ module Erx
     # The keyboard's five stages, in order; the stick's, read at the USB domain; and those
     # the harness reads after the boot. Each is a side cell.
     STAGES = %w[started connected addressed described typed].freeze
-    STICK_STAGES = %w[reported sized read written read_back flushed ended unplugged].freeze
+    STICK_STAGES = %w[reported sized read written read_back flushed listed file_read ended unplugged].freeze
     HOST_STAGES = %w[persisted logged_served logged_ended].freeze
     # The restart boot's cells, by the stage of its answers each is: the first key typed;
     # after the kill, another incarnation ready, its keyboard described and the follower on
@@ -93,17 +97,29 @@ module Erx
     STAGE_SIDES = [*STAGES, *STICK_STAGES].to_h { |stage| [stage, "-#{stage}"] }.freeze
 
     # The stick's raw image and what the cases do with it. It holds SECTORS sectors of
-    # SECTOR bytes, 1 MiB; each of its first READ sectors is its own line, repeated, and
-    # the rest are zeros. The third line reads those READ sectors and compares their MD5
-    # with READ_MD5, then writes WRITTEN, WRITE_SECTORS sectors of WRITE_TEXT, at
-    # WRITE_SECTOR, reads it back and flushes.
+    # SECTOR bytes: sector 0 an MBR whose one entry is a FAT16 volume of VOLUME_SECTORS
+    # sectors at VOLUME_START, which fsimg writes (write/3) holding FILE with FILE_TEXT;
+    # each of the next READ - 1 sectors its own line, repeated; and zeros up to the
+    # volume. The third line reads the first READ sectors and compares their MD5 with
+    # read_md5, then writes WRITTEN, WRITE_SECTORS sectors of WRITE_TEXT, at WRITE_SECTOR,
+    # inside the gap before the volume, reads it back and flushes; and root's session
+    # lists the volume, s1, and reads FILE.
     module Stick
       SECTOR = 512
-      SECTORS = 2048
       READ = 8
       WRITE_SECTOR = 16
       WRITE_SECTORS = 4
       WRITE_TEXT = 'erxos usb write!'
+      VOLUME_START = 2048
+      # 8 MiB, which FAT16 of 1 KiB clusters fills with more clusters than FAT12 may count.
+      VOLUME_SECTORS = 16_384
+      SECTORS = VOLUME_START + VOLUME_SECTORS
+      FILE = 'hello.txt'
+      FILE_TEXT = "erxos usb stick file\n"
+      # The MBR type of a FAT16 volume addressed by LBA.
+      FAT16_LBA = 0x0e
+      # FAT's first time, the volume's every time, so its bytes are reproducible.
+      EPOCH = '315532800'
 
       module_function
 
@@ -113,14 +129,40 @@ module Erx
         (line * ((SECTOR / line.bytesize) + 1)).byteslice(0, SECTOR)
       end
 
-      # The whole image, as the harness writes it. Pure.
-      def image = (0...READ).map { |number| sector(number) }.join.ljust(SECTORS * SECTOR, "\0").b
+      # Sector 0: the MBR, its one entry the volume's, with no CHS address. Pure.
+      def mbr
+        entry = [0, 0, 0, 0, FAT16_LBA, 0, 0, 0, VOLUME_START, VOLUME_SECTORS].pack('C8V2')
+        ("\0" * 446) + entry + ("\0" * 48) + "\x55\xAA".b
+      end
+
+      # The first READ sectors: the MBR, then a line a sector. Pure.
+      def head = [mbr, *(1...READ).map { |number| sector(number) }].join.b
+
+      # The whole image around the volume's bytes, as the harness writes it. Pure.
+      def image(volume)
+        raise Error, "the stick's volume is #{volume.bytesize} bytes, not #{VOLUME_SECTORS * SECTOR}" unless
+          volume.bytesize == VOLUME_SECTORS * SECTOR
+
+        head.ljust(VOLUME_START * SECTOR, "\0") + volume.b
+      end
+
+      # Writes the image at path; the volume's tree and its image lie beside it.
+      def write(path, root:, runner:)
+        tree = File.join(File.dirname(path), 'stick-tree')
+        volume = File.join(File.dirname(path), 'stick-volume.img')
+        FileUtils.mkdir_p(tree)
+        File.binwrite(File.join(tree, FILE), FILE_TEXT)
+        runner.run([Fsimg.checked(root: root, runner: runner), 'cW', '-f', volume, '-F', 'fat16',
+                    '-s', (VOLUME_SECTORS * SECTOR).to_s, '-L', 'ERXOS', '-o', 'cluster=1024', '-R', '-e', EPOCH,
+                    '-C', tree, '.'], name: 'usb-stick-volume', deadline: 60)
+        File.binwrite(path, image(BoundedFile.read(volume, maximum: VOLUME_SECTORS * SECTOR)))
+      end
 
       # The bytes the third line writes. Pure.
       def written = (WRITE_TEXT * (WRITE_SECTORS * SECTOR / WRITE_TEXT.bytesize)).b
 
       # The MD5 of the first READ sectors, in upper-case hex as binary:encode_hex/1 gives it.
-      def read_md5 = Digest::MD5.hexdigest(image.byteslice(0, READ * SECTOR)).upcase
+      def read_md5 = Digest::MD5.hexdigest(head).upcase
 
       # Whether the image bytes, read back after the boot, hold the written pattern where
       # the third line wrote it. Pure.
@@ -153,10 +195,10 @@ module Erx
     # 200 ms and the follower poll's 100. The second waits at most 15 s for the tracer.
     ANSWER_SECONDS = PcieDomain::HOLD_SECONDS + 90
     TYPED_SECONDS = 30
-    # The third line's two calls, each inside UbAt's minute: at the USB domain a 20 s poll and
-    # one request, at the media domain a 20 s poll and four; the fourth's and fifth's polls,
-    # 20 s each, and the fourth's second.
-    STICK_SECONDS = 130
+    # The third line's three calls, each inside UbAt's minute: at the USB domain a 20 s poll and
+    # one request, at the media domain a 20 s poll and four, and in root's session a listing
+    # and a read; the fourth's and fifth's polls, 20 s each, and the fourth's second.
+    STICK_SECONDS = 190
     GONE_SECONDS = 30
     # The restart line's wait for another incarnation, 1200 rounds of 100 ms, then the
     # enumeration's and the follower's polls as in the first line.
@@ -300,6 +342,24 @@ MEDIA_BODY = [
   'binary:part(MdText,0,min(byte_size(MdText),2000))'
 ].join(',').freeze
 
+    # Root's first session, whose namespace mounts the media tree at /media, and the stick's
+    # volume there (docs/design-drives.md, "Paths").
+    ROOT_NODE = 'root_1@erxos'
+    STICK_VOLUME = '/media/disk0/s1'
+
+    # The body of the fun the third line runs last, in root's session, once the media domain
+    # holds the medium: whether volume, a directory, lists Stick::FILE and reads it as
+    # Stick::FILE_TEXT, through the session's own namespace. The file's text is written as
+    # its bytes, so no byte of it needs quoting in the shell's line.
+    def self.root_body(volume: STICK_VOLUME) = [
+      "RtList=file:list_dir(\"#{volume}\")",
+      "RtRead=file:read_file(\"#{volume}/#{Stick::FILE}\")",
+      "RtAnswer={[{listed,case RtList of {ok,RtNames}->lists:member(\"#{Stick::FILE}\",RtNames);_->false end}," \
+      "{file_read,RtRead=:={ok,<<#{Stick::FILE_TEXT.bytes.join(',')}>>}}],{RtList,RtRead}}",
+      'RtText=iolist_to_binary(io_lib:format("~0kP",[RtAnswer,40]))',
+      'binary:part(RtText,0,min(byte_size(RtText),1000))'
+    ].join(',').freeze
+
     # StUntil(F, K): whether F() turns true, polled every 200 ms at most K times.
     STICK_UNTIL = 'StUntil=fun StU(_,0)->false;StU(StF,StK)->case StF() of true->true;' \
                   '_->timer:sleep(200),StU(StF,StK-1) end end'
@@ -372,7 +432,8 @@ MEDIA_BODY = [
     # The third, fourth and fifth lines, typed once the key's records, the stick's answer
     # and the medium's end are read.
     def self.stick_line = "io:format(\"~0kp~n\",[{usb_stick,UbAt(#{NODE},fun()->#{STICK_BODY} end)," \
-                          "UbAt(#{MEDIA_NODE},fun()->#{MEDIA_BODY} end)}]).\r".freeze
+                          "UbAt(#{MEDIA_NODE},fun()->#{MEDIA_BODY} end)," \
+                          "UbAt(#{ROOT_NODE},fun()->#{root_body} end)}]).\r".freeze
     # The fourth binds UbBots, the functions running before the stick is unplugged, which
     # the fifth waits on.
     def self.ended_line = "UbBots=UbAt(#{NODE},fun()->#{STICK_OF},StOf(erx_usb_bot) end)," \
@@ -534,7 +595,7 @@ MEDIA_BODY = [
         boot = OutputDirectory.prepare(root: @root, path: path, mode: 0o700)
         socket = File.join(boot, 'qmp.sock')
         stick = File.join(boot, 'stick.img')
-        File.binwrite(stick, Stick.image)
+        Stick.write(stick, root: @root, runner: @runner)
         pcie = QemuPlan::Pcie.new(qmp_socket: socket, functions: { @xhci.slot => 'qemu-xhci' },
                                   usb: ['usb-kbd', QemuPlan::Disk.new(path: stick)])
         passed = []

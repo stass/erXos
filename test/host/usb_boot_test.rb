@@ -3,6 +3,8 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'digest'
+require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/usb_boot'
 
@@ -12,7 +14,8 @@ class UsbBootTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   PLATFORM = Erx::Platform.development(ROOT)
   STICK = Erx::UsbBoot::Stick
-  SERVED = "1.2 notice domain 7 principal 1 usb: erx_usb_bot: medium LUN 0 ready: 2048 blocks of 512 bytes\r\n"
+  SERVED = "1.2 notice domain 7 principal 1 usb: erx_usb_bot: medium LUN 0 ready: " \
+           "#{Erx::UsbBoot::Stick::SECTORS} blocks of 512 bytes\r\n"
   ENDED = "1.9 notice domain 7 principal 1 usb: erx_usb_bot: medium LUN 0 ended: device\r\n"
 
   def setup
@@ -44,32 +47,66 @@ class UsbBootTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::QemuPlan::Pcie.new(qmp_socket: @socket, functions: { 2 => 'qemu-xhci' }, usb: ['usb-storage']) }
   end
 
-  # The image is 1 MiB; each of its first sectors is its own line, the rest zeros, and the
-  # MD5 the guest compares against is of those sectors alone.
-  def test_the_image_holds_a_line_per_read_sector_then_zeros
-    image = STICK.image
-    assert_equal 1 << 20, image.bytesize
+  # A volume's bytes as the image takes them: VOLUME_SECTORS sectors, each its number.
+  def volume_bytes = (0...STICK::VOLUME_SECTORS).map { |number| [number].pack('N').ljust(512, "\0") }.join.b
+
+  # The image is an MBR whose one entry places the volume, then a line a sector up to
+  # READ, zeros in the gap and the volume's bytes from VOLUME_START; the MD5 the guest
+  # compares against is of the first READ sectors alone, and the written sectors lie
+  # in the gap. A volume of any other length is refused.
+  def test_the_image_holds_the_mbr_the_lines_and_the_volume
+    image = STICK.image(volume_bytes)
+    assert_equal STICK::SECTORS * 512, image.bytesize
+    assert_equal [0x0e, STICK::VOLUME_START, STICK::VOLUME_SECTORS], image.byteslice(446 + 4, 12).unpack('Cx3V2')
+    assert_equal "\x55\xAA".b, image.byteslice(510, 2)
     assert image.byteslice(3 * 512, 512).start_with?("erxos usb-storage sector 0003\n")
     assert_equal "\0" * 512, image.byteslice(STICK::READ * 512, 512)
-    assert_match(/\A[0-9A-F]{32}\z/, STICK.read_md5)
+    assert_equal volume_bytes, image.byteslice(STICK::VOLUME_START * 512..)
+    assert_equal Digest::MD5.hexdigest(image.byteslice(0, STICK::READ * 512)).upcase, STICK.read_md5
+    assert_operator STICK::WRITE_SECTOR + STICK::WRITE_SECTORS, :<=, STICK::VOLUME_START
     assert_equal STICK::WRITE_SECTORS * 512, STICK.written.bytesize
+    assert_raises(Erx::Error) { STICK.image(volume_bytes.byteslice(512..)) }
+  end
+
+  # Seeded: root's session's body, run on the host's emulator over a directory of its
+  # own, passes listed and file_read with FILE_TEXT in FILE, and file_read alone fails
+  # when the file's bytes read wrong.
+  def test_root_s_body_passes_only_the_file_s_own_bytes
+    volume = File.join(@directory, 's1')
+    FileUtils.mkdir_p(volume)
+    File.binwrite(File.join(volume, STICK::FILE), STICK::FILE_TEXT)
+    assert_equal %w[listed file_read], root_stages(volume)
+    File.binwrite(File.join(volume, STICK::FILE), STICK::FILE_TEXT.sub('file', 'fil3'))
+    assert_equal %w[listed], root_stages(volume)
+    File.delete(File.join(volume, STICK::FILE))
+    assert_equal [], root_stages(volume)
+  end
+
+  # The stages root_body passes over volume, its text as the stick line's answer holds it.
+  def root_stages(volume)
+    program = "io:format(\"~p\", [begin #{Erx::UsbBoot.root_body(volume: volume)} end]), halt()."
+    output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', '-eval', program,
+                                     stdin_data: '')
+    assert status.success?, output
+    Erx::UsbBoot.passed("{usb_stick,#{output}}", tag: 'usb_stick')
   end
 
   # Seeded: the image after the boot passes persisted only with the written pattern in
   # place, and a console passes each logged stage only with its own line, the served one
   # at the image's capacity.
   def test_host_stages_need_the_pattern_on_the_image_and_each_line_on_the_console
-    written = STICK.image.dup
+    written = STICK.image(volume_bytes)
     written[STICK::WRITE_SECTOR * 512, STICK.written.bytesize] = STICK.written
     assert_equal %w[persisted logged_served logged_ended],
                  Erx::UsbBoot.host_passed(image: written, console: SERVED + ENDED)
     off_by_one = written.dup
     off_by_one[(STICK::WRITE_SECTOR * 512) + 7] = 'X'
     assert_equal [], Erx::UsbBoot.host_passed(image: off_by_one, console: '')
-    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image, console: ENDED)
-    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image, console: SERVED.sub('2048 blocks', '2047 blocks'))
-    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image, console: SERVED)
-    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image, console: ENDED + SERVED)
+    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: ENDED)
+    short = SERVED.sub("#{STICK::SECTORS} blocks", "#{STICK::SECTORS - 1} blocks")
+    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: short)
+    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: SERVED)
+    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: ENDED + SERVED)
   end
 
   # The stick's answer, the USB domain's text and then the media domain's, names its stages
