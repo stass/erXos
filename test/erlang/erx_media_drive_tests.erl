@@ -12,9 +12,11 @@
 facet(Test) ->
     receive {'$gen_call', From, window} -> Test ! {asked, From}, facet(Test) end.
 
-%% A stand-in proxy: a read answers the sector's number repeated, a write ok.
+%% A stand-in proxy: a read answers the sector's number repeated, a write ok, and info
+%% eio, so the drive process's reading of the medium fails and leaves it idle.
 proxy() ->
     receive
+        {'$gen_call', From, info} -> gen:reply(From, {error, eio}), proxy();
         {'$gen_call', From, {read, Sector, 1}} -> gen:reply(From, {ok, <<Sector:4096>>}), proxy();
         {'$gen_call', From, {write, _Sector, _Bytes}} -> gen:reply(From, ok), proxy()
     end.
@@ -31,16 +33,17 @@ answered(Drive, Answer) ->
     ok = receive {asked, From} -> gen:reply(From, Answer) after 1000 -> no_ask end,
     receive {medium, Caller, Medium} -> Medium after 1000 -> none end.
 
-%% The facet's proxy is the medium, held while it lives without asking again, and read
-%% and written through.
+%% The facet's proxy is the medium, held while it lives without asking again, idle when
+%% its reading fails, and read and written through.
 the_facet_s_proxy_is_the_medium_until_it_ends_test() ->
     Test = self(),
     Facet = spawn(fun() -> facet(Test) end),
     Proxy = spawn(fun proxy/0),
     Drive = start(fun() -> Facet end),
     try
-        ?assertEqual({ok, Proxy}, answered(Drive, {ok, Proxy})),
-        ?assertEqual({ok, Proxy}, gen_server:call(Drive, medium)),
+        Idle = {ok, #{proxy => Proxy, table => {failed, {info, {error, eio}}}}},
+        ?assertEqual(Idle, answered(Drive, {ok, Proxy})),
+        ?assertEqual(Idle, gen_server:call(Drive, medium)),
         ?assertEqual({ok, <<7:4096>>}, gen_server:call(Proxy, {read, 7, 1})),
         ?assertEqual(ok, gen_server:call(Proxy, {write, 7, <<0:4096>>})),
         %% The proxy's end is the medium's: the next ask asks the facet again.

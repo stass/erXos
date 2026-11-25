@@ -277,7 +277,7 @@ STICK_BODY = [
 # The body of the fun the third line then runs at the media domain, the drive disk0's
 # holder (docs/design-drives.md, "How the grant reaches the media domain"). MdPoll(K)
 # is the drive's medium, erx_media_drive:medium(0), polled every 200 ms at most K times
-# until the drive process holds a window proxy: the facet {drive, 0} is installed
+# until the drive process holds a window proxy, beside the table it read: the facet {drive, 0} is installed
 # once the USB domain is ready. Through the proxy it reads the harness's READ sectors
 # and compares their MD5, writes WRITTEN at WRITE_SECTOR, reads it back and flushes,
 # each request as a volume of the medium would send it; MdCall gives the class and
@@ -287,7 +287,7 @@ MEDIA_BODY = [
   'case erx_media_drive:medium(0) of {ok,_}=MdM->MdM;_->timer:sleep(200),MdPo(MdK-1) end end',
   "MdCall=fun(MdPx,MdQ)->try gen_server:call(MdPx,MdQ,#{STICK_CALL_MS}) catch MdC:MdR->{MdC,MdR} end end",
   "MdData=binary:copy(<<\"#{Stick::WRITE_TEXT}\">>,#{Stick.written.bytesize / Stick::WRITE_TEXT.bytesize})",
-  'MdAnswer=case MdPoll(100) of {ok,MdPx}->' \
+  'MdAnswer=case MdPoll(100) of {ok,#{proxy:=MdPx}}->' \
   "MdRead=MdCall(MdPx,{read,0,#{Stick::READ}})," \
   "MdW=MdCall(MdPx,{write,#{Stick::WRITE_SECTOR},MdData})," \
   "MdBack=MdCall(MdPx,{read,#{Stick::WRITE_SECTOR},#{Stick::WRITE_SECTORS}})," \

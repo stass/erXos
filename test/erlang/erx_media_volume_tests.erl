@@ -165,3 +165,44 @@ each_volume_runs_under_its_memory_bound_and_ends_alone_test() ->
     ?assertMatch([{{volume, 2}, Two, worker, _}],
                  [Child || {{volume, _}, _, _, _} = Child <- supervisor:which_children(Sup)]),
     ?assertMatch(#{fat := 32, mount := rw}, erx_media_volume:outcome(Two)).
+
+%% A stand-in drive facet whose every window ask answers Proxy.
+facet(Proxy) ->
+    receive {'$gen_call', From, window} -> gen:reply(From, {ok, Proxy}), facet(Proxy) end.
+
+%% The drive process mounts its medium at the ask that gets a proxy: the answer names
+%% the table with its volume started and mounted, a second ask answers the same
+%% medium, and the proxy's end ends the volume with the medium's supervisor.
+the_drive_mounts_its_medium_at_the_ask_and_ends_it_with_its_proxy_test() ->
+    Proxy = proxy(image("fat16.img"), ok),
+    unlink(Proxy),
+    Facet = spawn(fun() -> facet(Proxy) end),
+    {ok, Drive} = erx_media_drive:start_link(0, fun() -> Facet end),
+    unlink(Drive),
+    try
+        {ok, #{proxy := Proxy, table := {none, [{_, Volume}], 0}} = Medium} = gen_server:call(Drive, medium, 5000),
+        ?assertEqual({ok, Medium}, gen_server:call(Drive, medium, 5000)),
+        ?assertMatch(#{mount := rw}, erx_media_volume:outcome(Volume)),
+        Monitor = monitor(process, Volume),
+        exit(Proxy, kill),
+        ?assertEqual(shutdown, receive {'DOWN', Monitor, process, Volume, Why} -> Why after 2000 -> running end),
+      ?assertEqual({links, []}, process_info(Drive, links)),
+      ?assertMatch(#{medium := none}, sys:get_state(Drive))
+  after
+      [exit(P, kill) || P <- [Drive, Facet, Proxy]]
+  end.
+
+%% A medium whose table is refused is held idle, with no volume and its supervisor
+%% stopped, until its proxy ends.
+a_refused_table_leaves_the_medium_idle_with_no_supervisor_test() ->
+  Proxy = proxy(mbr([{16#0e, ?START, 100}, {16#0e, ?START + 50, 100}], [{?START + 150, <<0:512/unit:8>>}]), ok),
+  unlink(Proxy),
+  Facet = spawn(fun() -> facet(Proxy) end),
+  {ok, Drive} = erx_media_drive:start_link(0, fun() -> Facet end),
+  unlink(Drive),
+  try
+      ?assertMatch({ok, #{proxy := Proxy, table := {refused, _}}}, gen_server:call(Drive, medium, 5000)),
+      ?assertEqual({links, []}, process_info(Drive, links))
+  after
+      [exit(P, kill) || P <- [Drive, Facet, Proxy]]
+  end.

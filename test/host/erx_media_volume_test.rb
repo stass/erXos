@@ -20,6 +20,7 @@ class ErxMediaVolumeTest < Minitest::Test
   TESTS = %w[test/erlang/erx_media_volume_tests.erl].freeze
   MEDIUM = 'erlang/apps/erx_media/src/erx_media_medium.erl'
   VOLUME = 'erlang/apps/erx_media/src/erx_media_volume.erl'
+  DRIVE = 'erlang/apps/erx_media/src/erx_media_drive.erl'
 
   Fault = Data.define(:name, :path, :from, :to, :caught_by)
 
@@ -42,7 +43,13 @@ class ErxMediaVolumeTest < Minitest::Test
               caught_by: 'a_flush_decides_between_rw_ro_and_none_test'),
     Fault.new(name: 'the also condition removed', path: VOLUME,
               from: '{true, [Name | _]} -> {ro, {also, Name}};', to: '{true, [_Name | _]} -> flushed(Flush(), Clean);',
-              caught_by: 'the_rule_names_its_first_failing_condition_test')
+              caught_by: 'the_rule_names_its_first_failing_condition_test'),
+    Fault.new(name: "the proxy's end leaving the medium's supervisor running", path: DRIVE,
+              from: "    stop(Sup),\n    {noreply, State\#{medium := none}};", to: "    _ = Sup,\n    {noreply, State\#{medium := none}};",
+              caught_by: 'the_drive_mounts_its_medium_at_the_ask_and_ends_it_with_its_proxy_test'),
+    Fault.new(name: "an idle medium's supervisor left running", path: DRIVE,
+              from: '_Idle -> stop(Sup), none', to: '_Idle -> none',
+              caught_by: 'a_refused_table_leaves_the_medium_idle_with_no_supervisor_test')
   ].freeze
 
   def self.images
