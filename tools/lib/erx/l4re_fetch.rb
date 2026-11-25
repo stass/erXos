@@ -2,15 +2,14 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative 'dependencies'
 require_relative 'error'
-require_relative 'output_directory'
+require_relative 'side_lock'
 
 module Erx
   # `tools/erx fetch --l4re` (docs/design-bench.md, "L4Re's guest"): the sources of
   # L4Re's guest in the benchmark comparison, fetched on demand and by nothing else, so
   # neither a default fetch nor a --cache fetch clones or needs them. They are pinned in
-  # L4Re's own lock, bench/l4re/deps.lock, in the form of erXos's deps.lock: each is a
+  # L4Re's own lock (SideLock), bench/l4re/deps.lock: each is a
   # git source whose commit is exported as git's tar of it and verified against its
   # SHA-256 before it is published, under build/l4re-sources, a root of its own beside
   # the build's output (build/l4re), so no id it names can replace a source of erXos's
@@ -39,14 +38,7 @@ module Erx
     # build/l4re-sources/build/downloads, from which the archives come with no network.
     # Returns the lines that say what was done.
     def fetch(root:, runner:, cache: nil)
-      dependencies = lock(root: root, runner: runner)
-      dependencies.fetch(cache: cache)
-      dependencies.sources.map do |source|
-        id = source.fetch('id')
-        git = source.fetch('kind') == 'git'
-        path = (git ? dependencies.fetched_tree(id) : dependencies.fetched_file(id)).delete_prefix("#{File.expand_path(root)}/")
-        "l4re: #{id} #{(git ? source.fetch('commit') : source.fetch('sha256'))[0, 12]} fetched to #{path}"
-      end
+      SideLock.fetch(lock(root: root, runner: runner), root: root, label: 'l4re', cache: cache)
     end
 
     # The lock's sources over the workspace; refuses a lock whose git sources are not
@@ -54,8 +46,7 @@ module Erx
     # sources are not Debian arm64 packages (PACKAGE), or that pins upstream Fiasco at
     # another commit than the fork's. Its fetched_tree(id) is the tree LAYOUT places.
     def lock(root:, runner:)
-      dependencies = Dependencies.new(root: OutputDirectory.prepare(root: root, path: File.join(root, WORKSPACE)),
-                                      runner: runner, lock_path: File.join(root, LOCK))
+      dependencies = SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE)
       trees, others = dependencies.sources.partition { |source| source.fetch('kind') == 'git' }
       ids = trees.map { |source| source.fetch('id') }
       unless ids.sort == LAYOUT.keys.sort

@@ -51,6 +51,8 @@ begin
   require_relative 'lib/erx/bench_g5'
   require_relative 'lib/erx/bench_session'
   require_relative 'lib/erx/l4re_bench'
+  require_relative 'lib/erx/l4re_fetch'
+  require_relative 'lib/erx/linux_guest'
   require_relative 'lib/erx/bench_web'
   require_relative 'lib/erx/net_bench_freebsd'
   require_relative 'lib/erx/toolchain_provenance'
@@ -1131,29 +1133,30 @@ module Erx
       package_names = []
       docker_context = nil
       example = nil
-      l4re = false
+      side = nil
       sets = package_sets
       parser = OptionParser.new do |options|
-        options.on('--cache DIRECTORY', "Use only another checkout's build/downloads (with --l4re, its build/l4re-sources/build/downloads) as the source cache") { |value| cache = value }
+        options.on('--cache DIRECTORY', "Use only another checkout's build/downloads (with --l4re or --linux, its build/l4re-sources or build/linux-sources/build/downloads) as the source cache") { |value| cache = value }
         options.on('--source ID', 'Fetch this pinned source; repeatable') { |value| source_ids << value }
         options.on('--packages NAME', "Install this package set (#{sets.keys.join(', ')}); repeatable") { |value| package_names << value }
         options.on('--docker-context NAME', 'Use this local Docker context for image fetch') { |value| docker_context = value }
         options.on('--example NAME', 'Fetch only this example and its downloads (doom), which no other fetch obtains') { |value| example = value }
-        options.on('--l4re', "Fetch only L4Re's guest's sources (bench/l4re/deps.lock), which no other fetch obtains") { l4re = true }
+        options.on('--l4re', "Fetch only L4Re's guest's sources (bench/l4re/deps.lock), which no other fetch obtains") { side = L4ReFetch }
+        options.on('--linux', "Fetch only Linux's guest's sources (bench/linux/deps.lock), which no other fetch obtains") { side = LinuxGuest }
       end
       parser.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       unknown = package_names - sets.keys
       raise OptionParser::InvalidArgument, "no package set #{unknown.join(', ')}; the sets are #{sets.keys.join(', ')}" unless
         unknown.empty?
-      if (example || l4re) && !(source_ids.empty? && package_names.empty? && docker_context.nil?)
-        raise OptionParser::InvalidArgument, '--example and --l4re take no --source, --packages or --docker-context'
+      if (example || side) && !(source_ids.empty? && package_names.empty? && docker_context.nil?)
+        raise OptionParser::InvalidArgument, '--example, --l4re and --linux take no --source, --packages or --docker-context'
       end
-      raise OptionParser::InvalidArgument, '--example and --l4re are separate fetches' if example && l4re
+      raise OptionParser::InvalidArgument, '--example, --l4re and --linux are separate fetches' if example && side
 
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       return fetch_example(example, cache: cache, runner: runner) if example
-      return fetch_l4re(cache: cache, runner: runner) if l4re
+      return fetch_side(side, cache: cache, runner: runner) if side
 
       everything = source_ids.empty? && package_names.empty?
       if everything || !source_ids.empty?
@@ -1211,11 +1214,10 @@ module Erx
       0
     end
 
-    # L4Re's guest's sources are pinned in L4Re's own lock (L4ReFetch); the fetch above
-    # never obtains them.
-    def self.fetch_l4re(cache:, runner:)
-      require_relative 'lib/erx/l4re_fetch'
-      L4ReFetch.fetch(root: ROOT, runner: runner, cache: cache).each { |line| Terminal.puts(line) }
+    # A comparison guest's sources are pinned in its own lock (SideLock: L4ReFetch,
+    # LinuxGuest); the fetch above never obtains them.
+    def self.fetch_side(side, cache:, runner:)
+      side.fetch(root: ROOT, runner: runner, cache: cache).each { |line| Terminal.puts(line) }
       0
     end
 
@@ -1576,7 +1578,8 @@ module Erx
       BenchRecord::Destination.new(history: history, erxos_root: ROOT)
       guests = [NativeBench::Guest.new(run: NativeBench::Run.new(root: ROOT, runner: runner)),
                 L4ReBench::Guest.new(build: L4ReBench::Build.new(directory: File.join(ROOT, 'build/l4re')),
-                                     qemu: Qemu.new(root: ROOT, runner: runner), platform: Platform.development(ROOT))]
+                                     qemu: Qemu.new(root: ROOT, runner: runner), platform: Platform.development(ROOT)),
+                LinuxGuest::Guest.new(root: ROOT, runner: runner)]
       write = ->(record, logs) { BenchRecord.write(record, history: history, erxos_root: ROOT, boots: logs) }
       session = BenchSession::Run.new(guests: guests, host: BenchSystem.host(kind: BenchSession::KIND, root: ROOT, runner: runner),
                                       write: write, load: -> { QemuGate.one_minute_load })
