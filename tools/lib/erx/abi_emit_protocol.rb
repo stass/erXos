@@ -78,8 +78,11 @@ module Erx
                    ['error_reply/1']
         # A server fitting a reply to a request's byte count sizes it as the wire would.
         packed = @kinds.select { |_, kind| kind[:packed] }.map { |kind_name, _| "packed_#{kind_name}/1" }
+        # A server admits the root its tree answers, a tree name and a qid, by the
+        # grammar's own kinds (docs/design-files.md, "The root is admitted when the
+        # grant is made").
         ["-export([decode_request/1, decode_request_frame/1, decode_reply/2, writes/1,\n" \
-         '         directory_fids/1, operations/0, message_type/1]).',
+         '         directory_fids/1, operations/0, message_type/1, is_name/1, is_qid/1]).',
          export_list(packed + builders)].join("\n")
       end
 

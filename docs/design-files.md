@@ -3005,13 +3005,16 @@ with the client, and the two generated functions the client calls on
 every request are total, so neither assumes a request the client
 checked:
 
-* `writes/1` answers `true` exactly for a request of an operation the
-  table marks as writing whose marked field, where its rule reads one,
-  is an integer of the field's kind and matches the rule, and `false`
-  for every other term, a malformed request included; it never raises.
-  A `false` for a malformed request lets nothing write, since the
+* `writes/1` reads only a term's operation and the field the table
+  marks: it answers `true` for a term of an operation the table marks
+  as writing whose marked field, where its rule reads one, is an
+  integer of the field's kind and matches the rule, and `false` for a
+  term of no operation and for one whose marked field fails its kind
+  or its rule; it never raises. Since it checks no other field, it
+  answers `true` for some malformed requests of a writing operation,
+  and no answer for a malformed request lets anything write, since the
   grant's funnel refuses that request `einval` before its own rights
-  check;
+  check, so a `true` only refuses it sooner;
 * `decode_reply/2` holds a reply to its request and never raises: an
   error reply `{error, Posix}`, `Posix` one of the table's errors, is
   answered as it is whatever the request, since it states only the

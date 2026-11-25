@@ -372,7 +372,7 @@ loop(Count, Fun) ->
 %% A grant of erx_fs_test_tree, which test/integration/runtime_prim_file_test.rb compiles
 %% into test/ebin with erx_fs: / holds a/ (with b/ and f), the link l -> "a" and f.
 test_grant() ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [], rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [], rw),
     unlink(Grant),
     Grant.
 
@@ -770,7 +770,7 @@ io_server(Path) ->
 
 %% A grant of erx_fs_test_tree with Args, mounted at Point.
 mounted(Point, Args) ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, Args, rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, Args, rw),
     unlink(Grant),
     ok = erx_ns:mount({Grant, rw}, Point, [{tree, <<"test">>}, rw]),
     Grant.

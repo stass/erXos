@@ -227,7 +227,7 @@ a_tree_reaches_only_its_own() ->
     Volume = {_, _, Data} = start_volume(fresh_disk(), lfs_trees),
     {ok, Packages} = erx_lfs:init({lfs_trees, packages}),
     {ok, <<"data">>, Top, _} = erx_lfs:root(Data),
-    {ok, <<"packages">>, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Packages),
+    {ok, <<"data">>, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Packages),
     {ok, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:walk(Top, <<"packages">>, Data),
     {ok, _, _, Secret} = erx_lfs:make(Top, <<"secret">>, {file, 8#644, ?ERX_P9_O_RDWR}, Data),
     ok = erx_lfs:clunk(Secret, Data),
@@ -250,7 +250,7 @@ a_tree_reaches_only_its_own() ->
     {ok, _, {0, _, _}} = erx_lfs:walk(Root, <<"a.app">>, Data),
     {ok, InstalledArgs} = erx_lfs:subtree({lfs_trees, packages}, installed, #{client => 5, principal => <<"clock">>}),
     {ok, Installed} = erx_lfs:init(InstalledArgs),
-    {ok, <<"packages">>, Under, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Installed),
+    {ok, <<"data">>, Under, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Installed),
     {ok, Under, {?ERX_P9_QTDIR, _, _}} = erx_lfs:walk(Root, <<"installed">>, Packages),
     {ok, New, _} = erx_lfs:make(Root, <<"new">>, {directory, 8#755, self()}, Packages),
     {ok, _, _, Upload} = erx_lfs:make(New, <<"tmp.1">>, {file, 8#644, ?ERX_P9_O_RDWR}, Packages),
@@ -278,7 +278,7 @@ a_home_reaches_only_its_own() ->
     Grant = fun(User) ->
                     {ok, Args} = erx_lfs:subtree({lfs_homes, home}, home, #{client => 5, principal => User}),
                     {ok, Server} = erx_lfs:init(Args),
-                    {ok, <<"home">>, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Server),
+                    {ok, <<"data">>, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Server),
                     {Root, Server}
             end,
     {<<"/root">>, RootHome} = Grant(<<"root">>),
@@ -288,6 +288,13 @@ a_home_reaches_only_its_own() ->
     {ok, <<"/home/alice">>, _} = erx_lfs:walk(Homes, <<"alice">>, Data),
     {ok, _, _, Note} = erx_lfs:make(<<"/home/alice">>, <<"note">>, {file, 8#644, ?ERX_P9_O_RDWR}, Alice),
     ok = erx_lfs:clunk(Note, Alice),
+    %% The data grant and root's home grant overlap: both answer the tree data, and
+    %% /root/notes through the data grant and notes through the home grant are one
+    %% file, one qid path of that tree's numbering.
+    {ok, _, {_, _, NotesPath}, Notes} = erx_lfs:make(<<"/root">>, <<"notes">>, {file, 8#644, ?ERX_P9_O_RDWR}, RootHome),
+    ok = erx_lfs:clunk(Notes, RootHome),
+    {ok, _, {0, _, NotesPath}} = erx_lfs:walk(<<"/root">>, <<"notes">>, Data),
+    ok = erx_lfs:unlink(<<"/root">>, <<"notes">>, file, RootHome),
     {ok, Listed} = erx_lfs:readdir(element(2, erx_lfs:open(<<"/root">>, 0, RootHome)), 0, 16, RootHome),
     [] = [Name || {_, _, _, Name} <- Listed, Name =/= <<".">>, Name =/= <<"..">>],
     [{error, enoent}] = lists:usort([erx_lfs:walk(<<"/root">>, Name, RootHome)

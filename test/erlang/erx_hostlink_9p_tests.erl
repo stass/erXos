@@ -460,7 +460,7 @@ configured_trees(Value) ->
 
 %% A bridge of tree test, served by an erx_fs grant of erx_fs_test_tree.
 bridge(Options) ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [], rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [], rw),
     unlink(Grant),
     Counter = atomics:new(1, []),
     Draw = fun() -> atomics:add_get(Counter, 1, 1) end,
@@ -528,7 +528,7 @@ the_bridge_ends_with_its_link_test() ->
     end.
 
 the_bridges_end_clunks_its_fids_test() ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}], rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}], rw),
     unlink(Grant),
     Counter = atomics:new(1, []),
     {Bridge, Ref} = erx_hostlink_files:start(self(), #{trees => fun(_) -> {ok, Grant} end,

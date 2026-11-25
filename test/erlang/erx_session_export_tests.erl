@@ -305,7 +305,7 @@ grant(Rights) ->
     ok = erx_fs_version:init(),
     Args = #{principal => ?PRINCIPAL, commands => ?COMMANDS,
              entropy => fun(Size) -> binary:copy(<<7>>, Size) end},
-    {ok, Grant} = erx_fs:start_link(erx_session_export, Args, Rights),
+    {ok, Grant, _} = erx_fs:start_link(erx_session_export, Args, Rights),
     unlink(Grant),
     {ok, _Qid} = call(Grant, {attach, 1, ?ERX_P9_NOFID, <<"user">>, <<"export">>, 0}),
     Grant.

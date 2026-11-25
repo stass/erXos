@@ -62,7 +62,7 @@ dev(Name) ->
     {ok, Conn} = erx_draw_conn:start(#{window => Window}),
     Args = #{window => #{window => Window, conn => Conn, display => ?SERVICE,
                          clipboard => erx_win:clipboard(?SERVICE)}},
-    {ok, Tree} = erx_fs:start_link(erx_session_export, Args, rw, #{client => own}),
+    {ok, Tree, _} = erx_fs:start_link(erx_session_export, Args, rw, #{client => own}),
     unlink(Tree),
     {ok, _} = call(Tree, {attach, ?ROOT, ?ERX_P9_NOFID, <<"user">>, <<"export">>, 0}),
     #{tree => Tree, window => Window, conn => Conn}.

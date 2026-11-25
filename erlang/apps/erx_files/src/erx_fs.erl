@@ -49,7 +49,7 @@ client as `eio`.
 
 -include("erx_fs_waits.hrl").
 
--export_type([qid/0, attr/0, statfs/0, dirent/0, what/0, wait/0]).
+-export_type([qid/0, attr/0, statfs/0, dirent/0, what/0, wait/0, grant_handle/0]).
 
 -type qid() :: {Type :: 0..255, Version :: 0..16#ffffffff,
                 Path :: 0..16#ffffffffffffffff}.
@@ -62,6 +62,10 @@ client as `eio`.
               | {node, Mode :: non_neg_integer(), Major :: non_neg_integer(),
                  Minor :: non_neg_integer()}.
 -type wait() :: {wait, Keeper :: pid(), Request :: term()}.
+%% A grant of the domain's own, as its starter received it from start_link/3,4: the
+%% pid, the tree its callback module's root names and the rights it was started with
+%% (docs/design-files.md, "A grant handle is built by its starter").
+-opaque grant_handle() :: {pid(), Tree :: binary(), erx_fs_grant:rights()}.
 
 -callback init(Args :: term()) -> {ok, Fs :: term()}.
 %% A tree whose grants a facet row's `tree` may root within it (abi/services/files.txt)
@@ -129,9 +133,14 @@ client as `eio`.
 %% its owners and the requests in flight, binaries included, in words.
 -define(MAX_HEAP_WORDS, 4194304).
 
--doc "Serves one grant of `Module`'s tree to the server's own domain.".
+-doc """
+Serves one grant of `Module`'s tree to the server's own domain, and answers its
+pid with its handle, which carries the tree the callback module's `root` names. The
+root is asked once and checked before the grant takes any request; a root that
+fails the check fails the start with `{error, root}` (erx_fs_grant:new/1).
+""".
 -spec start_link(module(), term(), erx_fs_grant:rights()) ->
-          {ok, pid()} | {error, term()}.
+          {ok, pid(), grant_handle()} | {error, term()}.
 start_link(Module, Args, Rights) ->
     start_link(Module, Args, Rights, #{}).
 
@@ -147,7 +156,7 @@ does not know of, and answers its `{error, Reason}`.
 -spec start_mounted(module(), term(), erx_fs_grant:rights(), binary(), binary()) ->
           {ok, pid()} | {error, term()}.
 start_mounted(Module, Args, Rights, Point, Tree) ->
-    {ok, Grant} = start_link(Module, Args, Rights),
+    {ok, Grant, _} = start_link(Module, Args, Rights),
     _ = erx_ns:unmount(Point),
     case erx_ns:mount({Grant, Rights}, Point, [{tree, Tree}, Rights]) of
         ok ->
@@ -186,7 +195,7 @@ lives as long as this domain without it.
                    in_flight => pos_integer(), msize => pos_integer(),
                    max_heap_size => pos_integer(), ends_with => port() | pid() | none,
                    exports => module()}) ->
-          {ok, pid()} | {error, term()}.
+          {ok, pid(), grant_handle()} | {error, term()}.
 start_link(Module, Args, Rights, Options) ->
     Heap = #{size => maps:get(max_heap_size, Options, ?MAX_HEAP_WORDS), kill => true,
              include_shared_binaries => true},
@@ -199,16 +208,24 @@ init(Parent, {Module, Args, Rights, Options}) ->
     {module, Module} = code:ensure_loaded(Module),
     {ok, Fs} = Module:init(Args),
     Client = maps:get(client, Options, own),
-    Grant = erx_fs_grant:new((maps:with([pool, in_flight, msize], Options))#{
-                               module => Module, fs => Fs, rights => Rights,
-                               client => Client}),
+    case erx_fs_grant:new((maps:with([pool, in_flight, msize], Options))#{
+                            module => Module, fs => Fs, rights => Rights, client => Client}) of
+        {ok, Grant} ->
+            serve(Parent, Grant, Rights, Client, Options);
+        {error, root} = Refused ->
+            proc_lib:init_ack(Parent, Refused)
+    end.
+
+%% A grant whose root the core admitted, exported to its client and then
+%% answered with its handle.
+serve(Parent, Grant, Rights, Client, Options) ->
     %% The monitor comes first: a connection that ends at any time from here on,
     %% before the export or after it, ends the grant, and a port or process that
     %% has ended already is answered at once with a 'DOWN'.
     ConnectionMonitor = connection_monitor(Client, Options),
     case export(Client, maps:get(exports, Options, erx_dist)) of
         ok ->
-            proc_lib:init_ack(Parent, {ok, self()}),
+            proc_lib:init_ack(Parent, {ok, self(), {self(), erx_fs_grant:tree(Grant), Rights}}),
             loop(Grant, ConnectionMonitor);
         {error, _} = Refused ->
             proc_lib:init_ack(Parent, Refused)

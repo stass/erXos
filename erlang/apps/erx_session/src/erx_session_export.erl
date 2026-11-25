@@ -161,7 +161,7 @@ open_window(Display) ->
     end.
 
 %% A tree that does not start refuses the start with eio.
-tree({ok, _} = Started) -> Started;
+tree({ok, Pid, _Handle}) -> {ok, Pid};
 tree({error, _}) -> {error, eio}.
 
 %% ---------------------------------------------------------------------------

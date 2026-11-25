@@ -45,7 +45,7 @@ open(Bytes, Records) ->
 
 %% An attached grant with Rights on Tree, fid 1 at its root.
 grant(Tree, Rights) ->
-    {ok, Grant} = erx_fs:start_link(erx_storage_system, Tree, Rights),
+    {ok, Grant, _} = erx_fs:start_link(erx_storage_system, Tree, Rights),
     unlink(Grant),
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
     Grant.

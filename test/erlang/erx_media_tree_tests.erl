@@ -39,7 +39,7 @@ start(Medium) ->
     Proxy = proxy(Medium, ok),
     Facet = spawn_link(fun() -> facet(Proxy) end),
     ok = erx_facets:install(#{{drive, 0} => {?ERX_SERVICE_DRIVE, Facet}}),
-    {ok, Grant} = erx_fs:start_link(erx_media_tree, media, rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_media_tree, media, rw),
     [unlink(Pid) || Pid <- [Sup, Proxy, Facet, Grant]],
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"root">>, <<"media">>, 0}),
     #{grant => Grant, proxy => Proxy, ended => [Grant, Sup, Facet, Proxy]}.

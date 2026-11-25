@@ -207,7 +207,7 @@ a_malformed_request_answers_einval_and_changes_nothing() ->
 %% grant named packages, the session's packages facet, observed by the case; and the
 %% app's record naming it there with its layout, as the session's agent holds it.
 app_package(Bytes) ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}, {name, <<"packages">>},
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}, {name, <<"packages">>},
                                                       {file, <<"clock.app">>, Bytes}], rx),
     unlink(Grant),
     persistent_term:put({erx, facets}, {1, #{packages => {?ERX_SERVICE_FILES, {Grant, rx}}}}),

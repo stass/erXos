@@ -32,7 +32,7 @@ service(State) ->
 
 %% A grant of the tree of the service Fs, with fid 1 at the root.
 grant(Fs) ->
-    {ok, Grant} = erx_fs:start_link(erx_bt_fs_tree, Fs, rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_bt_fs_tree, Fs, rw),
     unlink(Grant),
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"user">>, <<"bt">>, 0}),
     #{fs => Fs, grant => Grant}.
@@ -294,7 +294,7 @@ the_openers_end_closes_the_window_test() ->
     #{fs := Fs, grant := Grant} = S = service(read),
     window(Grant, 2, <<"display">>),
     exit(Grant, kill),
-    {ok, Other} = erx_fs:start_link(erx_bt_fs_tree, Fs, rw),
+    {ok, Other, _} = erx_fs:start_link(erx_bt_fs_tree, Fs, rw),
     unlink(Other),
     {ok, _} = call(Other, {attach, 1, ?NOFID, <<"user">>, <<"bt">>, 0}),
     ?assertMatch({ok, _, _}, open(Other, 2)),

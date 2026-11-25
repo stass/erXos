@@ -36,7 +36,7 @@ start() ->
     ok = erx_fs_version:init(),
     Name = list_to_atom("erx_ramfs_test_" ++ integer_to_list(erlang:unique_integer([positive]))),
     {ok, Tree} = erx_ramfs:start_link(?CAP, Name),
-    {ok, Grant} = erx_fs:start_link(erx_ramfs, Name, rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_ramfs, Name, rw),
     unlink(Tree),
     unlink(Grant),
     put({tree, Grant}, Tree),
@@ -50,7 +50,7 @@ stop(Grant) ->
 
 %% A second grant on the tree of Grant, attached at fid 1.
 second_grant(Grant) ->
-    {ok, Second} = erx_fs:start_link(erx_ramfs, get({name, Grant}), rw),
+    {ok, Second, _} = erx_fs:start_link(erx_ramfs, get({name, Grant}), rw),
     unlink(Second),
     {ok, _} = attach(Second, 1),
     Second.

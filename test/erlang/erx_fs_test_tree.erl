@@ -67,7 +67,9 @@ the grantee it was asked for; it roots none at any other.
 
 -doc """
 The tree above, in a process linked to the caller; `Args` may hold
-`{observer, Pid}` and `{cap, Bytes}`.
+`{observer, Pid}`, `{cap, Bytes}`, `{root, Ino}`, the node its grants are
+rooted at, and `{root_answer, Fun}`, which turns each answer of `root` into the
+one given, for a tree whose root is malformed or changes.
 """.
 init(Args) ->
     Nodes = #{1 => directory(#{<<"a">> => 2, <<"l">> => 5, <<"f">> => 6}),
@@ -87,7 +89,9 @@ init(Args) ->
            end,
     Tree = spawn_link(fun() -> serve(#{nodes => Held, next => Next, cap => Cap}) end),
     {ok, #{tree => Tree, observer => proplists:get_value(observer, Args, none),
-           name => proplists:get_value(name, Args, <<"test">>)}}.
+           name => proplists:get_value(name, Args, <<"test">>),
+           root => proplists:get_value(root, Args, ?ROOT),
+           root_answer => proplists:get_value(root_answer, Args, fun(Answer) -> Answer end)}}.
 
 directory(Entries) ->
     #{kind => directory, mode => 8#755, entries => Entries, links => 1, opens => 0}.
@@ -130,8 +134,8 @@ subtree(Args, Tree, Grantee) ->
 -doc "The tree is named `test`, or the name its `{name, Name}` argument gives.".
 root(Fs) ->
     seen(root, Fs),
-    #{name := Name} = Fs,
-    apply_step(Fs, fun(T) -> {{ok, Name, ?ROOT, qid(?ROOT, T)}, T} end).
+    #{name := Name, root := Root, root_answer := Answer} = Fs,
+    Answer(apply_step(Fs, fun(T) -> {{ok, Name, Root, qid(Root, T)}, T} end)).
 
 -doc "One plain name in a directory.".
 walk(_, <<"..">>, _) ->

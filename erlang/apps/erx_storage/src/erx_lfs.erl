@@ -56,6 +56,11 @@ volume lacks, each after the one it lies within; one it cannot make is
 logged and costs only the grants rooted there, whose
 requests then fail, never the volume or the `data` tree.
 
+Every grant of the volume answers `root` with one tree name, `data`, whatever its
+service or root: a tree is the numbering its files' qid paths come from, and the
+volume has one, so a file reached through the data, packages, installed and home
+grants has one identity (docs/design-files.md, "Version and attach").
+
 Nodes are paths from the volume's root, `<<"/">>` and `<<"/a/b">>`, and a
 handle is `{dir, Path}` or `{file, Path, Slot}`. littlefs stores no file
 numbers, so the owner draws a qid path from the domain's counter the first
@@ -75,6 +80,9 @@ only on a request that carries the reference.
 -include("generated/erx_abi.hrl").
 
 -export([start_link/2, owner/1, worker/2, trees/0, subtree/3]).
+%% The one tree the volume's qid paths come from, which every grant of it answers.
+-define(TREE, <<"data">>).
+
 -export([init/1, root/1, walk/3, getattr/2, open/3, read/4, readdir/4, statfs/1,
          clunk/2, write/4, make/4, setattr/3, unlink/4, rename/5,
          fsync/2]).
@@ -259,7 +267,7 @@ reply(Alias, Reply) -> erlang:send(Alias, {?MODULE, Alias, Reply}).
 %% say, is logged and leaves the grants rooted there failing their requests.
 mount(Vol) ->
     case erx_littlefs:mount(Vol) of
-        ok -> make_roots(Vol, [Root || {_Service, Root} <- [tree_root(At) || At <- roots()], Root =/= ?ROOT]);
+        ok -> make_roots(Vol, [Root || Root <- [tree_root(At) || At <- roots()], Root =/= ?ROOT]);
         Error -> Error
     end.
 
@@ -655,16 +663,15 @@ subtree({_Name, _Tree}, _Subtree, _Grantee) -> {error, einval}.
 %% grant's start (init/1), and the home tree has no root of its own.
 roots() -> [data, packages, installed].
 
-%% Where each root of roots/0 lies in the volume, with the tree it lies within,
-%% whose files service's name the grant answers at attach.
-tree_root(data) -> {data, ?ROOT};
-tree_root(packages) -> {packages, <<"/packages">>};
-tree_root(installed) -> {packages, <<"/packages/installed">>};
-tree_root({home, Home}) -> {home, Home}.
+%% Where each root of roots/0, and a home, lies in the volume.
+tree_root(data) -> ?ROOT;
+tree_root(packages) -> <<"/packages">>;
+tree_root(installed) -> <<"/packages/installed">>;
+tree_root({home, Home}) -> Home.
 
 -doc false.
 init({Name, Tree}) when is_atom(Name) ->
-    {_, Root} = tree_root(Tree),
+    Root = tree_root(Tree),
     {Pid, Secret} = persistent_term:get({?MODULE, Name}),
     true = Pid =:= whereis(Name),
     Server = {Pid, Secret, Tree},
@@ -688,12 +695,12 @@ make_home(_Tree, _Root, _Server) ->
 
 -doc false.
 root({_Pid, _Secret, Tree} = Server) ->
-    {Service, Root} = tree_root(Tree),
+    Root = tree_root(Tree),
     case call(Server, {getattr, Root}) of
-        {ok, #{qid := Qid}} -> {ok, atom_to_binary(Service), Root, Qid};
+        {ok, #{qid := Qid}} -> {ok, ?TREE, Root, Qid};
         %% An owner that has ended still roots a tree, whose every
         %% request then answers eio.
-        _ -> {ok, atom_to_binary(Service), Root, {?ERX_P9_QTDIR, 0, 0}}
+        _ -> {ok, ?TREE, Root, {?ERX_P9_QTDIR, 0, 0}}
     end.
 
 -doc false.

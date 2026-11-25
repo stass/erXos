@@ -19,6 +19,9 @@ test/host/erx_fs_test.rb runs these on stock OTP and seeds a fault for each.
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
 
+%% This module is also a tree with a root and no write/4 (tree_without_write_is_read_only_test).
+-export([root/1]).
+
 -define(NOFID, 16#ffffffff).
 -define(TREE, <<"test">>).
 -define(ROOT_QID, {16#80, 0, 1}).
@@ -34,13 +37,13 @@ grant(Rights) ->
     grant(Rights, #{}).
 
 grant(Rights, Options) ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}], Rights, Options),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}], Rights, Options),
     unlink(Grant),
     Grant.
 
 %% A grant whose tree reports no callbacks, for tests that make many requests.
 quiet_grant() ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [], rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [], rw),
     unlink(Grant),
     Grant.
 
@@ -123,6 +126,101 @@ attach_test() ->
     ?assertEqual({error, enoent}, call(Grant, {attach, 2, ?NOFID, <<"u">>, <<"tmp">>, 0})),
     ?assertEqual({error, ebadf}, call(Grant, {attach, 2, 7, <<"u">>, ?TREE, 0})),
     ?assertEqual(ebadf, qid_of(Grant, 2)),
+    stop(Grant).
+
+%% A grant on erx_fs_test_tree whose root answers pass through Answer.
+answered_grant(Answer) ->
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{root_answer, Answer}], rw),
+    unlink(Grant),
+    Grant.
+
+%% Each attach asks the root afresh and carries its version; an answer naming
+%% another type, path or tree than the start admitted is eio and makes no fid.
+attach_carries_the_roots_version_and_nothing_else_test() ->
+    Change = counters:new(1, []),
+    Answer = fun({ok, Tree, Node, {Type, _, Path}}) ->
+                     case counters:get(Change, 1) of
+                         0 -> {ok, Tree, Node, {Type, 0, Path}};
+                         1 -> {ok, Tree, Node, {Type, 7, Path}};
+                         2 -> {ok, Tree, Node, {Type, 7, Path + 1}};
+                         3 -> {ok, Tree, Node, {0, 7, Path}};
+                         4 -> {ok, <<"other">>, Node, {Type, 7, Path}}
+                     end
+             end,
+    Grant = answered_grant(Answer),
+    ok = counters:add(Change, 1, 1),
+    ?assertEqual({ok, {16#80, 7, 1}}, attach(Grant, 1)),
+    [begin
+         ok = counters:add(Change, 1, 1),
+         ?assertEqual({error, eio}, attach(Grant, Fid)),
+         ?assertEqual(ebadf, qid_of(Grant, Fid))
+     end || Fid <- [2, 3, 4]],
+    ?assertEqual({error, enoent}, call(Grant, {attach, 5, ?NOFID, <<"u">>, <<"other">>, 0})),
+    stop(Grant).
+
+%% The root is admitted before the grant takes any request: a qid that is no
+%% directory fails the start, so no grant serves it.
+a_root_that_is_no_directory_fails_the_start_test() ->
+    File = fun({ok, Tree, _, _}) -> {ok, Tree, 6, {0, 0, 6}} end,
+    ?assertEqual({error, root}, erx_fs:start_link(erx_fs_test_tree, [{root_answer, File}], rw)).
+
+a_malformed_root_fails_the_start_test() ->
+    Long = binary:copy(<<"t">>, 256),
+    Answers = [{ok, <<>>, 1, {16#80, 0, 1}}, {ok, Long, 1, {16#80, 0, 1}},
+               {ok, <<"a/b">>, 1, {16#80, 0, 1}}, {ok, <<"..">>, 1, {16#80, 0, 1}},
+               {ok, test, 1, {16#80, 0, 1}}, {ok, <<"test">>, 1, {16#80, -1, 1}},
+               {ok, <<"test">>, 1, {16#80, 0, 1 bsl 64}}, {ok, <<"test">>, 1, {16#80, 0}},
+               {error, eio}, ok],
+    [?assertEqual({error, root},
+                  erx_fs:start_link(erx_fs_test_tree, [{root_answer, fun(_) -> Answer end}], rw))
+     || Answer <- Answers],
+    %% A tree name of 255 bytes is a plain name, and its grant answers it.
+    Longest = binary:copy(<<"t">>, 255),
+    ?assertMatch({ok, _, _},
+                 erx_fs:start_link(erx_fs_test_tree,
+                                   [{root_answer, fun({ok, _, Node, Qid}) -> {ok, Longest, Node, Qid} end}],
+                                   rw)).
+
+%% Walks from NOFID ----------------------------------------------------------
+
+%% A walk from NOFID starts at the grant's root, as a walk from a fid an attach
+%% had just made: of no names it makes a fid on the root, recording the qid the
+%% start admitted, and it makes no fid but NewFid.
+nofid_walk_starts_at_the_grants_root_test() ->
+    flush_tree_calls(),
+    Grant = grant(rw),
+    ?assertEqual({ok, []}, walk(Grant, ?NOFID, 1, [])),
+    ?assertEqual(?ROOT_QID, qid_of(Grant, 1)),
+    ?assertEqual({ok, [?A_QID, {16#80, 0, 3}]}, walk(Grant, ?NOFID, 2, [<<"a">>, <<"b">>])),
+    ?assertEqual({ok, [?ROOT_QID, ?A_QID]}, walk(Grant, ?NOFID, 3, [<<"..">>, <<"a">>])),
+    ?assertEqual({error, einval}, walk(Grant, ?NOFID, 1, [<<"a">>])),
+    ?assertEqual({error, enoent}, walk(Grant, ?NOFID, 4, [<<"none">>])),
+    ?assertEqual(ebadf, qid_of(Grant, 4)),
+    ?assertEqual([root], [Callback || Callback <- tree_calls(), Callback =:= root]),
+    stop(Grant).
+
+%% A grant rooted below its tree's top, as a home grant is: a walk from NOFID
+%% starts there, and ".." from it stays there, so nothing above it is reached.
+nofid_walk_stays_within_the_grants_root_test() ->
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{root, 2}], rw),
+    unlink(Grant),
+    ?assertEqual({ok, []}, walk(Grant, ?NOFID, 1, [])),
+    ?assertEqual(?A_QID, qid_of(Grant, 1)),
+    ?assertEqual({ok, [?A_QID, ?A_QID]}, walk(Grant, ?NOFID, 2, [<<"..">>, <<"..">>])),
+    %% The f beside /a is /f, inode 6; from this root f is /a/f, inode 4.
+    ?assertEqual({ok, [?A_QID, {0, 0, 4}]}, walk(Grant, ?NOFID, 3, [<<"..">>, <<"f">>])),
+    ?assertEqual({error, enoent}, walk(Grant, ?NOFID, 4, [<<"l">>])),
+    stop(Grant).
+
+%% A walk from NOFID carries only the grant's rights: on a read-only grant the
+%% fid it makes writes nothing.
+nofid_walk_on_a_read_only_grant_cannot_write_test() ->
+    Grant = grant(ro),
+    {ok, [_]} = walk(Grant, ?NOFID, 1, [<<"f">>]),
+    ?assertEqual({error, erofs}, call(Grant, {lopen, 1, ?O_WRONLY})),
+    {ok, []} = walk(Grant, ?NOFID, 2, []),
+    ?assertEqual({error, erofs}, call(Grant, {mkdir, 2, <<"d">>, 8#755, 0})),
+    ?assertEqual({error, erofs}, call(Grant, {lcreate, 2, <<"n">>, ?O_WRONLY, 8#644, 0})),
     stop(Grant).
 
 %% Fid numbers -------------------------------------------------------------
@@ -351,8 +449,9 @@ fid_flood_stops_at_the_pool_test() ->
 core(Rights) ->
     {module, _} = code:ensure_loaded(erx_fs_test_tree),
     {ok, Fs} = erx_fs_test_tree:init([]),
-    erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => Rights,
-                       client => own}).
+    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => Rights,
+                                     client => own}),
+    Core.
 
 core_frame(Core, Request) ->
     core_frame(Core, self(), Request).
@@ -427,9 +526,11 @@ refused_remove_still_clunks_its_fid_test() ->
     ?assertMatch({ok, [{0, 0, 6}]}, walk(Grant, 1, 2, [<<"f">>])),
     stop(Grant).
 
+root(Fs) -> erx_fs_test_tree:root(Fs).
+
 tree_without_write_is_read_only_test() ->
     {ok, Fs} = erx_fs_test_tree:init([]),
-    Core = erx_fs_grant:new(#{module => ?MODULE, fs => Fs, rights => rw, client => own}),
+    {ok, Core} = erx_fs_grant:new(#{module => ?MODULE, fs => Fs, rights => rw, client => own}),
     ?assertMatch(#{rights := ro}, erx_fs_grant:info(Core)).
 
 %% Changes on a read-write grant -------------------------------------------
@@ -533,7 +634,8 @@ domain_ref(D) ->
 
 client_core() ->
     {ok, Fs} = erx_fs_test_tree:init([]),
-    erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => ro, client => ?CLIENT}).
+    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => ro, client => ?CLIENT}),
+    Core.
 
 %% Effects and the refusals counted after Message reaches a fresh core.
 handled(Core, Message) ->
@@ -961,7 +1063,7 @@ a_clunk_answers_the_trees_clunk_test() ->
 %% A grant on erx_fs_stale_tree, whose callbacks named in Stale answer with a
 %% next state appended, as a tree kept as a value would.
 stale_grant(Stale) ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_stale_tree, [{stale, Stale}], rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_stale_tree, [{stale, Stale}], rw),
     unlink(Grant),
     Grant.
 
@@ -1008,13 +1110,10 @@ answers_with_a_state_are_eio_on_an_open_file_test() ->
     ?assert(is_process_alive(Grant)),
     stop(Grant).
 
-%% root and walk answering with a next state are eio too, and record no fid.
+%% A walk answering with a next state is eio too, and records no fid; a root
+%% answering so fails the grant's start.
 stale_root_and_walk_are_eio_test() ->
-    Root = stale_grant([root]),
-    ?assertEqual({error, eio}, attach(Root, 1)),
-    ?assertEqual(ebadf, qid_of(Root, 1)),
-    ?assert(is_process_alive(Root)),
-    stop(Root),
+    ?assertEqual({error, root}, erx_fs:start_link(erx_fs_stale_tree, [{stale, [root]}], rw)),
     Walk = stale_grant([walk]),
     {ok, _} = attach(Walk, 1),
     ?assertEqual({error, eio}, walk(Walk, 1, 2, [<<"f">>])),
@@ -1025,24 +1124,22 @@ stale_root_and_walk_are_eio_test() ->
 %% A grant, and a core, on erx_fs_stale_tree, whose callbacks named in
 %% Malformed answer in their own shape with a value the grammar refuses.
 malformed_grant(Malformed) ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_stale_tree, [{malformed, Malformed}, {observer, self()}], rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_stale_tree, [{malformed, Malformed}, {observer, self()}], rw),
     unlink(Grant),
     Grant.
 
 malformed_core(Malformed) ->
     {module, _} = code:ensure_loaded(erx_fs_stale_tree),
     {ok, Fs} = erx_fs_stale_tree:init([{malformed, Malformed}]),
-    erx_fs_grant:new(#{module => erx_fs_stale_tree, fs => Fs, rights => rw,
-                       client => own}).
+    erx_fs_grant:new(#{module => erx_fs_stale_tree, fs => Fs, rights => rw, client => own}).
 
 %% A malformed qid is answered eio and the grant keeps nothing of the answer:
 %% an attach records no fid and monitors no owner, a walk names no new fid,
 %% and an lcreate does not open its fid.
 malformed_qids_change_nothing_test() ->
-    {Attached, Root} = core_frame(malformed_core([root]), {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
-    ?assertMatch([{reply, _, {error, eio}}], Attached),
-    ?assertMatch(#{fids := 0, owners := 0}, erx_fs_grant:info(Root)),
-    {_, Core1} = core_frame(malformed_core([walk, make]), {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
+    ?assertEqual({error, root}, malformed_core([root])),
+    {ok, Core} = malformed_core([walk, make]),
+    {_, Core1} = core_frame(Core, {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
     {Walked, Core2} = core_frame(Core1, {walk, 1, 2, [<<"f">>]}),
     ?assertMatch([{reply, _, {error, eio}}], Walked),
     ?assertMatch(#{fids := 1}, erx_fs_grant:info(Core2)),
@@ -1099,7 +1196,7 @@ rejected_remove_still_clunks_its_fid_test() ->
 %% A clunk or a remove whose tree answers an error 9P2000.L does not carry is
 %% answered eio, and the tree's clunk of the fid's open runs once.
 rejected_clunk_and_remove_clunk_once_test() ->
-    {ok, Grant} = erx_fs:start_link(erx_fs_stale_tree,
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_stale_tree,
                                     [{malformed, [clunk, unlink]}, {observer, self()}], rw),
     unlink(Grant),
     {ok, _} = attach(Grant, 1),
@@ -1120,7 +1217,7 @@ rejected_clunk_and_remove_clunk_once_test() ->
 %% test hands it, with fid 1 at the root and fids 2 and 3 opened on the stream.
 stream_grant() ->
     Keeper = erx_fs_stream_tree:start_keeper(),
-    {ok, Grant} = erx_fs:start_link(erx_fs_stream_tree, Keeper, rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_stream_tree, Keeper, rw),
     unlink(Grant),
     {ok, _} = attach(Grant, 1),
     {ok, _} = walk(Grant, 1, 2, [<<"s">>]),
@@ -1182,8 +1279,8 @@ stream_core(Keeper) ->
     stream_core(Keeper, [2]).
 
 stream_core(Keeper, Fids) ->
-    Core = erx_fs_grant:new(#{module => erx_fs_stream_tree, fs => Keeper, rights => rw,
-                              client => own}),
+    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_stream_tree, fs => Keeper, rights => rw,
+                                    client => own}),
     {_, Attached} = core_frame(Core, {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
     lists:foldl(fun(Fid, C) ->
                         {[{reply, _, {ok, [_]}}], C1} = core_frame(C, {walk, 1, Fid, [<<"s">>]}),
@@ -1339,7 +1436,7 @@ a_remove_unlinks_when_it_is_admitted_test() ->
 a_grant_whose_client_ended_drains_test() ->
     Keeper = erx_fs_stream_tree:start_keeper(),
     Holder = spawn(fun() -> receive go -> ok end end),
-    {ok, Grant} = erx_fs:start_link(erx_fs_stream_tree, Keeper, rw, #{ends_with => Holder}),
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_stream_tree, Keeper, rw, #{ends_with => Holder}),
     unlink(Grant),
     Watch = monitor(process, Grant),
     {ok, _} = attach(Grant, 1),

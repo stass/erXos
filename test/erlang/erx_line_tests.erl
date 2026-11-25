@@ -32,7 +32,7 @@ line() ->
 
 %% A grant of Line's tree, with the fids line/0 describes.
 tree(Line) ->
-    {ok, Grant} = erx_fs:start_link(erx_line_fs, Line, rw),
+    {ok, Grant, _} = erx_fs:start_link(erx_line_fs, Line, rw),
     unlink(Grant),
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"user">>, ?ERX_LINE_TREE_BYTES, 0}),
     {ok, _} = call(Grant, {walk, 1, 2, [<<"data">>]}),

@@ -58,7 +58,7 @@ fids name, whichever way the step went: a walk that stopped, a reply the
 check rejected, a clunk, `..`, an owner's end.
 """.
 
--export([new/1, handle_frame/2, monitored/3, waiting/3, answered/3, down/3, client_ended/1,
+-export([new/1, tree/1, handle_frame/2, monitored/3, waiting/3, answered/3, down/3, client_ended/1,
          drained/1, info/1, in_flight_max/0]).
 
 -export_type([grant/0, effect/0, rights/0, client/0]).
@@ -140,6 +140,10 @@ check rejected, a clunk, `..`, an owner's end.
 
 -record(grant, {module :: module(),
                 fs :: term(),
+                %% The tree the grant reaches files of and the step a walk from NOFID
+                %% starts at, the root the start admitted (new/1).
+                tree :: binary(),
+                root :: step(),
                 rights :: rights(),
                 client :: client(),
                 self :: pid(),
@@ -180,10 +184,20 @@ read-only whatever they say (F5). `client` is the domain the grant serves,
 bound, `in_flight` the most requests it holds at once (64 at most, and the
 default) and `msize` the largest message size it agrees to (4,096 to 65,560,
 the default).
+
+The grant asks the tree's `root` once, before it takes any request, and
+admits the answer by one check: the tree a plain name of 1 to 255 bytes and
+the qid the grammar's, a directory's. An answer that fails it is
+`{error, root}`, so no grant exists whose root is unchecked. The grant then
+fixes the tree's name and the root's node and qid for its life: a walk from
+`NOFID` starts there, and an `attach` there once the tree's fresh answer
+names the same tree, type and path (docs/design-files.md, "The root is
+admitted when the grant is made").
 """.
 -spec new(#{module := module(), fs := term(), rights := rights(),
             client := client(), pool => pos_integer(),
-            in_flight => 1..?IN_FLIGHT_MAX, msize => ?MSIZE_MIN..?MSIZE_MAX}) -> grant().
+            in_flight => 1..?IN_FLIGHT_MAX, msize => ?MSIZE_MIN..?MSIZE_MAX}) ->
+          {ok, grant()} | {error, root}.
 new(#{module := Module, fs := Fs, rights := Rights, client := Client} = Options)
   when ?ERX_IS_FILES_RIGHTS(Rights),
        Client =:= own orelse is_integer(Client) andalso Client > 0 ->
@@ -194,12 +208,32 @@ new(#{module := Module, fs := Fs, rights := Rights, client := Client} = Options)
     MsizeMax = maps:get(msize, Options, ?MSIZE_MAX),
     true = is_integer(MsizeMax) andalso MsizeMax >= ?MSIZE_MIN andalso MsizeMax =< ?MSIZE_MAX,
     Writes = erlang:function_exported(Module, write, 4),
-    #grant{module = Module, fs = Fs, client = Client, self = self(), pool = Pool,
-           in_flight_max = InFlightMax, msize_max = MsizeMax,
-           rights = effective_rights(Rights, Writes)}.
+    case admitted_root(Module:root(Fs)) of
+        {ok, Tree, Root} ->
+            {ok, #grant{module = Module, fs = Fs, tree = Tree, root = Root, client = Client,
+                        self = self(), pool = Pool, in_flight_max = InFlightMax,
+                        msize_max = MsizeMax, rights = effective_rights(Rights, Writes)}};
+        error ->
+            {error, root}
+    end.
 
 effective_rights(rw, false) -> ro;
 effective_rights(Rights, _) -> Rights.
+
+%% The root's one check: a tree that is a plain name, and a qid of the grammar's
+%% qid kind whose type is a directory, as the root step every path begins with.
+admitted_root({ok, Tree, Node, {Type, _, _} = Qid}) ->
+    case erx_9p_grammar:is_name(Tree) andalso erx_9p_grammar:is_qid(Qid)
+        andalso Type band ?ERX_P9_QTDIR =/= 0 of
+        true -> {ok, Tree, {Node, Qid, root}};
+        false -> error
+    end;
+admitted_root(_) ->
+    error.
+
+-doc "The tree the grant reaches files of, as its start admitted it.".
+-spec tree(grant()) -> binary().
+tree(#grant{tree = Tree}) -> Tree.
 
 -doc "One message the grant received, other than a `DOWN` or a keeper's answer.".
 -spec handle_frame(term(), grant()) -> {[effect()], grant()}.
@@ -653,8 +687,9 @@ flush_at_keeper(Alias, #grant{aliases = Live, effects = Effects} = Grant) ->
 %% as eio and keeps the grant as it was before the request (Before), its
 %% effects included, as a refusal does (kept_when_rejected/3).
 %% Every qid the grant records travels in the reply that records it (attach,
-%% walk, lcreate), so a callback's malformed answer, a qid included, leaves
-%% no fid or open behind. Callers of finish/4 have nothing to undo: a
+%% walk, lcreate) or is the root's, which new/1 admitted before the grant took
+%% any request (a walk from NOFID), so a callback's malformed answer, a qid
+%% included, leaves no fid or open behind. Callers of finish/4 have nothing to undo: a
 %% refusal, a keeper's answer, or a clunk or a remove, whose fid has ended
 %% through run_clunk/3 whatever its answer, as clunk(5) says.
 finish(Alias, Request, Reply, Grant) ->
@@ -779,29 +814,33 @@ version(Msize, _, Max) -> {ok, min(Msize, Max), <<"unknown">>}.
 attach(_, _, Afid, _, Grant) when Afid =/= ?ERX_P9_NOFID ->
     %% auth is not served, so the grant holds no fid an Afid could name.
     {{error, ebadf}, Grant};
-attach(Owner, Fid, _, Aname, #grant{module = Module, fs = Fs} = Grant) ->
+%% An attach names the grant's tree, or is enoent, and starts at the root the
+%% start fixed. Its reply carries the root's current qid, which the tree answers
+%% afresh: only its version may differ from the admitted one, and an answer
+%% naming another tree, type or path is eio, making no fid.
+attach(Owner, Fid, _, Tree, #grant{tree = Tree, root = {Node, {Type, _, Path}, root},
+                                   module = Module, fs = Fs} = Grant) ->
     case new_fid_admissible(Fid, Grant) of
         ok ->
             case Module:root(Fs) of
-                {ok, Aname, Root, Qid} ->
-                    {{ok, Qid}, add_fid(Fid, Owner, [{Root, Qid, root}], Grant)};
-                {ok, _, _, _} ->
-                    {{error, enoent}, Grant};
-                Other ->
-                    {failed(Other), Grant}
+                {ok, Tree, _, {Type, _, Path} = Qid} ->
+                    {{ok, Qid}, add_fid(Fid, Owner, [{Node, Qid, root}], Grant)};
+                _ ->
+                    {{error, eio}, Grant}
             end;
         {error, _} = Error ->
             {Error, Grant}
-    end.
+    end;
+attach(_, _, _, _, Grant) ->
+    {{error, enoent}, Grant}.
 
-%% A walk names a fid that is not open and a new fid that is not in use, unless
-%% it is the same fid. It names the result only when every name was walked; one
-%% that stops after the first name lists the qids it walked and changes nothing.
-walk(Owner, Fid, NewFid, Names, #grant{fids = Fids} = Grant) ->
-    case Fids of
-        #{Fid := #fid{open = {open, _, _}}} ->
-            {{error, einval}, Grant};
-        #{Fid := #fid{path = Path}} ->
+%% A walk starts at a fid that is not open, or at the grant's root for NOFID,
+%% and names a new fid that is not in use, unless it is the same fid. It names
+%% the result only when every name was walked; one that stops after the first
+%% name lists the qids it walked and changes nothing.
+walk(Owner, Fid, NewFid, Names, Grant) ->
+    case walk_start(Fid, Grant) of
+        {ok, Path} ->
             Admissible = case NewFid of
                              Fid -> ok;
                              _ -> new_fid_admissible(NewFid, Grant)
@@ -810,8 +849,21 @@ walk(Owner, Fid, NewFid, Names, #grant{fids = Fids} = Grant) ->
                 ok -> walked(Owner, Fid, NewFid, walk_names(Names, Path, [], Grant));
                 {error, _} = Error -> {Error, Grant}
             end;
-        #{} ->
-            {{error, ebadf}, Grant}
+        {error, _} = Error ->
+            {Error, Grant}
+    end.
+
+%% Where a walk starts: NOFID, which names no fid (the grammar's fid kind
+%% excludes it, so no fid of the table is NOFID), starts at the root the start
+%% admitted, as a fid an attach had just made; any other fid is one the grant
+%% holds and has not opened.
+walk_start(?ERX_P9_NOFID, #grant{root = Root}) ->
+    {ok, [Root]};
+walk_start(Fid, #grant{fids = Fids}) ->
+    case Fids of
+        #{Fid := #fid{open = {open, _, _}}} -> {error, einval};
+        #{Fid := #fid{path = Path}} -> {ok, Path};
+        #{} -> {error, ebadf}
     end.
 
 %% The walk's grant carries the holds its steps took, kept or not.

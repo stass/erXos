@@ -82,7 +82,7 @@ server's own domain.
                                     exports := module()}) -> {ok, pid()} | {error, term()}.
 grant(Grants, Args, Limits, #{client := _, ends_with := _, exports := _} = Binding) ->
     case grant_options(Limits) of
-        {ok, Options} -> supervisor:start_child(Grants, [Args, maps:merge(Binding, Options)]);
+        {ok, Options} -> started(supervisor:start_child(Grants, [Args, maps:merge(Binding, Options)]));
         {error, _} = Refused -> Refused
     end.
 
@@ -99,7 +99,7 @@ refuse, is the answer and leaves no grant.
 grant(Grants, Limits, #{client := Client, ends_with := _, exports := _} = Binding)
   when is_integer(Client), Client > 0 ->
     case grant_options(Limits) of
-        {ok, Options} -> supervisor:start_child(Grants, [maps:merge(Binding, Options)]);
+        {ok, Options} -> started(supervisor:start_child(Grants, [maps:merge(Binding, Options)]));
         {error, _} = Refused -> Refused
     end.
 
@@ -123,7 +123,12 @@ from Args.
 own(Grants, Args) ->
     owned(supervisor:start_child(Grants, [Args, ?OWN])).
 
-owned({ok, Pid}) -> {ok, facet(Pid, ?OWN)}.
+owned({ok, Pid, _Handle}) -> {ok, facet(Pid, ?OWN)}.
+
+%% A grant started for another domain is answered by its pid: the domain that holds
+%% it learns its tree from the mint's reply, not from the starter's handle.
+started({ok, Pid, _Handle}) -> {ok, Pid};
+started({error, _} = Refused) -> Refused.
 
 -doc """
 The facet of the grant Pid as the grantee's registry holds it
@@ -186,7 +191,7 @@ grant_spec(Start) ->
       type => worker, modules => [erx_fs]}.
 
 -doc false.
--spec start_grant(module(), term(), map()) -> {ok, pid()} | {error, term()}.
+-spec start_grant(module(), term(), map()) -> {ok, pid(), erx_fs:grant_handle()} | {error, term()}.
 start_grant(Module, Args, Options) ->
     Grantee = maps:with([client, principal], Options),
     {Rights, Rest} = maps:take(rights, maps:remove(principal, Options)),
