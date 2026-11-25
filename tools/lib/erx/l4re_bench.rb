@@ -3,10 +3,10 @@
 # frozen_string_literal: true
 
 require 'digest'
-require 'json'
 require_relative 'bench_system'
 require_relative 'error'
 require_relative 'ipcbench'
+require_relative 'json_input'
 require_relative 'native_bench'
 require_relative 'qemu'
 
@@ -37,7 +37,7 @@ module Erx
       # The build record of the ELF as it is now, refused unless it is a JSON object whose
       # keys and strings are printable ASCII and whose bootstrap_sha256 is the ELF's.
       def record
-        value = JSON.parse(File.binread(record_path, 1 << 20))
+        value = JsonInput.parse(File.binread(record_path, (1 << 20) + 1), max_bytes: 1 << 20, label: record_path)
         raise Error, "#{record_path} is not a JSON object of printable ASCII" unless
           BenchRecord.plain_hash?(value) && L4ReBench.printable?(value)
         unless value['bootstrap_sha256'] == Digest::SHA256.file(bootstrap).hexdigest
@@ -45,8 +45,6 @@ module Erx
         end
 
         value
-      rescue JSON::ParserError
-        raise Error, "#{record_path} is not JSON"
       end
     end
 
