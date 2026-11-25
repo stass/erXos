@@ -50,11 +50,16 @@ module Erx
 
     LOADED = %r{\A\t(?:\S+ => )?(/\S+) \(0x\h+\)\z}.freeze
     UNLINKED = /\A\tlinux-vdso\.so\.\d+ \(0x\h+\)\z/.freeze
+    STATIC = "\tstatically linked\n"
 
     # The dynamic loader's listing (ldd) names each file it maps with its
-    # path; the kernel's vDSO is no file. Anything else, a library the
-    # loader did not find among them, refuses the listing.
+    # path; the kernel's vDSO is no file, and an object that needs no other
+    # file (a NIF library such as runtime_tools' dyntrace) is listed as
+    # statically linked. Anything else, a library the loader did not find
+    # among them, refuses the listing.
     def self.loader_paths(listing)
+      return [] if listing == STATIC
+
       paths = listing.lines(chomp: true).reject { |line| UNLINKED.match?(line) }.map do |line|
         LOADED.match(line)&.[](1) or raise Error, 'dynamic loader listing has an unresolved or unknown line'
       end
