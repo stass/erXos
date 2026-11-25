@@ -73,17 +73,22 @@ module Erx
                   deadline_seconds: NativeBench::LANDING_DEADLINE_SECONDS, root_flags: nil)
     end
 
-    # The ssh calls of a run: `ssh -o BatchMode=yes -T -- DEST reboot` and the read of
+    # The ssh calls of a run: `ssh -o BatchMode=yes ... -T -- DEST reboot` and the read of
     # /proc/sensors/status, each an argument vector, never a shell line, within
-    # DEADLINE_SECONDS. BatchMode makes ssh fail at once where it would ask for a password
-    # or a host key's acceptance, which no one at the run answers.
+    # DEADLINE_SECONDS. BatchMode makes ssh fail at once where it would ask for a password,
+    # which no one at the run answers.
     class Ssh
       DEADLINE_SECONDS = 30
       SENSORS = '/proc/sensors/status'
       # A reading larger than this is no reading.
       SENSOR_BYTES = 4096
-      # ssh and its options, up to the destination.
-      SSH = %w[ssh -o BatchMode=yes -T --].freeze
+      # ssh and its options, up to the destination. The board's host key is not checked
+      # (and not recorded): a development image makes a new key at every boot, so no
+      # known-hosts entry could match, and the boards run development builds only. A spoofed
+      # board during a benchmark could only falsify numbers that are re-checked. The residual
+      # is in TODO.md's security residuals.
+      SSH = %w[ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+               -o LogLevel=ERROR -T --].freeze
 
       def initialize(dest, spawn: Open3.method(:popen3), deadline: DEADLINE_SECONDS)
         @dest = CodeSsh.destination(dest)

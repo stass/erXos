@@ -163,6 +163,10 @@ document's "residual risks accepted" paragraph.
   releases on every CPU, including those made for other domains: a coarse side channel, beside
   the covert one user-mode `SEV` already gives. Trapping user-mode `WFE`, or erXos's kernel,
   closes it.
+* [Low] board walk: ssh to the board does not check its host key
+  (`tools/lib/erx/board_run.rb`): a development image makes a new key at every boot, so a spoofed
+  board could answer the walk and falsify the numbers of a benchmark. Boards run development
+  builds only. A per-boot known-hosts entry made from the image's key closes it.
 
 ## Planned features
 

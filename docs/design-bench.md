@@ -1188,11 +1188,15 @@ with `--http DIR` the served link that `tools/erx netboot --http` stages and
    the SoC temperature, the throttle state and the ARM clock before the
    run, `unknown` where the path is unsupported.
 3. It points the link at the queue (`Netboot.point`) and asks the running
-   system to reboot: `ssh -o BatchMode=yes -T -- DEST reboot`, which
+   system to reboot: `ssh -o BatchMode=yes -o StrictHostKeyChecking=no
+   -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -T -- DEST reboot`, which
    root's session may run, since it holds the `machine` grant
    (`config/manifest/development.txt`, `facet machine`). The destination
-   is checked as `CodeSsh` checks it, and batch mode makes a password or
-   host-key prompt fail at once. If ssh fails, the run types `reboot`
+   is checked as `CodeSsh` checks it, and batch mode makes a password
+   prompt fail at once. The walk does not check the board's host key
+   and records none, since a development image makes a new key at every
+   boot, and a board that answered as another could only falsify numbers
+   that are re-checked. If ssh fails, the run types `reboot`
    and a carriage return on the console it holds, as root's console
    session takes it, says so, and asks for a reset by hand if the board
    does not restart within the boot deadline, which runs from the request.
