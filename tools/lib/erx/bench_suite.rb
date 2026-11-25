@@ -74,14 +74,14 @@ module Erx
 
     # A landing boot: the environment kind and CPU count it boots at, and the layer its
     # cells measure, which names its side-by-side table (docs/design-bench.md,
-    # "Counterparts"): the native boot's C cells set the kernels' own paths beside each
+    # "Counterparts"): the native boot's cells set the kernels' own paths beside each
     # other, the xdomain boot's Erlang cells the runtimes' messages, and the posix boot's
     # cells what a program pays for its POSIX calls (docs/design-bench.md, "What a program
     # sees"). gate says whether the landing gate boots it: the program table's boots run in
     # comparison sessions and on demand only.
     Boot = Data.define(:kind, :cpus, :layer, :gate)
     BOOTS = {
-      'native' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'C', gate: true),
+      'native' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'kernel', gate: true),
       'xdomain' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'Erlang', gate: true),
       'posix' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'program', gate: false)
     }.freeze

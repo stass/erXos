@@ -183,6 +183,51 @@ class BenchSuiteTest < Minitest::Test
     end
   end
 
+  # docs/design-bench.md, "Counterparts": an operation names what each other system runs
+  # for it; a cell no other system has a counterpart for is not asked of that system.
+  def test_a_counterpart_names_another_system_and_what_it_runs
+    operation = ->(counterparts) { Suite::Operation.new(name: 'x', profile: 'fast', result: 'ok', counterparts: counterparts) }
+    assert_equal({ 'linux' => 'a condition wait' }, operation.call('linux' => 'a condition wait').counterparts)
+    [{ 'erxos' => 'itself' }, { 'plan9' => 'x' }, { 'linux' => '' }, { 'linux' => "a\ttab" }].each do |counterparts|
+      assert_raises(Erx::Error, counterparts.inspect) { operation.call(counterparts) }
+    end
+    assert_empty Suite::Operation.new(name: 'x', profile: 'fast', result: 'ok').counterparts
+  end
+
+  def test_wake_sets_posix_beside_its_wakes_and_deadline_and_nothing_beside_its_own
+    operations = Suite.benchmark('wake').operations
+    beside = operations.select { |_, operation| operation.counterparts.key?('linux') }.keys.sort
+    assert_equal %w[park-deadline wake-cross-cpu wake-same-cpu], beside
+    assert(operations.values.none? { |operation| operation.counterparts.key?('l4re') })
+  end
+
+  # The side-by-side tables are one per layer: the native boot's cells set the kernels'
+  # paths beside each other, the xdomain boot's the runtimes' messages.
+def test_each_boot_is_one_layer
+  assert_equal({ 'native' => 'kernel', 'xdomain' => 'Erlang', 'posix' => 'program' }, Suite::BOOTS.transform_values(&:layer))
+end
+
+# The program table's boot runs in comparison sessions only; the landing gate boots the others.
+def test_the_landing_gate_does_not_boot_the_program_table
+  assert_empty Suite.suite_cells.grep(/posix/)
+  refute_empty Suite.benchmark('posix').landing.fetch('posix')
+end
+
+# A program operation without its act line is refused before any boot, and an act is
+# the same act or a nearest counterpart's line.
+def test_a_program_operation_without_its_act_is_refused
+  cell = Suite::LandingCell.new(operation: 'getpid', load: 'idle', placement: 'same-cpu', parameters: {})
+  unsaid = Suite::Operation.new(name: 'getpid', profile: 'fast', result: 'ok')
+  error = assert_raises(Erx::Error) do
+    Suite::Benchmark.new(name: 'posix', operations: { 'getpid' => unsaid }, landing: { 'posix' => [cell] })
+  end
+  assert_match(/getpid do not say their act/, error.message)
+  assert_raises(Erx::Error) { Suite::Operation.new(name: 'getpid', profile: 'fast', result: 'ok', act: 'similar') }
+  assert Suite::Benchmark.new(name: 'posix', operations: { 'getpid' => unsaid.with(act: 'same act') },
+                              landing: { 'posix' => [cell] })
+  assert(Suite.benchmark('posix').operations.values.all?(&:act))
+end
+
   private
 
   # A record of wake-cross-cpu alone, booted at cpus CPUs.
@@ -205,29 +250,5 @@ class BenchSuiteTest < Minitest::Test
     FileUtils.mkdir_p(path)
     _, error, status = Open3.capture3('git', '-C', path, *arguments, stdin_data: '')
     raise "git #{arguments.first} failed: #{error}" unless status.success?
-  end
-
-  # docs/design-bench.md, "Counterparts": an operation names what each other system runs
-  # for it; a cell no other system has a counterpart for is not asked of that system.
-  def test_a_counterpart_names_another_system_and_what_it_runs
-    operation = ->(counterparts) { Suite::Operation.new(name: 'x', profile: 'fast', result: 'ok', counterparts: counterparts) }
-    assert_equal({ 'linux' => 'a condition wait' }, operation.call('linux' => 'a condition wait').counterparts)
-    [{ 'erxos' => 'itself' }, { 'plan9' => 'x' }, { 'linux' => '' }, { 'linux' => "a\ttab" }].each do |counterparts|
-      assert_raises(Erx::Error, counterparts.inspect) { operation.call(counterparts) }
-    end
-    assert_empty Suite::Operation.new(name: 'x', profile: 'fast', result: 'ok').counterparts
-  end
-
-  def test_wake_sets_posix_beside_its_wakes_and_deadline_and_nothing_beside_its_own
-    operations = Suite.benchmark('wake').operations
-    beside = operations.select { |_, operation| operation.counterparts.key?('linux') }.keys.sort
-    assert_equal %w[park-deadline wake-cross-cpu wake-same-cpu], beside
-    assert(operations.values.none? { |operation| operation.counterparts.key?('l4re') })
-  end
-
-  # The side-by-side tables are one per layer: the native boot's cells set the kernels'
-  # paths beside each other, the xdomain boot's the runtimes' messages.
-  def test_each_boot_is_one_layer
-    assert_equal({ 'native' => 'C', 'xdomain' => 'Erlang' }, Suite::BOOTS.transform_values(&:layer))
   end
 end

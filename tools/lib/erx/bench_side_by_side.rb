@@ -8,8 +8,10 @@ require_relative 'bench_suite'
 module Erx
   # The side-by-side tables of a comparison session (docs/design-bench.md, "A comparison
   # session"): a pure function of the session's runs and the benchmark's declaration.
-  # There is one table per layer, the C table of the native boot and the Erlang table of
-  # the xdomain boot, each with a row per erXos cell and a column per system. A cell on
+  # There is one table per layer, the kernel table of the native boot, the Erlang table of
+  # the xdomain boot and the program table of the posix boot, each with a row per erXos
+  # cell and a column per system; a program row also prints its operation's act, whether
+  # both systems do the same work for the call (docs/design-bench.md, "Fairness"). A cell on
   # one CPU is read from the one-CPU runs and one across CPUs from the runs at the
   # landing boot's count. The tables give no verdict: setting systems beside each other
   # is never a comparison.
@@ -32,7 +34,8 @@ module Erx
     # row is; 'none' where the system has no counterpart, and then no entries), and its
     # runs' cells.
     Column = Data.define(:system, :counterpart, :entries)
-    Row = Data.define(:benchmark, :cell, :cpus, :columns)
+    # act is the operation's declared act line, nil outside the program layer's table.
+    Row = Data.define(:benchmark, :cell, :cpus, :act, :columns)
     Table = Data.define(:layer, :benchmark, :rows)
 
     # The clocks whose ticks have a frequency, which their run's clock group records.
@@ -49,7 +52,7 @@ module Erx
         cells = benchmark.landing[boot] or next
         rows = cells.map do |cell|
           cpus = cell.cpus == 1 ? 1 : entry.cpus
-          Row.new(benchmark: benchmark.name, cell: cell, cpus: cpus,
+          Row.new(benchmark: benchmark.name, cell: cell, cpus: cpus, act: benchmark.operations.fetch(cell.operation).act,
                   columns: columns(benchmark, cell, runs.select { |run| run.record.environment.cpus == cpus }, systems))
         end
         Table.new(layer: entry.layer, benchmark: benchmark.name, rows: rows)
@@ -142,6 +145,7 @@ module Erx
       cell = row.cell
       ["#{row.benchmark}.#{cell.operation} #{cell.load} #{cell.placement}#{parameters(cell.parameters)}, " \
        "#{row.cpus}-CPU form",
+       *(row.act ? ["  act: #{row.act}"] : []),
        *row.columns.flat_map { |column| render_column(column) }]
     end
 

@@ -83,7 +83,7 @@ class BenchSideBySideTest < Minitest::Test
   # and CPU count are two environments, and the table sets them beside each other.
   def test_the_table_sets_two_systems_beside_each_other
     same, cross = table.rows
-    assert_equal ['C', 1, 4], [table.layer, same.cpus, cross.cpus]
+    assert_equal ['kernel', 1, 4], [table.layer, same.cpus, cross.cpus]
     erxos, linux = column(same, 'erxos'), column(same, 'linux')
     assert_equal [ns(1000)], erxos.entries.map { |entry| entry.values.fetch('p50') }
     assert_equal [ns(1500), ns(2000)], linux.entries.map { |entry| entry.values.fetch('p50') }
@@ -146,10 +146,55 @@ class BenchSideBySideTest < Minitest::Test
 
   def test_the_rendered_table_names_its_layer_and_each_counterpart
     lines = Tables.render([table])
-    assert_equal 'The C table of probe, side by side; no verdict', lines.first
+    assert_equal 'The kernel table of probe, side by side; no verdict', lines.first
     assert_includes lines, '  l4re: none'
     assert(lines.any? { |text| text.include?('p50 1500.0 ns') && text.include?('ratio 1.50') })
     # The same cell of erXos's four-CPU boot is not its one-CPU row's number.
     refute(lines.any? { |text| text.include?('1250.0 ns') })
   end
+
+# A program operation says whether both systems do the same work for the call; the
+# program table prints that line on every row (docs/design-bench.md, "Fairness").
+PROGRAM = Suite::Benchmark.new(
+  name: 'posix',
+  operations: {
+    'getpid' => Suite::Operation.new(name: 'getpid', profile: 'fast', result: 'ok', counterparts: { 'linux' => 'getpid' },
+                                     act: 'nearest counterpart: erXos answers in user mode'),
+    'read' => Suite::Operation.new(name: 'read', profile: 'fast', result: 'ok', counterparts: { 'linux' => 'pread' },
+                                   act: 'same act')
+  },
+  landing: { 'posix' => [Suite::LandingCell.new(operation: 'getpid', load: 'idle', placement: 'same-cpu', parameters: {}),
+                         Suite::LandingCell.new(operation: 'read', load: 'idle', placement: 'same-cpu',
+                                                parameters: { 'bytes' => 4096 })] }
+)
+
+def program_cell(operation, clock, total:, parameters: {})
+  Record::Cell.new(
+    benchmark: 'posix', operation: operation,
+    conditions: Record::Conditions.new(load: 'idle', placement: 'same-cpu', parameters: parameters, clock: clock, batch: 8),
+    profile: PROFILE, status: 'measured', reason: nil, counts: { 'lost' => 0, 'early' => 0, 'missed' => 0 },
+    detail: { 'histogram' => [[total / 160, total / 160, 20]], 'min' => total / 160, 'max' => total / 160, 'total' => total }
+  )
+end
+
+# An erXos and a Linux boot of posix: one row per cell, both columns, the act line, and
+# each batched cell's mean its total over its 160 calls.
+def test_the_program_table_sets_each_cell_beside_linux_with_its_act
+  runs = [boot('erxos', 1, [program_cell('getpid', 'counter', total: 3840),
+                            program_cell('read', 'counter', total: 384_000, parameters: { 'bytes' => 4096 })],
+               clock: ERXOS_CLOCK),
+          boot('linux', 1, [program_cell('getpid', 'monotonic', total: 32_000),
+                            program_cell('read', 'monotonic', total: 160_000, parameters: { 'bytes' => 4096 })],
+               clock: LINUX_CLOCK)]
+  program = Tables.tables(PROGRAM, runs, systems: %w[erxos linux]).first
+  assert_equal ['program', %w[getpid read]], [program.layer, program.rows.map { |row| row.cell.operation }]
+  assert_equal ['nearest counterpart: erXos answers in user mode', 'same act'], program.rows.map(&:act)
+  getpid = program.rows.first
+  assert_equal [ns(1000), ns(200)],
+               %w[erxos linux].map { |system| column(getpid, system).entries.first.values.fetch('mean') }
+  lines = Tables.render([program])
+  assert_equal 'The program table of posix, side by side; no verdict', lines.first
+  assert_includes lines, '  act: same act'
+  assert_includes lines, '  linux: pread'
+end
 end
