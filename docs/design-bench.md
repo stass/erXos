@@ -1047,10 +1047,11 @@ the host CPU's cycles, so their `CLOCK` lines stay `unknown`.
    the SoC temperature, the throttle state and the ARM clock before the
    run, `unknown` where the path is unsupported.
 3. It points the link at the queue (`Netboot.point`) and asks the running
-   system to reboot: `ssh -T -- DEST reboot`, which root's session may
-   run, since it holds the `machine` grant
+   system to reboot: `ssh -o BatchMode=yes -T -- DEST reboot`, which
+   root's session may run, since it holds the `machine` grant
    (`config/manifest/development.txt`, `facet machine`). The destination
-   is checked as `CodeSsh` checks it. If ssh fails, the run says so, asks
+   is checked as `CodeSsh` checks it, and batch mode makes a password or
+   host-key prompt fail at once. If ssh fails, the run says so, asks
    for a reset by hand, and waits the boot deadline.
 4. **Each line it reads** goes to `BoardWalk`, a pure function of the
    queue's names, the found pair's return identity, the walk's state and

@@ -68,13 +68,17 @@ module Erx
                   deadline_seconds: NativeBench::LANDING_DEADLINE_SECONDS)
     end
 
-    # The ssh calls of a run: `ssh -T -- DEST reboot` and the read of /proc/sensors/status,
-    # each an argument vector, never a shell line, within DEADLINE_SECONDS.
+    # The ssh calls of a run: `ssh -o BatchMode=yes -T -- DEST reboot` and the read of
+    # /proc/sensors/status, each an argument vector, never a shell line, within
+    # DEADLINE_SECONDS. BatchMode makes ssh fail at once where it would ask for a password
+    # or a host key's acceptance, which no one at the run answers.
     class Ssh
       DEADLINE_SECONDS = 30
       SENSORS = '/proc/sensors/status'
       # A reading larger than this is no reading.
       SENSOR_BYTES = 4096
+      # ssh and its options, up to the destination.
+      SSH = %w[ssh -o BatchMode=yes -T --].freeze
 
       def initialize(dest, spawn: Open3.method(:popen3), deadline: DEADLINE_SECONDS)
         @dest = CodeSsh.destination(dest)
@@ -82,8 +86,8 @@ module Erx
         @deadline = deadline
       end
 
-      def reboot_argv = ['ssh', '-T', '--', @dest, 'reboot']
-      def sensors_argv = ['ssh', '-T', '--', @dest, 'cat', SENSORS]
+      def reboot_argv = [*SSH, @dest, 'reboot']
+      def sensors_argv = [*SSH, @dest, 'cat', SENSORS]
 
       # Whether ssh ran the reboot.
       def reboot = run(reboot_argv).first

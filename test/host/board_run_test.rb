@@ -186,9 +186,10 @@ class BoardRunTest < Minitest::Test
     assert_raises(Erx::Error) { walk_board(runs: 0) }
   end
 
-  def test_ssh_runs_an_argument_vector_and_refuses_a_destination_it_could_take_as_an_option
+  def test_ssh_runs_an_argument_vector_in_batch_mode_and_refuses_a_destination_it_could_take_as_an_option
     ssh = Erx::BoardRun::Ssh.new('root@board')
-    assert_equal [%w[ssh -T -- root@board reboot], ['ssh', '-T', '--', 'root@board', 'cat', '/proc/sensors/status']],
+    assert_equal [%w[ssh -o BatchMode=yes -T -- root@board reboot],
+                  %w[ssh -o BatchMode=yes -T -- root@board cat /proc/sensors/status]],
                  [ssh.reboot_argv, ssh.sensors_argv]
     assert_raises(Erx::Error) { Erx::BoardRun::Ssh.new('-oProxyCommand=sh') }
   end
