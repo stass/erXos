@@ -179,16 +179,18 @@ module Erx
       benchmark.operations.transform_values { |operation| LANDING_PROFILES.fetch(operation.profile, nil) }.compact
     end
 
-    # What a landing boot asks of benchmark: its cells in boot at their landing profiles.
-    def wanted(benchmark, boot:)
-      BenchMeasurement::Wanted.new(benchmark: benchmark, cells: benchmark.landing.fetch(boot), profiles: profiles(benchmark))
+    # What a landing boot asks of benchmark: cells, its cells in boot unless given, at
+    # their landing profiles.
+    def wanted(benchmark, boot:, cells: benchmark.landing.fetch(boot))
+      BenchMeasurement::Wanted.new(benchmark: benchmark, cells: cells, profiles: profiles(benchmark))
     end
 
-    # What a boot of the image at cpus CPUs asks of its guest: the benchmark's native
-    # landing cells at their profiles, on the counter, and the one pair the root (on CPU
-    # 0) times wake-cross-cpu across, with the last CPU; none on one CPU.
-    def asked(benchmark, cpus:)
-      BenchMeasurement::Asked.new(benchmarks: [wanted(benchmark, boot: 'native')], clock: 'counter',
+    # What a boot of the image at cpus CPUs asks of its guest: cells, the benchmark's
+    # native landing cells unless given, at their profiles, on the counter, and the one
+    # pair the root (on CPU 0) times wake-cross-cpu across, with the last CPU; none on
+    # one CPU.
+    def asked(benchmark, cpus:, cells: benchmark.landing.fetch('native'))
+      BenchMeasurement::Asked.new(benchmarks: [wanted(benchmark, boot: 'native', cells: cells)], clock: 'counter',
                                   pairs: cpus > 1 ? [[0, cpus - 1]] : [])
     end
 
@@ -352,6 +354,27 @@ module Erx
         set = BootPartition.lay_out_set(root: @root, runner: @runner, platform: @platform, build_kind: BuildKind::DEVELOPMENT,
                                         bootable: image.single, directory: directory, compiler: @compiler, linker: @linker)
         Laid.new(set: set, image: image, deadline_seconds: deadline)
+      end
+    end
+
+    # erXos's guest for the native boot (BenchSystem): the native bench image, which
+    # times every native cell and prints their BENCH lines and one CLOCK line, judged by
+    # BenchMeasurement.boot against the cells asked. It boots in one CPU and in the
+    # landing boot's count, and its root is built with the landing profiles only.
+    class Guest
+      def initialize(run:)
+        @run = run
+      end
+
+      def system = 'erxos'
+      def boot = 'native'
+      def forms(cpus) = [1, cpus]
+      def offers?(profile) = profile == 'landing'
+
+      def call(benchmark, cells:, cpus:, accel:)
+        measured = @run.call(benchmark.name, accel: accel, cpus: cpus)
+        answer = BenchMeasurement.boot(measured.fetch(:lines), NativeBench.asked(benchmark, cpus: cpus, cells: cells))
+        BenchLanding.booted(measured, answer, memory_mib: MEMORY_MIB)
       end
     end
 
