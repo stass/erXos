@@ -125,8 +125,8 @@ module Erx
           %% only the server's refusal, and for a reply of Request's operation that its checks
           %% hold to Request when the grammar accepts Request; {error, eio} for every other
           %% pair, so no reply is taken on the bounds of a request the grammar refuses. It
-          %% never raises: a client sends its requests unchecked and the server refuses a
-          %% malformed one with an error reply, which reaches the caller as it is.
+          %% never raises, so a caller need not check its request first: the server refuses
+          %% a malformed one with an error reply, which reaches the caller as it is.
           -spec decode_reply(term(), term()) -> {ok, term()} | {error, eio}.
           decode_reply(Request, Reply) ->
               Taken = reply_shape(error, Reply) orelse
@@ -195,21 +195,22 @@ module Erx
           rule = operation.fetch(:writes)
           field = rule && rule[:field]
           names = fields.map { |item, _| item == field ? variable(item) : '_' }
-          marked = field && "#{check(fields.to_h.fetch(field))}(#{variable(field)}) andalso "
+          kind_guard = field && "#{check(fields.to_h.fetch(field))}(#{variable(field)}) andalso "
           body = case rule
                  in nil then 'false'
                  in { rule: 'always' } then 'true'
                  in { rule: 'any', masks: }
-                   "#{marked}(#{masks.map { |mask| "#{variable(field)} band #{literal(mask)} =/= 0" }.join(' orelse ')})"
-                 in { rule: 'equal', value: } then "#{marked}#{variable(field)} =:= #{literal(value)}"
+                   "#{kind_guard}(#{masks.map { |mask| "#{variable(field)} band #{literal(mask)} =/= 0" }.join(' orelse ')})"
+                 in { rule: 'equal', value: } then "#{kind_guard}#{variable(field)} =:= #{literal(value)}"
                  end
           "writes(#{pattern(operation.fetch(:name), names)}) ->\n    #{body}"
         end
         "%% Whether a read-only grant refuses Request before any callback (F5): true for a\n" \
-          "%% request of an operation the table marks as writing whose marked field, where its\n" \
-          "%% rule reads one, is of the field's kind and matches the rule; false for every\n" \
-          "%% other term, a malformed request included, which the funnel refuses einval before\n" \
-          "%% any rights check. It never raises.\n" \
+          "%% term of an operation the table marks as writing whose marked field, where its\n" \
+          "%% rule reads one, is of the field's kind and matches the rule; false for a term of\n" \
+          "%% no operation and for one whose marked field fails its kind or its rule. It never\n" \
+          "%% raises, and reads no other field: the funnel refuses a malformed request einval\n" \
+          "%% before any rights check, so a true for one only refuses it sooner.\n" \
           "-spec writes(term()) -> boolean().\n" + (clauses + ["writes(_) ->\n    false"]).join(";\n") + '.'
       end
 

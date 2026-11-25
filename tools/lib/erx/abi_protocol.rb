@@ -459,7 +459,8 @@ module Erx
         name, kind_name, attribute = words
         case [kind_name == FID_KIND, attribute]
         in [true, nil]
-          line.fail!("field #{name} of kind #{FID_KIND} states what it names: directory, node, new or start")
+          roles = "#{FID_ATTRIBUTES[0...-1].join(', ')} or #{FID_ATTRIBUTES.last}"
+          line.fail!("field #{name} of kind #{FID_KIND} states what it names: #{roles}")
         in [false, nil] then nil
         in [_, String] unless FID_ATTRIBUTES.include?(attribute)
           line.fail!("unknown field attribute #{attribute}")
