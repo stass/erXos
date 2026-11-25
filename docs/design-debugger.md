@@ -1008,7 +1008,7 @@ protocol (GDB manual, appendix E). It sends exactly these packets:
 | `0x03`, outside any packet | stop a running machine |
 | `qfThreadInfo`, `qsThreadInfo`, `Hg` | the CPUs, one thread each; select one |
 | `g` | the selected CPU's core registers |
-| `p NUMBER` | one register of the selected CPU that the `g` reply does not carry |
+| `p NUMBER` | one register of the selected CPU outside the core set, by the number the description gives it |
 | `m ADDRESS,LENGTH` | read memory |
 | `Z1`, `z1`, `Z2`, `z2`, `Z3`, `z3`, `Z4`, `z4` | insert and remove a hardware breakpoint and a write, read or access watchpoint |
 | `vCont?`, then `vCont;c` or `c` | resume every CPU |
@@ -1028,28 +1028,38 @@ reached its beginning or its end. It keeps acknowledgement mode on,
 checks every checksum, and undoes the protocol's escapes and run-length
 encoding before it reads a payload.
 
-**The description is read within bounds.** The `target.xml` of QEMU's
-stub holds no register. It names the architecture and includes one annex
-for each feature, the core registers' among them, and the stub serves
-each annex under its name ([References](#references), QEMU's
-`gdbstub.c`). So the tool reads `target.xml`, then each annex it
-includes, and no further: an include inside an annex refuses the target.
-It reads at most `stub_annexes_max` (16) annexes of at most
-`stub_annex_max` (1 MiB) each, and sends back an annex's name only if it
-is at most 64 characters of ASCII letters, digits, `.`, `_` and `-`. A
-description past any of these bounds, or one without the architecture's
-core registers, refuses the target.
+**The description is read within bounds.** The manual has a client load
+the main description from the `target.xml` annex, and names every other
+document of the description by an annex of its own, fetched the same way
+(General Query Packets, `qXfer:features:read`). So the tool reads
+`target.xml`, then each annex that `target.xml` includes, and no
+further: an include inside an annex refuses the target. It reads at most
+`stub_annexes_max` (16) annexes of at most `stub_annex_max` (1 MiB)
+each, and sends back an annex's name only if it is at most 64 characters
+of ASCII letters, digits, `.`, `_` and `-`. A description past any of
+these bounds, or one without the architecture's core registers, refuses
+the target. The bounds are the tool's own defence against a stub whose
+replies it does not trust, not facts of the protocol: the manual sets no
+limit on a description's size or depth. How the include is written is
+the manual's Target Descriptions appendix, which this design did not
+read, and which annexes QEMU's stub serves, whether any of them includes
+another and whether its description fits these bounds are *unverified*
+([P1](#unverified-facts)).
 
 **Registers are negotiated, never assumed.** The architecture binding
 lists the registers the tool uses: the core set, which every target must
 have, and each other register beside the command that needs it, of which
 the first is the translation root of the space a stopped CPU was in
 ([design-arch-aarch64.md](design-arch-aarch64.md#stopping-every-cpu)).
-The core registers are the lowest-numbered and lead the `g` reply, so the
-tool reads them from it by the description's sizes and looks at nothing
-after them. QEMU registers its system registers as a feature of their
-own, outside the set the `g` reply carries, so the tool reads such a
-register alone, by the number its annex gives it, with `p`. A register
+The core set is the one feature the manual makes every AArch64
+description carry, `x0` to `x30`, `sp`, `pc` and `cpsr` (AArch64
+Features), and the description fixes each register's size and its
+position in the `g` reply (Packets, `g`). So the tool takes the core
+registers from the `g` reply at the positions and sizes the description
+gives them, and reads every other register it needs alone, with `p`, by
+the number the description gives it (Packets, `p n`), whether or not the
+`g` reply also carries it; it never needs to know which registers a
+stub's `g` reply covers. A register
 the description does not list, or whose `p` is answered with the empty
 reply, an error or a run of `x`, is unavailable, and a command that needs
 it is refused with the register named: `watch` on an address of a space
@@ -1404,7 +1414,7 @@ Each test is paired with the seeded fault that proves it ran.
 | walker resolution at build time | every walker's kinds, keys, reporters and fields resolve | a walker naming a field the image does not have fails the build at its line |
 | `audit` | clean on an image of a healthy machine; on an image in which the test has overwritten one handle's slot in the root's table, exactly that row, by path and address | the reference check skipped: the corrupt image audits clean |
 | `tools/erx debug --stub` on a TCG run | attaches, stops, lists 4 CPUs, reads a kernel symbol's memory, reads a stopped CPU's translation root by its own register and finds the root its space's record gives, sets `watch` on a budget's `used`, continues, and reports the stop at the charging funnel | the physical mode request removed: the symbol's bytes no longer match the image's |
-| the stub client against a scripted stub, on the host | a description whose `target.xml` only includes annexes is read whole; the core registers come from `g` and a register outside it from `p`; an annex past its size bound, a seventeenth annex, an include inside an annex and an annex name with a character outside the allowed set each refuse the target; with no annex that lists the translation root, `watch` on an address of another space is refused with the register named, and `watch` on a kernel address still works | the size bound removed: the long annex is read; the refusal removed: the watch is set, and a stop in the wrong space is reported as the one meant |
+| the stub client against a scripted stub, on the host | a description whose `target.xml` only includes annexes is read whole; the core registers come from `g` and the translation root from `p`; an annex past its size bound, a seventeenth annex, an include inside an annex and an annex name with a character outside the allowed set each refuse the target; with no annex that lists the translation root, `watch` on an address of another space is refused with the register named, and `watch` on a kernel address still works | the size bound removed: the long annex is read; the refusal removed: the watch is set, and a stop in the wrong space is reported as the one meant |
 | moments, against the same scripted stub | an address read before and after `continue` across a write gives the old value and then the new; `save` after the second read holds the second moment's page alone and names that moment; on a scripted replay, `at` an earlier count discards what was read | the pages kept across `continue`: the second read gives the old value |
 | a recorded run | a case that seeds one stray write to a budget's record and panics later is recorded, replayed to its stop, and `when budgets/N used` ends at the seeded store, at the same instruction count on every replay | the watchpoint set on the neighbouring field: `when` ends at the replay's beginning |
 | the views' statuses | on an image with a hole where an attribute lies the attribute is `unknown`; one no walker reads is `unsupported`; a value outside its type is `{error, invalid}` with its bits beside it; a walk that meets its own row again is marked cyclic | an unreadable range answered with zero bytes: the attribute reads `ok` |
@@ -1560,9 +1570,13 @@ this design establishes, with the probe that settles it.
 
 * P1. Whether QEMU's stub, under HVF, stops the machine, reads registers
   and memory, and inserts hardware breakpoints and watchpoints (its
-  documentation says support depends on the accelerator), and whether its
-  description there lists the translation root's register and `p` reads
-  it. Probe: `tools/erx debug --stub` on an HVF run.
+  documentation says support depends on the accelerator); and, under TCG
+  and HVF alike, what its description is: which annexes `target.xml`
+  includes, whether any annex includes another, whether the whole fits
+  the tool's bounds (16 annexes of at most 1 MiB, names of the allowed
+  characters), and whether it lists the translation root's register, and
+  under which name, so that `p` reads it. Probe: `tools/erx debug --stub`
+  on a TCG run and on an HVF run, recording the annexes it fetched.
 * P2. Whether QEMU's ELF dump of an AArch64 guest carries one register
   note for each virtual CPU, under TCG and HVF, and whether it carries
   the translation root. The tool needs neither for a machine that stopped
@@ -1659,23 +1673,6 @@ this design establishes, with the probe that settles it.
   breakpoints on TCG and by accelerator elsewhere, the socket's security.
   `docs/system/replay.rst` of the same release, in the survey's sources:
   record and replay, snapshots, running backwards.
-* QEMU v10.1.0's stub, fetched from `github.com/qemu/qemu` at that tag
-  and kept under `notes/debugger-2026-11-25/src/qemu-v10.1.0/` of the
-  history repository. `gdbstub/gdbstub.c`, SHA-256
-  `1e38995194d62fcc9e2add943b54daff7cfb1dd658305c15da24cfc84d118dc1`:
-  `target.xml` built as an architecture and one `xi:include` for each
-  registered feature, each feature's XML served as an annex under its
-  name (lines 369 to 406); the `g` reply over the registers below
-  `gdb_num_g_regs`, which a feature registered with a `g` position of
-  zero does not raise (lines 604 to 631, 1335 to 1351); and `p`, which
-  reads any one register and answers `E14` for one it cannot (lines 1230
-  to 1253). `target/arm/gdbstub.c`, SHA-256
-  `d265abbf32b54c8044ec62e176bb8fbb8c5e8b2b3ec855eead917a33085b0f6d`:
-  the system registers as the generated feature `system-registers.xml`,
-  each under its own name, registered with a `g` position of zero (lines
-  264 to 323, 591 to 593). `gdb-xml/aarch64-core.xml`, SHA-256
-  `93fa15f79f4545af6b78de55740bff3ece0e653d8149b8e25c1c657bb5f3642f`:
-  the core feature, `x0` to `x30`, `sp`, `pc` and `cpsr`.
 * The Fiasco fork's own sources, read in this tree: the kernel
   information page's descriptor types and sub-types (`abi/kip.cpp`,
   `Mem_desc`), the virtual conventional descriptor
@@ -1693,10 +1690,12 @@ this design establishes, with the probe that settles it.
   `-icount` with `rr`, `rrfile` and `rrsnapshot`. The harness pins a
   later QEMU than the pages of v10.1.0 describe, which is why P1 to P4
   are probes and not facts.
-* GDB manual, appendix E, `sourceware.org/gdb/current/onlinedocs`, fetched
-  2026-11-25 (unpinned): Standard Replies (in the survey's sources), and
-  Packets, Stop Reply Packets, General Query Packets, Interrupts and
-  AArch64 Features, SHA-256
+* GDB manual, `sourceware.org/gdb/current/onlinedocs`, fetched
+  2026-11-25 (unpinned): from appendix E, the remote protocol's
+  specification, Standard Replies (in the survey's sources), and Packets,
+  Stop Reply Packets, General Query Packets and Interrupts; from appendix
+  G, AArch64 Features, the core feature every AArch64 description
+  carries; SHA-256
   `44dfada09e55839aecff010e443469a592a4eb8eb653dfa28ca7b3836b887800`,
   `041824625f6f4bf73159da0461b3e2c7bbe569890cc81ffeccea549543401831`,
   `40aff051f25a9093935653ab2f187af8e3fd07b568b12174927172237ada122f`,

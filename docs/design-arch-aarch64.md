@@ -595,13 +595,14 @@ stub implements them in the emulator under TCG, any number of them (its
 reports, which the tool reads and never assumes. A watchpoint is on a
 virtual address under whichever translation is current, so the tool reads
 the stopped CPU's `TTBR0_EL1` and continues past a stop outside the space
-it meant. The register is not among those a stub's `g` reply carries:
-QEMU's stub lists it, as `TTBR0_EL1`, in its `system-registers.xml`
-annex, and the tool reads it by the number given there, with `p`
+it meant. The register is outside the core set, so the tool reads it
+alone, with `p`, by the number the stub's target description gives it
 ([design-debugger.md](design-debugger.md#the-gdb-remote-protocol-subset)).
-A stub that does not list it gives no such watchpoint, and whether QEMU's
-does under HVF is *unverified* (P1). The registers every target must have
-are the core feature's: `x0` to `x30`, `sp`, `pc` and `cpsr`.
+A stub that does not list it gives no such watchpoint, and whether
+QEMU's lists it, and under which name, is *unverified* (P1). The
+registers every target must have are the core feature's, as the GDB
+manual's AArch64 Features section defines it: `x0` to `x30`, `sp`, `pc`
+and `cpsr`.
 
 **Reading a stopped machine.** The anchor's `translation` word is
 `TCR_EL1`, its `kernel_root` is `TTBR1_EL1` and its `root_task_root` the
