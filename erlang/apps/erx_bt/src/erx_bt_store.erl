@@ -280,10 +280,16 @@ info({'DOWN', Monitor, process, _Link, _Reason}, #store{links = Links} = Store) 
 %% are full (docs/design-bluetooth.md, "Pairing never replaces a bond").
 admit(#{identity := Identity} = Bond, Bonds) ->
     case lists:any(fun(#{identity := Kept}) -> Kept =:= Identity end, Bonds) of
-        true -> {error, already_bonded};
-        false when length(Bonds) >= ?ERX_BT_BONDS_MAX -> {error, bonds_full};
+        true -> {error, failure(already_bonded)};
+        false when length(Bonds) >= ?ERX_BT_BONDS_MAX -> {error, failure(bonds_full)};
         false -> {ok, Bonds ++ [Bond]}
     end.
+
+%% A reason the store writes, which must be one of abi/formats/bluetooth.txt's
+%% bt_pair_reason: admit/2's and change/2's own reasons pass through it, so a stray word
+%% ends the store where it is written and never reaches a window or a line. A `forget`
+%% answers change/2's `unavailable` as `eio`.
+failure(Reason) when ?ERX_IS_BT_PAIR_REASON(Reason) -> Reason.
 
 %% A drawn id no kept bond has, in its hexadecimal form: drawn again on a clash, which a
 %% draw of 128 random bits meets with a probability of at most bt_bonds_max / 2^128.
@@ -331,7 +337,7 @@ change(Edit, Store) ->
         {ok, Blob} ?= encoded(erx_bt_state:encode(#{address => Address, bonds => Edited}), Current),
         case write(Blob, Current) of
             {ok, Written} -> {ok, adopt(Edited, Written)};
-            {unconfirmed, Written} -> {error, unavailable, unconfirmed(Written)}
+            {unconfirmed, Written} -> {error, failure(unavailable), unconfirmed(Written)}
         end
     end.
 
@@ -339,7 +345,7 @@ edit({ok, Edited}, _Store) -> {ok, Edited};
 edit({error, Reason}, Store) -> {error, Reason, Store}.
 
 encoded({ok, Blob}, _Store) -> {ok, Blob};
-encoded({error, _TooLargeOrDuplicateId}, Store) -> {error, unavailable, Store}.
+encoded({error, _TooLargeOrDuplicateId}, Store) -> {error, failure(unavailable), Store}.
 
 %% One put under the next generation, which the store counts as put whatever the answer,
 %% since an unconfirmed put may yet land.
@@ -360,12 +366,12 @@ unconfirmed(Store) -> Store#store{known = {unknown, put}, reason = store_unavail
 current(#store{known = read} = Store) ->
     {ok, Store};
 current(#store{known = {unknown, start}} = Store) ->
-    {error, unavailable, Store};
+    {error, failure(unavailable), Store};
 current(#store{known = {unknown, put}} = Store) ->
     case read(Store) of
         {{ok, none}, Read} -> {ok, adopt([], Read#store{known = read, reason = none})};
         {{ok, #{bonds := Bonds}}, Read} -> {ok, adopt(Bonds, Read#store{known = read, reason = none})};
-        {{error, Reason}, Read} -> {error, unavailable, Read#store{reason = Reason}}
+        {{error, Reason}, Read} -> {error, failure(unavailable), Read#store{reason = Reason}}
     end.
 
 %% `forget all`, the one write that does not start from a read state: an empty state

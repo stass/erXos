@@ -61,7 +61,7 @@ values it answered reaches the link.
 """.
 -spec join(reference(), erx_smp_crypto:address()) ->
           #{table := erx_gatt_db:table(), values := #{erx_gatt_db:key() => binary()}}.
-join(Conn, Address) ->
+join(Conn, {Type, <<_:48>>} = Address) when is_reference(Conn), Type =:= public orelse Type =:= random ->
     gen_server:call(?MODULE, {join, Conn, Address}).
 
 -doc """

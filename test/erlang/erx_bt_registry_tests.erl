@@ -42,6 +42,16 @@ step(Input, Core) -> erx_gatt_registry:step(Input, Core).
 steps(Inputs) ->
     lists:foldl(fun(Input, {_, Core}) -> step(Input, Core) end, {[], erx_gatt_registry:new(?GAP, services(), [])}, Inputs).
 
+%% A join takes a connection and an address of erx_smp_crypto:address()'s shape and no
+%% other: a bare address, an unknown type or a short address fails at the call, before
+%% anything reaches the registry, which is not running here.
+join_takes_only_an_address_of_its_shape_test() ->
+    Conn = make_ref(),
+    [?assertError(function_clause, erx_gatt_srv:join(Conn, Address))
+     || Address <- [element(2, ?ADDRESS), {static, element(2, ?ADDRESS)}, {random, <<1, 2, 3>>}]],
+    ?assertError(function_clause, erx_gatt_srv:join(not_a_ref, ?ADDRESS)),
+    ?assertExit({noproc, _}, erx_gatt_srv:join(Conn, ?ADDRESS)).
+
 attach_answers_the_limits_and_refuses_test() ->
     {Actions, _} = steps([{facet, ?H1, {attach, a}, from}]),
     ?assertEqual([{monitor, ?H1}, {reply, from, {ok, #{x => #{max => 4, access => #{write => open, notify => open}}}}}],

@@ -25,9 +25,7 @@ every_line() ->
     ++ [{bonded, Bond} || Bond <- bonds_of_every_kind()]
     ++ [{failed, ?PHONE, Reason} || Reason <- reasons()].
 
-reasons() ->
-    [secure_connections_required, key_size, method, confirm, dhkey, bonding, invalid, unexpected,
-     peer, timeout, already_bonded, bonds_full, unavailable, disconnected].
+reasons() -> [Name || {Name, _} <- ?ERX_BT_PAIR_REASON_MEMBERS].
 
 %% One bond record ---------------------------------------------------------------
 
@@ -99,27 +97,11 @@ id_takes_32_lower_case_digits_alone_test() ->
                  <<" 123456789abcdef0123456789abcdef">>]].
 
 %% A failure's reason on a `failed` line: the phone's Pairing Failed is `peer` whatever its
-%% code, and every other reason is itself.
+%% code, every other reason of bt_pair_reason is itself, and a word outside it is none.
 reason_maps_a_failure_to_the_lines_word_test() ->
     ?assertEqual(peer, erx_bt_pair:reason({peer, 16#05})),
-    [?assertEqual(Reason, erx_bt_pair:reason(Reason)) || Reason <- type_reasons()].
-
-%% Every reason of the one reason type, which the Security Manager, the store and the
-%% window give, makes a `failed` line that parse/1 reads back as itself: the words parse/1
-%% reads cover the type, as the module's own debug info states it.
-every_reason_of_the_type_reads_back_test() ->
-    Reasons = type_reasons(),
-    ?assert(lists:member(disconnected, Reasons) andalso lists:member(peer, Reasons)),
-    [?assertEqual({Reason, {failed, ?PHONE, Reason}},
-                  {Reason, erx_bt_pair:parse(erx_bt_pair:format({failed, ?PHONE, Reason}))})
-     || Reason <- Reasons].
-
-%% The atoms of erx_bt_pair:reason(), read from the module's abstract code.
-type_reasons() ->
-    {ok, {erx_bt_pair, [{abstract_code, {raw_abstract_v1, Forms}}]}} =
-        beam_lib:chunks(code:which(erx_bt_pair), [abstract_code]),
-    [{type, _, union, Members}] = [Type || {attribute, _, type, {reason, Type, []}} <- Forms],
-    [Atom || {atom, _, Atom} <- Members].
+    [?assertEqual(Reason, erx_bt_pair:reason(Reason)) || {Reason, _} <- ?ERX_BT_PAIR_REASON_MEMBERS],
+    ?assertError(function_clause, erx_bt_pair:reason(withdrawn)).
 
 %% Bounded reading ----------------------------------------------------------------
 

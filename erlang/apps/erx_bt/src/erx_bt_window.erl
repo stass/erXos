@@ -100,7 +100,7 @@ level or the failure's reason.
                 | {monitor, link()} | {demonitor, link()}
                 | {log, #{address := erx_smp_crypto:address(),
                           outcome := {bonded, erx_bt_pair:bond_id(), authenticated | unauthenticated}
-                                   | {failed, erx_smp_core:reason()}}}.
+                                   | {failed, erx_bt_pair:failure()} | withdrawn}}.
 
 -type phase() :: none | {reserved, id()} | {admitting, id(), mode(), integer(), boolean()} | {pairing, id()}.
 -type pairing() :: none | {link(), tag(), erx_smp_crypto:address(), running | withdrawn | keeping}.
@@ -226,9 +226,9 @@ input({link, Link, {passkey, Tag, Passkey}}, _Now,
       #core{window = {pairing, Id}, pairing = {Link, Tag, {_Type, Octets}, running}} = Core) ->
     Digits = iolist_to_binary(io_lib:format("~6..0B", [Passkey])),
     {[], write(Id, {passkey, Digits, Octets}, Core)};
-input({link, Link, {outcome, Tag, {failed, Reason}}}, Now, #core{pairing = {Link, Tag, _, Stage}} = Core)
+input({link, Link, {outcome, Tag, {failed, _} = Failure}}, Now, #core{pairing = {Link, Tag, _, Stage}} = Core)
   when Stage =/= keeping ->
-    {Actions, Failed} = unbonded(Reason, Now, Core),
+    {Actions, Failed} = unbonded(Failure, Now, Core),
     {[{demonitor, Link} | Actions], Failed};
 input({link, Link, {withdrawn, Tag}}, Now, #core{pairing = {Link, Tag, _, withdrawn}} = Core) ->
     {Actions, Failed} = unbonded(withdrawn, Now, Core),
@@ -241,7 +241,7 @@ input({link, Link, wait}, Now, Core) ->
 input({link, _Link, _Late}, _Now, Core) ->
     {[], Core};
 input({down, Link}, Now, #core{pairing = {Link, _Tag, _, Stage}} = Core) when Stage =/= keeping ->
-    unbonded(disconnected, Now, Core);
+    unbonded(failed(disconnected), Now, Core);
 input({down, _Link}, _Now, Core) ->
     {[], Core};
 %% ---------------------------------------------------------------------------
@@ -253,8 +253,8 @@ input({store, {outcome, Link, Tag, Outcome}}, Now, #core{pairing = {Link, Tag, _
         {bonded, #{id := Id, address := Octets, type := Type, level := Level}} ->
             Log = #{address => {Type, Octets}, outcome => {bonded, Id, Level}},
             {Demonitor ++ [{log, Log}], ended(Outcome, Core)};
-        {failed, Reason} ->
-            {Actions, Failed} = unbonded(Reason, Now, Core),
+        {failed, _} ->
+            {Actions, Failed} = unbonded(Outcome, Now, Core),
             {Demonitor ++ Actions, Failed}
     end;
 input({store, {outcome, _Link, _Tag, _Outcome}}, _Now, Core) ->
@@ -300,17 +300,21 @@ ended(Line, #core{window = {pairing, Id}} = Core) ->
 ended(_Line, Core) ->
     Core#core{pairing = none}.
 
-%% The awaited pairing ended without a bond, by a failure or, in its `withdrawn` stage
-%% alone, by its window's withdrawal: its log record and the pairing wait it starts, and,
-%% unless it is withdrawn, its `failed` line if its window still has its opener. A
-%% withdrawn pairing composes no line, whatever ended it.
-unbonded(Why, Now, #core{pairing = {_Link, _Tag, {_Type, Octets} = Address, Stage}} = Core) ->
-    Log = {log, #{address => Address, outcome => {failed, Why}}},
+%% The awaited pairing ended without a bond, by a failure, `{failed, Failure}`, or, in
+%% its `withdrawn` stage alone, by its window's withdrawal, `withdrawn`: its log record
+%% and the pairing wait it starts, and, unless it is withdrawn, its `failed` line if its
+%% window still has its opener. A withdrawn pairing composes no line, whatever ended it.
+unbonded(Ending, Now, #core{pairing = {_Link, _Tag, Address, Stage}} = Core) ->
     Failed = wait_from(Now, Core),
-    case Stage of
-        withdrawn -> {[Log], Failed#core{pairing = none}};
-        _ -> {[Log], ended({failed, Octets, erx_bt_pair:reason(Why)}, Failed)}
-    end.
+    {[{log, #{address => Address, outcome => Ending}}], unbonded_line(Stage, Ending, Address, Failed)}.
+
+%% The window's own failure for Reason, one of bt_pair_reason's, so a stray word fails here.
+failed(Reason) when ?ERX_IS_BT_PAIR_REASON(Reason) -> {failed, Reason}.
+
+unbonded_line(withdrawn, _Ending, _Address, Core) ->
+    Core#core{pairing = none};
+unbonded_line(Stage, {failed, Failure}, {_Type, Octets}, Core) when Stage =:= running; Stage =:= keeping ->
+    ended({failed, Octets, erx_bt_pair:reason(Failure)}, Core).
 
 %% A failure at Now starts the wait it imposes: the minimum for the first, else twice the
 %% last failure's wait halved for each whole decay period since it, within the minimum

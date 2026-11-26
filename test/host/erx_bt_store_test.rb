@@ -179,6 +179,20 @@ class ErxBtStoreTest < Minitest::Test
     end
   end
 
+  # A reason outside abi/formats/bluetooth.txt's bt_pair_reason, written where the store
+  # refuses a bond, ends the store at failure/1, before the store answers the link or
+  # tells the window. The store reports only the class of what it raised, keeping its
+  # terms and stack out of every report, so the case sees the store end `raised error` on
+  # the keep that the unmodified store answers `bonds_full`.
+  def test_a_stray_reason_fails_at_its_producer
+    anchor = '{error, failure(bonds_full)}'
+    source = File.binread(File.join(ErlangBuild::ROOT, STORE))
+    assert_equal 1, source.scan(anchor).size, 'stray reason anchor is not unique'
+    output, status = run_cases({ STORE => source.sub(anchor) { anchor.sub('bonds_full', 'bonds_ful') } })
+    refute status.success?, 'a stray reason passed'
+    assert_match(/keep_refuses_a_kept_identity_and_a_ninth_bond_test[^\n]*\*failed\*(?:(?!erx_bt_store_tests: ).)*?store_down,\s*{shutdown,\s*{raised,\s*error,/m, output)
+  end
+
   private
 
   # The modules, erx_bytes's stand-in and the replaced ones in place of the application's

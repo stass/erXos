@@ -290,8 +290,15 @@ paired(N) -> maps:with([identity, irk, ltk, level], bond(N)).
 keep(Link, N) ->
     erx_bt_store ! {erx_bt_link, Link, {keep, 7, paired(N), #{{nus, tx} => notify, {nus, rx} => none}}}.
 
+%% The store's answer to a `keep`, or, if the store ends first, why it ended, so a failure
+%% in the store names its own function.
 kept(Link) ->
-    receive {link, Link, {store, {kept, Answer}}} -> Answer after 7000 -> no_answer end.
+    Monitor = monitor(process, erx_bt_store),
+    receive
+        {link, Link, {store, {kept, Answer}}} -> demonitor(Monitor, [flush]), Answer;
+        {'DOWN', Monitor, process, _, Why} -> {store_down, Why}
+    after 7000 -> demonitor(Monitor, [flush]), no_answer
+    end.
 
 outcome(Link) ->
     receive {window, _, {outcome, Link, 7, Outcome}} -> Outcome after 1000 -> no_outcome end.

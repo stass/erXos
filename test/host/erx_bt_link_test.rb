@@ -134,7 +134,7 @@ class ErxBtLinkTest < Minitest::Test
     Seed.new(fault: "a `withdraw` taken in the Security Manager's `done`, withdrawn while the store keeps the bond",
              path: SMP_CORE,
              anchor: 'phase(_Input, done, _State) -> {[], done};',
-             replacement: "phase({withdraw, _}, done, _State) -> fail(?ERX_SMP_REASON_UNSPECIFIED_REASON, withdrawn);\n" \
+             replacement: "phase({withdraw, _}, done, _State) -> withdrawn();\n" \
                           'phase(_Input, done, _State) -> {[], done};',
              catching_case: 'first_pairing_reaches_level_before_store_test'),
     Seed.new(fault: "the security told from the link before its encryption proved the bond, so a reconnection " \

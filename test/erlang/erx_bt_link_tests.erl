@@ -654,7 +654,7 @@ alphabet({Core, Now, Ref, Asked}) ->
     [att(write(handle(open_w), <<"w">>)), att(write(handle(enc_w), <<"e">>)), att(write_cmd(handle(open_w), <<"c">>)),
      att(write(configuration(enc_n), <<1, 0>>)), att(write(configuration(enc_n), <<0, 0>>)),
      att(write_cmd(configuration(enc_n), <<0, 0>>)), att(confirm()), acl(16#0040, <<1>>), acl(5, <<16#12, 1, 0:16>>),
-     smp(pairing_request()), {admission, 1, closed}, {acl, 2, <<3:16/little>>}, {acl, 1, <<4, 0, 16#0A, 3, 0>>},
+     smp(pairing_request()), {admission, 1, closed}, {withdraw, 1}, {acl, 2, <<3:16/little>>}, {acl, 1, <<4, 0, 16#0A, 3, 0>>},
      ltk_request(), {le_long_term_key_request, 1, <<1:64>>, 1}, encryption_on(), {encryption_change, 5, 1, 1},
      {encryption_key_refresh_complete, 0, 1}, {answer, Ref, ok},
      {ltk_reply_complete, ok}, {ltk_reply_complete, {failed, 16#0C}}, {notify, n, notify, {svc, enc_n}, <<"n">>}]

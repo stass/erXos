@@ -46,13 +46,10 @@ keeps them out of what its crash reports and logs show, as the window does.
 -type bond() :: #{id := bond_id(), address := address(), type := public | random,
                   level := authenticated | unauthenticated}.
 %% A failed pairing's reasons (docs/design-bluetooth.md, "Refusals and error results"):
-%% SMP's, each mapped from one Pairing Failed code or one event, the store's, and the
-%% link's end. This type is the one source: the Security Manager's, the store's and the
-%% window's reasons are written as it, and ?REASONS holds its words for parse/1, which
-%% erx_bt_pair_tests reads back from this type.
--type reason() :: secure_connections_required | key_size | method | confirm | dhkey | bonding
-                | invalid | unexpected | peer | timeout | already_bonded | bonds_full
-                | unavailable | disconnected.
+%% abi/formats/bluetooth.txt's bt_pair_reason, their one source, from which the build
+%% generates this type, the guard ?ERX_IS_BT_PAIR_REASON each producer admits its reason
+%% by, and the members parse/1 reads a line's word against.
+-type reason() :: erx_abi_enums:bt_pair_reason().
 %% Why a pairing failed, as the Security Manager, the store and the window report it: a
 %% reason, or the phone's own Pairing Failed with its code, which a line gives as `peer`.
 %% A window's withdrawal is no failure of this type, so no line can be composed for it.
@@ -64,11 +61,6 @@ keeps them out of what its crash reports and logs show, as the window does.
 %% The file, and the octets read from it that no line has taken yet.
 -record(reader, {file :: file:io_device(), held = <<>> :: binary()}).
 -opaque reader() :: #reader{}.
-
-%% The words of reason(), which parse/1 alone reads.
--define(REASONS, [secure_connections_required, key_size, method, confirm, dhkey, bonding,
-                  invalid, unexpected, peer, timeout, already_bonded, bonds_full,
-                  unavailable, disconnected]).
 
 %% ---------------------------------------------------------------------------
 %% One bond record
@@ -107,7 +99,7 @@ format(waiting) -> <<"waiting">>;
 format({passkey, <<_:6/binary>> = Digits, Address}) ->
     iolist_to_binary(["passkey ", Digits, $\s, address_text(Address)]);
 format({bonded, Bond}) -> <<"bonded ", (format_bond(Bond))/binary>>;
-format({failed, Address, Reason}) when is_atom(Reason) ->
+format({failed, Address, Reason}) when ?ERX_IS_BT_PAIR_REASON(Reason) ->
     iolist_to_binary(["failed ", address_text(Address), $\s, atom_to_binary(Reason)]);
 format({closed, timeout}) -> <<"closed timeout">>.
 
@@ -118,7 +110,7 @@ is itself. It takes every failure() and raises on none.
 """.
 -spec reason(failure()) -> reason().
 reason({peer, Code}) when is_integer(Code) -> peer;
-reason(Reason) when is_atom(Reason) -> Reason.
+reason(Reason) when ?ERX_IS_BT_PAIR_REASON(Reason) -> Reason.
 
 -doc "The term a window's line holds, or `invalid` for any line `format/1` does not make.".
 -spec parse(binary()) -> line() | invalid.
@@ -189,7 +181,7 @@ parse_line(<<"passkey ", Digits:6/binary, $\s, Address/binary>>) ->
     {passkey, digits(Digits), address(Address)};
 parse_line(<<"bonded ", Bond/binary>>) -> {bonded, parse_record(Bond)};
 parse_line(<<"failed ", Address:17/binary, $\s, Reason/binary>>) ->
-    {failed, address(Address), word(Reason, ?REASONS)};
+    {failed, address(Address), word(Reason, [Name || {Name, _} <- ?ERX_BT_PAIR_REASON_MEMBERS])};
 parse_line(<<"closed timeout">>) -> {closed, timeout};
 parse_line(_) -> throw(invalid).
 

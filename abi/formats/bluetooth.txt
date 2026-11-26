@@ -182,6 +182,28 @@ limit bt_pair_line_max u32 128
 limit bt_pair_wait_min_s u32 2
 limit bt_pair_wait_max_s u32 64
 limit bt_pair_wait_decay_s u32 600
+# A failed pairing's reasons (docs/design-bluetooth.md, "Refusals and error results"),
+# the words a `failed` line gives (erx_bt_pair): the Security Manager's, each mapped from
+# one Pairing Failed code or one event, peer for the phone's own Pairing Failed, the
+# store's, and the link's end. The Security Manager, the store and the window make each
+# reason through a function guarded by ?ERX_IS_BT_PAIR_REASON, erx_bt_pair composes and
+# reads a line's word against this set alone, and only the names cross: the values,
+# which the enum syntax asks for, are never encoded.
+enum bt_pair_reason u8
+  value secure_connections_required 1
+  value key_size 2
+  value method 3
+  value confirm 4
+  value dhkey 5
+  value bonding 6
+  value invalid 7
+  value unexpected 8
+  value peer 9
+  value timeout 10
+  value already_bonded 11
+  value bonds_full 12
+  value unavailable 13
+  value disconnected 14
 
 # erXos's deadlines (docs/design-bluetooth.md, "The bring-up"): every command's answer,
 # and the patch's two waits, NetBSD's (usr.sbin/btattach/init_bcm43xx.c, lines 123-125

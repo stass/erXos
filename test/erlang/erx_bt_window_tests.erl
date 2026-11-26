@@ -303,7 +303,7 @@ an_interrupted_pairing_writes_no_line_test() ->
     ?assertEqual(?L1, Link),
     ?assertMatch(#{window := none, pairing := {Link, 2, withdrawn}}, erx_bt_window:facts(W2)),
     {Actions, W3} = erx_bt_window:step({link, ?L1, {withdrawn, 2}}, 30, W2),
-    ?assertMatch([{demonitor, Link}, {log, #{outcome := {failed, withdrawn}}}], Actions),
+    ?assertMatch([{demonitor, Link}, {log, #{outcome := withdrawn}}], Actions),
     ?assertMatch(#{window := none, pairing := none, wait_until := 2030}, erx_bt_window:facts(W3)),
     ?assertMatch({[{answer, ok}], _}, erx_bt_window:step({open, b}, 2030, W3)).
 
@@ -314,7 +314,7 @@ closing_withdraws_a_running_pairing_test() ->
     ?assertEqual(?L1, Link),
     ?assertMatch({[{answer, {error, ebusy}}], _}, erx_bt_window:step({open, b}, 25, W2)),
     {Actions, W3} = erx_bt_window:step({link, ?L1, {withdrawn, 3}}, 30, W2),
-    ?assertMatch([{demonitor, _}, {log, #{outcome := {failed, withdrawn}}}], Actions),
+    ?assertMatch([{demonitor, _}, {log, #{outcome := withdrawn}}], Actions),
     ?assertMatch(#{wait_until := 2030}, erx_bt_window:facts(W3)),
     ?assertEqual([], erx_bt_window:opens(W3)).
 

@@ -108,6 +108,20 @@ class ErxBtSmpTest < Minitest::Test
     end
   end
 
+  # A reason outside abi/formats/bluetooth.txt's bt_pair_reason, written where the
+  # Security Manager fails a pairing, fails at failed/1, which makes every failure it
+  # reports, and reaches no
+  # window or line.
+  def test_a_stray_reason_fails_at_its_producer
+    anchor = 'fail(?ERX_SMP_REASON_UNSPECIFIED_REASON, unexpected)'
+    source = File.binread(File.join(ErlangBuild::ROOT, CORE))
+    assert_equal 1, source.scan(anchor).size, 'stray reason anchor is not unique'
+    output, status = run_cases({ CORE => source.sub(anchor) { anchor.sub('unexpected', 'unexpectd') } })
+    refute status.success?, 'a stray reason passed'
+    assert_match(/identity_before_encryption_fails_test[^\n]*\*failed\*\nin function erx_smp_core:failed\/1(?:(?!erx_bt_smp_tests: ).)*?\*\*error:function_clause/m,
+                 output)
+  end
+
   private
 
   # The modules, with replaced ones in place of the application's own, then the cases.

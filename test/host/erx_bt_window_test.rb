@@ -26,8 +26,8 @@ class ErxBtWindowTest < Minitest::Test
              replacement: '    Opened = Core#core{window = {admitting, Id, Mode, Deadline, false}, last_failure = none},',
              catching_case: 'back_to_back_windows_do_not_shorten_the_wait_test'),
     Seed.new(fault: 'a disconnection mid-pairing not counted',
-             anchor: '    unbonded(disconnected, Now, Core);',
-             replacement: '    {Actions, Failed} = unbonded(disconnected, Now, Core), ' \
+             anchor: '    unbonded(failed(disconnected), Now, Core);',
+             replacement: '    {Actions, Failed} = unbonded(failed(disconnected), Now, Core), ' \
                           '{Actions, Failed#core{last_failure = Core#core.last_failure}};',
              catching_case: 'a_disconnection_mid_pairing_fails_and_counts_test'),
     Seed.new(fault: "the link's monitor kept past its keeping, so its end fails a kept bond",
@@ -35,8 +35,8 @@ class ErxBtWindowTest < Minitest::Test
              replacement: '    {[], Core};',
              catching_case: 'keeping_then_down_leaves_the_store_to_decide_test'),
     Seed.new(fault: "a link's failure taken without its tag, so a stale one ends the pairing",
-             anchor: 'input({link, Link, {outcome, Tag, {failed, Reason}}}, Now,',
-             replacement: 'input({link, Link, {outcome, _Stale, {failed, Reason}}}, Now,',
+             anchor: 'input({link, Link, {outcome, Tag, {failed, _} = Failure}}, Now,',
+             replacement: 'input({link, Link, {outcome, _Stale, {failed, _} = Failure}}, Now,',
              catching_case: 'stale_tags_change_nothing_test'),
     Seed.new(fault: 'a closed window leaving its running pairing unwithdrawn',
              anchor: '    {[{send, Link, {withdraw, Tag}}], Core#core{window = none, pairing = {Link, Tag, Address, withdrawn}}};',
@@ -63,8 +63,8 @@ class ErxBtWindowTest < Minitest::Test
              replacement: 'Core#core{window = none}};',
              catching_case: 'an_interrupted_pairing_writes_no_line_test'),
     Seed.new(fault: "a link's failure taken only while its pairing runs, so one that crossed the withdrawal is lost",
-             anchor: "#core{pairing = {Link, Tag, _, Stage}} = Core)\n  when Stage =/= keeping ->\n    {Actions, Failed} = unbonded(Reason, Now, Core),",
-             replacement: "#core{pairing = {Link, Tag, _, Stage}} = Core)\n  when Stage =:= running ->\n    {Actions, Failed} = unbonded(Reason, Now, Core),",
+             anchor: "#core{pairing = {Link, Tag, _, Stage}} = Core)\n  when Stage =/= keeping ->\n    {Actions, Failed} = unbonded(Failure, Now, Core),",
+             replacement: "#core{pairing = {Link, Tag, _, Stage}} = Core)\n  when Stage =:= running ->\n    {Actions, Failed} = unbonded(Failure, Now, Core),",
              catching_case: 'a_failure_crossing_the_withdrawal_writes_no_line_test')
   ].freeze
 
