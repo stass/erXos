@@ -66,6 +66,8 @@ module Erx
         liberx/backend/fiasco/end.c
         liberx/backend/fiasco/end_how.c
         liberx/backend/fiasco/end_how.h
+        liberx/backend/fiasco/end_record.c
+        liberx/backend/fiasco/end_record.h
         liberx/backend/fiasco/entropy.c
         liberx/backend/fiasco/entropy.h
         liberx/backend/fiasco/exception.h

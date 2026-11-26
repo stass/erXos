@@ -20,7 +20,7 @@ module Erx
           sites: [Chokepoints::Site.new(glob: CRASH_CORE),
                   Chokepoints::Site.new(glob: 'include/erx/core/crash.h', permits: /\Aerx_crash_record_write\z/),
                   Chokepoints::Site.new(glob: 'include/erx/abi.h', permits: /\AERX_CRASH_MAGIC\z/),
-                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c', permits: /\Aerx_crash_record_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end_record.c', permits: /\Aerx_crash_record_write\z/),
                   Chokepoints::Site.new(glob: 'fiasco/kernel/src/erx/erx_machine_stop.cpp', permits: /\Aerx_crash_record_write\z/),
                   Chokepoints::Site.new(glob: 'test/fixtures/crash_driver.c', permits: /\Aerx_crash_record_write\z/),
                   Chokepoints::Site.new(glob: 'tools/fuzz/crash_fuzz.c')],

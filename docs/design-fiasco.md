@@ -3086,7 +3086,7 @@ through this call unchanged. A CPU that never started has an empty ring.
 The root already sees all of it, since it is every task's pager and the creator of every object; what it passes on is the
 system domain's policy, as on erXos's kernel: `erx:trace`'s `kernel` row needs a trace facet of scope `all`, and a release
 build's projections choose the fields shown ([Tracing](design-live.md#tracing)). The crash record carries a trace tail only
-in its full form, which only development builds write
+in its full form, which only development builds write, the root's ends among them,
 ([design-debugger.md](design-debugger.md#the-records-trace-tail)). A domain that makes many kernel events on a CPU
 overwrites other domains' older records there, which a reader counts as overwritten: the rings are a diagnostic, not an audit
 log, and a domain can push its own records out of them.

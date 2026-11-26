@@ -7,7 +7,7 @@ require_relative '../../tools/fuzz/crash_frame'
 # The serial log of a root task's fault on Fiasco, built at test time from the
 # ABI file's crash record layout, so a layout change needs no recaptured log:
 # the console text the test names, then the crash frame of the full record the
-# Fiasco backend's end path writes (docs/design-fiasco.md, "Faults, and the
+# Fiasco backend's end path writes in a development build (docs/design-fiasco.md, "Faults, and the
 # fault of the root task"), then the reset's line. The QEMU suites native_crash
 # and system_domain hold real guests' logs to the same judges.
 #

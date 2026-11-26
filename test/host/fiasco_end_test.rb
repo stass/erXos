@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../fixtures/generated_tree'
+require_relative '../../tools/lib/erx/crash_frame'
 
 # How each end of the machine ends it, on the host (docs/design-fiasco.md, "The end
 # path"): the driver holds every cause to its end, and each seed below must make it
@@ -66,5 +67,39 @@ class FiascoEndTest < Minitest::Test
       refute status.success?, "#{name}: the driver passed: #{log}"
       assert_includes log, diagnostic
     end
+  end
+
+  # The root's crash records (liberx/backend/fiasco/end_record.c): the boot image decides
+  # the form, whatever the input names. Only a development image's root writes the full
+  # form and the kernel's trace tail; a release image's, or one whose handoff the root has
+  # not read, writes the brief form with nothing else (docs/design-debugger.md, "The
+  # record's trace tail", "Who sees it").
+  RECORD_CORE = 'liberx/backend/fiasco/end_record.c'
+  RECORD_DRIVER = 'test/fixtures/fiasco_end_record_driver.c'
+  RECORD_SOURCES = %w[kernel/core/crash.c kernel/core/log.c kernel/core/trace_ring.c].freeze
+
+  def build_record_driver(core)
+    output = File.join(@directory, 'end-record')
+    log, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
+                                  *Erx::Generated.include_flags(root: ROOT), '-I', File.join(ROOT, 'include'), '-I', ROOT,
+                                  core, *RECORD_SOURCES.map { |file| File.join(ROOT, file) }, File.join(ROOT, RECORD_DRIVER),
+                                  '-o', output, stdin_data: '')
+    assert status.success?, log
+    output
+  end
+
+  def record_lines(core)
+    log, status = Open3.capture2e(build_record_driver(core), stdin_data: '')
+    assert status.success?, log
+    log.lines(chomp: true)
+  end
+
+  def test_only_a_development_image_writes_the_full_form_and_the_trace_tail
+    brief = Erx::CrashFrame::BRIEF_SIZE
+    lines = record_lines(File.join(ROOT, RECORD_CORE))
+    assert_equal ["before the handoff: brief #{brief} trace 0", "a release image: brief #{brief} trace 0"], lines.first(2)
+    assert_match(/\Aa development image: full \d+ trace 12\z/, lines.fetch(2))
+    assert_match(/\Aa task's fault: full \d+ trace 0\z/, lines.fetch(3))
+    assert_equal 4, lines.size
   end
 end

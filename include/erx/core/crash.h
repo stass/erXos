@@ -34,8 +34,8 @@ extern "C" {
 #endif
 
 /*
- * What an end knows. The writer reads regs, frames, cpus, message and log only
- * for the full form, so the brief form cannot carry them whatever the caller
+ * What an end knows. The writer reads regs, frames, cpus, message, log and trace
+ * only for the full form, so the brief form cannot carry them whatever the caller
  * holds. fault is copied whole, so a caller zero-initializes it (a designated
  * initializer does). regs is ERX_CRASH_REGS_BYTES laid out as the ABI's
  * erx_regs_t, or NULL for zeros. ncpus is the number of CPUs the stop's census

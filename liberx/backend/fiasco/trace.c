@@ -21,6 +21,7 @@
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/trace_ring.h"
 #include "liberx/backend/fiasco/lock.h"
+#include "liberx/backend/fiasco/end_record.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
@@ -107,7 +108,7 @@ erx_fiasco_trace_window_map(void)
 	if (rings <= 0 || rings > (long)ERX_CPU_LIMIT)
 		return (false);
 	atomic_store_explicit(&trace_kernel_rings, (uint32_t)rings, memory_order_release);
-	erx_fiasco_end_trace_rings((uint32_t)rings);
+	erx_fiasco_end_trace_rings((const void *)(uintptr_t)ERX_FIASCO_TRACE_WINDOW, (uint32_t)rings);
 	return (true);
 }
 

@@ -77,18 +77,36 @@ module Erx
       end
     end
 
-    # The record's trace tail (docs/design-debugger.md, "The record's trace tail"): an
-    # equal share of its slots for each CPU, all of them for a CPU that answered the
-    # census, whose ring nothing was writing when it stopped, and none newer than the stop.
+    # The record's trace tail (docs/design-debugger.md, "The record's trace tail"): the
+    # rings ever written share its slots equally, and each gives the newest of its records,
+    # up to its share. A CPU that answered the census wrote nothing while the stop read its
+    # ring, so its records are the ring's own newest, none refused: a whole share, or fewer
+    # only when its ring held no more, which then start at its first record (seq 2); either
+    # way with no gap. A CPU that did not answer may have lost records at either end, or all
+    # of them. None is newer than the stop, and the tail is not empty: three seconds of
+    # a running system switch threads on some CPU, so no record at all is a writer that
+    # skipped the tail or rings nobody wrote.
     def trace_problems(record, states)
-      share = CrashFrame::TRACE_RECORDS / CPUS
-      counts = record.fetch('trace').map { |entry| entry.fetch('cpu') }.tally
+      seqs = record.fetch('trace').group_by { |entry| entry.fetch('cpu') }
+                   .transform_values { |entries| entries.map { |entry| entry.fetch('seq') } }
+      share = seqs.empty? ? 0 : CrashFrame::TRACE_RECORDS / seqs.size
       problems = states.each_with_index.filter_map do |state, cpu|
-        wanted = state == 'unanswered' ? (1..share) : (share..share)
-        "trace of cpu #{cpu} #{counts.fetch(cpu, 0)}" unless wanted.cover?(counts.fetch(cpu, 0))
+        held = seqs.fetch(cpu, [])
+        "trace of cpu #{cpu} #{held.size} records, seq #{held.minmax.join('..')}" unless ring_tail?(held, share, answered: state != 'unanswered')
       end
       newer = record.fetch('trace').count { |entry| entry.fetch('time_ns') > record.fetch('uptime_ns') }
+      problems << 'trace empty' if seqs.empty?
       newer.zero? ? problems : [*problems, "#{newer} trace records newer than the stop"]
+    end
+
+    # Whether one CPU's sequence counts, oldest first, are what its ring gives a share of
+    # share: every index once, in a row, at most share of them, and for a CPU that answered,
+    # a whole share or the ring's whole content from its first record.
+    def ring_tail?(seqs, share, answered:)
+      return seqs.size <= share unless answered
+
+      in_a_row = seqs.each_cons(2).all? { |older, newer| newer == older + 2 }
+      in_a_row && (seqs.size == share || (seqs.size < share && seqs.fetch(0, 2) == 2))
     end
 
     # Holds one run's serial log to the stop. Raises on the first disagreement.

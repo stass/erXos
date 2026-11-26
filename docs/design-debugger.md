@@ -580,7 +580,10 @@ sixteen. For each covered ring the writer reads the share's indices below
 the head it loaded through the ring core's reader, keeps a record only
 if the reader keeps it and its `cpu` is the ring's, writes each ring's
 kept records together, in CPU order and oldest first, and leaves every
-other slot zero.
+other slot zero. A ring that holds fewer records than its share gives all
+it holds, from its first; its share's other slots are not given to another
+ring, so each CPU's count follows from its own ring alone: its share, or
+what its ring held when that is less, less any record the reader refused.
 
 An equal share, not the newest records by time, because the CPU a hang's
 reader needs is the one that stopped writing, stuck with interrupts
@@ -612,7 +615,10 @@ frames.
 
 **Who sees it.** The brief form carries no tail, since records hold other
 domains' user addresses and timing, as registers may hold what the
-interrupted code held. A frame written for a task's fault that the
+interrupted code held. Every writer takes the form from the boot image: the kernel's stop, and on
+Fiasco the root's own ends, a missed pet and a root fault, and its frames for
+a task's fault, so a release build writes the brief form everywhere. A frame
+written for a task's fault that the
 machine survives carries none either: the machine runs on, and its rings
 stay readable through the trace.
 
@@ -2098,7 +2104,7 @@ Each test is paired with the seeded fault that proves it ran.
 | the record's trace tail, on the host, and its readers under the crash records' fuzz targets | over rings of 1, 4, 16 and 17 CPUs that the test fills, each set among more rings that were never written (four written of eight among them), with a ring younger than its share, a record left half written and an exhausted ring: each written ring's share, oldest first, 8 each for four written of eight, without the half-written record; every tail written passes `erx_crash_check`, and `crash_read.c` and `crash_frame.rb` agree on mutated tails | the writer's check of a record's `cpu` against its ring dropped, with one record seeded with another CPU's number: the check refuses the record written; the share computed over all seventeen rings in place of the first sixteen: one slot each in place of two, and the case fails; the share computed over `ntrace` in place of the written rings: 4 each for four written of eight, and the case fails |
 | the crash core and its readers | records with CPU entries round-trip through `crash.c`, `crash_read.c` and `crash_frame.rb`, which agree case by case; the brief form carries, for `panic`, the message, the leader's registers and backtrace, and for every cause each CPU's number and state with every register word zero, and for `fault`, `halt` and `watchdog` no registers, backtrace or text, whatever the stop hands the writer | an entry with a state outside the enum accepted by one reader; an entry's registers copied into the brief form; the root's user registers written into a brief `fault` record; the log's tail written after a brief panic's message |
 | the boot arguments' parser (`boot_args.c`) and the root's arming of the board's watchdog (`test/host/pm_wdt_test.rb`) | a release build refuses a boot whose command line carries `erx.hold=1`; the watchdog is armed in every boot but a deterministic one and one that may hold | the refusal removed; an attended boot armed |
-| `native_machine_stop`, a QEMU cell on a development test kernel with a seeded panic on CPU 2 of 4, under TCG and HVF | one crash frame of cause `panic`, CPU 2 `leader` and the others `stopped`; the image's `report` symbolizes the leader's backtrace to the seeded function; the record's trace tail holds 8 records of each CPU, none newer than the stop, and `tools/erx debug FRAME trace` prints them | the request's send removed: three `unanswered`; the tail's writer skipped: `trace` on the frame finds no records |
+| `native_machine_stop`, a QEMU cell on a development test kernel with a seeded panic on CPU 2 of 4, under TCG and HVF | one crash frame of cause `panic`, CPU 2 `leader` and the others `stopped`; the image's `report` symbolizes the leader's backtrace to the seeded function; the record's trace tail holds, for each CPU that answered, its ring's newest records up to an equal share of the written rings (8 each when all four were written), or all its ring held, from its first record, when that is fewer, with no gap and none newer than the stop, and `tools/erx debug FRAME trace` prints them | the request's send removed: three `unanswered`; the tail's writer skipped: the judge finds the tail empty; a share one short of a full ring, a record skipped from a quiet ring, or more than a share: the judge names the CPU (`test/host/native_machine_stop_test.rb`) |
 | the same cell with CPU 1 waiting for a spinlock that CPU 3 holds, interrupts masked on both, CPU 3 spinning | CPU 1 `waiting` with the seeded lock's address, CPU 3 `unanswered`; the image shows CPU 3's program counter in the seeded loop, and `whatis` names the lock | the check removed from the wait loop: CPU 1 `unanswered` |
 | the same cell with CPUs 1 and 2 panicking at once | one frame; one `leader`, one `concurrent` | the claim by a plain store: two frames |
 | the same cell with CPU 3 held in its start until the census has ended, then released | the record gives CPU 3 as `offline`; no line of CPU 3's follows the crash frame; the image's slot for CPU 3 is `starting`, with its program counter in the admission | the admission's check removed: CPU 3's start-up lines follow the frame, and the image shows it in its idle loop |
@@ -2296,7 +2302,7 @@ Each of these was a choice between designs, and is settled as stated.
    [References](#references) cites each by its path there.
 9. **The full record's trace tail is 32 records**, `crash_trace_records`
    ([The record's trace tail](#the-records-trace-tail)): 2,048 bytes,
-   about a quarter of a second more at 115,200 baud, and 8 records for
+   about a quarter of a second more at 115,200 baud, and up to 8 records for
    each CPU of the four-CPU boards and QEMU cells erXos runs on. A longer
    history is the hold's, which serves whole rings.
 10. **The hold has a prompt, and the prompt only reads.** A held board

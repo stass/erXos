@@ -870,7 +870,8 @@ It holds the cause, the program counter and fault address, the build
 identifier, the uptime, a short message, the faulting thread's
 registers and a backtrace; the layout also has room for the newest
 records of each CPU's kernel trace ring, 32 shared equally among the
-CPUs whose rings hold anything, eight each on a four-CPU board, so a
+CPUs whose rings hold anything, up to eight each on a four-CPU board
+(a ring holding fewer gives all it holds), so a
 record nobody was reading live still says what each CPU did last; a gap
 inside one CPU's records is shown with its size, but whether records
 were lost at either end of them is unknown
@@ -882,6 +883,8 @@ The root first gives the UART back to the kernel, which writes out its
 own lines still in its ring. When the ending thread owns the kernel
 log, the root then writes the log records still waiting for a reader; on any other thread the log
 may be mid-write, so it is skipped (`liberx/backend/fiasco/end.c`).
+The root writes the form its boot image asks for, as every writer does,
+so a release build's root record is the brief form, with no trace records.
 The record is **Built**.
 
 No memory region survives the reset, so the record lives only in the

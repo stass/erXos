@@ -156,7 +156,7 @@ class FiascoConfigTest < Minitest::Test
     defconfig = File.binread(File.join(ROOT, Erx::Kconfig::FIASCO_KERNEL_DEFCONFIG))
     assert_operator Erx::Kconfig.max_cpus(defconfig), :>=, 1
   end
-  
+
   def test_max_cpus_refuses_an_absent_or_malformed_count
     ["CONFIG_ARM=y\n", "# CONFIG_MP_MAX_CPUS is not set\n",
      *%w[0 08 -1 4x 10000 0x8].map { |value| "CONFIG_MP_MAX_CPUS=#{value}\n" },
@@ -164,7 +164,7 @@ class FiascoConfigTest < Minitest::Test
       assert_raises(Erx::Error, config) { Erx::Kconfig.max_cpus(config) }
     end
   end
-  
+
   def test_non_ascii_and_oversized_input_is_refused
     assert_raises(Erx::Error) { violations(RESOLVED + "# \xC3\xA9\n") }
     assert_raises(Erx::Error) { violations("#\n" * (Erx::Kconfig::MAX_LINES + 1)) }
