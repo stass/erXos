@@ -19,7 +19,7 @@ class ErxShellRunnerTest < Minitest::Test
   # stand-in erx_inspector replaces the application's module of that name, so that no kernel
   # record is read; it is compiled after the applications and overwrites its beam.
   APPLICATIONS = %w[erx erx_shell].freeze
-  TESTS = %w[test/erlang/stand_in/erx_inspector.erl test/erlang/erx_shell_runner_tests.erl].freeze
+  TESTS = %w[test/erlang/stand_in/erx_inspector.erl test/erlang/erx_test_dir.erl test/erlang/erx_shell_runner_tests.erl].freeze
 
   def test_runner_cases_pass_under_eunit
     Dir.mktmpdir('erx-shell-runner-test') do |work|

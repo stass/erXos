@@ -16,7 +16,7 @@ class ErxShellTextTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The applications the suite exercises, compiled whole (ErlangBuild), and the suite.
   APPLICATIONS = %w[erx erx_shell].freeze
-  TESTS = %w[test/erlang/erx_shell_text_tests.erl].freeze
+  TESTS = %w[test/erlang/erx_test_dir.erl test/erlang/erx_shell_text_tests.erl].freeze
 
   def test_text_cases_pass_under_eunit
     Dir.mktmpdir('erx-shell-text-test') do |work|

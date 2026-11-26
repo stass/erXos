@@ -17,7 +17,7 @@ class ErxCmdWcTest < Minitest::Test
   FIXTURES = File.join(ROOT, 'test/fixtures/wc')
   # The applications the command runs in, compiled whole (ErlangBuild), and the cases.
   APPLICATIONS = %w[erx erx_shell].freeze
-  TESTS = %w[test/erlang/erx_cmd_wc_tests.erl].freeze
+  TESTS = %w[test/erlang/erx_test_dir.erl test/erlang/erx_cmd_wc_tests.erl].freeze
 
   def test_wc_cases_pass_under_eunit
     Dir.mktmpdir('erx-cmd-wc-test') do |work|

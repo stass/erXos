@@ -52,9 +52,7 @@ shown(Stream, Acc) ->
     end.
 
 with_files(Files, Fun) ->
-    Dir = filename:join(filename:basedir(user_cache, "erx_cmd_wc_tests"),
-                        integer_to_list(erlang:unique_integer([positive]))),
-    ok = filelib:ensure_path(Dir),
+    Dir = erx_test_dir:new(),
     try
         [ok = file:write_file(filename:join(Dir, Name), Bytes) || {Name, Bytes} <- Files],
         Fun(list_to_binary(Dir))

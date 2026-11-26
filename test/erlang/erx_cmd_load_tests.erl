@@ -62,8 +62,7 @@ lines_test_() ->
 start() ->
     {ok, Pid} = erx_code:start_link(#{limit => 1 bsl 22}),
     unlink(Pid),
-    Dir = filename:join(filename:basedir(user_cache, "erx_cmd_load_tests"), integer_to_list(erlang:unique_integer([positive]))),
-    ok = filelib:ensure_path(Dir),
+    Dir = erx_test_dir:new(),
     #{service => Pid, dir => list_to_binary(Dir)}.
 
 stop(#{service := Pid, dir := Dir}) ->
@@ -139,8 +138,7 @@ a_blob_past_one_piece_goes_in_pieces(#{dir := Dir}) ->
 %% missing, and measures the call as a facet of another domain receives it, from a pid
 %% and a reference of the longest node name.
 largest_requests_fit_the_request_bound_test() ->
-    Dir = filename:join(filename:basedir(user_cache, "erx_cmd_load_tests"), integer_to_list(erlang:unique_integer([positive]))),
-    ok = filelib:ensure_path(Dir),
+    Dir = erx_test_dir:new(),
     Names = [[integer_to_list(I), lists:duplicate(255 - length(integer_to_list(I)), $m)]
              || I <- lists:seq(1, ?ERX_CODE_MODULES_MAX)],
     ok = file:write_file(filename:join(Dir, "in"), [binary:copy(<<0>>, ?ERX_CODE_PIECE_MAX), lists:duplicate(length(Names) - 1, 0)]),

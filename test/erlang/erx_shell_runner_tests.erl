@@ -311,10 +311,7 @@ run_source(Source) ->
     erx_shell_eval:run_source(Source, Shell).
 
 scratch_dir() ->
-    Dir = filename:join(filename:basedir(user_cache, "erx_shell_runner_tests"),
-                        integer_to_list(erlang:unique_integer([positive]))),
-    ok = filelib:ensure_path(Dir),
-    Dir.
+    erx_test_dir:new().
 
 %% A copy onto itself is refused, and the file keeps its bytes.
 runner_cp_onto_itself_test() ->

@@ -14,7 +14,7 @@ require_relative '../fixtures/erlang_build'
 class ErxCmdLoadTest < Minitest::Test
   # The applications the command runs in, compiled whole (ErlangBuild), and the cases.
   APPLICATIONS = %w[erx erx_shell erx_code].freeze
-  TESTS = %w[test/erlang/host_bytes/erx_bytes.erl test/erlang/erx_cmd_load_tests.erl].freeze
+  TESTS = %w[test/erlang/host_bytes/erx_bytes.erl test/erlang/erx_test_dir.erl test/erlang/erx_cmd_load_tests.erl].freeze
 
   def test_load_cases_pass_under_eunit
     Dir.mktmpdir('erx-cmd-load-test') do |work|
