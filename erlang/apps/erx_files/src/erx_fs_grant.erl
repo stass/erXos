@@ -28,8 +28,10 @@ wait for an event answers `{wait, Keeper, Request}`, and the request goes to
 its keeper, which answers it later through `answered/3`, or ends and is
 seen through `down/3`, while the grant goes on with its client's other
 requests. The core reads no other state and sends nothing. Every callback
-receives the tree's handle `Fs`, which `init/1` answered and which never
-changes, and answers only its result, never a next state; an answer that
+receives `Fs` as `init/1` answered it: a tree's handle, which never changes
+and to which a callback answers only its result, or a tree of the grant's
+own, which a callback answers anew with its result and which tree/3,4
+threads through the grant; an answer that
 is none of its callback's shapes reaches the client as `eio`, through
 `failed/1` or the grammar's reply check in `finish/5`, and a keeper's answer
 is held to the same shapes and the same check.
@@ -139,7 +141,10 @@ check rejected, a clunk, `..`, an owner's end.
                   waits :: non_neg_integer()}).
 
 -record(grant, {module :: module(),
-                fs :: term(),
+                %% init's answer: {ok, Fs}, a handle to a tree kept elsewhere, or
+                %% {own, Tree}, the tree itself, which tree/4 alone passes to the
+                %% callbacks and replaces with their next tree.
+                fs :: {ok, term()} | {own, term()},
                 %% The tree the grant reaches files of and the step a walk from NOFID
                 %% starts at, the root the start admitted (new/1).
                 tree :: binary(),
@@ -194,7 +199,7 @@ fixes the tree's name and the root's node and qid for its life: a walk from
 names the same tree, type and path (docs/design-files.md, "The root is
 admitted when the grant is made").
 """.
--spec new(#{module := module(), fs := term(), rights := rights(),
+-spec new(#{module := module(), fs := {ok, term()} | {own, term()}, rights := rights(),
             client := client(), pool => pos_integer(),
             in_flight => 1..?IN_FLIGHT_MAX, msize => ?MSIZE_MIN..?MSIZE_MAX}) ->
           {ok, grant()} | {error, root}.
@@ -208,13 +213,13 @@ new(#{module := Module, fs := Fs, rights := Rights, client := Client} = Options)
     MsizeMax = maps:get(msize, Options, ?MSIZE_MAX),
     true = is_integer(MsizeMax) andalso MsizeMax >= ?MSIZE_MIN andalso MsizeMax =< ?MSIZE_MAX,
     Writes = erlang:function_exported(Module, write, 4),
-    case admitted_root(Module:root(Fs)) of
-        {ok, Tree, Root} ->
-            {ok, #grant{module = Module, fs = Fs, tree = Tree, root = Root, client = Client,
-                        self = self(), pool = Pool, in_flight_max = InFlightMax,
-                        msize_max = MsizeMax, rights = effective_rights(Rights, Writes)}};
-        error ->
-            {error, root}
+    Grant = #grant{module = Module, fs = Fs, client = Client, self = self(), pool = Pool,
+                   in_flight_max = InFlightMax, msize_max = MsizeMax,
+                   rights = effective_rights(Rights, Writes)},
+    {Answer, Grant1} = tree(root, [], Grant),
+    case admitted_root(Answer) of
+        {ok, Tree, Root} -> {ok, Grant1#grant{tree = Tree, root = Root}};
+        error -> {error, root}
     end.
 
 effective_rights(rw, false) -> ro;
@@ -345,26 +350,31 @@ then({Effects, Grant}, Next) ->
     {More, Grant1} = Next(Grant),
     {Effects ++ More, Grant1}.
 
-%% A request on an open file, its answer or, for a read or a write, a wait.
--spec call(call(), module(), term()) -> term().
-call({read, Handle, Offset, Count}, Module, Fs) ->
-    may_wait(read, Module:read(Handle, Offset, Count, Fs));
-call({write, Handle, Offset, Data}, Module, Fs) ->
-    may_wait(write, Module:write(Handle, Offset, Data, Fs));
-call({readdir, Handle, Offset, Count}, Module, Fs) ->
+%% A request on an open file, its answer or, for a read or a write, a wait,
+%% with the grant its callback left.
+-spec call(call(), grant()) -> {term(), grant()}.
+call({read, Handle, Offset, Count}, Grant) ->
+    answered_by(fun(A) -> may_wait(read, A) end, tree(read, [Handle, Offset, Count], Grant));
+call({write, Handle, Offset, Data}, Grant) ->
+    answered_by(fun(A) -> may_wait(write, A) end, tree(write, [Handle, Offset, Data], Grant));
+call({readdir, Handle, Offset, Count}, Grant) ->
     case Count div packed_entry(<<>>) of
         0 ->
-            {error, einval};
+            {{error, einval}, Grant};
         Fit ->
-            case Module:readdir(Handle, Offset, min(Fit, ?DIRENTS_PER_CALL), Fs) of
-                {ok, Entries} -> fit_listing(Entries, Count);
-                Other -> failed(Other)
-            end
+            answered_by(fun({ok, Entries}) -> fit_listing(Entries, Count);
+                           (Other) -> failed(Other)
+                        end,
+                        tree(readdir, [Handle, Offset, min(Fit, ?DIRENTS_PER_CALL)], Grant))
     end;
-call({fsync, Handle}, Module, Fs) ->
-    done(optional(Module, fsync, [Handle, Fs], ok));
-call({setattr, Handle, Attr}, Module, Fs) ->
-    done(optional(Module, setattr, [{open, Handle}, Attr, Fs], {error, eperm})).
+call({fsync, Handle}, Grant) ->
+    answered_by(fun done/1, tree(fsync, [Handle], ok, Grant));
+call({setattr, Handle, Attr}, Grant) ->
+    answered_by(fun done/1, tree(setattr, [{open, Handle}, Attr], {error, eperm}, Grant)).
+
+%% A callback's answer as Shape holds it to its callback's shapes, beside the grant.
+answered_by(Shape, {Answer, Grant}) ->
+    {Shape(Answer), Grant}.
 
 %% A read or a write waits when its callback answers so; its answer, now or
 %% from its keeper, is one of the callback's shapes or failed.
@@ -536,8 +546,8 @@ run_clunk(Fid, #closing{fid = Record, alias = Alias, request = Request, answer =
 %% It unlinks the entry its fid was walked by, only while that entry
 %% still names the fid's node (the tree decides, in one step); the root has no
 %% entry to unlink.
-unlinked([{_, _, root}], _) ->
-    {error, einval};
+unlinked([{_, _, root}], Grant) ->
+    {{error, einval}, Grant};
 unlinked([{Node, _, Name}, {Dir, _, _} | _], Grant) ->
     change(unlink, [Dir, Name, {node, Node}], Grant).
 
@@ -617,7 +627,9 @@ admit(Alias, _, {clunk, Fid} = Request, Grant) ->
     end_fid(Alias, Fid, Request, closed, Grant);
 admit(Alias, _, {remove, Fid} = Request, #grant{fids = Fids} = Grant) ->
     case Fids of
-        #{Fid := #fid{path = Path}} -> end_fid(Alias, Fid, Request, unlinked(Path, Grant), Grant);
+        #{Fid := #fid{path = Path}} ->
+            {Answer, Grant1} = unlinked(Path, Grant),
+            end_fid(Alias, Fid, Request, Answer, Grant1);
         #{} -> finish(Alias, Request, {error, ebadf}, Grant)
     end;
 admit(Alias, _, Request, #grant{in_flight = InFlight, in_flight_max = Max} = Grant)
@@ -689,7 +701,8 @@ flush_at_keeper(Alias, #grant{aliases = Live, effects = Effects} = Grant) ->
 %% answers its reply with the grant it would leave (Built), and only a reply
 %% the check accepts keeps it. A reply the check rejects reaches the client
 %% as eio and keeps the grant as it was before the request (Before), its
-%% effects included, as a refusal does (kept_when_rejected/3).
+%% effects included, as a refusal does, but for a tree of the grant's own,
+%% whose step has run and is kept (kept_when_rejected/3).
 %% Every qid the grant records travels in the reply that records it (attach,
 %% walk, lcreate) or is the root's, which new/1 admitted before the grant took
 %% any request (a walk from NOFID), so a callback's malformed answer, a qid
@@ -715,9 +728,10 @@ finish(Alias, Request, Reply, Built, Before) ->
     end.
 
 %% The holds a step took stay taken when its grant is dropped: they are the
-%% tree's, and drain/1 forgets those no fid of Before names.
-kept_when_rejected(_, #grant{held = Held, loose = Loose}, Before) ->
-    Before#grant{held = Held, loose = Loose}.
+%% tree's, and drain/1 forgets those no fid of Before names. An own tree is
+%% kept as the step left it, since what the tree did is not undone.
+kept_when_rejected(_, #grant{held = Held, loose = Loose, fs = Fs}, Before) ->
+    Before#grant{held = Held, loose = Loose, fs = Fs}.
 
 %% A refusal of a frame the grammar did not decode (Request none) is the
 %% grant's own {error, Posix}; every other reply is checked against its request.
@@ -736,14 +750,16 @@ drain(Grant) ->
     #grant{effects = Effects} = Grant1 = forget_loose(Grant),
     {lists:reverse(Effects), Grant1#grant{effects = []}}.
 
-%% The tree's forget is a cast: the grant's later walks reach the tree after it.
+%% A tree kept in a process of its own takes forget as a cast, so the grant's
+%% later walks reach it after the forget; an own tree's forget runs here.
 forget_loose(#grant{loose = []} = Grant) ->
     Grant;
-forget_loose(#grant{loose = Loose, held = Held, steps = Steps, module = Module, fs = Fs} = Grant) ->
+forget_loose(#grant{loose = Loose, held = Held, steps = Steps} = Grant) ->
     Unnamed = [Node || Node <- lists:usort(Loose), is_map_key(Node, Held),
                        not is_map_key(Node, Steps)],
-    _ = [optional(Module, forget, [Node, Fs], ok) || Node <- Unnamed],
-    Grant#grant{held = maps:without(Unnamed, Held), loose = []}.
+    Forgotten = lists:foldl(fun(Node, G) -> element(2, tree(forget, [Node], ok, G)) end,
+                            Grant, Unnamed),
+    Forgotten#grant{held = maps:without(Unnamed, Held), loose = []}.
 
 %% Each admitted operation, as {Reply, Grant}, or {wait, Keeper, Request,
 %% Grant} for a read or a write its tree's keeper answers: only on_open/3
@@ -756,13 +772,11 @@ dispatch(Owner, {attach, Fid, Afid, _, Aname, _}, Grant) ->
 dispatch(Owner, {walk, Fid, NewFid, Names}, Grant) ->
     walk(Owner, Fid, NewFid, Names, Grant);
 dispatch(_, {getattr, Fid, _}, Grant) ->
-    on_node(Fid, Grant, fun(Node, Module, Fs) -> Module:getattr(Node, Fs) end);
+    on_node(Fid, Grant, fun(Node, G) -> tree(getattr, [Node], G) end);
 dispatch(_, {readlink, Fid}, Grant) ->
-    on_node(Fid, Grant, fun(Node, Module, Fs) ->
-                                optional(Module, readlink, [Node, Fs], {error, einval})
-                        end);
+    on_node(Fid, Grant, fun(Node, G) -> tree(readlink, [Node], {error, einval}, G) end);
 dispatch(_, {statfs, Fid}, Grant) ->
-    on_node(Fid, Grant, fun(_, Module, Fs) -> Module:statfs(Fs) end);
+    on_node(Fid, Grant, fun(_, G) -> tree(statfs, [], G) end);
 dispatch(_, {lopen, Fid, Flags}, Grant) ->
     lopen(Fid, Flags, Grant);
 dispatch(_, {lcreate, _, _, _, _, _} = Request, Grant) ->
@@ -822,15 +836,14 @@ attach(_, _, Afid, _, Grant) when Afid =/= ?ERX_P9_NOFID ->
 %% start fixed. Its reply carries the root's current qid, which the tree answers
 %% afresh: only its version may differ from the admitted one, and an answer
 %% naming another tree, type or path is eio, making no fid.
-attach(Owner, Fid, _, Tree, #grant{tree = Tree, root = {Node, {Type, _, Path}, root},
-                                   module = Module, fs = Fs} = Grant) ->
+attach(Owner, Fid, _, Tree, #grant{tree = Tree, root = {Node, {Type, _, Path}, root}} = Grant) ->
     case new_fid_admissible(Fid, Grant) of
         ok ->
-            case Module:root(Fs) of
-                {ok, Tree, _, {Type, _, Path} = Qid} ->
-                    {{ok, Qid}, add_fid(Fid, Owner, [{Node, Qid, root}], Grant)};
-                _ ->
-                    {{error, eio}, Grant}
+            case tree(root, [], Grant) of
+                {{ok, Tree, _, {Type, _, Path} = Qid}, Grant1} ->
+                    {{ok, Qid}, add_fid(Fid, Owner, [{Node, Qid, root}], Grant1)};
+                {_, Grant1} ->
+                    {{error, eio}, Grant1}
             end;
         {error, _} = Error ->
             {Error, Grant}
@@ -885,7 +898,7 @@ walk_names([], Path, Qids, Grant) ->
 walk_names([Name | Names], Path, Qids, Grant) ->
     case walk_step(Name, Path, Grant) of
         {ok, [{_, Qid, _} | _] = Path1, Grant1} -> walk_names(Names, Path1, [Qid | Qids], Grant1);
-        {error, Posix} -> {stopped, Qids, Posix, Grant}
+        {error, Posix, Grant1} -> {stopped, Qids, Posix, Grant1}
     end.
 
 %% Only a directory is walked from, so a walk that reaches a symbolic link
@@ -894,20 +907,20 @@ walk_names([Name | Names], Path, Qids, Grant) ->
 %% directory recorded on the way down, even one removed since, which the
 %% fid's steps keep alive. A node the callback answers is held from that
 %% answer on.
-walk_step(_, [{_, {Type, _, _}, _} | _], _) when Type band ?ERX_P9_QTDIR =:= 0 ->
-    {error, enotdir};
+walk_step(_, [{_, {Type, _, _}, _} | _], Grant) when Type band ?ERX_P9_QTDIR =:= 0 ->
+    {error, enotdir, Grant};
 walk_step(<<"..">>, [_] = Root, Grant) ->
     {ok, Root, Grant};
 walk_step(<<"..">>, [_ | Parent], Grant) ->
     {ok, Parent, Grant};
-walk_step(Name, [{Dir, _, _} | _] = Path,
-          #grant{module = Module, fs = Fs, held = Held, loose = Loose} = Grant) ->
-    case Module:walk(Dir, Name, Fs) of
-        {ok, Node, Qid} ->
+walk_step(Name, [{Dir, _, _} | _] = Path, Grant) ->
+    case tree(walk, [Dir, Name], Grant) of
+        {{ok, Node, Qid}, #grant{held = Held, loose = Loose} = Grant1} ->
             {ok, [{Node, Qid, Name} | Path],
-             Grant#grant{held = Held#{Node => []}, loose = [Node | Loose]}};
-        Other ->
-            failed(Other)
+             Grant1#grant{held = Held#{Node => []}, loose = [Node | Loose]}};
+        {Other, Grant1} ->
+            {error, Posix} = failed(Other),
+            {error, Posix, Grant1}
     end.
 
 %% lopen opens an unopened fid in place; a fid at a symbolic link is never
@@ -915,7 +928,7 @@ walk_step(Name, [{Dir, _, _} | _] = Path,
 %% with O_DIRECTORY a fid at anything but a directory is never opened
 %% (enotdir), so its O_TRUNC empties nothing, as FreeBSD's vn_open_vnode
 %% refuses both before it opens.
-lopen(Fid, Flags, #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
+lopen(Fid, Flags, #grant{fids = Fids} = Grant) ->
     case Fids of
         #{Fid := #fid{open = {open, _, _}}} ->
             {{error, einval}, Grant};
@@ -925,9 +938,9 @@ lopen(Fid, Flags, #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
           when Flags band ?ERX_P9_O_DIRECTORY =/= 0, Type band ?ERX_P9_QTDIR =:= 0 ->
             {{error, enotdir}, Grant};
         #{Fid := #fid{path = [{Node, Qid, _} | _]}} ->
-            case Module:open(Node, Flags, Fs) of
-                {ok, Handle} -> {{ok, Qid, ?IOUNIT}, opened(Fid, Node, Handle, Grant)};
-                Other -> {failed(Other), Grant}
+            case tree(open, [Node, Flags], Grant) of
+                {{ok, Handle}, Grant1} -> {{ok, Qid, ?IOUNIT}, opened(Fid, Node, Handle, Grant1)};
+                {Other, Grant1} -> {failed(Other), Grant1}
             end;
         #{} ->
             {{error, ebadf}, Grant}
@@ -941,25 +954,25 @@ lopen(Fid, Flags, #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
 %% at once, since dropping the grant this operation built cannot release
 %% what the tree acquired.
 lcreate({lcreate, Fid, Name, Flags, Mode, _} = Request,
-        #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
+        #grant{fids = Fids} = Grant) ->
     case Fids of
         #{Fid := #fid{open = {open, _, _}}} ->
             {{error, einval}, Grant};
         #{Fid := #fid{path = [{Dir, _, _} | _] = Path}} ->
             What = {file, Mode band 8#7777, Flags},
-            case optional(Module, make, [Dir, Name, What, Fs], {error, eperm}) of
-                {ok, Node, Qid, Handle} ->
+            case tree(make, [Dir, Name, What], {error, eperm}, Grant) of
+                {{ok, Node, Qid, Handle}, Made} ->
                     Reply = {ok, Qid, ?IOUNIT},
                     case accepted(Request, Reply) of
                         true ->
-                            Grant1 = set_path(Fid, [{Node, Qid, Name} | Path], Grant),
+                            Grant1 = set_path(Fid, [{Node, Qid, Name} | Path], Made),
                             {Reply, opened(Fid, Node, Handle, Grant1)};
                         false ->
-                            _ = Module:clunk(Handle, Fs),
-                            {{error, eio}, Grant}
+                            {_, Clunked} = tree(clunk, [Handle], Made),
+                            {{error, eio}, Clunked}
                     end;
-                Other ->
-                    {failed(Other), Grant}
+                {Other, Made} ->
+                    {failed(Other), Made}
             end;
         #{} ->
             {{error, ebadf}, Grant}
@@ -969,8 +982,8 @@ make(Dfid, Name, What, Grant) ->
     case node_of(Dfid, Grant) of
         {ok, Dir} ->
             case change(make, [Dir, Name, What], Grant) of
-                {ok, _Node, Qid} -> {made_reply(What, Qid), Grant};
-                {error, _} = Error -> {Error, Grant}
+                {{ok, _Node, Qid}, Grant1} -> {made_reply(What, Qid), Grant1};
+                {{error, _} = Error, Grant1} -> {Error, Grant1}
             end;
         error ->
             {{error, ebadf}, Grant}
@@ -980,43 +993,60 @@ made_reply({link, _}, _) -> ok;
 made_reply(_, Qid) -> {ok, Qid}.
 
 %% A callback that changes the tree answers ok, or for make the node it made;
-%% a tree without the callback keeps nothing of that kind (eperm). The change
-%% is the tree's, behind its handle, so the grant holds the same state after.
+%% a tree without the callback keeps nothing of that kind (eperm). A handle's
+%% change is the tree's, behind the handle; an own tree's is the grant's next tree.
 change_on_node(Fid, Grant, Callback, Arguments) ->
     case node_of(Fid, Grant) of
-        {ok, Node} -> {change(Callback, Arguments(Node), Grant), Grant};
+        {ok, Node} -> change(Callback, Arguments(Node), Grant);
         error -> {{error, ebadf}, Grant}
     end.
 
-change(Callback, Arguments, #grant{module = Module, fs = Fs}) ->
-    changed(Callback, optional(Module, Callback, Arguments ++ [Fs], {error, eperm})).
+change(Callback, Arguments, Grant) ->
+    answered_by(fun(Answer) -> changed(Callback, Answer) end,
+                tree(Callback, Arguments, {error, eperm}, Grant)).
 
 changed(make, {ok, Node, Qid}) -> {ok, Node, Qid};
 changed(make, Other) -> failed(Other);
 changed(_, Answer) -> done(Answer).
 
-on_node(Fid, #grant{module = Module, fs = Fs} = Grant, Read) ->
+on_node(Fid, Grant, Read) ->
     case node_of(Fid, Grant) of
-        {ok, Node} -> {Read(Node, Module, Fs), Grant};
+        {ok, Node} -> Read(Node, Grant);
         error -> {{error, ebadf}, Grant}
     end.
 
 %% An operation of an open file needs an opened fid; an unopened one has no
 %% handle to give it (ebadf).
-on_open(Fid, #grant{fids = Fids, module = Module, fs = Fs} = Grant, Call) ->
+on_open(Fid, #grant{fids = Fids} = Grant, Call) ->
     case Fids of
         #{Fid := #fid{open = {open, _, Handle}}} ->
-            case call(Call(Handle), Module, Fs) of
-                {wait, Keeper, Request} -> {wait, Keeper, Request, Grant};
-                Answer -> {Answer, Grant}
+            case call(Call(Handle), Grant) of
+                {{wait, Keeper, Request}, Grant1} -> {wait, Keeper, Request, Grant1};
+                {Answer, Grant1} -> {Answer, Grant1}
             end;
         #{} -> {{error, ebadf}, Grant}
     end.
 
-optional(Module, Callback, Arguments, Absent) ->
-    case erlang:function_exported(Module, Callback, length(Arguments)) of
-        true -> apply(Module, Callback, Arguments);
-        false -> Absent
+%% The one way to the tree's callbacks: Callback with Arguments and the
+%% grant's handle, or its own tree, which the callback's answer replaces
+%% (docs/design-files.md, "A handle, or a tree of the grant's own"). An own
+%% tree's answer that is no pair is a fault of the module and ends the grant.
+%% A tree without an optional callback answers Absent and changes nothing.
+tree(Callback, Arguments, Grant) ->
+    tree(Callback, Arguments, none, Grant).
+
+tree(Callback, Arguments, Absent, #grant{module = Module, fs = Fs} = Grant) ->
+    case erlang:function_exported(Module, Callback, length(Arguments) + 1) of
+        false when Absent =/= none ->
+            {Absent, Grant};
+        _ ->
+            case Fs of
+                {ok, Handle} ->
+                    {apply(Module, Callback, Arguments ++ [Handle]), Grant};
+                {own, Tree} ->
+                    {Answer, Tree1} = apply(Module, Callback, Arguments ++ [Tree]),
+                    {Answer, Grant#grant{fs = {own, Tree1}}}
+            end
     end.
 
 node_of(Fid, #grant{fids = Fids}) ->
@@ -1073,8 +1103,7 @@ add_fid(Fid, Owner, Path, #grant{fids = Fids, owners = Owners, effects = Effects
 %% complete. The fid ends either way, and leaves its owner, unless the owner
 %% ended first (owner_down/2).
 close_fid(Fid, #fid{owner = Owner, open = Open, path = Path}, Grant) ->
-    #grant{owners = Owners, effects = Effects} = Grant1 = repath(Path, [], Grant),
-    Closed = closed(Open, Grant1),
+    {Closed, #grant{owners = Owners, effects = Effects} = Grant1} = closed(Open, repath(Path, [], Grant)),
     case Owners of
         #{Owner := #owner{monitor = Ref, fids = #{Fid := _} = Owned} = Record} ->
             case maps:remove(Fid, Owned) of
@@ -1094,7 +1123,7 @@ opened(Fid, Node, Handle, #grant{fids = Fids} = Grant) ->
     #{Fid := Record} = Fids,
     Grant#grant{fids = Fids#{Fid := Record#fid{open = {open, Node, Handle}}}}.
 
-closed(none, _) ->
-    ok;
-closed({open, _, Handle}, #grant{module = Module, fs = Fs}) ->
-    done(Module:clunk(Handle, Fs)).
+closed(none, Grant) ->
+    {ok, Grant};
+closed({open, _, Handle}, Grant) ->
+    answered_by(fun done/1, tree(clunk, [Handle], Grant)).

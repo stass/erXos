@@ -37,14 +37,17 @@ through the monitor, which answers the request `eio`. The messages between
 them are erx_fs_waits.hrl's. That every request is atomic against every
 other is the tree's to keep.
 
-`init/1` answers the tree's handle, `Fs`, which never changes: every callback
-receives it and none returns a new one, and a tree that changes keeps its
-nodes behind it, in a process or on a medium, where every grant reaches the
-same tree. A callback's answer that is not one of its shapes reaches the
-client as `eio`.
+`init/1` answers either the tree's handle, `{ok, Fs}`, which never changes:
+every callback receives it and none returns a new one, and a tree that
+changes keeps its nodes behind it, in a process or on a medium, where every
+grant reaches the same tree; or a tree of the grant's own, `{own, Tree}`, a
+value only this grant holds, which every callback takes and answers anew with
+its reply, so a step of it runs in the grant with no message (`/tmp`'s, of
+docs/design-tmp.md). A callback's answer that is not one of its shapes
+reaches the client as `eio`.
 """.
 
--export([start_link/3, start_link/4, start_mounted/4]).
+-export([start_link/3, start_link/4, start_mounted/4, start_mounted/5, reserve_words/1]).
 -export([init/2, loop/2, drain/1, format_status/1]).
 -export([handle_tree/1]).
 
@@ -69,7 +72,11 @@ client as `eio`.
 %% erx_ns:mount/3 mounts, whose entry takes the tree from it.
 -opaque grant_handle() :: {pid(), Tree :: binary(), erx_fs_grant:rights()}.
 
--callback init(Args :: term()) -> {ok, Fs :: term()}.
+%% The grant's tree: {ok, Fs}, a handle to a tree kept elsewhere, the same for the
+%% grant's life; or {own, Tree}, a tree value init made, which only this grant holds.
+%% For an own tree every callback below takes the current Tree in Fs's place and
+%% answers {Answer, Tree1}, forget {ok, Tree1}, and the grant keeps Tree1.
+-callback init(Args :: term()) -> {ok, Fs :: term()} | {own, Tree :: term()}.
 %% A tree whose grants a facet row's `tree` may root within it (abi/services/files.txt)
 %% adds subtree: the init Args of a grant of the tree Args name, rooted at the root Tree
 %% names for Grantee, the domain the grant is for and the principal its mint named
@@ -132,9 +139,16 @@ client as `eio`.
 -optional_callbacks([subtree/3, forget/2, readlink/2, write/4, make/4, setattr/3,
                      unlink/4, rename/5, fsync/2, xattr/3]).
 
-%% What a grant's process may hold for its client, its fids and their paths,
-%% its owners and the requests in flight, binaries included, in words.
--define(MAX_HEAP_WORDS, 4194304).
+%% The reserve's parts (reserve_words/1), in words: the grant's own state with no
+%% fid, and one fid with a path of 16 steps, each with its qid and a name of 255
+%% bytes. A request in flight counts its frame twice: the message and the payload
+%% a callback may copy from it.
+-define(BASE_WORDS, 65536).
+-define(FID_WORDS, 750).
+-define(FRAME_COPIES, 2).
+-define(DEFAULT_POOL, 4096).
+-define(DEFAULT_IN_FLIGHT, 64).
+-define(DEFAULT_MSIZE, 65560).
 
 -doc """
 Serves one grant of `Module`'s tree to the server's own domain, and answers its
@@ -160,7 +174,13 @@ does not know of, and answers its `{error, Reason}`.
 -spec start_mounted(module(), term(), erx_fs_grant:rights(), binary()) ->
           {ok, pid()} | {error, term()}.
 start_mounted(Module, Args, Requested, Point) ->
-    case start_link(Module, Args, Requested) of
+    start_mounted(Module, Args, Requested, Point, #{}).
+
+-doc "Serves and mounts one grant, as start_mounted/4 does, with start_link/4's `Options`.".
+-spec start_mounted(module(), term(), erx_fs_grant:rights(), binary(), map()) ->
+          {ok, pid()} | {error, term()}.
+start_mounted(Module, Args, Requested, Point, Options) ->
+    case start_link(Module, Args, Requested, Options) of
         {ok, Grant, {Grant, _Tree, Rights} = Handle} ->
             _ = erx_ns:unmount(Point),
             mounted(Grant, erx_ns:mount(Handle, Point, [Rights]));
@@ -181,7 +201,11 @@ for, `own` for the server's own (the default) or another domain's id;
 `pool` is its fid bound (4,096), `in_flight` and `msize` its bounds on the
 requests it holds and on the message size (erx_fs_grant:new/1), and
 `max_heap_size` its process's heap bound in words, shared binaries included
-(4,194,304).
+(by default the reserve of reserve_words/1, which a tree of the grant's own
+must add to), and `sensitive`, `true` for a grant whose state holds a tree of
+files (`/tmp`'s), makes its process sensitive before `init/1` runs, so neither
+`process_info/2`, a trace nor a crash dump shows its queue, its heap or its
+dictionary (default `false`).
 
 A grant for another domain is exported to that domain alone, with `send`
 alone, before this returns, through `exports` (erx_dist, or a host test's
@@ -201,20 +225,41 @@ lives as long as this domain without it.
 -spec start_link(module(), term(), erx_fs_grant:rights(),
                  #{client => erx_fs_grant:client(), pool => pos_integer(),
                    in_flight => pos_integer(), msize => pos_integer(),
-                   max_heap_size => pos_integer(), ends_with => port() | pid() | none,
+                   max_heap_size => pos_integer(), sensitive => boolean(),
+                   ends_with => port() | pid() | none,
                    exports => module()}) ->
           {ok, pid(), grant_handle()} | {error, term()}.
 start_link(Module, Args, Rights, Options) ->
-    Heap = #{size => maps:get(max_heap_size, Options, ?MAX_HEAP_WORDS), kill => true,
+    Heap = #{size => maps:get(max_heap_size, Options, reserve_words(Options)), kill => true,
              include_shared_binaries => true},
     proc_lib:start_link(?MODULE, init, [self(), {Module, Args, Rights, Options}],
                         infinity, [{max_heap_size, Heap}]).
 
+-doc """
+What any grant of these bounds may hold with no tree of its own, in words: its
+root and state, its pool of fids with their paths and per-node counts and its
+owners' monitors, and its requests in flight with a full frame each
+(docs/design-tmp.md, "The grant's heap bound"). The same for every grant of
+the same bounds, and never zero.
+""".
+-spec reserve_words(#{pool => pos_integer(), in_flight => pos_integer(),
+                      msize => pos_integer(), atom() => term()}) -> pos_integer().
+reserve_words(Options) ->
+    Pool = maps:get(pool, Options, ?DEFAULT_POOL),
+    InFlight = maps:get(in_flight, Options, ?DEFAULT_IN_FLIGHT),
+    Msize = maps:get(msize, Options, ?DEFAULT_MSIZE),
+    ?BASE_WORDS + Pool * ?FID_WORDS
+        + InFlight * ceil(?FRAME_COPIES * Msize / erlang:system_info(wordsize)).
+
 -doc false.
 -spec init(pid(), {module(), term(), erx_fs_grant:rights(), map()}) -> no_return().
 init(Parent, {Module, Args, Rights, Options}) ->
+    _ = process_flag(sensitive, maps:get(sensitive, Options, false)),
     {module, Module} = code:ensure_loaded(Module),
-    {ok, Fs} = Module:init(Args),
+    Fs = case Module:init(Args) of
+             {ok, _} = Handle -> Handle;
+             {own, _} = Own -> Own
+         end,
     Client = maps:get(client, Options, own),
     case erx_fs_grant:new((maps:with([pool, in_flight, msize], Options))#{
                             module => Module, fs => Fs, rights => Rights, client => Client}) of

@@ -2432,7 +2432,7 @@ process, a request to the server of the path's grant, the reply, the
 program's doorbell and the event executor's wake of the worker, the
 bytes crossing the 64 KiB slots of the data area
 ([design-programs.md](design-programs.md#performance)). The files are
-in `/tmp`, which on erXos is the domain's `erx_ramfs` tree process,
+in `/tmp`, which on erXos is the domain's `erx_ramfs` tree, held by its grant,
 Erlang ([design-tmp.md](design-tmp.md)), and on Linux the initramfs's
 root, both in memory. A 64 KiB file of a known pattern is made untimed
 before the cells. Reads and writes are timed as `pread` and `pwrite` at

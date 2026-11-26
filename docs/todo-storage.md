@@ -473,8 +473,35 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `a_dead_owners_open_file_gives_back_what_it_held_test`, but under load (a full `make check`) the mutant runs into
   EUnit's timeout in `wait_free/3` first and the case reads `*timed out*`, so the seeded-fault test fails though the
   fault was caught; it passes run alone. Accept a timeout as caught, or bound `wait_free/3` below EUnit's timeout.
+* [High] /tmp, the grant's heap bound against deep fids (`erx_fs:reserve_words/1`, `erx_fs_grant`;
+  [design-tmp.md](design-tmp.md#starting-and-mounting)): the reserve budgets each fid a path of 16 steps
+  (`FID_WORDS`), but nothing bounds a fid's path depth but the cap, and a fid walked on its own from `NOFID`
+  builds its own path. So legal requests pass the bound and ERTS kills the grant, emptying `/tmp` for the
+  domain: by an estimate from the code, 4,096 fids each walked into a chain of about 400 directories with
+  1-byte names (about 100 with 255-byte names), some 100,000 walks charging only about 130 KB of a 32 MiB
+  cap. Repeated, it passes `erx_ramfs_sup`'s restart intensity (the residual below). The design says the
+  bound is met only by a bug or `o` set too low. Fixes, in order: bound the path steps a grant holds and
+  refuse a walk past it (`emfile`), deriving the reserve from that bound; or keep a fid's steps shared with
+  the tree; or charge steps to the cap. Each is a new bound the design must name first.
+* [Medium] /tmp, the heap-bound tests miss the cases that decide the bound (`test/erlang/erx_ramfs_tests.erl`;
+  [design-tmp.md](design-tmp.md#verification)): the fills use 4 KiB chunks, which live off the heap; the
+  worst tree, its cap full of empty files, directories and links (`o` about 1 by `erx_ramfs`'s own comment),
+  is never built; the pool is clones sharing one path of 1-byte names, never 16 unshared steps of 255-byte
+  names; the 32 MiB chain stops at 1,024 directories ([watch list](todo-performance.md)); no seeded fault
+  counts the tree's part once, so the doubling is unproven; and the cases run in EUnit on stock's emulator,
+  not the hosted runtime the design names. The watch-list item measuring `o` the design cites is missing.
+* [Medium] files, the grant's bound defaults are copied (`erx_fs`, `erx_fs_grant`, `erx_ramfs_sup`): `erx_fs`'s
+  `DEFAULT_POOL`, `DEFAULT_IN_FLIGHT` and `DEFAULT_MSIZE` repeat `erx_fs_grant`'s, `erx_ramfs_tests` repeats
+  the pool, and `erx_ramfs_sup:heap_words/1` computes the reserve for `#{}` rather than the options the grant
+  gets. Compute the reserve from the bounds `erx_fs_grant:new/1` resolves, in one place.
+* [Medium] files, a tree of the grant's own has no grant-core test (`erx_fs_grant`, `erx_fs_grant_fuzz`,
+  [design-files.md](design-files.md#serving-the-erx_fs-behaviour)): the fuzz target, the model and
+  `erx_fs_tests` serve only handles; that a rejected reply keeps the own tree's step
+  (`kept_when_rejected/3`) and that a non-pair answer ends the grant are untested, so dropping the kept tree
+  passes every test. Add an own tree to `erx_fs_tests` with both cases, or an own-tree variant to the fuzz
+  target.
 * [Low] /tmp, `erx_ramfs_sup` under `kernel_safe_sup`
-  ([design-tmp.md](design-tmp.md#starting-and-mounting)): a crash of the tree process that recurs
+  ([design-tmp.md](design-tmp.md#starting-and-mounting)): a crash of `/tmp`'s grant that recurs
   on every restart, such as one a request reproduces, passes `kernel_safe_sup`'s restart intensity, which
   ends `kernel` and halts the node. A Phase 1 residual: `/tmp` is the domain's own, so the domain ends
   with it. The restart test of [/tmp's verification](design-tmp.md#verification) covers one crash,

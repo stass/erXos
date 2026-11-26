@@ -9,9 +9,11 @@ require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_ramfs_tests.erl, the EUnit cases of /tmp's grant over its real tree,
 # on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies) against the sources
-# as they are. Then each seeded fault of docs/design-tmp.md's "Fids and nodes" and "Grammar
-# on the local route" items, applied to a copy of one module, must fail the case named for
-# it, which shows that case runs the code the fault breaks.
+# as they are. Then each seeded fault of docs/design-tmp.md's "Fids and nodes", "One message
+# each way", "The heap bound" and "Grammar on the local route" items, applied to a copy of
+# one module, must fail the case named for it, which shows that case runs the code the fault
+# breaks. The client's fault of "One message each way", an attach sent with every exchange,
+# is test/host/erx_ns_test.rb's, whose cases run the client against a grant.
 class ErxRamfsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APP = 'erlang/apps/erx_files/src'
@@ -47,17 +49,42 @@ class ErxRamfsTest < Minitest::Test
               to: "    _ = Owned,\n    Forgotten.\n",
               caught_by: 'a_dead_owners_open_file_gives_back_what_it_held_test'),
     Fault.new(name: 'a grant that never forgets a walked node', file: "#{APP}/erx_fs_grant.erl",
-              from: '    _ = [optional(Module, forget, [Node, Fs], ok) || Node <- Unnamed],',
-              to: '    _ = Unnamed,',
+              from: '    Forgotten = lists:foldl(fun(Node, G) -> element(2, tree(forget, [Node], ok, G)) end,',
+              to: '    Forgotten = lists:foldl(fun(_Node, G) -> G end,',
               caught_by: 'clunking_every_fid_frees_a_nameless_file_test'),
-    Fault.new(name: "a tree that keeps a dead grant's holds", file: "#{APP}/erx_ramfs.erl",
-              from: '            {ok, Tree1} = step({forget_holder, Holder}, Root, Tree),',
+    Fault.new(name: 'a forget that leaves the node in walked', file: "#{APP}/erx_ramfs_core.erl",
+              from: '            Tree1 = Tree#tree{walked = sets:del_element(Ino, Walked)},',
               to: '            Tree1 = Tree,',
-              caught_by: 'a_file_two_grants_hold_needs_both_to_let_go_test'),
+              caught_by: 'clunking_every_fid_frees_a_nameless_file_test'),
     Fault.new(name: 'a walk that holds nothing', file: "#{APP}/erx_ramfs_core.erl",
-              from: '{done, {ok, Ino, qid(Ino, Tree)}, hold(Ino, Holder, Tree)}',
+              from: '{done, {ok, Ino, qid(Ino, Tree)}, hold(Ino, Tree)}',
               to: '{done, {ok, Ino, qid(Ino, Tree)}, Tree}',
-              caught_by: 'a_stat_finds_a_name_renamed_over_between_its_walk_and_getattr_test')
+              caught_by: 'a_stat_finds_a_name_renamed_over_between_its_walk_and_getattr_test'),
+    # A callback that calls a process of its own, as a tree process would be called:
+    # a monitored keeper asked for each step and its answer awaited.
+    Fault.new(name: 'a callback that calls a process of its own', file: "#{APP}/erx_ramfs.erl",
+              from: '        {ok, Stamp} -> erx_ramfs_core:step(Request, Stamp, time_ns(), Tree);',
+              to: '        {ok, Stamp} -> Keeper = spawn(fun() -> receive {From, R, _} -> From ! {R, ok} end end), ' \
+                  'R = monitor(process, Keeper), Keeper ! {self(), R, Request}, ' \
+                  'receive {R, ok} -> demonitor(R, [flush]) end, ' \
+                  'erx_ramfs_core:step(Request, Stamp, time_ns(), Tree);',
+              caught_by: 'each_request_is_one_message_each_way_test'),
+    # docs/design-files.md, "Requests behind a failed request": a clone refused for a full
+    # pool that still enters its new fid, so the lopen behind it truncates f.
+    Fault.new(name: 'a clone refused for a full pool that still enters its new fid', file: "#{APP}/erx_fs_grant.erl",
+              from: "                ok -> walked(Owner, Fid, NewFid, walk_names(Names, Path, [], Grant));\n",
+              to: "                ok -> walked(Owner, Fid, NewFid, walk_names(Names, Path, [], Grant));\n" \
+                  "                {error, emfile} = Error -> {Error, element(2, walked(Owner, Fid, NewFid, " \
+                  "walk_names(Names, Path, [], Grant)))};\n",
+              caught_by: 'requests_behind_a_failed_request_change_nothing_test'),
+    Fault.new(name: 'a grant that is not sensitive', file: "#{APP}/erx_ramfs_sup.erl",
+              from: '    #{max_heap_size => heap_words(Cap), sensitive => true}.',
+              to: '    #{max_heap_size => heap_words(Cap), sensitive => false}.',
+              caught_by: 'the_supervisors_grant_hides_its_state_test'),
+    Fault.new(name: 'a heap bound of the tree alone, without the reserve', file: "#{APP}/erx_ramfs_sup.erl",
+              from: '    erx_fs:reserve_words(#{}) + ceil(2 * TreeBytes / erlang:system_info(wordsize)).',
+              to: '    ceil(2 * TreeBytes / erlang:system_info(wordsize)).',
+              caught_by: 'a_64_kib_tmp_serves_at_its_bounds_test')
   ].freeze
 
   def test_the_cases_pass

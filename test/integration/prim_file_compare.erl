@@ -1422,7 +1422,7 @@ tmp_erxos("release") ->
     Show("limit", erx_ns:tmp_limit() > 0),
     %% A second instance under a small cap: a write past it is refused whole, and
     %% a cap of 0 refuses every creation.
-    {ok, Small} = erx_ramfs_sup:start_link(100000, <<"/small">>, erx_ramfs_small),
+    {ok, Small} = erx_ramfs_sup:start_link(100000, <<"/small">>),
     Show("small fits", file:write_file(<<"/small/a">>, binary:copy(<<1>>, 60000))),
     Show("small past", file:write_file(<<"/small/b">>, binary:copy(<<2>>, 60000))),
     Show("small b", tmp_info(file:read_file_info(<<"/small/b">>))),
@@ -1445,7 +1445,7 @@ tmp_erxos("release") ->
     Show("small cwd unmounted", file:read_file_info(<<"a">>)),
     Show("small cwd kept", file:get_cwd()),
     ok = file:set_cwd(Saved),
-    {ok, Zero} = erx_ramfs_sup:start_link(0, <<"/zero">>, erx_ramfs_zero),
+    {ok, Zero} = erx_ramfs_sup:start_link(0, <<"/zero">>),
     Show("zero list", file:list_dir(<<"/zero">>)),
     Show("zero write", file:write_file(<<"/zero/a">>, <<>>)),
     Show("zero dir", file:make_dir(<<"/zero/d">>)),
@@ -1454,21 +1454,21 @@ tmp_erxos("release") ->
     tmp_held(Show),
     %% A file written and renamed over b while others stat b: every stat finds b. Then
     %% writers filling the tree stop at the cap together.
-    {ok, Conc} = erx_ramfs_sup:start_link(?CONC_CAP, <<"/conc">>, erx_ramfs_conc),
+    {ok, Conc} = erx_ramfs_sup:start_link(?CONC_CAP, <<"/conc">>),
     Show("concurrent renames", tmp_concurrent_renames()),
     Show("concurrent fill", tmp_concurrent_fill()),
     unlink(Conc),
     exit(Conc, shutdown),
-    %% Restart: kill the tree process with a file open; the open file answers eio,
+    %% Restart: kill /tmp's grant, which holds the tree, with a file open; the open file answers eio,
     %% and /tmp comes back empty, mounted again, with no old owner alive.
     ok = file:write_file(<<"/tmp/before">>, <<"b">>),
     {ok, Open} = file:open(<<"/tmp/before">>, [read, binary]),
     {ok, #file_info{inode = OldInode}} = file:read_file_info(<<"/tmp/before">>),
-    OldTree = whereis(erx_ramfs),
-    Old = tmp_processes(OldTree),
-    exit(OldTree, kill),
-    Show("restarted", tmp_restarted(OldTree, 100)),
-    Show("old owners counted", length(Old) >= 3),
+    OldGrant = tmp_grant(),
+    Old = tmp_processes(OldGrant),
+    exit(OldGrant, kill),
+    Show("restarted", tmp_restarted(OldGrant, 100)),
+    Show("old owners counted", length(Old) >= 1),
     Show("no old owner alive", tmp_all_dead(Old, 100)),
     Show("old fd", file:read(Open, 1)),
     Show("empty", file:list_dir(<<"/tmp">>)),
@@ -1484,13 +1484,13 @@ tmp_erxos("release") ->
 %% compares /tmp's free blocks before and after, so it also runs alone (main/1,
 %% "tmp-held").
 tmp_held(Show) ->
-    Free = tmp_free(erx_ramfs),
+    Free = tmp_free(),
     {ok, Gone} = file:open(<<"/tmp/held">>, [read, write, binary]),
     ok = file:delete(<<"/tmp/held">>),
     ok = file:write(Gone, binary:copy(<<7>>, 50000)),
-    Show("held while open", tmp_free(erx_ramfs) < Free),
+    Show("held while open", tmp_free() < Free),
     ok = file:close(Gone),
-    Show("held after close", tmp_wait_free(erx_ramfs, Free, 100) =:= ok),
+    Show("held after close", tmp_wait_free(Free, 100) =:= ok),
     Parent = self(),
     Killed = spawn(fun() ->
                            {ok, Fd} = file:open(<<"/tmp/held2">>, [read, write, binary]),
@@ -1500,29 +1500,38 @@ tmp_held(Show) ->
                            receive never -> ok end
                    end),
     receive {written, Killed} -> ok after ?HELPER_WAIT -> helper_silent(held_writer) end,
-    Show("held while owner lives", tmp_free(erx_ramfs) < Free),
+    Show("held while owner lives", tmp_free() < Free),
     exit(Killed, kill),
-    Show("held after owner killed", tmp_wait_free(erx_ramfs, Free, 100)).
+    Show("held after owner killed", tmp_wait_free(Free, 100)).
 
-%% Free blocks of a tree, through the callback the grant uses.
-tmp_free(Name) ->
-    {ok, #{bfree := Free}} = erx_ramfs:statfs(persistent_term:get({erx_ramfs, Name})),
-    Free.
-
-tmp_wait_free(_Name, _Free, 0) ->
-    timeout;
-tmp_wait_free(Name, Free, Tries) ->
-    case tmp_free(Name) of
-        Free -> ok;
-        _ -> receive after 20 -> tmp_wait_free(Name, Free, Tries - 1) end
+%% /tmp's grant, which holds the tree, as the namespace mounts it; none while /tmp is
+%% not mounted.
+tmp_grant() ->
+    case [Pid || #{point := [<<"tmp">>], provider := {grant, Pid, _}} <- persistent_term:get(erx_ns)] of
+        [Pid] -> Pid;
+        [] -> none
     end.
 
-%% The tree process, its grant and every process linked to the grant.
-tmp_processes(Tree) ->
-    {links, [Sup]} = process_info(Tree, links),
-    [Grant] = [Pid || {grant, Pid, _, _} <- supervisor:which_children(Sup)],
+%% /tmp's free blocks, as the grant's statfs answers them.
+tmp_free() ->
+    {ok, #{bfree := Free}} = erx_file_remote:statfs({tmp_grant(), <<"tmp">>, rw}, {target, []}),
+    Free.
+
+tmp_wait_free(_Free, 0) ->
+    timeout;
+tmp_wait_free(Free, Tries) ->
+    case tmp_free() of
+        Free -> ok;
+        _ -> receive after 20 -> tmp_wait_free(Free, Tries - 1) end
+    end.
+
+%% The grant and every process linked to it but its supervisor. The grant is
+%% sensitive, so its own dictionary names no ancestor; the supervisor's names it.
+tmp_processes(Grant) ->
     {links, Linked} = process_info(Grant, links),
-    lists:usort([Tree, Grant | [P || P <- Linked, P =/= Sup]]).
+    lists:usort([Grant | [P || P <- Linked, is_pid(P),
+                               not is_tuple(proc_lib:initial_call(P)) orelse
+                               element(2, proc_lib:initial_call(P)) =/= erx_ramfs_sup]]).
 
 tmp_all_dead(Old, 0) ->
     [P || P <- Old, is_process_alive(P)];
@@ -1668,15 +1677,15 @@ deadline(Millis, Fun) ->
         timeout
     end.
 
-tmp_restarted(_OldTree, 0) ->
+tmp_restarted(_OldGrant, 0) ->
     timeout;
-tmp_restarted(OldTree, Tries) ->
-    case whereis(erx_ramfs) of
-        Pid when is_pid(Pid), Pid =/= OldTree ->
+tmp_restarted(OldGrant, Tries) ->
+    case tmp_grant() of
+        Pid when is_pid(Pid), Pid =/= OldGrant ->
             case file:list_dir(<<"/tmp">>) of
                 {ok, _} -> ok;
-                _ -> receive after 20 -> tmp_restarted(OldTree, Tries - 1) end
+                _ -> receive after 20 -> tmp_restarted(OldGrant, Tries - 1) end
             end;
         _ ->
-            receive after 20 -> tmp_restarted(OldTree, Tries - 1) end
+            receive after 20 -> tmp_restarted(OldGrant, Tries - 1) end
     end.

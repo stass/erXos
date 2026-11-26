@@ -456,7 +456,7 @@ sum of three parts:
   per-node counts, its owners' monitors and its 64 requests in flight
   with up to 64 KiB of payload each ([design-files.md](design-files.md#bounds)).
   `erx_fs` computes it from the grant's bounds, the same figure for
-  every grant of one pool, so it is never zero and a `tmp` of 0 still
+  every grant of the same bounds, so it is never zero and a `tmp` of 0 still
   serves every request its bounds admit.
 * **The tree at its cap**, `cap` times `1 + o`, where `o` is ERTS's
   memory per charged byte beyond the charge (headers, map entries,
@@ -529,7 +529,7 @@ runs only in tests.
 | --- | --- | --- | --- | --- |
 | A write request, create or link would pass the cap | the step's charge check, before it builds anything | the tree as before the step; of a caller's write over 64 KiB, the requests before it | none | `{error, enospc}`, with an open file's offset past what was written; `ENOSPC` to a program |
 | The domain's budget is exhausted | ERTS's allocator | nothing: the domain ends | the domain library | as any ERTS allocation failure ([design-runtime.md](design-runtime.md#crash-handling)); the cap keeps `/tmp`'s charges to their share, ERTS's overhead on top ([Charges](#data-model)) |
-| A bug crashes the grant or the lock table, or the grant passes its heap bound | the link, then the supervisor | nothing of `/tmp` | both end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log, which for the heap bound names the bound and the tree's `held` |
+| A bug crashes the grant or the lock table, or the grant passes its heap bound | the link, then the supervisor | nothing of `/tmp` | both end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log; for the heap bound it is ERTS's own `max_heap_size` report, which names the bound and the grant, killed at once with no code of its own run, and the tree's `held` is what `statfs`, as `df /tmp` shows it, answered before |
 | A caller ends during a request or with files open | the grant's monitor on the fid's owner ([design-files.md](design-files.md#fid-owners)) | the effects of the steps that ran | the grant clunks every fid the caller owned, after every request it sent; a removed file it held open is freed | nothing |
 | A request names a fid whose node lost its names | the node's `links`, 0 | the node, held by the fid | the grant forgets it when no fid names it | `getattr` answers with `nlink` 0; `lopen` of a file opens it; `lopen` of a directory and `walk` answer `{error, enoent}` |
 | The version counter is exhausted | the counter's refusal | the tree | none | `{error, eio}` and a report, as for every server |

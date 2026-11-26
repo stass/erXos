@@ -90,7 +90,7 @@ sequence(Tally) ->
     Owners = owners(Client),
     Keepers = [spawn_link(fun idle/0) || _ <- [1, 2]],
     Pool = pick([1, 2, 3, 8, 4096]),
-    {ok, Core} = ?CORE:new(#{module => ?MODULE, fs => {Fs, Keepers}, rights => pick([ro, rw, rx]),
+    {ok, Core} = ?CORE:new(#{module => ?MODULE, fs => {ok, {Fs, Keepers}}, rights => pick([ro, rw, rx]),
                              client => Client, pool => Pool}),
     Shell = #shell{core = Core, client = Client, owners = Owners, keepers = Keepers, pool = Pool,
                    tally = Tally},

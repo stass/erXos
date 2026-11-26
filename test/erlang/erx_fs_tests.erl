@@ -455,7 +455,7 @@ fid_flood_stops_at_the_pool_test() ->
 core(Rights) ->
     {module, _} = code:ensure_loaded(erx_fs_test_tree),
     {ok, Fs} = erx_fs_test_tree:init([]),
-    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => Rights,
+    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_test_tree, fs => {ok, Fs}, rights => Rights,
                                      client => own}),
     Core.
 
@@ -536,7 +536,7 @@ root(Fs) -> erx_fs_test_tree:root(Fs).
 
 tree_without_write_is_read_only_test() ->
     {ok, Fs} = erx_fs_test_tree:init([]),
-    {ok, Core} = erx_fs_grant:new(#{module => ?MODULE, fs => Fs, rights => rw, client => own}),
+    {ok, Core} = erx_fs_grant:new(#{module => ?MODULE, fs => {ok, Fs}, rights => rw, client => own}),
     ?assertMatch(#{rights := ro}, erx_fs_grant:info(Core)).
 
 %% Changes on a read-write grant -------------------------------------------
@@ -640,7 +640,7 @@ domain_ref(D) ->
 
 client_core() ->
     {ok, Fs} = erx_fs_test_tree:init([]),
-    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => ro, client => ?CLIENT}),
+    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_test_tree, fs => {ok, Fs}, rights => ro, client => ?CLIENT}),
     Core.
 
 %% Effects and the refusals counted after Message reaches a fresh core.
@@ -1137,7 +1137,7 @@ malformed_grant(Malformed) ->
 malformed_core(Malformed) ->
     {module, _} = code:ensure_loaded(erx_fs_stale_tree),
     {ok, Fs} = erx_fs_stale_tree:init([{malformed, Malformed}]),
-    erx_fs_grant:new(#{module => erx_fs_stale_tree, fs => Fs, rights => rw, client => own}).
+    erx_fs_grant:new(#{module => erx_fs_stale_tree, fs => {ok, Fs}, rights => rw, client => own}).
 
 %% A malformed qid is answered eio and the grant keeps nothing of the answer:
 %% an attach records no fid and monitors no owner, a walk names no new fid,
@@ -1285,7 +1285,7 @@ stream_core(Keeper) ->
     stream_core(Keeper, [2]).
 
 stream_core(Keeper, Fids) ->
-    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_stream_tree, fs => Keeper, rights => rw,
+    {ok, Core} = erx_fs_grant:new(#{module => erx_fs_stream_tree, fs => {ok, Keeper}, rights => rw,
                                     client => own}),
     {_, Attached} = core_frame(Core, {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
     lists:foldl(fun(Fid, C) ->

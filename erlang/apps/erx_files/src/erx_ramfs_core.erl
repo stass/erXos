@@ -19,11 +19,13 @@ builds; it only ever frees, so it needs no comparison with the cap.
 Nodes are named by inode numbers, the stamps of their creation, so a number
 is never given to a second node and a request naming a node that is gone
 answers `enoent`. A node lives while a directory entry names it (`links`),
-an open holds it (`opens`) or a walk holds it for its holder (`holds`), as
-FreeBSD's tmpfs keeps a node while a vnode references it; the step that
-brings all three to zero frees it and returns its charge. A walk takes its
-hold in the step that finds the node, and the holder's `forget` of it, or
-`forget_holder` at the holder's end, lets it go. A directory's `links` count its name, its own
+an open holds it (`opens`) or a fid of the tree's one grant names it (the
+tree's set `walked`), as FreeBSD's tmpfs keeps a node while a vnode
+references it; the step that leaves a node with no links, no opens and no
+place in `walked` frees it and returns its charge. A walk adds the node it
+finds to `walked` in the step that finds it, and the grant's `forget` of it
+takes it out. The tree has one grant, its holder, so it records no holder: the
+grant's end ends the tree, holds and all. A directory's `links` count its name, its own
 `.` and each subdirectory's `..`, as tmpfs counts them. File data is a map
 from 4 KiB chunk index to chunk; a missing chunk is a hole and reads as
 zeros.
@@ -37,9 +39,9 @@ through `erx_fs`'s grammar, and the checks here keep the step total over
 anything else.
 """.
 
--export([new/3, step/4, check/1, held/1]).
+-export([new/3, step/4, check/1, held/1, root/1]).
 
--export_type([tree/0, ino/0, holder/0, request/0, reply/0, handle/0, qid/0]).
+-export_type([tree/0, ino/0, request/0, reply/0, handle/0, qid/0]).
 
 %% Charges (docs/design-tmp.md, "Charges"): what the cap bounds.
 -define(CHUNK_BYTES, 4096).
@@ -82,11 +84,8 @@ anything else.
                      gid => integer(), size => integer(),
                      atime => now | integer(), mtime => now | integer()}.
 
-%% Who holds a node through a walk: in erx_ramfs, the pid of a grant.
--type holder() :: term().
--type request() :: {walk, Dir :: ino(), name(), holder()}
-                 | {forget, ino(), holder()}
-                 | {forget_holder, holder()}
+-type request() :: {walk, Dir :: ino(), name()}
+                 | {forget, ino()}
                  | {getattr, ino()}
                  | {open, ino(), open_flags()}
                  | {make, Dir :: ino(), name(), what()}
@@ -122,7 +121,6 @@ anything else.
     mode :: 0..?MODE_BITS,
     links :: non_neg_integer(),
     opens :: non_neg_integer(),
-    holds :: non_neg_integer(),
     size :: 0..?MAX_SIZE,
     atime :: integer(),
     mtime :: integer(),
@@ -132,10 +130,9 @@ anything else.
 
 -record(tree, {
     nodes :: #{ino() => #node{}},
-    %% Each holder and the nodes it holds, the one record of the holds; each
-    %% node's holds counts the holders that hold it.
-    holders :: #{holder() => #{ino() => []}},
     root :: ino(),
+    %% The nodes the grant's fids name, the one record of the holds.
+    walked :: sets:set(ino()),
     held :: non_neg_integer(),
     cap :: non_neg_integer()
 }).
@@ -157,9 +154,10 @@ new(Cap, Stamp, Now)
   when is_integer(Cap), Cap >= 0, is_integer(Stamp), Stamp > 0,
        is_integer(Now) ->
     Root = #node{data = {directory, Stamp, #{}, gb_trees:empty(), 1},
-                 mode = ?ROOT_MODE, links = 2, opens = 0, holds = 0, size = 0,
+                 mode = ?ROOT_MODE, links = 2, opens = 0, size = 0,
                  atime = Now, mtime = Now, ctime = Now, version = Stamp},
-    #tree{nodes = #{Stamp => Root}, holders = #{}, root = Stamp, held = 0, cap = Cap}.
+    #tree{nodes = #{Stamp => Root}, root = Stamp, walked = sets:new([{version, 2}]),
+          held = 0, cap = Cap}.
 
 -doc """
 One request decided whole. `Stamp` is a fresh value of the domain's file
@@ -187,20 +185,25 @@ The bytes the tree is charged for, as `check/1` recomputes them.
 held(#tree{held = Held}) ->
     Held.
 
+-doc "The root's inode number, the stamp the tree was made with.".
+-spec root(tree()) -> ino().
+root(#tree{root = Root}) ->
+    Root.
+
 -doc """
 Recomputes the tree's invariants from its nodes (docs/design-tmp.md, T2-T4)
 and answers `ok` or every violation found: `held` against the charges of
 what the tree holds and the cap; each node's shape, chunks inside its size
 and zero past it, names and texts valid and holding no larger binary; each
-`links` against the entries naming it; every nameless node open or held,
+`links` against the entries naming it; every nameless node open or walked,
 every nameless directory empty; every named directory's parents reaching
-the root; each node's `holds` against the holders that hold it. It grows
+the root; every walked node in the tree. It grows
 with the tree, so it runs in tests only.
 """.
 -spec check(tree()) -> ok | {error, [term()]}.
 check(#tree{} = Tree) ->
     Checks = [fun check_root/1, fun check_held/1, fun check_shapes/1,
-              fun check_links/1, fun check_parents/1, fun check_holds/1],
+              fun check_links/1, fun check_parents/1, fun check_walked/1],
     case lists:flatmap(fun(Check) -> Check(Tree) end, Checks) of
         [] -> ok;
         Problems -> {error, Problems}
@@ -210,12 +213,10 @@ check(#tree{} = Tree) ->
 %% Dispatch: one clause per callback of erx_fs
 %% ---------------------------------------------------------------------------
 
-decide({walk, Dir, Name, Holder}, _Stamp, _Now, Tree) ->
-    walk(Dir, Name, Holder, Tree);
-decide({forget, Ino, Holder}, _Stamp, _Now, Tree) ->
-    {done, ok, forget(Ino, Holder, Tree)};
-decide({forget_holder, Holder}, _Stamp, _Now, Tree) ->
-    {done, ok, forget_holder(Holder, Tree)};
+decide({walk, Dir, Name}, _Stamp, _Now, Tree) ->
+    walk(Dir, Name, Tree);
+decide({forget, Ino}, _Stamp, _Now, Tree) ->
+    {done, ok, forget(Ino, Tree)};
 decide({getattr, Ino}, _Stamp, _Now, Tree) ->
     getattr(Ino, Tree);
 decide({open, Ino, Flags}, Stamp, Now, Tree) ->
@@ -253,18 +254,18 @@ decide(_Request, _Stamp, _Now, _Tree) ->
 %% run in Linux's order for the same call, so the first refusal is Linux's.
 %% ---------------------------------------------------------------------------
 
-%% A walk holds the node it finds for Holder in the same step, so no request
+%% A walk holds the node it finds for the grant in the same step, so no request
 %% between the walk and the next one through its fid frees that node. A
 %% removed directory finds nothing, as FreeBSD's tmpfs finds nothing in a
 %% directory with no parent.
-walk(Dir, Name, Holder, Tree) ->
+walk(Dir, Name, Tree) ->
     maybe
         ok ?= valid_name(Name),
         {ok, D} ?= directory(Dir, Tree),
         ok ?= permitted(D, ?X),
         ok ?= not_a_removed_directory(D),
         {ok, Ino} ?= lookup(D, Name),
-        {done, {ok, Ino, qid(Ino, Tree)}, hold(Ino, Holder, Tree)}
+        {done, {ok, Ino, qid(Ino, Tree)}, hold(Ino, Tree)}
     end.
 
 getattr(Ino, Tree) ->
@@ -462,7 +463,7 @@ unlink(Dir, Name, Kind, Stamp, Now, Tree) ->
         Victim = fetch(Ino, Tree),
         ok ?= removable_kind(Kind, Victim),
         ok ?= empty_if_directory(Victim),
-        Charge = -entry_charge(Name) - freed_by_unnaming(Victim),
+        Charge = -entry_charge(Name) - freed_by_unnaming(Ino, Victim, Tree),
         Tree1 = update(Dir, fun(P) -> changed(remove_entry(P, Name), Stamp, Now) end,
                        Tree),
         {done, ok, charged(Charge, drop_name(Ino, Dir, Now, Tree1))}
@@ -529,7 +530,7 @@ clunk({Ino, _Access, _Append}, #tree{nodes = Nodes} = Tree) ->
     case Nodes of
         #{Ino := #node{opens = Opens} = N} when Opens > 0 ->
             N1 = N#node{opens = Opens - 1},
-            {done, ok, charged(-freed_charge(N1), release(Ino, N1, Tree))};
+            {done, ok, charged(-freed_charge(Ino, N1, Tree), release(Ino, N1, Tree))};
         #{} ->
             {done, ok, Tree}
     end;
@@ -908,21 +909,30 @@ node_charge_of({symlink, Text}) -> ?NODE_CHARGE + byte_size(Text);
 node_charge_of({link, _Ino}) -> 0.
 
 %% The charge a node returns when it is freed: all of it once it has no
-%% links, no opens and no holds.
-freed_charge(#node{links = 0, opens = 0, holds = 0} = N) -> node_charge(N);
-freed_charge(#node{}) -> 0.
+%% links, no opens and no place in walked.
+freed_charge(Ino, #node{} = N, Tree) ->
+    case unkept(Ino, N, Tree) of
+        true -> node_charge(N);
+        false -> 0
+    end.
+
+%% Whether nothing keeps the node N would be: no name, no open, no fid.
+unkept(Ino, #node{links = 0, opens = 0}, #tree{walked = Walked}) ->
+    not sets:is_element(Ino, Walked);
+unkept(_Ino, #node{}, _Tree) ->
+    false.
 
 %% The charge removing one name of a node frees: a directory loses every
 %% link with its one name.
-freed_by_unnaming(#node{data = {directory, _, _, _, _}} = N) ->
-    freed_charge(N#node{links = 0});
-freed_by_unnaming(#node{links = Links} = N) ->
-    freed_charge(N#node{links = Links - 1}).
+freed_by_unnaming(Ino, #node{data = {directory, _, _, _, _}} = N, Tree) ->
+    freed_charge(Ino, N#node{links = 0}, Tree);
+freed_by_unnaming(Ino, #node{links = Links} = N, Tree) ->
+    freed_charge(Ino, N#node{links = Links - 1}, Tree).
 
 replaced_charge(none, _NewName, _Tree) ->
     0;
 replaced_charge(Target, NewName, Tree) ->
-    entry_charge(NewName) + freed_by_unnaming(fetch(Target, Tree)).
+    entry_charge(NewName) + freed_by_unnaming(Target, fetch(Target, Tree), Tree).
 
 %% ---------------------------------------------------------------------------
 %% Building: runs only after the step's checks and charge passed
@@ -969,7 +979,7 @@ fresh(What, Dir, Stamp, Now) ->
                 {{symlink, binary:copy(Text)}, ?LINK_MODE, byte_size(Text), 1, 0}
         end,
     #node{data = Data, mode = Mode band ?MODE_BITS, links = Links,
-          opens = Opens, holds = 0, size = Size, atime = Now, mtime = Now, ctime = Now,
+          opens = Opens, size = Size, atime = Now, mtime = Now, ctime = Now,
           version = Stamp}.
 
 %% A directory whose entries changed.
@@ -1017,51 +1027,29 @@ moved_parent(Ino, #node{data = {directory, _, _, _, _}}, Dir, NewDir, Tree)
 moved_parent(_Ino, #node{}, _Dir, _NewDir, Tree) ->
     Tree.
 
-release(Ino, #node{links = 0, opens = 0, holds = 0}, #tree{nodes = Nodes} = Tree) ->
-    Tree#tree{nodes = maps:remove(Ino, Nodes)};
-release(Ino, N, Tree) ->
-    put_node(Ino, N, Tree).
-
-%% Holds. A holder holds a node at most once, so a walk that finds a node its
-%% holder already holds changes nothing, and so does a forget of a node it
-%% does not hold. A held node is never freed, so every node a holder holds is
-%% in the tree.
-hold(Ino, Holder, #tree{holders = Holders} = Tree) ->
-    Held = maps:get(Holder, Holders, #{}),
-    case Held of
-        #{Ino := []} ->
-            Tree;
-        #{} ->
-            update(Ino, fun(N) -> N#node{holds = N#node.holds + 1} end,
-                   Tree#tree{holders = Holders#{Holder => Held#{Ino => []}}})
+release(Ino, N, #tree{nodes = Nodes} = Tree) ->
+    case unkept(Ino, N, Tree) of
+        true -> Tree#tree{nodes = maps:remove(Ino, Nodes)};
+        false -> put_node(Ino, N, Tree)
     end.
 
-forget(Ino, Holder, #tree{holders = Holders} = Tree) ->
-    case Holders of
-        #{Holder := #{Ino := []} = Held} ->
-            Holders1 = case maps:remove(Ino, Held) of
-                           Left when map_size(Left) =:= 0 -> maps:remove(Holder, Holders);
-                           Left -> Holders#{Holder := Left}
-                       end,
-            unheld(Ino, Tree#tree{holders = Holders1});
-        #{} ->
+%% Holds. A node is in walked at most once, so a walk that finds a node
+%% already walked changes nothing, and so does a forget of a node not in it.
+%% A walked node is never freed, so every member of walked is in the tree.
+hold(Ino, #tree{walked = Walked} = Tree) ->
+    Tree#tree{walked = sets:add_element(Ino, Walked)}.
+
+%% The grant's last fid naming Ino has gone: the node leaves walked, and is
+%% freed with its charge when nothing else keeps it.
+forget(Ino, #tree{walked = Walked} = Tree) ->
+    case sets:is_element(Ino, Walked) of
+        true ->
+            Tree1 = Tree#tree{walked = sets:del_element(Ino, Walked)},
+            N = fetch(Ino, Tree1),
+            charged(-freed_charge(Ino, N, Tree1), release(Ino, N, Tree1));
+        false ->
             Tree
     end.
-
-%% Every hold of a holder that ended.
-forget_holder(Holder, #tree{holders = Holders} = Tree) ->
-    case maps:take(Holder, Holders) of
-        {Held, Holders1} ->
-            lists:foldl(fun unheld/2, Tree#tree{holders = Holders1}, maps:keys(Held));
-        error ->
-            Tree
-    end.
-
-%% A node one hold let go of, freed with its charge when nothing else keeps it.
-unheld(Ino, Tree) ->
-    #node{holds = Holds} = N = fetch(Ino, Tree),
-    N1 = N#node{holds = Holds - 1},
-    charged(-freed_charge(N1), release(Ino, N1, Tree)).
 
 %% A file's new size: chunks past it are freed and the tail of the last one
 %% zeroed, or the file extends with a hole. Returns the node and the charge
@@ -1273,8 +1261,8 @@ stored_alone(Bin) ->
 %% Each node's links against the entries naming it: a named directory has 2
 %% plus its subdirectories and exactly one name, under the parent it
 %% records; a nameless directory is empty with no parent; any other node
-%% has one link per name; a node with no links is open.
-check_links(#tree{nodes = Nodes, root = Root}) ->
+%% has one link per name; a node with no links is open or walked.
+check_links(#tree{nodes = Nodes, root = Root, walked = Walked}) ->
     Named = maps:fold(
               fun(DirIno, #node{data = {directory, _, Entries, _, _}}, Acc) ->
                       maps:fold(fun(_Name, {Ino, _Seq}, Acc1) ->
@@ -1283,11 +1271,11 @@ check_links(#tree{nodes = Nodes, root = Root}) ->
                                 end, Acc, Entries);
                  (_Ino, #node{}, Acc) -> Acc
               end, #{}, Nodes),
-    lists:flatmap(fun({Ino, N}) -> links(Ino, N, maps:get(Ino, Named, []), Root, Nodes) end,
+    lists:flatmap(fun({Ino, N}) -> links(Ino, N, maps:get(Ino, Named, []), Root, Nodes, Walked) end,
                   maps:to_list(Nodes)).
 
 links(Ino, #node{data = {directory, Parent, Entries, _, _}, links = Links,
-                 opens = Opens, holds = Holds}, Names, Root, Nodes) ->
+                 opens = Opens}, Names, Root, Nodes, Walked) ->
     Expected = 2 + length([I || {I, _} <- maps:values(Entries),
                                 kind(map_get(I, Nodes)) =:= directory]),
     case {Ino, Names} of
@@ -1301,26 +1289,17 @@ links(Ino, #node{data = {directory, Parent, Entries, _, _}, links = Links,
         {_, []} ->
             [{nameless_dir, Ino, Links, Parent, map_size(Entries)} ||
                 Links =/= 0 orelse Parent =/= none orelse map_size(Entries) =/= 0]
-                ++ [{unreferenced, Ino} || Opens =:= 0, Holds =:= 0];
+                ++ [{unreferenced, Ino} || Opens =:= 0, not sets:is_element(Ino, Walked)];
         {_, _} ->
             [{dir_hard_link, Ino, Names}]
     end;
-links(Ino, #node{links = Links, opens = Opens, holds = Holds}, Names, _Root, _Nodes) ->
+links(Ino, #node{links = Links, opens = Opens}, Names, _Root, _Nodes, Walked) ->
     [{links, Ino, Links, length(Names)} || Links =/= length(Names)]
-        ++ [{unreferenced, Ino} || Links =:= 0, Opens =:= 0, Holds =:= 0].
+        ++ [{unreferenced, Ino} || Links =:= 0, Opens =:= 0, not sets:is_element(Ino, Walked)].
 
-%% Each node's holds counts the holders whose sets name it, every node a
-%% holder holds is in the tree, and no holder holds an empty set.
-check_holds(#tree{nodes = Nodes, holders = Holders}) ->
-    Counted = maps:fold(fun(_Holder, Held, Acc) ->
-                                maps:fold(fun(Ino, [], Acc1) ->
-                                                  maps:update_with(Ino, fun(C) -> C + 1 end, 1, Acc1)
-                                          end, Acc, Held)
-                        end, #{}, Holders),
-    [{empty_holder, Holder} || Holder := Held <- Holders, map_size(Held) =:= 0]
-        ++ [{held_gone, Ino} || Ino := _ <- Counted, not is_map_key(Ino, Nodes)]
-        ++ [{holds, Ino, Holds, maps:get(Ino, Counted, 0)}
-            || Ino := #node{holds = Holds} <- Nodes, Holds =/= maps:get(Ino, Counted, 0)].
+%% Every node a fid names is in the tree.
+check_walked(#tree{nodes = Nodes, walked = Walked}) ->
+    [{walked_gone, Ino} || Ino <- sets:to_list(Walked), not is_map_key(Ino, Nodes)].
 
 %% Every named directory's parent chain reaches the root, in at most one
 %% step per node.

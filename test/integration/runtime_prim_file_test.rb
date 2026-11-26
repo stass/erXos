@@ -723,7 +723,7 @@ class RuntimePrimFileTest < Minitest::Test
                             "        {Ino, _Access, _} = Handle,\n        {ok, Ino, N, node}\n"]]),
     TmpSeed.new(name: 'tmp-clunk-keeps-charge', source: CORE, mode: 'tmp-held',
                 caught: ['tmpx held after close'],
-                passages: [["            {done, ok, charged(-freed_charge(N1), release(Ino, N1, Tree))};\n",
+                passages: [["            {done, ok, charged(-freed_charge(Ino, N1, Tree), release(Ino, N1, Tree))};\n",
                             "            {done, ok, release(Ino, N1, Tree)};\n"]]),
     TmpSeed.new(name: 'tmp-inode-counter-in-state', source: RAMFS, mode: 'tmp-seeded',
                 caught: ['tmpx inode above'],

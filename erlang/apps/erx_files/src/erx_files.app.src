@@ -20,7 +20,7 @@
              erx_ramfs,
              erx_ramfs_core,
              erx_ramfs_sup]},
-  {registered, [erx_ramfs]},
+  {registered, []},
   {applications, [kernel, stdlib, erx]},
   %% /proc renders values with erx_shell's erx_render, a library it starts nothing of.
   {runtime_dependencies, ["erx_shell-1"]},

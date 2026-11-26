@@ -55,7 +55,7 @@ clunk(stream, _) ->
 start() ->
     put(clunks, 0),
     Keeper = spawn(fun() -> ok end),
-    {ok, Core} = erx_fs_grant:new(#{module => ?MODULE, fs => Keeper, rights => rw, client => own}),
+    {ok, Core} = erx_fs_grant:new(#{module => ?MODULE, fs => {ok, Keeper}, rights => rw, client => own}),
     World = #{core => Core, keeper => Keeper, sent => #{}, replies => [], held => #{},
               inbox => [], flushed => [], used => [], begun => [], clunks => 0},
     lists:foldl(fun(Request, W) -> frame(none, Request, W) end, World,

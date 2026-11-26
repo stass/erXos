@@ -944,6 +944,11 @@ design does not have, to be deleted so no side-by-side table can show it under s
   built for erXos's POSIX layer and run under QEMU over `/data` on F2FS and littlefs
   ([design-f2fs.md](design-f2fs.md#posix-suites)); whether the POSIX layer offers every call it
   makes is unverified.
+* [Low] test, `test/integration/runtime_prim_file_test.rb`, `test_seeded_walk_in_place_removes_the_victim`:
+  the `walk` seed rewrites every walk to act on its own fid, but the client walks from `NOFID`, which no
+  walk may take as its new fid, so the seeded client's mount of `/t` answers `einval`
+  (`prim_file_compare:seeded/1`) and the case fails before it reaches the fault. Re-aim the seed at a walk
+  the client sends from a fid of its own, or drop it if no path operation sends one.
 * [Medium] test, `test/integration/runtime_prim_file_test.rb`: the open-file cases (`OPEN_FILES`) are
   hand-written expectations rather than the same calls run on stock over a local directory, which the
   oracle rule asks for. Known differences from stock: `position(Fd, {bof, 1 bsl 64})` answers `einval`

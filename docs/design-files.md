@@ -2735,7 +2735,8 @@ other client's request can come between its parts:
   answer reaches the client as `eio`. Each operation builds the grant it
   would leave before anything is kept, and only a reply the check
   accepts keeps it; a rejected reply is answered `eio` and, like a
-  refusal, keeps only a `remove`'s clunk. Every qid the grant records
+  refusal, keeps only a `remove`'s clunk and, for a tree of the
+  grant's own, the tree its step left. Every qid the grant records
   either travels in the reply that records it (attach, a walk of names,
   `lcreate`) or is the root's, which the grant's start admitted before
   the grant took any request (a walk from `NOFID`, whose reply lists only

@@ -56,8 +56,8 @@ unicode_util_SUITE_data).
 %% Stock: the logs beside the work directory, and each priv_dir where
 %% stock Common Test puts it, in the log tree; ERX_ORACLE_PRIV_ROOT is
 %% unset, also when the caller's environment set it. erXos: the logs on a
-%% RAM file system of Cap bytes mounted at LogDir, whose tree process is
-%% registered as erx_ct_oracle_logs, and each priv_dir under WorkDir/priv,
+%% RAM file system of Cap bytes mounted at LogDir, its tree held by its
+%% grant, and each priv_dir under WorkDir/priv,
 %% named in ERX_ORACLE_PRIV_ROOT for the patched test_server_ctrl. The host
 %% tool passes both forms.
 -spec main([string()]) -> no_return().
@@ -67,7 +67,7 @@ main([SuiteDir, WorkDir]) ->
     ok = filelib:ensure_path(LogDir),
     run(SuiteDir, WorkDir, LogDir, resolved_dir(LogDir));
 main([SuiteDir, WorkDir, LogDir, Cap]) ->
-    {ok, _} = erx_ramfs_sup:start_link(list_to_integer(Cap), list_to_binary(LogDir), erx_ct_oracle_logs),
+    {ok, _} = erx_ramfs_sup:start_link(list_to_integer(Cap), list_to_binary(LogDir)),
     Priv = filename:join(WorkDir, "priv"),
     ok = filelib:ensure_path(Priv),
     PrivRoot = resolved_dir(Priv),

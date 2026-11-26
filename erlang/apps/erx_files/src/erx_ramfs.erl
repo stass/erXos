@@ -3,44 +3,34 @@
 
 -module(erx_ramfs).
 -moduledoc """
-The domain's `/tmp`: the `erx_fs` callback module over `erx_ramfs_core`, and
-the one tree process that holds the tree (docs/design-tmp.md).
+The domain's `/tmp`: the `erx_fs` callback module over `erx_ramfs_core`, whose
+tree lives in the one grant that serves it (docs/design-tmp.md).
 
-The tree exists only in the tree process, as one `erx_ramfs_core` value. Each
-callback, in the grant, turns its 9P2000.L arguments into
-one core request, sends it to the tree process and waits for the reply, which
-it turns back into the protocol's terms. The tree process runs every request
-as one `erx_ramfs_core:step/4` with a fresh stamp of the domain's version
-counter and the time, in arrival order, so each request is atomic against
-every other, and it never waits for anyone.
+`init/1` makes an empty tree and answers it as an own tree of `erx_fs`, so the
+tree exists only in the grant's process, as one `erx_ramfs_core` value. Each
+callback turns its 9P2000.L arguments into one core request, runs it as one
+`erx_ramfs_core:step/4` with a fresh stamp of the domain's version counter and
+the time, and answers the reply in the protocol's terms with the next tree,
+which the grant keeps for its next callback. The grant runs one callback at a
+time, so each request is atomic against every other; no callback sends a
+message or waits, so a request costs its client's message and the reply.
 
-The handle `erx_fs` passes every callback, `Server`, is the tree process's pid
-and a reference the tree process made at its start and published under its
-registered name for the grant. It acts only on a request that carries that
-reference and wants its reply at an alias of its own node, so a process that
-learns its pid reaches the tree only through `erx_fs`'s checks. Any other
-message is dropped, and a request the core does not know answers `einval`.
-
-A walk holds the node it finds for the grant that asked, the caller of
-`walk/3`, until that grant's `forget/2` of it, which is the one request sent
-without waiting for a reply: messages from one process arrive in the order
-sent, so a forget never overtakes a later walk from the same grant. The tree
-process monitors each grant that walked, and its end lets go of every node
-it held, so a grant that crashes leaks nothing.
-If the tree process ends anyway, every caller waiting on it ends with it,
-and `erx_ramfs_sup` restarts `/tmp` whole.
+A walk adds the node it finds to the tree's walked set, and the grant's
+`forget/2` takes it out once none of its fids names the node. The tree has
+one grant, so a hold names no holder, and the grant's end ends the tree with
+every hold it took; `erx_ramfs_sup` restarts `/tmp` whole.
 """.
 
 -behaviour(erx_fs).
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/2, serve/1]).
 -export([init/1, root/1, walk/3, forget/2, getattr/2, open/3, read/4, readdir/4,
          readlink/2, statfs/1, clunk/2, write/4, make/4,
          setattr/3, unlink/4, rename/5, fsync/2]).
+-export([overhead_ratio/0]).
 
-%% The tree's name: its root answers it, its grant's handle carries it, attach's Aname names it.
+%% The tree's name: its root answers it, attach's Aname names it.
 -define(TREE, <<"tmp">>).
 %% What getattr answers: every basic field, and the data version.
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK
@@ -51,191 +41,128 @@ and `erx_ramfs_sup` restarts `/tmp` whole.
                         bor ?ERX_P9_GETATTR_MASK_BLOCKS
                         bor ?ERX_P9_GETATTR_MASK_DATA_VERSION)).
 -define(NS, 1000000000).
+%% ERTS's memory per charged byte beyond the charge, `o` of "The grant's heap
+%% bound" (docs/design-tmp.md): set above the worst ratio a tree of empty files
+%% reaches, whose node, map entries and listing entry cost about as much as
+%% their fixed charges.
+-define(OVERHEAD_RATIO, 1).
 
 %% ---------------------------------------------------------------------------
-%% The tree process
+%% The tree in the grant
 %% ---------------------------------------------------------------------------
 
--doc """
-Starts the tree process with an empty tree under a cap of `Cap` bytes of
-charges, registered as `Name`, under which it publishes its handle for the
-grant; a cap of 0 makes a `/tmp` that refuses every creation with `enospc`.
-""".
--spec start_link(non_neg_integer(), atom()) -> {ok, pid()} | {error, term()}.
-start_link(Cap, Name) when is_integer(Cap), Cap >= 0, is_atom(Name) ->
-    proc_lib:start_link(?MODULE, serve, [{start, self(), Cap, Name}]).
+-doc "`o` of the grant's heap bound: ERTS's memory per charged byte beyond the charge.".
+-spec overhead_ratio() -> pos_integer().
+overhead_ratio() ->
+    ?OVERHEAD_RATIO.
 
+%% An empty tree under a cap of Cap bytes of charges, which only this grant
+%% holds; a cap of 0 makes a `/tmp` that refuses every creation with enospc.
+%% An exhausted version counter fails the grant's start.
 -doc false.
--spec serve({start, pid(), non_neg_integer(), atom()}
-            | {reference(), erx_ramfs_core:ino(), erx_ramfs_core:tree(),
-               #{pid() => reference()}}) -> no_return().
-serve({start, Parent, Cap, Name}) ->
-    %% A crash report shows no queued request, whose data is the domain's files.
-    _ = process_flag(sensitive, true),
-    true = register(Name, self()),
-    Secret = make_ref(),
-    case erx_fs_version:draw() of
-        {ok, Stamp} ->
-            Tree = erx_ramfs_core:new(Cap, Stamp, time_ns()),
-            persistent_term:put({?MODULE, Name}, {self(), Secret}),
-            proc_lib:init_ack(Parent, {ok, self()}),
-            ?MODULE:serve({Secret, Stamp, Tree, #{}});
-        {error, _} = Error ->
-            proc_lib:init_fail(Parent, Error, {exit, normal})
-    end;
-%% Each request is handled whole, and the next awaited through a remote call,
-%% so the tree process moves to new code between requests. Holders maps each
-%% grant that walked to the monitor whose DOWN ends its holds.
-serve({Secret, Root, Tree, Holders}) ->
-    receive
-        {?MODULE, Secret, Alias, Request} when is_reference(Alias), node(Alias) =:= node() ->
-            {Reply, Tree1} = step(Request, Root, Tree),
-            erlang:send(Alias, {?MODULE, Alias, Reply}),
-            ?MODULE:serve({Secret, Root, Tree1, watched(Request, Holders)});
-        {?MODULE, Secret, forget, Ino, Holder} ->
-            {ok, Tree1} = step({forget, Ino, Holder}, Root, Tree),
-            ?MODULE:serve({Secret, Root, Tree1, Holders});
-        {'DOWN', Ref, process, Holder, _} when map_get(Holder, Holders) =:= Ref ->
-            {ok, Tree1} = step({forget_holder, Holder}, Root, Tree),
-            ?MODULE:serve({Secret, Root, Tree1, maps:remove(Holder, Holders)});
-        _ ->
-            ?MODULE:serve({Secret, Root, Tree, Holders})
-    end.
+init(Cap) when is_integer(Cap), Cap >= 0 ->
+    {ok, Stamp} = erx_fs_version:draw(),
+    {own, erx_ramfs_core:new(Cap, Stamp, time_ns())}.
 
-%% A grant is monitored from its first walk until its end.
-watched({walk, _, _, Holder}, Holders) when is_pid(Holder), not is_map_key(Holder, Holders) ->
-    Holders#{Holder => erlang:monitor(process, Holder)};
-watched(_Request, Holders) ->
-    Holders.
-
-%% A walk holds for the grant that sent it, which the tree process monitors.
-step({walk, _, _, Holder}, _Root, Tree) when not is_pid(Holder) ->
-    {{error, einval}, Tree};
-%% The root is the tree process's own: the core names it by the first stamp.
-step(root, Root, Tree) ->
-    {{ok, Root}, Tree};
-%% A release makes and changes nothing that takes a version, so it draws no
-%% stamp and cannot fail.
-step({forget, _, _} = Request, Root, Tree) ->
-    erx_ramfs_core:step(Request, Root, time_ns(), Tree);
-step({forget_holder, _} = Request, Root, Tree) ->
-    erx_ramfs_core:step(Request, Root, time_ns(), Tree);
-step(Request, _Root, Tree) ->
+%% One request as one step of the core. A release, a forget or a clunk, makes
+%% and changes nothing that takes a version, so it draws no stamp and cannot fail.
+step({Release, _} = Request, Tree) when Release =:= forget; Release =:= clunk ->
+    erx_ramfs_core:step(Request, 1, time_ns(), Tree);
+step(Request, Tree) ->
     case erx_fs_version:draw() of
         {ok, Stamp} -> erx_ramfs_core:step(Request, Stamp, time_ns(), Tree);
         {error, eio} -> {{error, eio}, Tree}
     end.
 
+%% A step's reply turned into the protocol's terms by Map when it succeeded.
+step(Request, Tree, Map) ->
+    case step(Request, Tree) of
+        {{ok, _} = Ok, Tree1} -> {Map(Ok), Tree1};
+        {{ok, _, _} = Ok, Tree1} -> {Map(Ok), Tree1};
+        {{ok, _, _, _} = Ok, Tree1} -> {Map(Ok), Tree1};
+        Refused -> Refused
+    end.
+
 time_ns() ->
     os:system_time(nanosecond).
-
-%% One request to the tree process, from a grant. The alias ends
-%% with the reply, and the monitor turns the tree's end into the caller's.
-call({Pid, Secret}, Request) ->
-    Alias = erlang:monitor(process, Pid, [{alias, reply_demonitor}]),
-    erlang:send(Pid, {?MODULE, Secret, Alias, Request}),
-    receive
-        {?MODULE, Alias, Reply} -> Reply;
-        {'DOWN', Alias, process, _, Reason} -> exit({erx_ramfs, Reason})
-    end.
 
 %% ---------------------------------------------------------------------------
 %% erx_fs's callbacks: the protocol's terms into the core's and back
 %% ---------------------------------------------------------------------------
 
-%% The handle of the tree process the supervisor started just before the
-%% grant: a restart starts the tree first, so no earlier instance's is found.
 -doc false.
-init(Name) when is_atom(Name) ->
-    {Pid, Secret} = persistent_term:get({?MODULE, Name}),
-    true = Pid =:= whereis(Name),
-    {ok, {Pid, Secret}}.
+root(Tree) ->
+    Root = erx_ramfs_core:root(Tree),
+    step({getattr, Root}, Tree, fun({ok, Attr}) -> {ok, ?TREE, Root, attr_qid(Attr)} end).
 
 -doc false.
-root(Server) ->
-    {ok, Root} = call(Server, root),
-    {ok, Attr} = call(Server, {getattr, Root}),
-    {ok, ?TREE, Root, attr_qid(Attr)}.
+walk(Dir, Name, Tree) ->
+    step({walk, Dir, Name}, Tree, fun({ok, Ino, Qid}) -> {ok, Ino, qid(Qid)} end).
 
 -doc false.
-walk(Dir, Name, Server) ->
-    case call(Server, {walk, Dir, Name, self()}) of
-        {ok, Ino, Qid} -> {ok, Ino, qid(Qid)};
-        Error -> Error
-    end.
+forget(Ino, Tree) ->
+    step({forget, Ino}, Tree).
 
 -doc false.
-forget(Ino, {Pid, Secret}) ->
-    erlang:send(Pid, {?MODULE, Secret, forget, Ino, self()}),
-    ok.
+getattr(Ino, Tree) ->
+    step({getattr, Ino}, Tree, fun({ok, Attr}) -> {ok, attr(Attr)} end).
 
 -doc false.
-getattr(Ino, Server) ->
-    case call(Server, {getattr, Ino}) of
-        {ok, Attr} -> {ok, attr(Attr)};
-        Error -> Error
-    end.
+open(Ino, Flags, Tree) ->
+    step({open, Ino, open_flags(Flags)}, Tree).
 
 -doc false.
-open(Ino, Flags, Server) ->
-    call(Server, {open, Ino, open_flags(Flags)}).
+read(Handle, Offset, Count, Tree) ->
+    step({read, Handle, Offset, Count}, Tree).
 
 -doc false.
-read(Handle, Offset, Count, Server) ->
-    call(Server, {read, Handle, Offset, Count}).
+readdir(Handle, Offset, Max, Tree) ->
+    step({readdir, Handle, Offset, Max}, Tree,
+         fun({ok, Entries}) ->
+                 {ok, [{qid(Qid), Seq, dirent_type(Kind), Name}
+                       || {{Kind, _, _} = Qid, Seq, Name} <- Entries]}
+         end).
 
 -doc false.
-readdir(Handle, Offset, Max, Server) ->
-    case call(Server, {readdir, Handle, Offset, Max}) of
-        {ok, Entries} ->
-            {ok, [{qid(Qid), Seq, dirent_type(Kind), Name}
-                  || {{Kind, _, _} = Qid, Seq, Name} <- Entries]};
-        Error ->
-            Error
-    end.
+readlink(Ino, Tree) ->
+    step({readlink, Ino}, Tree).
 
 -doc false.
-readlink(Ino, Server) ->
-    call(Server, {readlink, Ino}).
+statfs(Tree) ->
+    step(statfs, Tree, fun({ok, Statfs}) -> {ok, Statfs#{type => ?ERX_P9_MAGIC_TMPFS, fsid => 0}} end).
+
+%% The core's clunk always succeeds; the fid ends either way.
+-doc false.
+clunk(Handle, Tree) ->
+    {_, Tree1} = step({clunk, Handle}, Tree),
+    {ok, Tree1}.
 
 -doc false.
-statfs(Server) ->
-    {ok, Statfs} = call(Server, statfs),
-    {ok, Statfs#{type => ?ERX_P9_MAGIC_TMPFS, fsid => 0}}.
+write(Handle, Offset, Data, Tree) ->
+    step({write, Handle, Offset, Data}, Tree).
 
 -doc false.
-clunk(Handle, Server) ->
-    _ = call(Server, {clunk, Handle}),
-    ok.
-
-
--doc false.
-write(Handle, Offset, Data, Server) ->
-    call(Server, {write, Handle, Offset, Data}).
+make(Dir, Name, What, Tree) ->
+    step({make, Dir, Name, what(What)}, Tree,
+         fun({ok, Ino, Qid, Handle}) -> {ok, Ino, qid(Qid), Handle};
+            ({ok, Ino, Qid}) -> {ok, Ino, qid(Qid)}
+         end).
 
 -doc false.
-make(Dir, Name, What, Server) ->
-    case call(Server, {make, Dir, Name, what(What)}) of
-        {ok, Ino, Qid, Handle} -> {ok, Ino, qid(Qid), Handle};
-        {ok, Ino, Qid} -> {ok, Ino, qid(Qid)};
-        Error -> Error
-    end.
+setattr(Target, Attr, Tree) ->
+    step({setattr, Target, changes(Attr)}, Tree).
 
 -doc false.
-setattr(Target, Attr, Server) ->
-    call(Server, {setattr, Target, changes(Attr)}).
+unlink(Dir, Name, Kind, Tree) ->
+    step({unlink, Dir, Name, Kind}, Tree).
 
 -doc false.
-unlink(Dir, Name, Kind, Server) ->
-    call(Server, {unlink, Dir, Name, Kind}).
+rename(Dir, Name, NewDir, NewName, Tree) ->
+    step({rename, Dir, Name, NewDir, NewName}, Tree).
 
 -doc false.
-rename(Dir, Name, NewDir, NewName, Server) ->
-    call(Server, {rename, Dir, Name, NewDir, NewName}).
-
--doc false.
-fsync(Handle, Server) ->
-    call(Server, {fsync, Handle}).
+fsync(Handle, Tree) ->
+    step({fsync, Handle}, Tree).
 
 %% ---------------------------------------------------------------------------
 %% The mapping
