@@ -2436,6 +2436,11 @@ is the facet's exit, which the registry sees as `noconnection` or a
 a process can use, since a dead pid names nothing (D1). Configured domains
 take their baseline grants from the manifest, and `grant/4` refuses them
 rather than imply that a runtime assignment edits that configuration.
+A facet of interface `svc`, a service tree, is never passed on:
+`grant/4`, and a create spec's `facets`, refuse one with `einval`, since
+every domain that may hold a service tree is granted it by the domain
+service itself and no other may hold one
+([design-app-trees.md](design-app-trees.md#granting), AT8).
 Programs receive their names through their session's startup message
 ([design-programs.md](design-programs.md#the-channel)).
 
@@ -2534,16 +2539,13 @@ whole. Its **lines** are the services `abi/services` declares
 `served_by session`, `web_line` and `tty_line`, which every session
 provides and the domain service mints only when the system domain names
 their grantee ([A session's lines](#a-sessions-lines)). `svc` is its
-app's own tree ([design-app-trees.md](design-app-trees.md#providing)):
-its principal NAME has a start row and its template declares `serves
-svc`; NAME's provider is
-its newest live session that provides `svc`, and a report from an older
-one provides nothing. The name the grant is installed under is
-`{svc, NAME}`, from the session's principal, never from the report. No
-manifest row grants `svc`: the domain service grants it by its own
-policy, as it grants `code_objects`, to every live session whose
-template holds the start service's tree, `start`, with rights `rw`, and
-to no other grantee, the system domain included.
+app's own tree, which no manifest row grants: which session provides it,
+under which name, to which grantees and with which rights are
+[design-app-trees.md](design-app-trees.md)'s alone
+([Providing](design-app-trees.md#providing),
+[The grant](design-app-trees.md#the-grant),
+[Granting](design-app-trees.md#granting)), and each of its grants is a
+record of this section ("One operation per grant").
 
 **A drive window as a grant.** Each window row of the `drive` role is a
 grant of its own, which no service or facet row declares
@@ -2607,13 +2609,14 @@ The record moves on these events, and on nothing else:
 
 * **a session's ready report**, which adds a record for each of its
   template's grants, keyed by the session's id, so two sessions of a
-  template never share one, and, for a template that holds `start`, a
-  record `{svc, NAME}` for each name with a provider; or **the session's
-  end**, which cancels their operations and deletes them.
-* **a provider's ready report** of `svc`, which adds a record
-  `{svc, NAME}` for each live session whose template holds `start`, or
-  **its end**, after which those records have no pair until NAME's next
-  session provides, and leave their state as below. A session is never restarted, so only its
+  template never share one, and the records of the app trees it is
+  granted ([design-app-trees.md](design-app-trees.md#granting)); or
+  **the session's end**, which cancels their operations and deletes them.
+* **a provider's ready report** of `svc`, which adds the records of its
+  tree's grantees, or **its end**, after which those records have no
+  pair until the name's next provider
+  ([design-app-trees.md](design-app-trees.md#granting)), and leave their
+  state as below. A session is never restarted, so only its
   server's restart makes its grants anew; a failed one stays failed for
   the session's life.
 * **a ready report** of a configured domain, with its accepted providers,

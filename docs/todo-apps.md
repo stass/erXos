@@ -8,23 +8,25 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] apps, service trees at `/svc` ([design-app-trees.md](design-app-trees.md#order-of-work)): every
   service's control tree is at `/svc/NAME`, and the code still mounts the start table's at `/etc/start`, the
   machine's at `/machine` and the controller's line at `/line` (`erx_ns:place/1`), and reports the start table
-  at `/proc/apps`. In the design's order of work: `abi/services/svc.txt` (the interface, `svc_rights`, the
-  limits) and the `links none` row word on `svc` and `media`, with `erx_facets:table/1` marking from the word;
-  the `start` and `machine` service rows as `interface svc`, and the manifest check refusing an `svc` service
-  named like another or like a principal and a facet row granting one to the system domain; the `/svc` entry
-  in every domain, `{facets, svc}` selecting by interface, `place/1` without `start` and `machine`, and
-  `mount_own/2` placing an `svc` service at `/svc/NAME`; `erx_svc_client` with `read/3`, `command/3`, `open/2`
-  and the chokepoint check that only it names `/svc`; `reboot` and `halt` writing `/svc/machine/ctl`, and
-  `service` writing `/svc/start/ctl`, without its blanket `-erx_needs([start])`, resolving system names first,
-  refusing run verbs for system and domain names, and offering `-l` with each name's kind; the inspection
-  path `[apps]` renamed `[svc]` in `abi/inspection.txt` and every reader (`service`, the find-and-act palette,
-  the tests); `erx_domain:grant/4` keeping an `svc` facet's name; the guide, README and `docs/plan.md`'s
-  paths in the same branches. The controller's line moves to `/dev/line` when the Bluetooth code is next
-  touched, and the Bluetooth design's open decision 1 settles on `/svc/bluetooth` with `interface svc`.
+  at `/proc/apps`. In the design's order of work, each path moving in the same step as its readers and writers:
+  `abi/services/svc.txt` (the interface, `svc_rights`, the limits) and the `links none` row word on `svc` and
+  `media`, with `erx_facets:table/1` marking from the word; the `start` and `machine` service rows as
+  `interface svc`, and the manifest check refusing an `svc` service named like another or like a principal and
+  a facet row granting one to the system domain; `erx_svc_client` with `read/4`, `command/3`, `open/3`, taking a
+  service name and a file of its tree, and the chokepoint check that only it names `/svc`; then in one step the
+  `/svc` entry in every domain, `{facets, svc}` selecting by interface, `place/1` without `start` and
+  `machine`, `mount_own/2` placing an `svc` service at `/svc/NAME` with its name kept as the entry's provider,
+  and `reboot`, `halt` and `service` writing through the client, with the guide and README; then in one step
+  the inspection path `[apps]` renamed `[svc]` in `abi/inspection.txt` with every reader (`service`, the
+  find-and-act palette, the tests); `service` without its blanket `-erx_needs([start])`, resolving system
+  names first, its own mounts included, refusing run verbs for system and domain names, taking `purge` as its
+  own verb, and offering `-l` with each name's kind; `erx_domain:grant/4` and a create spec refusing an `svc`
+  facet; `docs/plan.md`'s paths in the same branches. The controller's line moves to `/dev/line` when the
+  Bluetooth code is next touched; the Bluetooth design places its control tree at `/svc/bluetooth` with
+  `interface svc` on branch ble-api, which lands after this design.
 * [Medium] apps, an app's own tree ([design-app-trees.md](design-app-trees.md)): build `/svc/NAME` for apps, on the item above:
   `erx_svc` (the SDK's tree server and mint, started before a session's ready report when its template or
-  package declares `serves svc`), `erx_svc_status` (format and parser, with its fuzz target) and
-  `erx_svc_client` (reads and commands at `svc_wait_max`, with the chokepoint source check); the `serves` field
+  package declares `serves svc`) and `erx_svc_status` (format and parser, with its fuzz target); the `serves` field
   in `abi/manifest.txt`'s session template and `abi/formats/package.txt`'s declaration, and admission
   carrying the declaration's `serves` in `erx_app_admit`'s `Admitted` to the registry entry, for the
   session's plan ([design-packaging.md](design-packaging.md#admission)); the provide check

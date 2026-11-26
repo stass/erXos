@@ -688,6 +688,9 @@ appears: the manifest's facet rows grant a system service's tree, and
 the domain service grants an app's to each session whose template holds
 the `start` facet
 ([design-app-trees.md, The construction](../design-app-trees.md#overview)).
+A holder cannot pass a tree on to another domain, so those grants are
+all its holders
+([design-app-trees.md, Granting](../design-app-trees.md#granting)).
 So one question finds a `ctl`: a device's is under `/dev`, any other
 service's under `/svc/NAME`. No link in a tree of the `svc` interface is
 followed, so a tree cannot point a reader at another's. When ntpd's

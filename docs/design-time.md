@@ -1284,7 +1284,7 @@ The arguments choose the source of a step, and nothing else does
 
   `peers` writes one line for each address in use, the current one
   marked `current`, then one for each denied address, marked `denied`.
-  The command reads the file through `erx_svc_client:read/3` at `svc_wait_max`, writes
+  The command reads the file through `erx_svc_client:read/4` at `svc_wait_max`, writes
   `ntpctl: ntpd is not running`, status 1, when no session of ntpd's
   row serves it, kept or started by `onestart`, and parses it with
   `erx_svc_status:parse/1`
