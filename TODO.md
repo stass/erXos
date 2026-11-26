@@ -81,7 +81,7 @@ goes to the document of the subsystem its component pointer names.
 * [Network](docs/todo-network.md#bugs-by-subsystem): the network stack (`erx_net`), WiFi and HTTPS clients.
   63 items (2 High, 28 Medium, 33 Low).
 * [USB](docs/todo-usb.md#bugs-by-subsystem): the USB stack and its class drivers.
-  26 items (16 Medium, 10 Low).
+  27 items (17 Medium, 10 Low).
 * [Bluetooth](docs/todo-bluetooth.md#bugs-by-subsystem): the Bluetooth host and controller, GATT and the security manager.
   5 items (1 Medium, 4 Low).
 * [Drivers and platforms](docs/todo-drivers.md#bugs-by-subsystem): drivers and the device layer: PCIe, DMA, the device tree, GENET, SD, UART, the platforms and boards.

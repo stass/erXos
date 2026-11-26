@@ -5,6 +5,16 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] USB, `erlang/apps/erx_usb/src/erx_usb_bot_core.erl`: on a Pi 4 an 8 GB FAT32 stick held a
+  removal about 90 s before the engine logged `medium LUN 0 ended: device` (board time 150.6 s), five
+  times `usb_bot_issue_deadline_ms` (18 s), and the reset recovery that followed timed out in
+  `reset_pipe` 31 s later. The FAT server issued only a handful of sectors for that removal (a host
+  replay counts 4 reads and 3 writes), so the stick stopped answering. Which wait outlived the
+  deadline is unverified: the core checks the deadline on a tick only while a bulk transfer is
+  posted, and otherwise only once the function's own calls (control transfers, `reset_pipe`, each
+  bounded by the controller) return. Settled by a board run with the volume's failure log
+  (`erx_media: volume sN ended: its commit failed: ...`) and the BOT engine's step trace; the fix
+  is a deadline that holds across recovery, not a longer one.
 * [Low] USB, `erlang/apps/erx_usb/src/erx_usb_bot.erl`: a medium whose function ends (a stick unplugged, a crash)
   logs `ready` and never `ended`: the function logs only the ends it sees itself (its transport's and the
   engine's `medium_ended`). Log it where the function ends, probably in the bus.
