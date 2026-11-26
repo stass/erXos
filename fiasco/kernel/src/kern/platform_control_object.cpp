@@ -34,6 +34,8 @@ protected:
 IMPLEMENTATION:
 
 #include "erx_trace.h"
+#include "globals.h"
+#include "task.h"
 
 JDB_DEFINE_TYPENAME(Platform_control_object, "Icu/Pfc");
 
@@ -102,6 +104,25 @@ Platform_control_object::sys_system_shutdown(L4_fpage::Rights, Syscall_frame *f,
   return commit_result(-L4_err::ENosys);
 }
 
+/*
+ * erXos: map_trace, which maps the kernel's trace rings read-only into the
+ * caller (docs/design-fiasco.md, "The kernel's trace rings"). Decodes the
+ * message here, in Fiasco's own types, and hands Erx_trace plain values.
+ */
+PRIVATE inline
+L4_msg_tag
+Platform_control_object::sys_erx_map_trace(Syscall_frame *f, Utcb const *msg)
+{
+  unsigned const words = f->tag().words();
+  L4_fpage window(words >= 2 ? msg->values[1] : 0);
+  bool const mempage = words >= 2 && window.is_valid() && window.is_mempage();
+
+  return commit_result(Erx_trace::map_trace(
+    static_cast<Task *>(current()->space()), words, mempage,
+    mempage ? cxx::int_value<Virt_addr>(window.mem_address()) : 0,
+    mempage ? window.order() : 0));
+}
+
 PUBLIC inline
 L4_msg_tag
 Platform_control_object::kinvoke(L4_obj_ref ref, L4_fpage::Rights rights,
@@ -121,7 +142,7 @@ Platform_control_object::kinvoke(L4_obj_ref ref, L4_fpage::Rights rights,
     case Op::Suspend_system:     return sys_system_suspend(rights, f, r_msg);
     case Op::Shutdown_system:    return sys_system_shutdown(rights, f, r_msg);
     case Op::Allow_cpu_shutdown: return sys_cpu_allow_shutdown(rights, f, r_msg);
-    case Op::Erx_map_trace:      return Erx_trace::map_trace(f, r_msg);
+    case Op::Erx_map_trace:      return sys_erx_map_trace(f, r_msg);
     default:                     return invoke_arch(rights, f, r_msg, s_msg);
     }
 }

@@ -98,6 +98,8 @@ module Erx
         liberx/backend/fiasco/trace.c
         liberx/backend/fiasco/trace.h
         liberx/backend/fiasco/trace_stub.c
+        liberx/backend/fiasco/trace_window.c
+        liberx/backend/fiasco/trace_window.h
         liberx/backend/hosted/trace.c
         liberx/backend/fiasco/libc_root.c
         liberx/backend/fiasco/libc_start.c
@@ -242,6 +244,7 @@ module Erx
           # musl's seam is this backend's first client, until a neutral liberx header stands in front of it.
           sites: [Chokepoints::Site.new(glob: 'musl/src/internal/erxos/syscall.c'),
                   Chokepoints::Site.new(glob: 'musl/src/thread/erxos/clone.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/trace_window_driver.c'),
                   Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/function_api/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/function_api/device_cases.c'),

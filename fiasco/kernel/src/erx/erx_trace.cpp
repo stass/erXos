@@ -11,12 +11,10 @@
 // erx/core/trace_kernel.h.
 INTERFACE:
 
-#include "l4_types.h"
 #include "types.h"
 
 class Context;
-class Syscall_frame;
-class Utcb;
+class Task;
 
 class Erx_trace
 {
@@ -32,13 +30,9 @@ IMPLEMENTATION:
 #include "cpu_lock.h"
 #include "generic_timer.h"
 #include "globals.h"
-#include "kobject_iface.h"
-#include "l4_error.h"
-#include "l4_fpage.h"
 #include "lock_guard.h"
 #include "mem_space.h"
 #include "platform_control_object.h"
-#include "syscalls.h"
 #include "task.h"
 #include "thread.h"
 
@@ -109,55 +103,44 @@ Erx_trace::switch_to(Context const *next)
 
 // map_trace on the platform control object (docs/design-fiasco.md, "The
 // kernel's trace rings", "The root's window"): maps the rings' pages read-only
-// at the base of the window, a flexpage of the caller's own space, once in a
-// boot. Holding the platform control object is the authority, and only the
-// root holds it. erx_fiasco_trace_window decides; this maps. Answers the
-// number of rings mapped, or -L4_EINVAL for a malformed call or window and
-// -L4_EEXIST once the rings are mapped.
+// at the window's base in caller's own space, once in a boot. The platform
+// control object decodes the message (Platform_control_object::kinvoke):
+// words is its word count, and mempage, base and order its flexpage. Holding
+// that object is the authority, and only the root holds it.
+// erx_fiasco_trace_window decides; this maps. Answers the number of rings
+// mapped, or Fiasco's negative error: -L4_EINVAL for a malformed call or
+// window, -L4_EEXIST once the rings are mapped, or the map's own failure.
 PUBLIC static
-L4_msg_tag
-Erx_trace::map_trace(Syscall_frame *f, Utcb const *msg)
+long
+Erx_trace::map_trace(Task *caller, unsigned words, bool mempage, Address base,
+                     unsigned order)
 {
   size_t bytes = 0;
   void *rings = const_cast<void *>(erx_trace_kernel_pages(&bytes));
-  Task *caller = static_cast<Task *>(current()->space());
-  bool const claimed = erx_trace_kernel_window_claim();
   erx_trace_window_call_t call{};
-
-  call.words = f->tag().words();
-  call.mapped = !claimed;
-  if (call.words == ERX_FIASCO_PFC_MAP_TRACE_WORDS)
-    {
-      L4_fpage window(msg->values[1]);
-      call.mempage = window.is_valid() && window.is_mempage();
-      call.base = cxx::int_value<Virt_addr>(window.mem_address());
-      call.order = window.order();
-    }
-
   erx_trace_window_limits_t limits{};
+
+  call.words = words;
+  call.mempage = mempage;
+  call.base = base;
+  call.order = order;
+  call.mapped = !erx_trace_kernel_window_claim();
   limits.user_last = Mem_space::max_usable_user_address();
   limits.page_order = Config::PAGE_SHIFT;
   limits.rings_bytes = bytes;
 
   erx_trace_window_t const decided = erx_fiasco_trace_window(&call, &limits);
-  int result;
-  switch (decided.verdict)
-    {
-    case ERX_TRACE_WINDOW_MAP:
-      result = caller->erx_map_kernel_ro(static_cast<Address>(decided.base), rings,
-                                         static_cast<size_t>(decided.bytes));
-      break;
-    case ERX_TRACE_WINDOW_MAPPED:
-      return Kobject_iface::commit_result(-L4_err::EExists);
-    default:
-      result = -L4_err::EInval;
-      break;
-    }
+  if (decided.verdict == ERX_TRACE_WINDOW_MAPPED)
+    return -L4_err::EExists;
 
-  if (result < 0)
+  int const mapped = decided.verdict == ERX_TRACE_WINDOW_MAP
+    ? caller->erx_map_kernel_ro(static_cast<Address>(decided.base), rings,
+                                static_cast<size_t>(decided.bytes))
+    : -L4_err::EInval;
+  if (mapped < 0)
     {
       erx_trace_kernel_window_release();
-      return Kobject_iface::commit_result(result);
+      return mapped;
     }
-  return Kobject_iface::commit_result(ERX_TRACE_KERNEL_RINGS);
+  return ERX_TRACE_KERNEL_RINGS;
 }
