@@ -233,12 +233,11 @@ The order reaches a usable system first:
   host-first packages run beside everything, since they need no guest.
 * 0.1, the preview, is Phase 1b's first published result: a
   development build whose closure is distributable, with the clean-room
-  header brought forward from 0.2 and the kernel debugger kept, its
-  source offered ([0.1](#01-the-preview)). The work is ordered towards
+  header brought forward from 0.2 ([0.1](#01-the-preview)). The work is ordered towards
   0.2.
 * 0.2 ships that system as erXos's first full release on Fiasco: the backend
   moves onto Fiasco's own capabilities, factories, interrupts and DMA
-  spaces, the release build drops the debugger and the GPL files, and
+  spaces, the release build drops the GPL files, and
   the security closure is reached in its Fiasco form. It also takes,
   in their Fiasco form, the user-facing milestones that would otherwise
   wait for erXos's kernel: M9's devices, the rest of track P, M10, M12

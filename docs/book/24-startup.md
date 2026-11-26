@@ -247,9 +247,10 @@ A kernel panic stops every CPU, prints a crash record and resets the
 machine through PSCI; in a development boot that asked for it, the
 stopped kernel first holds, so that the host's debugger can read its
 memory ([chapter 21](21-live-machine.md#2154-reading-a-stopped-machine)).
-That stop is **Designed**. As built, no kernel carries JDB, Fiasco's kernel
-debugger: a panic takes Fiasco's own panic path, the one a release kernel
-uses.
+That stop is **Built** in part, without the hold: every kernel, development
+or release, stops its CPUs, prints the reason and the crash record, and
+resets. No kernel carries JDB, Fiasco's kernel debugger, in which a panic
+would wait for the operator.
 
 ### 24.2.2 The root task's first steps
 

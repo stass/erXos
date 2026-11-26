@@ -94,19 +94,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   [vCPU upcalls on Fiasco](design-fiasco.md#vcpu-upcalls-on-fiasco) states, for Track P
   ([plan.md](plan.md)).
 * [High] 0.2 on Fiasco, the kernel debugger's replacement ([design-debugger.md](design-debugger.md)): the fork
-  has no JDB, no console input and no `jdb_object.cpp` (GPL-2.0-only), so a fatal kernel error has no stop
-  yet, and the design documents describe the fork with it. To land, in parts that each stand alone:
-  1. the stop: the glue `fiasco/kernel/src/erx/erx_machine_stop.cpp`, the routes from `panic`, `assert_fail`,
-     `kdb_ke` and the four trap reports, the park in the debug inter-processor interrupt's handler, the check in
-     the spinlock's wait, the admission at the end of a secondary CPU's start, the bounded take of the printf
-     lock, and the `native_machine_stop` cells (the core, its exhaustive host test, the anchor and stop slot
-     layouts of `abi/kernel.txt` in its seam, the crash record's CPU entries and the litmus tests of the
-     admission and the slot are in the tree, and no build has `CONFIG_JDB` or `CONFIG_INPUT`); every
-     development boot is one of a kernel without the object, and a boot checks that `sigma0` ignores its
+  has no JDB, no console input and no `jdb_object.cpp` (GPL-2.0-only); a panic, a failed assertion and
+  `kdb_ke` stop every CPU, print the report and the crash record and reset, and the rest of the stop is   1. the rest of the stop (the glue `fiasco/kernel/src/erx/erx_machine_stop.cpp`, its routes from `panic`,
+     `assert_fail` and `kdb_ke`, the park in the debug inter-processor interrupt's handler, the admission, the
+     census and the report are in the tree, checked by the `native_machine_stop` cell): the route from a kernel
+     trap and the three trap reports that panic, the check in the spinlock's wait, the bounded take of the
+     printf lock held to the machine's end, the platform control object's shutdown that names the root's
+     cause, and panic stacks shaped as Fiasco's `Context`, so a lookup of the current thread through the
+     stack pointer finds no thread instead of reading the stack's bytes as one; every development boot is one
+     of a kernel without the object, and a boot checks that `sigma0` ignores its object-naming calls failing
+     (P9);
+gnores its
      object-naming calls failing (P9);
   2. `tools/erx debug` over crash records and memory images, the debug bundle with its layout table and
      walkers, and the harness's image and report on a failing QEMU run;
-  3. the hold and `erx.hold=1`, in the kernel, with its readable-RAM map, the classification of Fiasco's memory
+  3. the hold and `erx.hold=1`, in the kernel, with the anchor's remaining fields and its crc, its readable-RAM map, the classification of Fiasco's memory
      descriptors and the `Modules.generic` line that keeps the UART's polling members for it, the root's watchdog
      arming and the card writer;
   4. stubs, recorded runs and a probe, each after the probe of design-debugger.md that it rests on (P1 to P5).

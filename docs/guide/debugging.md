@@ -132,14 +132,14 @@ uses it to compare transcripts. `tools/erx boot` has no flag for it.
 ## The kernel debugger
 
 No kernel is built with Fiasco's own debugger, JDB, or with the kernel's
-console input: the fork has neither. A kernel trap or panic prints the trap
-state and takes Fiasco's own panic path, as a release kernel's does
-([plan.md](../plan.md)).
+console input: the fork has neither, so a kernel trap or panic never waits
+at a prompt. A kernel panic stops every CPU, prints `erx: kernel stop:`
+with its reason, then the crash record that says where each CPU was, and
+resets the machine, on QEMU and on a Pi 4 alike
+([design-debugger.md](../design-debugger.md)). A kernel trap still prints
+Fiasco's own trap state and takes Fiasco's panic path.
 
-Designed, not built ([design-debugger.md](../design-debugger.md)): a kernel
-that fails stops every CPU, prints a crash
-record that says where each CPU was, and resets. `tools/erx debug` then
-reads what the machine left:
+Designed, not built: `tools/erx debug` reads what the machine left:
 
 * the crash record, from a console log;
 * a memory image, which the harness takes of every failing QEMU run and

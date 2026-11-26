@@ -84,13 +84,16 @@ the only check. No erXos code names the capability or its calls: not
 
 **Why JDB leaves.** A kernel built with JDB and the kernel's console
 input, as upstream's development configuration is, parks every CPU a
-fatal kernel error reaches and waits on the console: on QEMU until the harness's deadline,
-on a Raspberry Pi 4 until the watchdog resets the board. A release kernel
-is built without both and resets at a panic
-(`FiascoConfig::RELEASE_UNSET`, `tools/lib/erx/fiasco_config.rb`). An
-image so built, the website's first images among them, carries a prompt
-that reads and writes kernel memory for whoever is at its console after a
-panic, and a GPL file.
+fatal kernel error reaches and waits on the console: on QEMU until the
+harness's deadline, on a Raspberry Pi 4 until the watchdog resets the
+board. Such an image, the website's first images among them, carries a
+prompt that reads and writes kernel memory for whoever is at its console
+after a panic, and a GPL file. The fork carries neither: its import has no
+`src/jdb` and no `jdb_object.cpp`, and `FiascoConfig::FORBIDDEN`
+(`tools/lib/erx/fiasco_config.rb`) refuses `CONFIG_JDB` and
+`CONFIG_INPUT` in every build kind. Only L4Re's comparison kernel of the
+benchmark build keeps JDB, for its board run's reboot
+([design-bench.md](design-bench.md)).
 
 **What erXos's own kernel already decides.** It has no kernel debugger
 ([design-kernel.md](design-kernel.md#the-ledger)). Its panic claims one
@@ -441,7 +444,8 @@ its entry too:
 `erx_crash_cpu` in `abi/kernel.txt`, 56 bytes, in a fixed array of
 `crash_cpus` (16) entries after the backtrace. The header's count
 `ncpus`, in the four bytes of padding after `nframes`, is the number of
-CPUs the census covered, so a machine with more CPUs than entries says
+CPUs the census covered: CPU 0 up to the highest CPU the kernel has
+brought online or admitted, the leader included, so a machine with more CPUs than entries says
 how many its record leaves out. An entry holds the CPU's number, its
 stop state and, for a state that has registers, the program counter, the
 stack pointer, the frame pointer, the return address, the processor
@@ -1219,11 +1223,20 @@ The routes into the stop:
 
 `Thread::system_abort` and the exit question go, since nothing reaches
 them. The interrupted registers of a CPU that takes the stop request are
-the interrupt entry's saved frame, which the entry already passes in its
-first argument register (`kern/arm/64/ivt.S`) and which the glue keeps
-per CPU while an interrupt is dispatched. Each CPU's panic stack is one
-page the glue allocates for it, as the `debug` part allocated one for JDB
-(`Thread::dbg_stack`, `kern/thread.cpp`). A stop before the kernel knows
+the interrupt entry's saved frame, which Fiasco's `irq_handler` takes no arguments, so one call
+in the interrupt entry (`kern/arm/64/ivt.S`) hands the frame and the
+stack pointer the interrupt found to the glue before the dispatch, and a
+second clears them after it; the glue keeps them per CPU. Each CPU's
+panic stack is two pages the glue reserves for it, which hold the
+formatted message, the crash core's writer and the report's printer
+below the leader's own frames, until the kernel stack proof measures the
+stop's depth. Every line the stop prints takes the UART console's
+polled write past the ring console (`Erx_console_ring::write_uart`),
+without its lock, so a nested stop's line and an end before the ring's
+close reach the line. Where the interrupt controller takes the request as a write of a system
+register, which a memory barrier does not order, the leader completes
+its claim with the architecture's full barrier before the requests
+([design-arch-aarch64.md](design-arch-aarch64.md#stopping-every-cpu)). A stop before the kernel knows
 its reset, which it learns from the device tree and PSCI, ends in a loop
 with interrupts masked, as a panic there does
 ([design-fiasco.md](design-fiasco.md#boot-handoff)); it has printed its
@@ -1647,7 +1660,10 @@ this design establishes, with the probe that settles it.
   "The spin lock's event"). Probes: a litmus test of the store, the
   signal and the waiter's load, at the milestone gate, whose seeded fault
   is the store moved after the signal; the cell with a seeded lock wait,
-  repeated under HVF; and the same seed on the board.
+  repeated under HVF; and the same seed on the board. Until they settle
+  it, the Fiasco glue does not rest on one request: each millisecond of
+  the census it asks again every CPU that has not published, so a CPU
+  that took a request before it could see the store is asked once more.
 * P9. Whether `sigma0` ignores its object-naming calls failing on an
   empty slot 10. Probe: any full boot of a kernel without the object.
 * P10. Whether, on Fiasco, a stop request sent to a secondary CPU that is

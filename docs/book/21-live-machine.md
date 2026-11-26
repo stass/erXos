@@ -18,7 +18,7 @@
 > the host's tree mounted in the machine; the kernel's stop with every
 > CPU's state in the crash record, the hold, and `tools/erx debug` over
 > records, memory images, held boards, stubs and recorded runs, in place
-> of Fiasco's kernel debugger, which a development kernel still carries.
+> of Fiasco's kernel debugger, which no erXos kernel carries.
 
 **Background needed.** [Chapter 3](03-erlang.md), sections 3.6 and
 3.7: two versions of a module, and looking at a running node.
@@ -936,10 +936,12 @@ On a recorded run it runs the machine backwards to the write that gave
 an attribute its value, which is the question a corrupted counter poses:
 who wrote this, and when.
 
-The stop, the hold and the tool are **Designed**. The fork carries no
-kernel debugger: Fiasco's own, a prompt on the console in which a kernel
-panic waits, is left out of the import, and with it the one GPL file a
-kernel build would compile ([appendix D](d-dependencies.md)).
+The stop is **Built** in part: a fatal kernel error stops every CPU,
+prints its reason and the crash record, and resets. The hold and the tool
+are **Designed**. The fork carries no kernel debugger: Fiasco's own, a
+prompt on the console in which a kernel panic waits, is left out of the
+import, and with it the one GPL file a kernel build would compile
+([appendix D](d-dependencies.md)).
 
 ## 21.6 Attributed text
 

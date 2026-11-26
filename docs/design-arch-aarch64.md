@@ -517,7 +517,12 @@ zero otherwise. It stores the slot's state last, with `stlr`, sets every
 leader loads each slot's state with `ldar`. A litmus test of `make check-litmus`
 checks, under the architecture's memory model, that a reader never finds a
 published state beside registers written before it, and fails with the
-state stored by a plain `str`.
+state stored by a plain `str`. On GICv3 the leader sends the SGI by a write
+of `ICC_SGI1R_EL1`, which `dmb` does not order after its claim's store,
+so it executes `dsb ish` between the claim and the first request. The
+interrupted stack pointer of a CPU taken at EL0 is the live `SP_EL0`: an
+interrupt entry that does not save it, as Fiasco's does not, leaves its
+frame's copy stale.
 
 **The lock's wait.** The stop word is claimed by a compare-and-swap with
 acquire and release ordering, and the ticket lock's wait loop loads it on
