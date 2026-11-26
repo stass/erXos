@@ -71,4 +71,4 @@ until the next collection.
 -spec heap_words(non_neg_integer()) -> pos_integer().
 heap_words(Cap) when is_integer(Cap), Cap >= 0 ->
     TreeBytes = Cap * (1 + erx_ramfs:overhead_ratio()),
-    erx_fs:reserve_words(#{}) + ceil(2 * TreeBytes / erlang:system_info(wordsize)).
+    erx_fs:reserve_words(erx_ramfs, #{}) + ceil(2 * TreeBytes / erlang:system_info(wordsize)).

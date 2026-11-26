@@ -1301,22 +1301,21 @@ links(Ino, #node{links = Links, opens = Opens}, Names, _Root, _Nodes, Walked) ->
 check_walked(#tree{nodes = Nodes, walked = Walked}) ->
     [{walked_gone, Ino} || Ino <- sets:to_list(Walked), not is_map_key(Ino, Nodes)].
 
-%% Every named directory's parent chain reaches the root, in at most one
-%% step per node.
-check_parents(#tree{nodes = Nodes, root = Root} = Tree) ->
+%% Every named directory's parent chain reaches the root: each is reached from the
+%% root by following parents backwards, one step per directory, so a cycle or a
+%% parent outside the tree leaves a directory unreached.
+check_parents(#tree{nodes = Nodes, root = Root}) ->
+    Children = maps:groups_from_list(
+                 fun({_Ino, Parent}) -> Parent end, fun({Ino, _Parent}) -> Ino end,
+                 [{Ino, Parent} || {Ino, #node{data = {directory, Parent, _, _, _}}} <- maps:to_list(Nodes),
+                                   Parent =/= none, Ino =/= Root]),
+    Reached = descendants([Root], Children, #{Root => true}),
     [{detached, Ino} ||
         {Ino, #node{data = {directory, Parent, _, _, _}}} <- maps:to_list(Nodes),
-        Parent =/= none,
-        not reaches_root(Ino, Root, map_size(Nodes), Tree)].
+        Parent =/= none, not is_map_key(Ino, Reached)].
 
-reaches_root(Root, Root, _Fuel, _Tree) ->
-    true;
-reaches_root(_Ino, _Root, 0, _Tree) ->
-    false;
-reaches_root(Ino, Root, Fuel, #tree{nodes = Nodes} = Tree) ->
-    case Nodes of
-        #{Ino := #node{data = {directory, Parent, _, _, _}}} when Parent =/= none ->
-            reaches_root(Parent, Root, Fuel - 1, Tree);
-        #{} ->
-            false
-    end.
+descendants([], _Children, Reached) ->
+    Reached;
+descendants([Ino | Rest], Children, Reached) ->
+    New = [Child || Child <- maps:get(Ino, Children, []), not is_map_key(Child, Reached)],
+    descendants(New ++ Rest, Children, lists:foldl(fun(Child, R) -> R#{Child => true} end, Reached, New)).

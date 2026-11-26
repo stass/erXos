@@ -155,9 +155,9 @@ a_stopped_walk_keeps_nothing_test() ->
     ?assertEqual(Free, free(Grant)),
     stop(Grant).
 
-%% A fid at a directory that is removed: the directory finds no name, and ".." through
-%% the fid's chain returns to the parent, after which nothing keeps the directory.
-dotdot_after_rmdir_lets_the_directory_go_test() ->
+%% A fid at a directory that is removed: the directory finds no name, no walk goes
+%% up from it, and its clunk lets the directory go.
+a_removed_directorys_fid_keeps_it_until_its_clunk_test() ->
     Grant = start(),
     Free = free(Grant),
     {ok, _} = call(Grant, {mkdir, 1, <<"d">>, 8#755, 0}),
@@ -166,8 +166,9 @@ dotdot_after_rmdir_lets_the_directory_go_test() ->
     ?assertMatch({ok, #{nlink := 0}}, call(Grant, {getattr, 3, 16#7ff})),
     ?assertEqual({error, enoent}, call(Grant, {walk, 3, 4, [<<"x">>]})),
     ?assert(free(Grant) < Free),
-    {ok, [{16#80, _, _}]} = call(Grant, {walk, 3, 3, [<<"..">>]}),
-    ?assertMatch({ok, #{nlink := 2}}, call(Grant, {getattr, 3, 16#7ff})),
+    ?assertEqual({error, einval}, call(Grant, {walk, 3, 3, [<<"..">>]})),
+    ?assertMatch({ok, #{nlink := 0}}, call(Grant, {getattr, 3, 16#7ff})),
+    ok = call(Grant, {clunk, 3}),
     ?assertEqual(Free, free(Grant)),
     stop(Grant).
 
@@ -525,14 +526,32 @@ chain(Grant, Cursor, Depth, Made) ->
             Made
     end.
 
-%% Removes the chain of Depth directories below the directory fid Cursor names,
-%% the deepest first, leaving Cursor where the chain began.
-unchain(_Grant, _Cursor, 0) ->
-    ok;
-unchain(Grant, Cursor, Depth) ->
-    {ok, [_]} = call(Grant, {walk, Cursor, Cursor, [<<"..">>]}),
-    ok = call(Grant, {unlinkat, Cursor, <<"d">>, ?D_REMOVEDIR}),
-    unchain(Grant, Cursor, Depth - 1).
+%% A directory name of 255 bytes, distinct for each N.
+long_name(N) ->
+    Digits = integer_to_binary(N),
+    <<Digits/binary, (binary:copy(<<"x">>, 255 - byte_size(Digits)))/binary>>.
+
+%% Fills the pool with fids numbered from Fid, each walked from NOFID to the next of
+%% Names in turn, and answers the fids made; the walk past the last is emfile.
+walk_pool(Grant, Fid, Names) ->
+    Name = lists:nth(Fid rem length(Names) + 1, Names),
+    case call(Grant, {walk, ?NOFID, Fid, [Name]}) of
+        {ok, [_]} -> [Fid | walk_pool(Grant, Fid + 1, Names)];
+        {error, emfile} -> []
+    end.
+
+%% Fills the pool with fids numbered from Fid, each walked on its own from NOFID
+%% and then in place, 16 names at a time, Depth directories down the chain of
+%% "d"; answers the fids made.
+deep_pool(Grant, Fid, Depth) ->
+    [First | Rest] = [lists:duplicate(min(16, Depth - At), <<"d">>) || At <- lists:seq(0, Depth - 1, 16)],
+    case call(Grant, {walk, ?NOFID, Fid, First}) of
+        {ok, _} ->
+            [{ok, _} = call(Grant, {walk, Fid, Fid, Names}) || Names <- Rest],
+            [Fid | deep_pool(Grant, Fid + 1, Depth)];
+        {error, emfile} ->
+            []
+    end.
 
 %% Files of 4 KiB named by number in the root until the cap refuses one; answers
 %% how many were made.
@@ -627,38 +646,35 @@ the_supervisors_grant_hides_its_state_test() ->
 %% The pool a grant takes by default (erx_fs:start_link/4).
 erx_fs_grant_pool() -> 4096.
 
-%% docs/design-tmp.md, "The heap bound", at a tmp of 64 KiB, and the case its seeded
-%% fault, a bound without the reserve, must fail.
+%% docs/design-tmp.md, "The heap bound", at a tmp of 64 KiB, the pool on four
+%% directories it shares, since 4,096 directories of 255-byte names would pass the
+%% cap; the case its seeded fault, a bound without the reserve, must fail.
 a_64_kib_tmp_serves_at_its_bounds_test() ->
-    serves_at_its_bounds(64 * 1024, infinity).
+    serves_at_its_bounds(64 * 1024, 4).
 
-%% The same at a tmp of 32 MiB. The chain stops at 1,024 directories: each walk
-%% costs the grant time linear in its fid's depth (erx_fs_grant's repath/3), so
-%% the chain the cap allows, about 100,000 deep, would take the case quadratic time.
+%% The same at a tmp of 32 MiB, each fid on a directory of its own.
 a_32_mib_tmp_serves_at_its_bounds_test_() ->
-    {timeout, 600, fun() -> serves_at_its_bounds(32 * 1024 * 1024, 1024) end}.
+    {timeout, 600, fun() -> serves_at_its_bounds(32 * 1024 * 1024, erx_fs_grant_pool()) end}.
 
-%% The grant's whole pool walked into the deepest directory chain allowed and 64
-%% writes of 64 KiB in flight; then the chain gone, the tree filled to its cap with
-%% 4 KiB files, then emptied and filled with one file, every chunk of it
-%% overwritten a hundred times with the writes in flight again, and then
+%% The grant's whole pool walked to Dirs directories of 255-byte names and 64
+%% writes of 64 KiB in flight; then the fids and directories gone, the tree filled
+%% to its cap with 4 KiB files, then emptied and filled with one file, every chunk
+%% of it overwritten a hundred times with the writes in flight again, and then
 %% everything removed and the 4 KiB files made again. The grant serves throughout
 %% and check/1 holds at the end.
-serves_at_its_bounds(Cap, MaxDepth) ->
+serves_at_its_bounds(Cap, Dirs) ->
     Grant = bounded(Cap),
     Monitor = monitor(process, Grant),
-    {ok, []} = call(Grant, {walk, 1, 2, []}),
-    Depth = chain(Grant, 2, MaxDepth),
-    ?assert(Depth > 0),
-    Fids = fill_pool(Grant, 2, 10),
-    ?assertEqual(erx_fs_grant_pool(), length(Fids) + 2),
-    ok = call(Grant, {clunk, lists:last(Fids)}),
-    {ok, []} = call(Grant, {walk, 2, 3, []}),
-    {ok, _, _} = call(Grant, {lopen, 3, 0}),
-    _ = writes_in_flight(Grant, 3),
+    Names = [long_name(N) || N <- lists:seq(1, Dirs)],
+    [{ok, _} = call(Grant, {mkdir, 1, Name, 8#755, 0}) || Name <- Names],
+    Fids = walk_pool(Grant, 2, Names),
+    ?assertEqual(erx_fs_grant_pool(), length(Fids) + 1),
+    Spare = lists:last(Fids),
+    {ok, _, _} = call(Grant, {lopen, Spare, 0}),
+    _ = writes_in_flight(Grant, Spare),
     assert_serving(Grant, Monitor),
-    [ok = call(Grant, {clunk, Fid}) || Fid <- [3 | lists:droplast(Fids)]],
-    unchain(Grant, 2, Depth),
+    [ok = call(Grant, {clunk, Fid}) || Fid <- Fids],
+    [ok = call(Grant, {unlinkat, 1, Name, ?D_REMOVEDIR}) || Name <- Names],
     Small = fill_small(Grant, 4),
     ?assert(Small > 0),
     [ok = call(Grant, {unlinkat, 1, integer_to_binary(N), 0}) || N <- lists:seq(0, Small - 1)],
@@ -672,7 +688,45 @@ serves_at_its_bounds(Cap, MaxDepth) ->
     _ = writes_in_flight(Grant, 5),
     ok = call(Grant, {clunk, 5}),
     ok = call(Grant, {unlinkat, 1, <<"big">>, 0}),
-    ?assertEqual(Small, fill_small(Grant, 4)),
+        ?assertEqual(Small, fill_small(Grant, 4)),
+        assert_serving(Grant, Monitor),
+        check_tree(Grant),
+        stop(Grant).
+
+%% docs/design-tmp.md, "The heap bound", the deep-fid case at a tmp of 32 MiB: one
+%% fid walked in place one directory at a time down the deepest chain the cap
+%% allows, and the rest of the pool each walked on its own 400 directories down
+%% it. A fid's cost is fixed, so each walk costs the same at any depth; the grant
+%% serves throughout, and ends with its tree rather than climbing back out of it.
+deep_fids_serve_at_their_bounds_test_() ->
+    {timeout, 600,
+     fun() ->
+             Grant = bounded(32 * 1024 * 1024),
+             Monitor = monitor(process, Grant),
+             {ok, []} = call(Grant, {walk, 1, 2, []}),
+             Depth = chain(Grant, 2, infinity),
+             ?assert(Depth > 50000),
+             Fids = deep_pool(Grant, 3, 400),
+             ?assertEqual(erx_fs_grant_pool(), length(Fids) + 2),
+             erlang:garbage_collect(Grant),
+             assert_serving(Grant, Monitor),
+             check_tree(Grant),
+             stop(Grant)
+     end}.
+
+%% docs/design-tmp.md, "The heap bound": 64 fids at a tmp of 64 KiB, each walked by
+%% a 255-byte name carved from a binary of its own of 1 MiB, which together pass the
+%% reserve unless the grant keeps only each name's own bytes.
+carved_names_pin_nothing_test() ->
+    Grant = bounded(64 * 1024),
+    Monitor = monitor(process, Grant),
+    Name = long_name(1),
+    {ok, _} = call(Grant, {mkdir, 1, Name, 8#755, 0}),
+    Carried = [<<Name/binary, (binary:copy(<<N:32>>, 262080))/binary>> || N <- lists:seq(1, 64)],
+    [{ok, [_]} = call(Grant, {walk, 1, Fid, [binary:part(Big, 0, 255)]})
+     || {Fid, Big} <- lists:zip(lists:seq(10, 73), Carried)],
+    erlang:garbage_collect(Grant),
     assert_serving(Grant, Monitor),
     check_tree(Grant),
+    ?assertEqual(64, length(Carried)),
     stop(Grant).

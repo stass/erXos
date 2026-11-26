@@ -1005,8 +1005,11 @@ nothing the grant keeps for a fid grows with it ([Serving](#serving-the-erx_fs-b
 "What a fid denotes"): what a grant keeps for its fids is its pool times
 one fid at its largest, its record with a name of at most 255 bytes that
 owns exactly its bytes and two per-node counts, and `erx_fs` derives a
-grant's heap reserve from that. The node term each fid holds is its
-tree's, and its size is part of that server's per-fid bound. A session's handlers draw their programs'
+grant's heap reserve from that, measuring one such fid on the grant's own
+records. The node and handle terms a fid holds are its tree's: a tree
+whose terms can be larger than a few words names its largest with the
+behaviour's `largest_node/0`, and the reserve counts each fid's copies of
+it. A session's handlers draw their programs'
 fids from the session's grants, at most 256 for each program, and leave a
 quarter of each grant's pool to the session's own processes, so the
 programs a session starts cannot spend the fids the session needs to go
@@ -1830,8 +1833,8 @@ added:
   prefix of its node name
   ([design-domains.md](design-domains.md#principals-sessions-and-quotas));
   `place/1` gives `home` no place of its own, as it gives `packages`
-  none. The grant is rooted at the home and answers `..` at its root
-  itself, so a session that holds only `home` sees its own home and
+  none. The grant is rooted at the home and no walk names `..`, which
+  the grammar refuses, so a session that holds only `home` sees its own home and
   nothing else of the volume: the home is a user's one place on the
   data volume, and no other grant reaches a part of it for one user.
   Root's session also holds `data`, the whole volume, as the
@@ -2805,12 +2808,15 @@ other client's request can come between its parts:
   bytes: a name carved from a larger binary, which a client in the
   server's own domain can send, pins none of the rest. The grant's
   bookkeeping for a fid is thus fixed; the node term is the tree's, and
-  what it costs is part of its server's per-fid bound. `/tmp`'s node is
-  an inode number, fixed in size, so its fids cost the same at any depth;
-  a tree whose node is its path, as the system partition's tree builds a
-  list of names and littlefs's grant a path binary, holds a node that
-  grows with depth within that tree's own bound on a path, and its
-  server's bound counts it. A fid keeps its node when another grant
+  a tree whose node or handle terms can be larger than a few words names
+  its largest with `largest_node/0`, which the grant's heap reserve
+  counts for each fid; it counts the grant's heap words three times, a
+  measured allowance for what ERTS's collections count beyond the live
+  words, and its binaries off the heap once. `/tmp`'s node is an inode number, fixed in size,
+  so its fids cost the same at any depth; a tree whose node is its path,
+  as littlefs's grant holds a path binary, holds a node that grows with
+  depth only within that tree's own bound on a path, 1,023 bytes for
+  littlefs. A fid keeps its node when another grant
   renames it, even out of this grant's subtree: F2 is that no walk
   goes up, so the client keeps what it had reached, that node and what
   lies below it, and never reaches its new parent or siblings; it is
@@ -3897,9 +3903,8 @@ and the invariants.
   an erXos server through the host link's bridge and runs a
   file-semantics corpus, compared with the same corpus on a Linux
   `tmpfs`, and independent byte fixtures check the generated codec
-  ([design-generation.md](design-generation.md)). Seeded: a server that
-  answers a `walk` of `..` at its root with the parent's qid, which both
-  catch.
+  ([design-generation.md](design-generation.md)). Seeded: a grammar that
+  admits a `walk` naming `..`, which both catch.
 * **Stock OTP.** OTP's `file_SUITE` and `filelib_SUITE` run with their
   working directory on an `erx_fs` server backed by a RAM tree, compared
   case by case with the same suites on a local mount; every difference
@@ -3997,7 +4002,7 @@ request function.
   `NOFID`, from the root's fid and from a fid below it, refused with
   `einval` before any callback, making no fid and leaving a walked fid
   where it was (F2; seeded: `..` dropped from the walk name's
-  refusals in `abi/protocols/9p.txt`, which the case catches); a walk whose `NewFid` is `NOFID`, and `NOFID` as the
+  refusals in `abi/protocols/9p.txt`, which the grammar's walk-name case catches); a walk whose `NewFid` is `NOFID`, and `NOFID` as the
   fid of any other request, refused with `einval` before the grant's
   dispatch, making no fid; a host's walk from `NOFID` at the host link's
   bridge answered `ebadf`, while the host's ordinary walk from a fid it

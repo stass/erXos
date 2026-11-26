@@ -81,7 +81,7 @@ class Erx9pTest < Minitest::Test
   def test_wire_layouts_that_lose_bytes_are_refused
     {
       ->(text) { text.sub('  tuple qid u8 u32 u64', '  tuple qid u8 u32 at') } => /holds the local kind at/,
-      ->(text) { text.sub('  list walk_names walk_name max @p9_maxwelem', '  list walk_names walk_name max 65536') } =>
+      ->(text) { text.sub('  list walk_names name max @p9_maxwelem', '  list walk_names name max 65536') } =>
         /counts its elements in a u16/
     }.each do |edit, message|
       error = assert_raises(Erx::Error) do

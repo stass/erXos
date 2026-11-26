@@ -89,7 +89,7 @@ its process's heap bound in words, shared binaries included. `reductions` and `p
 namespace reads its `data` grant at each lookup, so the mint keeps no record of what it handed out. The volume's `packages/` directory is
 the files service `packages` ([design-packaging.md](design-packaging.md#where-a-package-lies)), with a mint of its own beside `data`'s that
 works the same way: each of its grants roots at `packages/`, or at `packages/installed/` when its row states `tree installed`, as the
-app template's does (`erx_lfs:subtree/3`), answers `..` there itself, and takes no `.` or `..` as a name, so it reaches nothing else
+app template's does (`erx_lfs:subtree/3`), and takes no `.` or `..` as a name, which the grammar refuses in every walk, so it reaches nothing else
 of the volume, and the mount makes both directories when the volume lacks them. Only a domain the manifest grants `data`
 mounts its `data` facet at `/data`, read-write and on the tree `data`, with `erx_ns:mount_facets/1` ([design-files.md](design-files.md), "A
 facet's mount"): the system domain's domain service once it has read the manifest, and a session domain as `erx_session` starts

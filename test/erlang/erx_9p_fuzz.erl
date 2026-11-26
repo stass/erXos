@@ -109,7 +109,7 @@ corpus() ->
                 ?G:version_request(65560, <<"9P2000.L">>),
                 ?G:auth_request(16#ffffffff, <<"u">>, <<"a">>, 0),
                 ?G:attach_request(0, 16#ffffffff, <<"u">>, <<>>, 0), {flush, 9},
-                ?G:walk_request(0, 1, [<<"..">>, <<"a">>, <<"b">>]), ?G:read_request(1, 0, 3),
+                ?G:walk_request(0, 1, [<<"b">>, <<"a">>, <<"b">>]), ?G:read_request(1, 0, 3),
                 ?G:write_request(1, 0, <<"abc">>), ?G:clunk_request(1), ?G:remove_request(1)],
     Replies = [{statfs, ?G:statfs_reply(Statfs)}, {lopen, ?G:lopen_reply(Qid, 0)},
                {mknod, ?G:mknod_reply(Qid)}, {readlink, ?G:readlink_reply(<<"/a">>)},

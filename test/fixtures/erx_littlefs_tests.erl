@@ -192,7 +192,7 @@ tree_operations() ->
     {error, eexist} = erx_lfs:make(Dir, <<"f">>, {file, 8#644, ?ERX_P9_O_WRONLY}, Fs),
     {error, eperm} = erx_lfs:make(Dir, <<"l">>, {symlink, <<"f">>}, Fs),
     {error, einval} = erx_lfs:walk(Dir, <<"a/b">>, Fs),
-    %% `.` and `..` are no entry: the grant answers `..` itself (erx_fs_grant).
+    %% `.` and `..` are no entry: the grammar refuses `..` before any walk (erx_fs_grant).
     {error, einval} = erx_lfs:walk(Dir, <<"..">>, Fs),
     {error, einval} = erx_lfs:walk(Dir, <<".">>, Fs),
     {ok, DirH} = erx_lfs:open(Dir, 0, Fs),

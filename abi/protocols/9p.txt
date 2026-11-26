@@ -12,8 +12,10 @@
 # * A link's text is bytes without NUL, at most p9_symlink_max; it need not
 #   be UTF-8 ("stored as given"), and an empty one decodes, so the server
 #   answers Linux's enoent for it.
-# * A walk name may be "..", which the server handles at the grant's root
-#   and below it; "." is not used in the protocol, as walk(5) says. A
+# * A walk name is a plain name, never "." or "..": a walk only descends
+#   from where it starts, and erXos's clients resolve both against their
+#   own place (docs/design-files.md, F2), so the funnel refuses a walk
+#   naming ".." with einval before any callback. A
 #   readdir entry may be "." or "..". An extended attribute's name may be
 #   empty, which xattrwalk uses for the list of names.
 # * A fid is any u32 but NOFID, which 9P reserves; Afid may be NOFID, and so
@@ -188,7 +190,6 @@ protocol erx_9p
   integer unlink_flags u32 values 0 @p9_at_removedir
   integer at u64 or unknown local
   text name max @name_max utf8 refuse nul slash empty dot dotdot
-  text walk_name max @name_max utf8 refuse nul slash empty dot
   text entry_name max @name_max utf8 refuse nul slash empty
   text xattr_name max @name_max utf8 refuse nul slash
   text string max @p9_string_max utf8 refuse nul
@@ -196,7 +197,7 @@ protocol erx_9p
   text data max @p9_io_max length u32
   tuple qid u8 u32 u64
   tuple dirent qid u64 u8 entry_name
-  list walk_names walk_name max @p9_maxwelem
+  list walk_names name max @p9_maxwelem
   list qids qid max @p9_maxwelem
   list dirents dirent max @p9_dirents_max packed @p9_dirent_fixed
   map attr

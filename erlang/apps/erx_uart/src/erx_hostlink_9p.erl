@@ -54,9 +54,11 @@ across file systems does.
 **Bounds.** At most 32 requests are pending and at most 64 tags are in
 use, requests and flushes together, so what the bridge has at its grants
 never exceeds 64. A request beyond 32 fails with `emfile`; a message that
-would take a 65th tag, one whose tag is in use, one that fails the codec
-and one that is not a request are discarded and counted, never answered
-(docs/design-live.md, "Failure handling, diagnostics and debuggability").
+would take a 65th tag, one whose tag is in use, one that is not a request,
+and one that fails the codec before a session is open are discarded and
+counted, never answered (docs/design-live.md, "Failure handling,
+diagnostics and debuggability"). One that fails the codec on a free tag of
+an open session, a walk naming `..` among them, is answered `einval`.
 A read's or readdir's `Count` is cut to what an `Rread` of the negotiated
 `msize` holds, and `lopen`'s and `lcreate`'s `Iounit` is answered as
 `msize` less 24, Linux's and QEMU's `P9_IOHDRSZ`, so every reply fits the
@@ -178,6 +180,8 @@ step({host, Bytes, Drawn}, B) when is_binary(Bytes) ->
                     {count(not_request, B), []};
                 {ok, Tag, Request} ->
                     admit(Tag, Request, Drawn, B);
+                {error, {malformed, Tag}} ->
+                    refused(Tag, B);
                 {error, _Reason} ->
                     {count(malformed, B), []}
             end);
@@ -195,6 +199,17 @@ info(#bridge{msize = Msize, fids = Fids, counts = Counts} = B) ->
     (tally(B))#{msize => Msize, fids => map_size(Fids), counts => Counts}.
 
 %%% A message of the host
+
+%% A message the codec refuses whose tag it could read, a walk naming ".." among
+%% them (docs/design-live.md, "Files between the host and the machine"): once a
+%% session is open and the tag is free, the tag is answered einval, asking no
+%% grant and changing no fid, so the host learns its request failed; before a
+%% session, or on a tag in use, it is discarded and counted as any message there.
+refused(Tag, #bridge{msize = Msize, slots = Slots} = B) when Msize =/= none, not is_map_key(Tag, Slots) ->
+    B1 = count(malformed, B),
+    {B1, [{host, encoded(Tag, error, {error, einval}, B1)}]};
+refused(_Tag, B) ->
+    {count(malformed, B), []}.
 
 %% A message is held to its tag, which must be free, and, when its plan
 %% holds the tag in the slot table, to the tags bound.

@@ -72,19 +72,31 @@ class ErxRamfsTest < Minitest::Test
     # docs/design-files.md, "Requests behind a failed request": a clone refused for a full
     # pool that still enters its new fid, so the lopen behind it truncates f.
     Fault.new(name: 'a clone refused for a full pool that still enters its new fid', file: "#{APP}/erx_fs_grant.erl",
-              from: "                ok -> walked(Owner, Fid, NewFid, walk_names(Names, Path, [], Grant));\n",
-              to: "                ok -> walked(Owner, Fid, NewFid, walk_names(Names, Path, [], Grant));\n" \
+              from: "                ok -> walked(Owner, Fid, NewFid, walk_names(Names, At, [], Grant));\n",
+              to: "                ok -> walked(Owner, Fid, NewFid, walk_names(Names, At, [], Grant));\n" \
                   "                {error, emfile} = Error -> {Error, element(2, walked(Owner, Fid, NewFid, " \
-                  "walk_names(Names, Path, [], Grant)))};\n",
+                  "walk_names(Names, At, [], Grant)))};\n",
               caught_by: 'requests_behind_a_failed_request_change_nothing_test'),
     Fault.new(name: 'a grant that is not sensitive', file: "#{APP}/erx_ramfs_sup.erl",
               from: '    #{max_heap_size => heap_words(Cap), sensitive => true}.',
               to: '    #{max_heap_size => heap_words(Cap), sensitive => false}.',
               caught_by: 'the_supervisors_grant_hides_its_state_test'),
     Fault.new(name: 'a heap bound of the tree alone, without the reserve', file: "#{APP}/erx_ramfs_sup.erl",
-              from: '    erx_fs:reserve_words(#{}) + ceil(2 * TreeBytes / erlang:system_info(wordsize)).',
+              from: '    erx_fs:reserve_words(erx_ramfs, #{}) + ceil(2 * TreeBytes / erlang:system_info(wordsize)).',
               to: '    ceil(2 * TreeBytes / erlang:system_info(wordsize)).',
-              caught_by: 'a_64_kib_tmp_serves_at_its_bounds_test')
+            caught_by: 'a_64_kib_tmp_serves_at_its_bounds_test'),
+    # docs/design-tmp.md, "The heap bound": a grant that keeps each place a walk passes
+    # through, as the chain of directories a fid once kept did, so what it holds grows
+    # with its fids' depth.
+    Fault.new(name: 'a grant that keeps the places its walks passed', file: "#{APP}/erx_fs_grant.erl",
+              from: "    Kept = kept_name(Name),\n    case tree(walk, [Dir, Kept], Grant) of\n",
+              to: "    Kept = kept_name(Name),\n    put({passed, make_ref()}, {Dir, Kept}),\n" \
+                  "    case tree(walk, [Dir, Kept], Grant) of\n",
+              caught_by: 'deep_fids_serve_at_their_bounds_test_'),
+    Fault.new(name: "a fid's name kept as the request carried it", file: "#{APP}/erx_fs_grant.erl",
+              from: "kept_name(Name) ->\n    binary:copy(Name).\n",
+              to: "kept_name(Name) ->\n    Name.\n",
+              caught_by: 'carved_names_pin_nothing_test')
   ].freeze
 
   def test_the_cases_pass

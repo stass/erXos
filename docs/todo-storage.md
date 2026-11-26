@@ -254,6 +254,52 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   open behind it, and the writer's grant, for as long as those reads take, each bounded by the
   window's deadline; a grant's callback otherwise waits on no event (`erx_fs`). Answer the eject as a
   waiting request whose keeper is the drive process, so only the writer waits.
+* [High] files, a grant's heap bound does not model ERTS's collections (`erlang/apps/erx_files/src/erx_fs.erl`,
+  `reserve_words/2`; `erlang/apps/erx_files/src/erx_ramfs_sup.erl`, `heap_words/1`): the bound counts the
+  reserve's heap words three times, a factor measured on /tmp's deep-fid case, and `/tmp`'s tree twice for what a
+  step leaves behind, but
+  ERTS checks `max_heap_size` during a collection against the heaps' allocated sizes plus the heap it
+  copies into: at a major collection the young and old heaps and `next_heap_size` of their use, at a
+  minor one with no old heap yet about five times the young heap's use (`otp/erts/emulator/beam/erl_gc.c`,
+  `minor_collection` and `major_collection`). A legal request mix near `/tmp`'s cap may then kill the grant
+  at a collection, and `/tmp` restarts empty. Model the collection once, where the bound is set, over the
+  reserve and the tree together, measured by a case that drives a full pool at its worst and a full tree
+  through collections.
+* [Medium] files, the per-fid reserve lists a fid's parts by hand (`erx_fs_grant.erl`, `fid_words/2`):
+  the terms and the seven map entries it measures must follow `#grant{}`'s fields by hand; it measures
+  map entries on a map of `Pool` keys where `named` and `held` reach twice that, a closing answer of
+  `closed` where a remove keeps `{error, Posix}`, and a local owner and alias where a grant for another
+  domain holds remote pids and references. No case fills the pool at the worst case it models (distinct
+  nodes, 255-byte names, open handles, one owner per fid, a u64 qid path) and no seeded fault in
+  `fid_words/2` is caught. Measure a grant state built through `add_fid/4`, `place/4` and `opened/3` at N
+  and N+k fids instead, and add that case with its seed.
+* [Medium] files, trees whose nodes outgrow the default (`erx_fs.erl`, `largest_node/0`): a tree without
+  `largest_node/0` is counted with a node of a few words, and nothing fails when one is larger;
+  `erx_procfs`'s `{dir, Path}` nodes hold a list of inspector ids that grows with depth. Declare procfs's
+  bound (it has `ERX_INSPECT_NAME_MAX` names and a depth its inspector bounds) or make the callback
+  required.
+
+* [Medium] files, facet-row grants under a heap bound below their reserve (`abi/services/files.txt`,
+  `max_heap_size`; `erlang/apps/erx_files/src/erx_fs.erl`, `reserve_words/2`): a facet row's grant
+  runs under the row's `max_heap_size` of 262,144 words with the default pool of 4,096 fids, while
+  `reserve_words/2` puts that pool alone above 1.5 million words, so a client that opens its whole
+  pool kills its own grant at the heap bound rather than meeting `emfile`. The failure is safe (the
+  grant ends, its client sees `eio`) and the tree's `largest_node/0` is not counted. Derive the row's
+  heap bound from `reserve_words/2` and the row's pool, or shrink the row's pool to what its bound
+  holds.
+* [Low] storage, the system tree's node grows with its depth (`erx_storage_system.erl`, `walk/3`,
+  `open/3`): a node is the list of names below `apps/` and a directory's handle its whole listing, so
+  neither is bounded and the tree declares no `largest_node/0`; its grants run under the facet row's
+  fixed heap bound. The image is trusted, so a deep tree costs only its own grant. Give a node a
+  constant size (the image's inode number) or refuse a walk past a path of 1,023 bytes, and declare
+  the largest node.
+* [Low] hostlink, a malformed `Tclunk` keeps the bridge's fid (`erx_hostlink_9p.erl`, `refused/2`):
+  the bridge answers a request the codec refuses on a free tag `einval` and changes no fid, so a
+  `Tclunk` or `Tremove` the codec refuses leaves the bridge's fid and the grant's fid in place, where
+  clunk(5) says the fid ends whatever the outcome. The host's fids stay bounded by the grant's pool.
+  Have the bridge end its own fid for any `Tclunk` or `Tremove` whose fid it can read, through a
+  header peek the generated codec offers.
+
 * [Medium] files, the client's frame bound unproven (`otp/erts/preloaded/src/erx_file_remote.erl`, `posted/2`):
   the client refuses a request whose message passes `files_max_frame_min` as `erlang:external_size/1`
   measures it, which rests on two facts nothing checks. That size equals the frame's `payload_len`
@@ -437,11 +483,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   single 16 MiB `write` to tmpfs succeeds. The same 16 MiB in 1 MiB writes succeeds. Split a large write into
   bounded jobs (or bound the binary a grant holds per request) so a write within the cap never kills the grant, and
   add the one-call 16 MiB write as a regression test.
-* [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: a fid's path has no depth bound, and `repath/3` counts every
-  step of it, so a clone, clunk or walk in place of a fid at depth D costs O(D) and building the path by walks in place
-  O(D^2); renames of two directories grow a path without bound. Cap a fid's path length (a walk past it refuses), or
-  count steps per shared path suffix so a clone is one increment ([todo-performance.md](todo-performance.md)).
-* [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: the grant's hold bookkeeping (`held`, `steps`, `loose`) has
+* [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: the grant's hold bookkeeping (`held`, `named`, `loose`) has
   no test of its own: `erx_fs_test_tree` has no `forget`, so a rejected walk reply's holds (`kept_when_rejected/3`), `remove`
   and an owner's `down/3` with walked fids are seen only end to end, or not at all. Give the test tree `forget`, check in
   `fid_table_model_test_` that the tree holds exactly the walked nodes the fids name after every step, and consider
@@ -473,19 +515,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `a_dead_owners_open_file_gives_back_what_it_held_test`, but under load (a full `make check`) the mutant runs into
   EUnit's timeout in `wait_free/3` first and the case reads `*timed out*`, so the seeded-fault test fails though the
   fault was caught; it passes run alone. Accept a timeout as caught, or bound `wait_free/3` below EUnit's timeout.
-* [High] /tmp, the grant's heap bound against deep fids (`erx_fs:reserve_words/1`, `erx_fs_grant`;
-  [design-tmp.md](design-tmp.md#starting-and-mounting)): the reserve budgets each fid a path of 16 steps
-  (`FID_WORDS`), but nothing bounds a fid's path depth but the cap, and a fid walked on its own from `NOFID`
-  builds its own path. So legal requests pass the bound and ERTS kills the grant, emptying `/tmp` for the
-  domain: by an estimate from the code, 4,096 fids each walked into a chain of about 400 directories with
-  1-byte names (about 100 with 255-byte names), some 100,000 walks charging only about 130 KB of a 32 MiB
-  cap. Repeated, it passes `erx_ramfs_sup`'s restart intensity (the residual below). The design says the
-  bound is met only by a bug or `o` set too low. The design ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
-  "What a fid denotes") keeps for a fid only its node and its entry, and the grammar refuses a walk naming `..`,
-  the chain's one consumer; implement it (`abi/protocols/9p.txt`'s `walk_name` refuses `dotdot`; `erx_fs_grant`'s
-  fid record and `repath/3`; `FID_WORDS` for one fid at its largest) with the deep-fid heap case and its seed of
-  [design-tmp.md](design-tmp.md#verification). It also closes the `repath/3` depth item above and the two
-  depth items of [todo-performance.md](todo-performance.md).
 * [Medium] /tmp, the heap-bound tests miss the cases that decide the bound (`test/erlang/erx_ramfs_tests.erl`;
   [design-tmp.md](design-tmp.md#verification)): the fills use 4 KiB chunks, which live off the heap; the
   worst tree, its cap full of empty files, directories and links (`o` about 1 by `erx_ramfs`'s own comment),

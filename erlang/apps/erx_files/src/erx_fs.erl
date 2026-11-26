@@ -47,7 +47,7 @@ docs/design-tmp.md). A callback's answer that is not one of its shapes
 reaches the client as `eio`.
 """.
 
--export([start_link/3, start_link/4, start_mounted/4, start_mounted/5, reserve_words/1]).
+-export([start_link/3, start_link/4, start_mounted/4, start_mounted/5, reserve_words/2]).
 -export([init/2, loop/2, drain/1, format_status/1]).
 -export([handle_tree/1]).
 
@@ -136,15 +136,27 @@ reaches the client as `eio`.
               ok | {error, file:posix()}.
 -callback xattr(Node :: term(), Op :: term(), Fs :: term()) ->
               {ok, term()} | {error, file:posix()}.
+%% A tree whose node or handle terms can be larger than a few words adds
+%% largest_node: the largest node or handle any of its grants answers, a term
+%% the grant's heap reserve counts each fid's copies of (reserve_words/2).
+-callback largest_node() -> term().
 -optional_callbacks([subtree/3, forget/2, readlink/2, write/4, make/4, setattr/3,
-                     unlink/4, rename/5, fsync/2, xattr/3]).
+                     unlink/4, rename/5, fsync/2, xattr/3, largest_node/0]).
 
-%% The reserve's parts (reserve_words/1), in words: the grant's own state with no
-%% fid, and one fid with a path of 16 steps, each with its qid and a name of 255
-%% bytes. A request in flight counts its frame twice: the message and the payload
-%% a callback may copy from it.
+%% The reserve's parts (reserve_words/2), in words. The grant's own state with no
+%% fid, and each of its pool's fids at its largest, whatever its depth, as
+%% erx_fs_grant:fid_words/2 measures it, with the tree's largest node, or a node
+%% of a few words for a tree without largest_node/0. A collection meets the
+%% bound with more than the live words: a full sweep with the young and old heaps
+%% and the heap it copies into, a minor one with more (erl_gc.c,
+%% minor_collection and major_collection). The reserve counts its heap words
+%% three times, a factor /tmp's deep-fid case measures enough for a grant at its
+%% bounds, not one ERTS guarantees (docs/todo-storage.md); binaries off the heap
+%% count once. A request in flight counts its frame twice: the message and the
+%% payload a callback may copy from it, both binaries off the heap.
 -define(BASE_WORDS, 65536).
--define(FID_WORDS, 750).
+-define(SMALL_NODE, {node, 16#ffffffffffffffff}).
+-define(COLLECTION_COPIES, 3).
 -define(FRAME_COPIES, 2).
 -define(DEFAULT_POOL, 4096).
 -define(DEFAULT_IN_FLIGHT, 64).
@@ -201,7 +213,7 @@ for, `own` for the server's own (the default) or another domain's id;
 `pool` is its fid bound (4,096), `in_flight` and `msize` its bounds on the
 requests it holds and on the message size (erx_fs_grant:new/1), and
 `max_heap_size` its process's heap bound in words, shared binaries included
-(by default the reserve of reserve_words/1, which a tree of the grant's own
+(by default the reserve of reserve_words/2, which a tree of the grant's own
 must add to), and `sensitive`, `true` for a grant whose state holds a tree of
 files (`/tmp`'s), makes its process sensitive before `init/1` runs, so neither
 `process_info/2`, a trace nor a crash dump shows its queue, its heap or its
@@ -230,26 +242,38 @@ lives as long as this domain without it.
                    exports => module()}) ->
           {ok, pid(), grant_handle()} | {error, term()}.
 start_link(Module, Args, Rights, Options) ->
-    Heap = #{size => maps:get(max_heap_size, Options, reserve_words(Options)), kill => true,
+    Bound = case Options of
+                #{max_heap_size := Words} -> Words;
+                #{} -> reserve_words(Module, Options)
+            end,
+    Heap = #{size => Bound, kill => true,
              include_shared_binaries => true},
     proc_lib:start_link(?MODULE, init, [self(), {Module, Args, Rights, Options}],
                         infinity, [{max_heap_size, Heap}]).
 
 -doc """
-What any grant of these bounds may hold with no tree of its own, in words: its
-root and state, its pool of fids with their paths and per-node counts and its
-owners' monitors, and its requests in flight with a full frame each
-(docs/design-tmp.md, "The grant's heap bound"). The same for every grant of
-the same bounds, and never zero.
+What any grant of `Module`'s tree and these bounds may hold beside the tree's own
+state, in words: its root and state, its pool of fids each at its largest, with
+its place, its per-node counts and its owner's monitor, and its requests in
+flight with a full frame each (docs/design-tmp.md, "The grant's heap bound"). The
+same for every grant of the same tree and bounds, and never zero.
 """.
--spec reserve_words(#{pool => pos_integer(), in_flight => pos_integer(),
-                      msize => pos_integer(), atom() => term()}) -> pos_integer().
-reserve_words(Options) ->
+-spec reserve_words(module(), #{pool => pos_integer(), in_flight => pos_integer(),
+                                msize => pos_integer(), atom() => term()}) -> pos_integer().
+reserve_words(Module, Options) ->
     Pool = maps:get(pool, Options, ?DEFAULT_POOL),
     InFlight = maps:get(in_flight, Options, ?DEFAULT_IN_FLIGHT),
     Msize = maps:get(msize, Options, ?DEFAULT_MSIZE),
-    ?BASE_WORDS + Pool * ?FID_WORDS
+    {FidHeap, FidOffHeap} = erx_fs_grant:fid_words(Pool, largest_node(Module)),
+    ?COLLECTION_COPIES * (?BASE_WORDS + Pool * FidHeap) + Pool * FidOffHeap
         + InFlight * ceil(?FRAME_COPIES * Msize / erlang:system_info(wordsize)).
+
+largest_node(Module) ->
+    {module, Module} = code:ensure_loaded(Module),
+    case erlang:function_exported(Module, largest_node, 0) of
+        true -> Module:largest_node();
+        false -> ?SMALL_NODE
+    end.
 
 -doc false.
 -spec init(pid(), {module(), term(), erx_fs_grant:rights(), map()}) -> no_return().

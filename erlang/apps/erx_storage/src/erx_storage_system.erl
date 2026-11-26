@@ -32,8 +32,8 @@ domain that serves `system` serves the booted slot's system partition.
   image in its own processes and grants share nothing but the window. The
   tree roots at the partition's `apps/`: a node is the list of names below
   it, and every operation asks the reader for `apps/` and those names, so
-  no request reaches a file outside it (`..` is the grant's, which stays at
-  the root). The tree serves directories and regular files, all the packer
+  no request reaches a file outside it (no walk names `..`, which the grammar
+  refuses). The tree serves directories and regular files, all the packer
   writes there; any other kind answers `enotsup`. There is no writing
   callback, so every grant of the tree, an `rw` one included, refuses each
   writing operation with `erofs` before any callback (F5).
@@ -149,8 +149,8 @@ init(Tree) ->
 root({erofs, _Fs, Qid}) -> {ok, ?TREE, [], Qid};
 root(none) -> {ok, ?TREE, [], {?ERX_P9_QTDIR, 0, 0}}.
 
-%% The reader would walk a directory's own `.` and `..` entries; `..` is the grant's,
-%% and neither names anything below the node.
+%% The reader would walk a directory's own `.` and `..` entries, neither of which
+%% names anything below the node; the grant refuses both before any walk.
 -doc false.
 walk(_Dir, Name, _Tree) when Name =:= <<".">>; Name =:= <<"..">> ->
     {error, enoent};

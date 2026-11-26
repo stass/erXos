@@ -215,7 +215,7 @@ samples() ->
      {?G:auth_request(?NOFID, <<"u">>, <<"a">>, 0), ?G:error_reply(enotsup)},
      {?G:attach_request(0, ?NOFID, <<"u">>, <<"">>, 0), ?G:attach_reply(Qid)},
      {{flush, 9}, ?G:flush_reply()},
-     {?G:walk_request(0, 1, [<<"..">>, <<"a">>]), ?G:walk_reply([Qid, Qid])},
+     {?G:walk_request(0, 1, [<<"a">>, <<"b">>]), ?G:walk_reply([Qid, Qid])},
      {?G:read_request(1, 0, 3), ?G:read_reply(<<"abc">>)},
      {?G:write_request(1, 0, <<"abc">>), ?G:write_reply(3, unknown)},
      {?G:clunk_request(1), ?G:clunk_reply()},

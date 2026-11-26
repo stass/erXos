@@ -213,6 +213,32 @@ a_hosts_walk_from_nofid_is_ebadf_test() ->
                   end, [{3, {walk, ?NOFID, 2, []}}, {4, {walk, ?NOFID, 2, [<<"x">>]}},
                         {5, {walk, ?NOFID, 1, []}}]).
 
+%% A walk naming "..", which the codec refuses as it decodes it, so only raw
+%% bytes carry it: in a session its free tag is answered einval, no grant is
+%% asked and no fid made, and the session serves on; on a tag in use it is
+%% discarded, as any message on such a tag is.
+a_hosts_walk_of_dotdot_is_einval_test() ->
+    {Bridge, A, _} = attached(),
+    lists:foreach(fun({Tag, Fid, NewFid, Names}) ->
+                          {Bridge1, Effects} =
+                              erx_hostlink_9p:step({host, raw_walk(Tag, Fid, NewFid, Names), 102}, Bridge),
+                          ?assertEqual([], sent(Effects)),
+                          ?assertEqual({Tag, {error, einval}}, answer(Effects)),
+                          ?assertMatch(#{fids := 1, requests := 0, tags := 0}, erx_hostlink_9p:info(Bridge1))
+                  end, [{3, 1, 2, [<<"..">>]}, {4, 1, 2, [<<"x">>, <<"..">>]}, {5, 1, 1, [<<"..">>]}]),
+    {Bridge2, _, Held} = host(3, {read, 1, 0, 4}, 102, Bridge),
+    [_] = sent(Held),
+    {Bridge3, InUse} = erx_hostlink_9p:step({host, raw_walk(3, 1, 2, [<<"..">>]), 103}, Bridge2),
+    ?assertEqual([], InUse),
+    {_, Alias, Effects} = host(4, {walk, 1, 2, [<<"x">>]}, 104, Bridge3),
+    ?assertEqual([{A, Alias, {walk, 101, 104, [<<"x">>]}}], sent(Effects)).
+
+%% The bytes of a walk, built by hand for names the codec's encoder refuses.
+raw_walk(Tag, Fid, NewFid, Names) ->
+    Body = <<Fid:32/little, NewFid:32/little, (length(Names)):16/little,
+             << <<(byte_size(N)):16/little, N/binary>> || N <- Names >>/binary>>,
+    <<(7 + byte_size(Body)):32/little, 110, Tag:16/little, Body/binary>>.
+
 walk_in_place_keeps_its_grant_fid_test() ->
     {Bridge, A, _} = attached(),
     {Bridge1, Alias, Effects} = host(3, {walk, 1, 1, [<<"x">>]}, 102, Bridge),

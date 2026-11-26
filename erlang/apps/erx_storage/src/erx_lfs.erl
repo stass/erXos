@@ -49,7 +49,7 @@ the home tree has no root of its own, so a home grant whose row states no tree
 is not started.
 root_path/1 is the one table of the roots. A grant names its root in init/1
 and roots there, and nothing it sends names a node above that root:
-the grant answers `..` itself, staying at its root (erx_fs_grant), and every
+no walk names `..`, which the grammar refuses (erx_fs_grant), and every
 path the owner makes extends a node the grant already holds by one name that
 is neither `.` nor `..` (child/2). The mount makes each root's directory the
 volume lacks, each after the one it lies within; one it cannot make is
@@ -80,7 +80,7 @@ only on a request that carries the reference.
 -include("generated/erx_abi.hrl").
 
 -export([start_link/2, owner/1, worker/2, trees/0, subtree/3]).
--export([init/1, root/1, walk/3, getattr/2, open/3, read/4, readdir/4, statfs/1,
+-export([init/1, root/1, largest_node/0, walk/3, getattr/2, open/3, read/4, readdir/4, statfs/1,
          clunk/2, write/4, make/4, setattr/3, unlink/4, rename/5,
          fsync/2]).
 
@@ -703,6 +703,10 @@ root({_Pid, _Secret, Tree} = Server) ->
         {error, _} = Error -> Error
     end.
 
+%% The largest node or handle a grant of the tree holds, which its heap reserve
+%% counts (erx_fs): a file's handle on a path of PATH_MAX bytes.
+-doc false.
+largest_node() -> {file, binary:copy(<<"/">>, ?PATH_MAX), 16#ffffffff}.
 -doc false.
 walk(Dir, Name, Server) -> call(Server, {walk, Dir, Name}).
 -doc false.

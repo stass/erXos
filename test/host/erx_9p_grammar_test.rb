@@ -38,6 +38,18 @@ class Erx9pGrammarTest < Minitest::Test
     assert_match(/name_test/, output)
   end
 
+  # docs/design-files.md, F2: a walk only descends, so a table whose walk names admit
+  # ".." fails the grammar's walk-name case.
+  def test_a_table_whose_walk_names_admit_dotdot_fails_the_cases
+    source = with_table(->(text) { text.sub("#{NAME_KIND} refuse nul slash empty dot dotdot", "#{NAME_KIND} refuse nul slash empty dot") }) do |root|
+      schema = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))
+      Erx::ABI::ProtocolEmitter.outputs(schema).fetch(GENERATED)
+    end
+    output, status = eunit(source)
+    refute status.success?, output
+    assert_match(/walk_names_test/, output)
+  end
+
   def test_malformed_protocol_declarations_are_refused
     {
       '  colour blue' => /unknown protocol member colour/,

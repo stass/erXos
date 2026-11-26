@@ -467,9 +467,11 @@ sum of three parts:
   depth, since the grant keeps no chain of directories for it
   ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
   "What a fid denotes"). So the reserve is the grant's own state plus
-  the pool times one fid at its largest, and `erx_fs` computes it from
-  the grant's bounds, the same figure for every grant of the same
-  bounds, so it is never zero and a `tmp` of 0 still serves every
+  the pool times one fid at its largest, measured on the grant's own
+  records, with its heap words counted three times, an allowance
+  measured by the deep-fid case for what a collection counts beyond the
+  live words, not a bound ERTS keeps; `erx_fs` computes it from the grant's bounds and its tree, the
+  same figure for every grant of the same tree and bounds, so it is never zero and a `tmp` of 0 still serves every
   request its bounds admit.
 * **The tree at its cap**, `cap` times `1 + o`, where `o` is ERTS's
   memory per charged byte beyond the charge (headers, map entries,

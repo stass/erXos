@@ -105,7 +105,7 @@ rebuilt(Op, Reply) ->
 
 valid_requests() ->
     [{version, 65560, <<"9P2000.L">>}, {auth, 16#ffffffff, <<"u">>, <<"tmp">>, 0},
-     {attach, 1, 16#ffffffff, <<"u">>, <<"tmp">>, 0}, {walk, 1, 2, [<<"a">>, <<"..">>]},
+     {attach, 1, 16#ffffffff, <<"u">>, <<"tmp">>, 0}, {walk, 1, 2, [<<"a">>, <<"b">>]},
      {lopen, 1, 2}, {lcreate, 1, <<"f">>, 2, 8#644, 0}, {read, 1, 0, 64}, {write, 1, 0, <<"abc">>},
      {readdir, 1, 0, 128}, {getattr, 1, 16#3fff},
      {setattr, 1, #{valid => 1, mode => 0, uid => 0, gid => 0, size => 0, atime_sec => 0,

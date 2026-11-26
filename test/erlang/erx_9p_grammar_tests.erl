@@ -72,7 +72,7 @@ fid_bounds_test() ->
 %% grant's root; its NewFid and every other fid field still refuse it.
 a_walk_alone_starts_at_nofid_test() ->
     ok({walk, ?NOFID, 2, []}),
-    ok({walk, ?NOFID, 2, [<<"a">>, <<"..">>]}),
+    ok({walk, ?NOFID, 2, [<<"a">>, <<"b">>]}),
     bad({walk, ?NOFID, ?NOFID, []}),
     bad({walk, ?NOFID + 1, 2, []}),
     bad({walk, -1, 2, []}),
@@ -137,8 +137,8 @@ every_entry_name_is_a_name_test() ->
                   end, Checks).
 
 walk_names_test() ->
-    ok(walk([<<"..">>])),
-    ok(walk([<<"a">>, <<"..">>, <<"b">>])),
+    bad(walk([<<"..">>])),
+    bad(walk([<<"a">>, <<"..">>, <<"b">>])),
     bad(walk([<<".">>])),
     bad(walk([<<"a/b">>])),
     bad(walk([<<>>])),

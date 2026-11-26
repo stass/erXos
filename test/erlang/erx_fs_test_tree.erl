@@ -34,7 +34,9 @@ answers them.
 
 With `{observer, Pid}` in its arguments, every callback first sends
 `{tree_call, Callback}` to `Pid` (subtree/3 sends `{tree_subtree, Tree, Grantee}`), so a test can show a request never reached
-the tree. A walk of ".." crashes the grant: erx_fs must answer ".." itself.
+the tree. A walk of ".." crashes the grant: the grammar refuses ".." before
+any walk. With `loop` in its arguments, /a/b also holds `d`, a name of /a/b
+itself, so a fid walks as deep as it likes with no tree part to hold.
 
 With `{cap, Bytes}`, a write ending past `Bytes` answers `enospc` and writes
 nothing, as a full tree answers. With `{name, Name}` the tree is named `Name`
@@ -79,13 +81,17 @@ init(Args) ->
               5 => #{kind => symlink, mode => 8#777, target => <<"a">>, links => 1, opens => 0},
               6 => file(8#644)},
     Cap = proplists:get_value(cap, Args, infinity),
+    Looped = case proplists:get_bool(loop, Args) of
+                 true -> Nodes#{3 := directory(#{<<"d">> => 3})};
+                 false -> Nodes
+             end,
     {Held, Next} = case lists:keyfind(file, 1, Args) of
                {file, Name, Bytes} ->
-                   #{1 := Root} = Nodes,
-                   {Nodes#{1 := Root#{entries := maps:put(Name, 7, maps:get(entries, Root))},
+                   #{1 := Root} = Looped,
+                   {Looped#{1 := Root#{entries := maps:put(Name, 7, maps:get(entries, Root))},
                            7 => (file(8#444))#{data := Bytes}}, 8};
                false ->
-                   {Nodes, 7}
+                   {Looped, 7}
            end,
     Tree = spawn_link(fun() -> serve(#{nodes => Held, next => Next, cap => Cap}) end),
     {ok, #{tree => Tree, observer => proplists:get_value(observer, Args, none),

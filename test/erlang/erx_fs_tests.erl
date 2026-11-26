@@ -198,7 +198,7 @@ nofid_walk_starts_at_the_grants_root_test() ->
     ?assertEqual({ok, []}, walk(Grant, ?NOFID, 1, [])),
     ?assertEqual(?ROOT_QID, qid_of(Grant, 1)),
     ?assertEqual({ok, [?A_QID, {16#80, 0, 3}]}, walk(Grant, ?NOFID, 2, [<<"a">>, <<"b">>])),
-    ?assertEqual({ok, [?ROOT_QID, ?A_QID]}, walk(Grant, ?NOFID, 3, [<<"..">>, <<"a">>])),
+    ?assertEqual({error, einval}, walk(Grant, ?NOFID, 3, [<<"..">>, <<"a">>])),
     ?assertEqual({error, einval}, walk(Grant, ?NOFID, 1, [<<"a">>])),
     ?assertEqual({error, enoent}, walk(Grant, ?NOFID, 4, [<<"none">>])),
     ?assertEqual(ebadf, qid_of(Grant, 4)),
@@ -206,15 +206,16 @@ nofid_walk_starts_at_the_grants_root_test() ->
     stop(Grant).
 
 %% A grant rooted below its tree's top, as a home grant is: a walk from NOFID
-%% starts there, and ".." from it stays there, so nothing above it is reached.
+%% starts there, and a walk of ".." from it is refused, so nothing above it is
+%% reached.
 nofid_walk_stays_within_the_grants_root_test() ->
     {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{root, 2}], rw),
     unlink(Grant),
     ?assertEqual({ok, []}, walk(Grant, ?NOFID, 1, [])),
     ?assertEqual(?A_QID, qid_of(Grant, 1)),
-    ?assertEqual({ok, [?A_QID, ?A_QID]}, walk(Grant, ?NOFID, 2, [<<"..">>, <<"..">>])),
+    ?assertEqual({error, einval}, walk(Grant, ?NOFID, 2, [<<"..">>])),
     %% The f beside /a is /f, inode 6; from this root f is /a/f, inode 4.
-    ?assertEqual({ok, [?A_QID, {0, 0, 4}]}, walk(Grant, ?NOFID, 3, [<<"..">>, <<"f">>])),
+    ?assertEqual({ok, [{0, 0, 4}]}, walk(Grant, ?NOFID, 3, [<<"f">>])),
     ?assertEqual({error, enoent}, walk(Grant, ?NOFID, 4, [<<"l">>])),
     stop(Grant).
 
@@ -246,17 +247,21 @@ fid_in_use_is_refused_test() ->
 
 %% Walking -----------------------------------------------------------------
 
-dotdot_stays_at_the_root_test() ->
+%% A walk only descends (F2): the grammar refuses ".." as a walk name, so the
+%% funnel answers einval before any callback (the test tree fails a walk of
+%% ".."), from NOFID, from the root's fid and from a fid below it, alone or
+%% after a plain name, making no fid and leaving a walked fid where it was.
+dotdot_is_refused_test() ->
     Grant = grant(rw),
     {ok, _} = attach(Grant, 1),
-    ?assertEqual({ok, [?ROOT_QID, ?ROOT_QID]}, walk(Grant, 1, 2, [<<"..">>, <<"..">>])),
-    ?assertEqual({ok, [?A_QID, ?ROOT_QID, ?ROOT_QID, ?A_QID]},
-                 walk(Grant, 1, 3, [<<"a">>, <<"..">>, <<"..">>, <<"a">>])),
-    ?assertEqual({ok, [?A_QID, {16#80, 0, 3}, ?A_QID, ?ROOT_QID]},
-                 walk(Grant, 1, 4, [<<"a">>, <<"b">>, <<"..">>, <<"..">>])),
-    ?assertEqual(?ROOT_QID, qid_of(Grant, 4)),
-    %% ".." from a fid walked below the root returns to its recorded parent.
-    ?assertEqual({ok, [?ROOT_QID]}, walk(Grant, 3, 3, [<<"..">>])),
+    {ok, [?A_QID]} = walk(Grant, 1, 3, [<<"a">>]),
+    lists:foreach(fun({Fid, NewFid, Names}) ->
+                          ?assertEqual({error, einval}, walk(Grant, Fid, NewFid, Names))
+                  end, [{?NOFID, 2, [<<"..">>]}, {1, 2, [<<"..">>]}, {1, 2, [<<"a">>, <<"..">>]},
+                        {3, 2, [<<"..">>]}, {3, 3, [<<"..">>]}, {1, 1, [<<"a">>, <<"..">>]}]),
+    ?assertEqual(ebadf, qid_of(Grant, 2)),
+    ?assertEqual(?ROOT_QID, qid_of(Grant, 1)),
+    ?assertEqual(?A_QID, qid_of(Grant, 3)),
     stop(Grant).
 
 walk_that_stops_makes_no_fid_test() ->
@@ -280,7 +285,7 @@ walk_through_a_link_stops_at_it_test() ->
     {ok, [?LINK_QID]} = walk(Grant, 1, 2, [<<"l">>]),
     ?assertEqual({ok, <<"a">>}, call(Grant, {readlink, 2})),
     ?assertEqual({error, enotdir}, walk(Grant, 2, 3, [<<"b">>])),
-    ?assertEqual({error, enotdir}, walk(Grant, 2, 3, [<<"..">>])),
+    ?assertEqual({error, enotdir}, walk(Grant, 2, 3, [<<"c">>])),
     stop(Grant).
 
 %% O_DIRECTORY on a fid at a file, a truncating open included, answers enotdir and
@@ -449,6 +454,57 @@ fid_flood_stops_at_the_pool_test() ->
     ?assertEqual({ok, ?ROOT_QID}, attach(Grant, 9)),
     [Owner ! stop || Owner <- Owners],
     wait_for_monitors(Grant, 1),
+    stop(Grant).
+
+%% docs/design-files.md, F4: the full pool, each fid walked on its own 402
+%% directories deep in steps of 16 names down the test tree's loop, under the
+%% heap reserve with no tree part; every walk costs the same at any depth, so the
+%% grant serves throughout.
+deep_fids_serve_under_the_reserve_test_() ->
+    {timeout, 120,
+     fun() ->
+             {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [loop], rw, #{}),
+             unlink(Grant),
+             Monitor = monitor(process, Grant),
+             Steps = [[<<"a">>, <<"b">>] | lists:duplicate(25, lists:duplicate(16, <<"d">>))],
+             [deep_fid(Grant, Fid, Steps) || Fid <- lists:seq(1, 4096)],
+             ?assertEqual({error, emfile}, attach(Grant, 4097)),
+             erlang:garbage_collect(Grant),
+             ?assertEqual({ok, []}, walk(Grant, 4096, 4096, [])),
+             assert_alive(Monitor),
+             stop(Grant)
+     end}.
+
+%% Fid attached and walked in place by each step of names.
+deep_fid(Grant, Fid, Steps) ->
+    {ok, ?ROOT_QID} = attach(Grant, Fid),
+    [{ok, _} = walk(Grant, Fid, Fid, Names) || Names <- Steps].
+
+assert_alive(Monitor) ->
+    receive
+        {'DOWN', Monitor, _, _, Reason} -> erlang:error({grant_ended, Reason})
+    after 0 ->
+        ok
+    end.
+
+%% docs/design-files.md, F4: 64 fids walked by a name of 255 bytes, each carved
+%% from a binary of its own of 1 MiB, more together than the heap reserve, which
+%% leave the grant under it, since a fid keeps only its name's own bytes. (A name
+%% of 64 bytes or fewer arrives as a copy of its own, so the case needs a longer
+%% one.)
+carved_names_pin_nothing_test() ->
+    Grant = quiet_grant(),
+    Monitor = monitor(process, Grant),
+    {ok, ?ROOT_QID} = attach(Grant, 1),
+    Name = binary:copy(<<"n">>, 255),
+    {ok, _} = call(Grant, {mkdir, 1, Name, 8#755, 0}),
+    Carried = [<<Name/binary, (binary:copy(<<N:32>>, 262080))/binary>> || N <- lists:seq(1, 64)],
+    [{ok, [_]} = walk(Grant, 1, Fid, [binary:part(Big, 0, 255)])
+     || {Fid, Big} <- lists:zip(lists:seq(10, 73), Carried)],
+    erlang:garbage_collect(Grant),
+    ?assertEqual({ok, []}, walk(Grant, 73, 73, [])),
+    assert_alive(Monitor),
+    ?assertEqual(64, length(Carried)),
     stop(Grant).
 
 %% A core of the test tree, served by the calling process.
@@ -1024,17 +1080,19 @@ lopen_of_a_node_with_no_name_is_enoent_test() ->
     ?assertEqual({ok, <<"kept">>}, call(Grant, {read, 3, 0, 100})),
     stop(Grant).
 
-%% ".." returns to the directory a fid was walked through, whatever was
-%% renamed or removed since; the removed directory itself answers enoent.
-dotdot_returns_through_renames_and_removals_test() ->
+%% A fid keeps the node it was walked to, whatever was renamed or removed
+%% since: renaming its parent leaves it on its directory, the removed
+%% directory answers enoent, and still no walk goes up from it.
+a_fid_keeps_its_node_through_renames_and_removals_test() ->
     Grant = quiet_grant(),
     {ok, _} = attach(Grant, 1),
-    {ok, [?A_QID, _]} = walk(Grant, 1, 2, [<<"a">>, <<"b">>]),
+    {ok, [?A_QID, B]} = walk(Grant, 1, 2, [<<"a">>, <<"b">>]),
     ok = call(Grant, {renameat, 1, <<"a">>, 1, <<"c">>}),
-    ?assertEqual({ok, [?A_QID]}, walk(Grant, 2, 3, [<<"..">>])),
+    ?assertEqual(B, qid_of(Grant, 2)),
+    {ok, [?A_QID]} = walk(Grant, 1, 3, [<<"c">>]),
     ok = call(Grant, {unlinkat, 3, <<"b">>, 16#200}),
     ?assertEqual(enoent, qid_of(Grant, 2)),
-    ?assertEqual({ok, [?A_QID, ?ROOT_QID]}, walk(Grant, 2, 4, [<<"..">>, <<"..">>])),
+    ?assertEqual({error, einval}, walk(Grant, 2, 4, [<<"..">>])),
     stop(Grant).
 
 %% A request sent to an alias another request still holds is dropped, since an

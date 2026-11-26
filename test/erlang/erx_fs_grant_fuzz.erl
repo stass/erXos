@@ -465,7 +465,7 @@ request(Shell) ->
         2 -> {attach, Fid, 16#ffffffff, <<"u">>, pick([<<"test">>, <<"test">>, <<"tmp">>, <<>>]), 0};
         3 -> {walk, Fid, fid(), [name() || _ <- lists:seq(1, rand:uniform(4) - 1)]};
         4 -> {walk, Fid, fid(), pick([[], [<<"a">>], [<<"f">>], [<<"l">>], [<<"a">>, <<"b">>], [<<"a">>, <<"f">>],
-                                     [<<"a">>, <<"..">>, <<"f">>], [<<"n">>], [<<"m">>]])};
+                                     [<<"a">>, <<"b">>, <<"f">>], [<<"n">>], [<<"m">>]])};
         5 -> {lopen, Fid, flags()};
         6 -> {lcreate, Fid, name(), flags(), 8#644, 0};
         7 -> {read, Fid, offset(), count()};
