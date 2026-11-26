@@ -1837,13 +1837,18 @@ HELPER`.
 * `served_as` is stated by every interface, so no interface is served
   one way by omission. `tree` marks an interface whose grants are
   `erx_fs` grants of one tree, which the grantee mounts and speaks
-  9P2000.L to (`files`, `windows`, `line` and `input`); `message` one served as a
+  9P2000.L to (`files`, `media`, `windows`, `line` and `input`); `message` one served as a
   message facet. It is the one source of that fact: the generator lists
   the `tree` interfaces for Erlang as `?ERX_TREE_SERVICES`, from which
   the domain service serves the system domain's such services as
   `erx_fs` grants ([design-system.md](design-system.md#facets-a-configured-domain-serves)),
   and the manifest check holds every receiver of such a facet to
   `files_max_frame_min` (property 16 of design-system.md).
+  Of those, the interfaces whose parameters name `files_grant` as
+  their checker (`files` and `media`) are the ones whose grants a
+  namespace mounts with the rights the facet row states; the generator
+  lists them for Erlang as `?ERX_FILES_GRANT_SERVICES`, and the manifest
+  check tells them by the same checker.
 * A facet row's operations are explicit operation numbers of its
   interface, strictly ascending; a schema revision does not add newly
   declared operations to an existing grant. A tree service's row names

@@ -541,11 +541,23 @@ class AbiSchemaTest < Minitest::Test
     end
   end
 
-  # The checked-in interfaces served as trees are files, input, windows and line.
-  def test_files_input_windows_and_line_are_served_as_trees
+  # The checked-in interfaces served as trees are files, input, line, media and windows.
+  def test_files_input_line_media_and_windows_are_served_as_trees
     root = File.expand_path('../..', __dir__)
     services = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)).services
-    assert_equal %w[files input line windows], services.select { |service| service.fetch(:served_as) == 'tree' }.map { |service| service.fetch(:name) }.sort
+    assert_equal %w[files input line media windows], services.select { |service| service.fetch(:served_as) == 'tree' }.map { |service| service.fetch(:name) }.sort
+  end
+
+  # ?ERX_FILES_GRANT_SERVICES lists by number the interfaces whose parameters name
+  # files_grant as their checker, and no other tree interface; the checked-in ones are
+  # files and media, whose grants a namespace mounts with rights (erx_domain_srv).
+  def test_files_grant_services_are_the_interfaces_files_grant_checks
+    parsed = schema("service carried 2\n  served_as tree\n  parameter rights 1 u64 optional range 1 2 checked_by files_grant\n" \
+                    "service line 3\n  served_as tree\n  parameter rate 1 u64 optional range 1 2 checked_by line_grant\n")
+    assert_includes Erx::ABI::ErlangEmitter.header(parsed), "-define(ERX_FILES_GRANT_SERVICES, [2]).\n"
+    model = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: File.expand_path('../..', __dir__)))
+    numbers = %w[files media].map { |name| model.services.find { |service| service.fetch(:name) == name }.fetch(:number) }
+    assert_includes Erx::ABI::ErlangEmitter.header(model), "-define(ERX_FILES_GRANT_SERVICES, [#{numbers.sort.join(', ')}]).\n"
   end
 
   # served_by session marks a session's line (docs/design-system.md, "A session's lines"):

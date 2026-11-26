@@ -395,14 +395,15 @@ booted(#{lib := Lib} = State) ->
             {System, Minted} = lists:partition(fun({_Grantee, _Name, Server, _Limits}) -> Server =:= system end,
                                                maps:get(grants, Boot, [])),
             %% erx_domain_mints takes each configured domain's service as {Server,
-            %% Name}; the interface number tells files services, of the files or the
-            %% media interface, whose grants a namespace mounts and the mint core
-            %% settles before a session's start answers. The services of interfaces
+            %% Name}; the interface number tells files services, of the interfaces
+            %% whose parameters files_grant checks, ?ERX_FILES_GRANT_SERVICES (files and
+            %% media), whose grants a namespace mounts and the mint core settles before
+            %% a session's start answers. The services of interfaces
             %% abi/services declares served_as tree, ?ERX_TREE_SERVICES, are those the
             %% system domain serves as erx_fs grants (served_kind/2).
             Services = [{Server, Name} || {Server, Name, _Interface} <- maps:get(services, Boot, []), Server =/= system],
             Files = [Name || {_Server, Name, Interface} <- maps:get(services, Boot, []),
-                             Interface =:= ?ERX_SERVICE_FILES orelse Interface =:= ?ERX_SERVICE_MEDIA],
+                             lists:member(Interface, ?ERX_FILES_GRANT_SERVICES)],
             Windows = [Name || {_Server, Name, ?ERX_SERVICE_WINDOWS} <- maps:get(services, Boot, [])],
             Inputs = [Name || {_Server, Name, ?ERX_SERVICE_INPUT} <- maps:get(services, Boot, [])],
             Trees = [Name || {_Server, Name, Interface} <- maps:get(services, Boot, []),

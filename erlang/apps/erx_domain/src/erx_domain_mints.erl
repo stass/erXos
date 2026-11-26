@@ -255,7 +255,8 @@ name, and its facet rows served by configured domains, each a grantee, the
 service's name, its server row and the grant's limits. A grantee
 {template, T}'s grants are kept nowhere here: each session carries the facet
 rows its plan gave it, in its ready report and as a party. Files names the
-services of the files interface, whose grants a namespace mounts, and
+services of the files and media interfaces (?ERX_FILES_GRANT_SERVICES), whose
+grants a namespace mounts, and
 Windows those of the windows interface, whose grants size their pairs'
 pixel areas (pair_area/3), and Inputs those of the input interface, whose
 grants are read-only (grant_limits/2); none of any by default. Interfaces

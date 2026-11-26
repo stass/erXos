@@ -154,7 +154,7 @@ module Erx
           end
         end
         schema.signals.sets.sort.each { |name, signals| lines << signal_set_members(schema, name, signals) }
-        lines << tree_services(schema)
+        lines << tree_services(schema) << files_grant_services(schema)
         lines << session_lines(schema) << drive_grants(schema)
         (lines + ['', '-endif.', '']).join("\n")
       end
@@ -180,6 +180,18 @@ module Erx
         numbers = schema.services.select { |service| service.fetch(:served_as) == 'tree' }
                         .map { |service| service.fetch(:number) }.sort
         "-define(ERX_TREE_SERVICES, [#{numbers.join(', ')}])."
+      end
+
+      # ?ERX_FILES_GRANT_SERVICES: the numbers of the abi/services interfaces whose
+      # parameters name files_grant as their checker, in number order: files and media,
+      # whose grants a namespace mounts with the rights the facet row states, so the
+      # domain service tells them from the other tree interfaces by the ABI alone.
+      def files_grant_services(schema)
+        raise SchemaError, 'files_grant_services collides with a constant' if schema.constants.key?('files_grant_services')
+
+        numbers = schema.services.select { |service| service.fetch(:checked_by) == 'files_grant' }
+                        .map { |service| service.fetch(:number) }.sort
+        "-define(ERX_FILES_GRANT_SERVICES, [#{numbers.join(', ')}])."
       end
 
       # ?ERX_LINES: each abi/services interface declared served_by session, a session's

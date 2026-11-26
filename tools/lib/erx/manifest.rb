@@ -467,8 +467,9 @@ module Erx
       # the manifest check requires of it beyond what it requires of every service:
       #
       # * constant, the abi/manifest.txt constant that holds its name;
-      # * interface, the abi/services interface it is of: files, or media for the media
-      #   service, whose own interface marks its entries nofollow (abi/services/media.txt);
+      # * interface, the abi/services interface it is of, one whose parameters files_grant
+      #   checks (files_grant_interface): files, or media for the media service, whose own
+      #   interface marks its entries nofollow (abi/services/media.txt);
       # * needs, what makes the manifest hold exactly one service of the name, of its
       #   interface, and the build derive its rows: an apps row (:apps), the name
       #   being served at all (:served), or nothing (nil), when it derives none;
@@ -487,7 +488,6 @@ module Erx
       # A row with neither needs nor window is not checked to be of its interface.
       WellKnown = Data.define(:constant, :interface, :needs, :window, :derived, :source) do
         def initialize(constant:, needs:, window:, derived:, source:, interface: 'files')
-          raise Erx::Error, "WellKnown #{constant} interface #{interface.inspect}" unless %w[files media].include?(interface)
           raise Erx::Error, "WellKnown #{constant} needs #{needs.inspect}" unless [:apps, :served, nil].include?(needs)
           raise Erx::Error, "WellKnown #{constant} source #{source.inspect}" unless
             [:any, :none].include?(source) || source.is_a?(SourceGrants)
@@ -1896,7 +1896,7 @@ module Erx
           unsupported("services names #{name}, of the inspect interface, whose scope for an app is not checked", 'apps.services') if
             interface == fetch_interface('inspect')
           unsupported("services names #{name}, of a files or media interface, whose grant no tree apps roots yet", 'apps.services') if
-            [fetch_interface('files'), fetch_interface('media')].include?(interface)
+            grant_checker(interface) == 'files_grant'
           declared = declared_parameters(interface) ||
                      invalid("services names #{name}, whose interface no ABI file declares", 'apps.services')
           required = declared.select { |_key, parameter| parameter.fetch(:cardinality) == 'one' }.keys
@@ -2050,8 +2050,8 @@ module Erx
         [facet, values.freeze]
       end
 
-      # The index of the one service named as the well-known service known is, of the
-      # files interface, which a manifest holds when known's needs or window call for it,
+      # The index of the one service named as the well-known service known is, of its
+      # interface, which a manifest holds when known's needs or window call for it,
       # required_by naming which, or known's property refuses it.
       def fetch_well_known(service_rows, known, required_by:)
         name = name_of(known)
@@ -2059,8 +2059,19 @@ module Erx
         invalid("a manifest with #{required_by} holds one service named #{name}", 'service.name') unless
           named.size == 1
         invalid("the service named #{name} is of the #{known.interface} interface", 'service.interface') unless
-          service_rows.fetch(named.first).fetch('interface') == fetch_interface(known.interface)
+          service_rows.fetch(named.first).fetch('interface') == files_grant_interface(known.interface)
         named.first
+      end
+
+      # The number of the interface name, which must be one whose parameters files_grant
+      # checks, files or media (grant_checker), since a well-known service's derived rows
+      # are files grants.
+      def files_grant_interface(name)
+        interface = fetch_interface(name)
+        raise Erx::Error, "a well-known service of the #{name} interface, whose parameters files_grant does not check" unless
+          grant_checker(interface) == 'files_grant'
+
+        interface
       end
 
       # The well-known services' window clauses, those of property 19's eighth and of
