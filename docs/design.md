@@ -86,6 +86,7 @@ evidence, not design contracts.
 | [design-display.md](design-display.md) | the display: composition, input routing, window buffers, the draw protocol, the terminal, widget trees, kiosks, graphics hardware |
 | [design-desktop-programs.md](design-desktop-programs.md) | the desktop's own programs and the shared visual theme |
 | [design-find-act.md](design-find-act.md) | find and act: the desktop session's palette and routes from values to rc lines |
+| [design-app-model.md](design-app-model.md) | the app model: a program is a file, an app is a package, the board is the manifest; what each person writes and what each kind may hold |
 | [design-apps.md](design-apps.md) | apps as principals, the start table and `service` |
 | [design-packaging.md](design-packaging.md) | packages: one file per app, admission, install and update at run time, the SDK |
 | [design-app-trees.md](design-app-trees.md) | an app's own tree at `/svc/NAME` |

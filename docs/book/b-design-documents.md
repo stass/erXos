@@ -1,7 +1,7 @@
 # Appendix B. Reading the Design Documents
 
 The book explains erXos; the design documents decide it. Behind the
-chapters stand forty-eight documents named `design-*.md`, together more
+chapters stand fifty-three documents named `design-*.md`, together more
 than a hundred thousand lines, each the contract of one subsystem.
 Each is written for the people who build or review its subsystem and
 assumes they know the rest. A reader who opens one cold meets terms
@@ -152,6 +152,7 @@ gives the question the document settles.
 | [design-find-act.md](../design-find-act.md) | Find and act: the session's palette and routes from values to rc lines |
 | [design-web.md](../design-web.md) | The web client and its two front ends |
 | [design-book-site.md](../design-book-site.md) | The book on the website: Markdown rendered to static pages at build time, diagrams drawn from the book's Mermaid, typography and fonts |
+| [design-app-model.md](../design-app-model.md) | The app model: a program is a file, an app is a package, the board is the manifest |
 | [design-apps.md](../design-apps.md) | Apps as principals, the start table and `service` |
 | [design-packaging.md](../design-packaging.md) | Packages: one file per app, admission, install and update at run time, the SDK |
 | [design-app-trees.md](../design-app-trees.md) | An app's own tree at `/svc/NAME` |
