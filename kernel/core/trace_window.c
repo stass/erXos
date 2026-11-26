@@ -13,7 +13,7 @@
 
 #include "erx/core/trace_window.h"
 
-/* The window's size, when the call's words make a window the rings fit in user space. */
+/* Whether the call's words name a window in user space that the rings' whole pages fit. */
 static bool
 trace_window_fits(const erx_trace_window_call_t *call, const erx_trace_window_limits_t *limits)
 {
@@ -25,7 +25,10 @@ trace_window_fits(const erx_trace_window_call_t *call, const erx_trace_window_li
 	if ((call->base & last_offset) != 0 || last_offset > limits->user_last ||
 	    call->base > limits->user_last - last_offset)
 		return (false);
-	return (limits->rings_bytes != 0 && limits->rings_bytes - 1 <= last_offset);
+	/* Whole pages of the kernel's, or a map of them would reach past the rings. */
+	if (limits->rings_bytes == 0 || (limits->rings_bytes & ((UINT64_C(1) << limits->page_order) - 1)) != 0)
+		return (false);
+	return (limits->rings_bytes - 1 <= last_offset);
 }
 
 erx_trace_window_t

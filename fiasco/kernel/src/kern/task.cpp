@@ -1,7 +1,7 @@
 // Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: alloc_ku_mem refuses an area under 16 KiB or not aligned
 // to its size (docs/design-fiasco.md, "Congruent UTCB areas").
-// Modified by erXos: erx_map_kernel_ro maps the kernel's trace rings read-only
+// Modified by erXos: erx_map_trace_rings maps the kernel's trace rings read-only
 // (docs/design-fiasco.md, "The kernel's trace rings").
 INTERFACE:
 
@@ -77,6 +77,8 @@ public:
 
 //---------------------------------------------------------------------------
 IMPLEMENTATION:
+
+#include "erx_trace.h"
 
 #include "atomic.h"
 #include "config.h"
@@ -968,12 +970,13 @@ Task::ext_map_ku_mem(Utcb const *utcb, Utcb *out, void *k_addr,
 }
 
 /**
- * erXos: map kernel memory read-only at a user address of this task, as
- * kernel-user memory is mapped but without a Ku_mem record, since the pages
- * are the kernel image's and never freed (docs/design-fiasco.md, "The
- * kernel's trace rings"). Its one caller, Erx_trace::map_trace, has checked
- * that [u_addr, u_addr + size) is page-aligned user space and holds the claim
- * that keeps a second mapping of the same pages out.
+ * erXos: map the kernel's trace rings, and nothing else of the kernel's,
+ * read-only for user mode at a user address of this task, as kernel-user
+ * memory is mapped but without a Ku_mem record, since the pages are the
+ * kernel image's and never freed (docs/design-fiasco.md, "The kernel's trace
+ * rings"). Its one caller, Erx_trace::map_trace, has checked that the rings
+ * fit page-aligned user space at u_addr and holds the claim that keeps a
+ * second mapping of the same pages out.
  *
  * \retval 0                 Mapping succeeded.
  * \retval -L4_err::ENomem   A page table could not be allocated.
@@ -982,8 +985,11 @@ Task::ext_map_ku_mem(Utcb const *utcb, Utcb *out, void *k_addr,
  */
 PUBLIC
 int
-Task::erx_map_kernel_ro(Address u_addr, void *k_addr, size_t size)
+Task::erx_map_trace_rings(Address u_addr)
 {
+  size_t size = 0;
+  void *k_addr = Erx_trace::rings_pages(&size);
+
   Ref_ptr self(this);
   auto guard_task = switch_lock_guard(existence_lock);
   if (!guard_task.is_valid())
@@ -994,7 +1000,7 @@ Task::erx_map_kernel_ro(Address u_addr, void *k_addr, size_t size)
 
   User_ptr<void> user(reinterpret_cast<void *>(u_addr));
   switch (map_ku_mem_chunk(&user, k_addr, false, size, true,
-                           L4_fpage::Rights::R()))
+                           L4_fpage::Rights::UR()))
     {
     case Mem_space::Insert_ok:         return 0;
     case Mem_space::Insert_err_nomem:  return -L4_err::ENomem;

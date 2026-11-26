@@ -3034,7 +3034,8 @@ no ring is ever a C++ object and no C++ file includes the ring's header. Three f
 The glue holds `static_assert(Config::Max_num_cpus <= ERX_TRACE_KERNEL_RINGS)` (`kern/config.cpp:74`), so a CPU number
 the glue passes always names a ring, and a configuration with more CPUs fails to build. The glue's references into
 Fiasco (`cpu_lock`, `current()`, `current_cpu()`, the object id, the counter) are inline functions of Fiasco's headers, so
-the glue's object refers to no Fiasco symbol and `fiasco/erx_glue_imports.txt` gains no line; the object ids exist because
+the glue's object refers to one Fiasco symbol, `Task::erx_map_trace_rings`, which maps the rings and nothing else with
+read rights for user mode and is `map_trace`'s one line in `fiasco/erx_glue_imports.txt`; the object ids exist because
 the fork's configuration requires `CONFIG_RT_DBG`.
 
 **The root's window.** As its service starts, the root asks for the mapping with one operation the fork adds to the platform
@@ -3046,7 +3047,7 @@ a window smaller than the rings or outside user space with `-L4_EINVAL`, and eve
 `-L4_EEXIST`, so the operation makes the kernel write the page-table entries of the root's window once in a boot and nothing
 else. The decision is a pure core function, `erx_fiasco_trace_window` (`kernel/core/trace_window.c`), over the
 call's words, the window and the rings' size, so host tests (`trace_window_test`) drive each refusal and a fuzz target
-(`trace_window_fuzz`) covers the operation's decoding; the system-call fuzz campaign reaches the operation only as an
+(`trace_window_fuzz`) covers the decision over any decoded words, though not Fiasco's own flexpage decoding; the system-call fuzz campaign reaches the operation only as an
 empty slot, since its test domain holds no platform control object. Two calls at once cannot both map: the first claims
 the mapping before it maps (`erx_trace_kernel_window_claim`), and a refused or failed map gives the claim back. The root's
 window is `ERX_FIASCO_TRACE_WINDOW`, a flexpage of 32 MiB below the kernel information page's window. A refused map leaves the root without the

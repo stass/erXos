@@ -32,6 +32,10 @@ static const erx_trace_window_limits_t limits = { .user_last = USER_LAST, .page_
 static const erx_trace_window_limits_t exact = { .user_last = USER_LAST, .page_order = 12,
     .rings_bytes = UINT64_C(1) << 22 };
 
+/* Rings that end inside a page: no map may cover them. */
+static const erx_trace_window_limits_t partial = { .user_last = USER_LAST, .page_order = 12,
+    .rings_bytes = (UINT64_C(1) << 22) - 64 };
+
 static erx_trace_ring_t rings[2];
 static erx_trace_record_t out[ERX_TRACE_READ_MAX];
 
@@ -81,6 +85,8 @@ window(void)
 	call.base = UINT64_C(0x400000);
 	if (erx_fiasco_trace_window(&call, &exact).verdict != ERX_TRACE_WINDOW_MAP)
 		return (fail("window", "a window exactly the rings' size was refused"));
+	if (erx_fiasco_trace_window(&call, &partial).verdict != ERX_TRACE_WINDOW_INVALID)
+		return (fail("window", "rings of part of a page were mapped"));
 	return (0);
 }
 

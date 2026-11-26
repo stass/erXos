@@ -116,7 +116,7 @@ Erx_trace::map_trace(Task *caller, unsigned words, bool mempage, Address base,
                      unsigned order)
 {
   size_t bytes = 0;
-  void *rings = const_cast<void *>(erx_trace_kernel_pages(&bytes));
+  (void)erx_trace_kernel_pages(&bytes);
   erx_trace_window_call_t call{};
   erx_trace_window_limits_t limits{};
 
@@ -134,8 +134,7 @@ Erx_trace::map_trace(Task *caller, unsigned words, bool mempage, Address base,
     return -L4_err::EExists;
 
   int const mapped = decided.verdict == ERX_TRACE_WINDOW_MAP
-    ? caller->erx_map_kernel_ro(static_cast<Address>(decided.base), rings,
-                                static_cast<size_t>(decided.bytes))
+    ? caller->erx_map_trace_rings(static_cast<Address>(decided.base))
     : -L4_err::EInval;
   if (mapped < 0)
     {
@@ -143,4 +142,13 @@ Erx_trace::map_trace(Task *caller, unsigned words, bool mempage, Address base,
       return mapped;
     }
   return ERX_TRACE_KERNEL_RINGS;
+}
+
+// The rings' pages and their size in bytes, for Task::erx_map_trace_rings,
+// which maps them and nothing else.
+PUBLIC static
+void *
+Erx_trace::rings_pages(size_t *bytes)
+{
+  return const_cast<void *>(erx_trace_kernel_pages(bytes));
 }

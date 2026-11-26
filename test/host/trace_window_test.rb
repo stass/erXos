@@ -26,12 +26,14 @@ class TraceWindowTest < Minitest::Test
   SEEDS = {
     'the once-per-boot check removed' => [WINDOW, "\tif (call->mapped)\n\t\treturn ((erx_trace_window_t){ .verdict = ERX_TRACE_WINDOW_MAPPED });\n",
                                           '', 'window', 'second call was not refused'],
-    'the size check removed' => [WINDOW, 'limits->rings_bytes != 0 && limits->rings_bytes - 1 <= last_offset', 'limits->rings_bytes != 0',
+    'the size check removed' => [WINDOW, 'return (limits->rings_bytes - 1 <= last_offset);', 'return (true);',
                                  'window', 'smaller than the rings was accepted'],
     'the exact fit refused' => [WINDOW, 'limits->rings_bytes - 1 <= last_offset', 'limits->rings_bytes <= last_offset',
                                 'window', "exactly the rings' size was refused"],
     'the window maps its whole size' => [WINDOW, '.bytes = limits->rings_bytes', '.bytes = UINT64_C(1) << call->order',
                                          'window', "rings' pages alone"],
+    'the whole-page check removed' => [WINDOW, ' || (limits->rings_bytes & ((UINT64_C(1) << limits->page_order) - 1)) != 0', '',
+                                       'window', 'rings of part of a page'],
     'the user bound removed' => [WINDOW, ' ||
 	    call->base > limits->user_last - last_offset)', ')', 'refusals', 'past user space was accepted'],
     'the alignment check removed' => [WINDOW, '(call->base & last_offset) != 0 || ', '', 'refusals', 'not aligned to its size'],

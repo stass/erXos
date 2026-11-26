@@ -63,7 +63,7 @@ typedef struct erx_trace_window {
  * The decision. A call is refused as mapped once one has mapped; otherwise it maps only
  * when it has exactly ERX_FIASCO_PFC_MAP_TRACE_WORDS words and its window is a memory
  * flexpage of at least a page, aligned to its size, wholly in user space and at least as
- * large as the rings.
+ * large as the rings, and the rings are a whole number of the kernel's pages.
  */
 erx_trace_window_t	erx_fiasco_trace_window(const erx_trace_window_call_t *call,
 			    const erx_trace_window_limits_t *limits);
