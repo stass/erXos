@@ -13,6 +13,8 @@
 
 %% The fixtures the media tree's cases share (erx_media_tree_tests).
 -export([image/1, proxy/2, mbr/2, sectors/1, facet/1]).
+%% The logger handler a case adds.
+-export([log/2]).
 
 -define(SECTOR, 512).
 -define(START, 2048).
@@ -81,12 +83,31 @@ flushes(Proxy) ->
     receive {flushed, Proxy} -> 1 + flushes(Proxy) after 0 -> 0 end.
 
 %% A stick with no table is volume 1, its whole medium: a FAT16 volume that flushes and
-%% is clean mounts rw, after exactly one flush.
-a_fat_stick_with_no_table_mounts_rw_test() ->
-    Proxy = proxy(image("fat16.img"), ok),
-    {_Sup, {none, [{#{number := 1, first := 0}, Volume}], 0}} = through(Proxy),
-    ?assertMatch(#{format := msdosfs, fat := 16, mount := rw}, erx_media_volume:outcome(Volume)),
-    ?assertEqual(1, flushes(Proxy)).
+%% is clean passes every condition of the writable rule but the server's write path,
+%% which erx_fat lacks, so it mounts read-only after exactly one flush, and says why in
+%% one log line from the same outcome status shows. Logger runs a handler in the
+%% process that logs, and the volume logs before it answers outcome/1, so the line is
+%% already here when outcome/1 returns.
+a_clean_fat_stick_mounts_read_only_for_want_of_a_write_path_test() ->
+    ok = logger:add_handler(?MODULE, ?MODULE, #{config => #{test => self()}}),
+    try
+        Proxy = proxy(image("fat16.img"), ok),
+        {_Sup, {none, [{#{number := 1, first := 0}, Volume}], 0}} = through(Proxy),
+        Outcome = erx_media_volume:outcome(Volume),
+        ?assertMatch(#{format := msdosfs, fat := 16, mount := {ro, no_write_path}}, Outcome),
+        ?assertEqual(<<"erXos has no msdosfs write path">>, erx_media_volume:ro_reason(Outcome)),
+        ?assertEqual(1, flushes(Proxy)),
+        ?assertEqual(<<"erx_media: volume s1 (msdosfs) mounted read-only: erXos has no msdosfs write path">>,
+                     receive {logged, Line} -> Line after 0 -> none end)
+    after
+        logger:remove_handler(?MODULE)
+    end.
+
+%% The logger handler the case above adds: each event's text goes to the test process.
+log(#{msg := {Format, Arguments}}, #{config := #{test := Test}}) when is_list(Arguments) ->
+    Test ! {logged, iolist_to_binary(io_lib:format(Format, Arguments))};
+log(_Event, _Config) ->
+    ok.
 
 %% Each volume of an MBR medium reads only its own sectors, each placed by its entry:
 %% FAT16 at 2048 and FAT32 behind it both mount, which no read at the wrong place
@@ -97,8 +118,8 @@ each_volume_reads_at_its_own_place_test() ->
     Medium = mbr([{16#0e, ?START, sectors(Fat16)}, {16#0c, Second, sectors(Fat32)}],
                  [{?START, Fat16}, {Second, Fat32}]),
     {_Sup, {mbr, [{_, One}, {_, Two}], 0}} = read(Medium, ok),
-    ?assertMatch(#{fat := 16, mount := rw}, erx_media_volume:outcome(One)),
-    ?assertMatch(#{fat := 32, mount := rw}, erx_media_volume:outcome(Two)).
+    ?assertMatch(#{fat := 16, mount := {ro, no_write_path}}, erx_media_volume:outcome(One)),
+    ?assertMatch(#{fat := 32, mount := {ro, no_write_path}}, erx_media_volume:outcome(Two)).
 
 %% The writable rule's flush: a medium that cannot flush mounts read-only, and a flush
 %% that fails refuses the mount, with nothing written.
@@ -140,7 +161,19 @@ the_rule_names_its_first_failing_condition_test() ->
     ?assertEqual({ro, {also, littlefs}}, erx_media_volume:writable(msdosfs, [littlefs], Unsent, true)),
     ?assertEqual({ro, flush}, erx_media_volume:writable(msdosfs, [], fun() -> {error, enotsup} end, false)),
     ?assertEqual({ro, dirty}, erx_media_volume:writable(msdosfs, [], fun() -> ok end, false)),
-    ?assertEqual(rw, erx_media_volume:writable(msdosfs, [], fun() -> ok end, true)).
+    ?assertEqual({ro, no_write_path}, erx_media_volume:writable(msdosfs, [], fun() -> ok end, true)).
+
+%% Each read-only reason has one plain line, which status and the log line both show;
+%% an outcome that is not read-only has none.
+each_read_only_reason_reads_plainly_test() ->
+    Reason = fun(Format, Mount) -> erx_media_volume:ro_reason(#{format => Format, mount => Mount}) end,
+    ?assertEqual(<<"erXos does not write erofs">>, Reason(erofs, {ro, format})),
+    ?assertEqual(<<"a littlefs signature is also on the volume">>, Reason(littlefs, {ro, {also, littlefs}})),
+    ?assertEqual(<<"the medium cannot flush">>, Reason(msdosfs, {ro, flush})),
+    ?assertEqual(<<"the FAT's dirty flag is set">>, Reason(msdosfs, {ro, dirty})),
+    ?assertEqual(<<"erXos has no msdosfs write path">>, Reason(msdosfs, {ro, no_write_path})),
+    ?assertEqual(none, Reason(msdosfs, rw)),
+    ?assertEqual(none, Reason(exfat, {none, format})).
 
 %% A table refused whole starts no volume; a medium whose window does not answer is a
 %% failed reading.
@@ -177,7 +210,7 @@ each_volume_runs_under_its_memory_bound_and_ends_alone_test() ->
     %% signals, delivered at once on one node, though Erlang orders only one sender's.
     ?assertMatch([{{volume, 2}, Two, worker, _}],
                  [Child || {{volume, _}, _, _, _} = Child <- supervisor:which_children(Sup)]),
-    ?assertMatch(#{fat := 32, mount := rw}, erx_media_volume:outcome(Two)).
+    ?assertMatch(#{fat := 32, mount := {ro, no_write_path}}, erx_media_volume:outcome(Two)).
 
 %% A stand-in drive facet whose every window ask answers Proxy.
 facet(Proxy) ->
@@ -196,7 +229,7 @@ the_drive_mounts_its_medium_at_the_ask_and_ends_it_with_its_proxy_test() ->
     try
         {ok, #{proxy := Proxy, table := {none, [{_, Volume}], 0}} = Medium} = gen_server:call(Drive, medium, 5000),
         ?assertEqual({ok, Medium}, gen_server:call(Drive, medium, 5000)),
-        ?assertMatch(#{mount := rw}, erx_media_volume:outcome(Volume)),
+        ?assertMatch(#{mount := {ro, no_write_path}}, erx_media_volume:outcome(Volume)),
         Monitor = monitor(process, Volume),
         exit(Proxy, kill),
         ?assertEqual(shutdown, receive {'DOWN', Monitor, process, Volume, Why} -> Why after 2000 -> running end),

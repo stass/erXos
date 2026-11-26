@@ -246,15 +246,19 @@ volume({#{number := Number}, extended}, _Outcome) ->
     [{field(Number, <<>>), extended}, {field(Number, <<"_mount">>), [none, extended]}];
 volume({#{number := Number, length := Length}, Pid}, Outcome) ->
     #{format := Format, mount := Mount} = Shown = Outcome(Pid),
-    Fields = [{<<>>, Format}, {<<"_mount">>, mount(Mount)}, {<<"_sectors">>, Length}]
+    Fields = [{<<>>, Format}, {<<"_mount">>, mount(Mount)}]
+             ++ [{<<"_ro_reason">>, Reason} || Reason <- [erx_media_volume:ro_reason(Shown)], Reason =/= none]
+             ++ [{<<"_sectors">>, Length}]
              ++ [{<<"_", (atom_to_binary(Key))/binary>>, maps:get(Key, Shown)}
                  || Key <- [fat, label, serial], maps:get(Key, Shown, none) =/= none],
     [{field(Number, Suffix), Value} || {Suffix, Value} <- Fields].
 
+%% A read-only mount's reason is its own line, `sN_ro_reason`, from
+%% erx_media_volume:ro_reason/1, the line the volume logs at its mount.
 mount(rw) -> rw;
-mount({Shown, {also, Name}}) -> [Shown, also, Name];
-mount({Shown, {Reason, Why}}) -> [Shown, Reason, Why];
-mount({Shown, Reason}) -> [Shown, Reason].
+mount({ro, _Reason}) -> ro;
+mount({none, {Reason, Why}}) -> [none, Reason, Why];
+mount({none, Reason}) -> [none, Reason].
 
 field(Number, Suffix) -> <<"s", (integer_to_binary(Number))/binary, Suffix/binary>>.
 

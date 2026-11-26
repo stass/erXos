@@ -130,6 +130,16 @@ status_escapes_what_the_medium_supplies_test() ->
                  Lines),
     ?assertEqual(<<"medium\tnone\n">>, erx_media_tree:status(none, none, Outcome)).
 
+%% A read-only volume shows `ro` and, on a line of its own, the reason the writable rule
+%% gave, the same line erx_media_volume:ro_reason/1 makes for the mount's log line.
+status_names_why_a_volume_is_read_only_test() ->
+    Table = {none, [{#{number => 1, length => 100}, self()}], 0},
+    Outcome = fun(_Pid) -> #{format => msdosfs, fat => 32, mount => {ro, {also, 'hfs+'}}} end,
+    Lines = binary:split(erx_media_tree:status({ok, #{sectors => 100}}, Table, Outcome), <<"\n">>, [global, trim]),
+    ?assertEqual([<<"s1\tmsdosfs">>, <<"s1_mount\tro">>, <<"s1_ro_reason\ta hfs+ signature is also on the volume">>,
+                  <<"s1_sectors\t100">>, <<"s1_fat\t32">>],
+                 lists:sublist(Lines, 6, 5)).
+
 %% A rename between two volumes answers exdev from the two nodes alone: neither
 %% volume's process is asked.
 exdev_is_decided_before_any_volume_is_asked_test() ->

@@ -87,7 +87,7 @@ goes to the document of the subsystem its component pointer names.
 * [Drivers and platforms](docs/todo-drivers.md#bugs-by-subsystem): drivers and the device layer: PCIe, DMA, the device tree, GENET, SD, UART, the platforms and boards.
   54 items (2 High, 29 Medium, 23 Low).
 * [Shell and programs](docs/todo-shell.md#bugs-by-subsystem): the command shell (rc), programs, the console line and the terminal.
-  88 items (44 Medium, 44 Low).
+  89 items (44 Medium, 45 Low).
 * [Sessions and SSH](docs/todo-session.md#bugs-by-subsystem): sessions, SSH, the vault and login.
   61 items (1 High, 38 Medium, 22 Low).
 * [Apps and the start service](docs/todo-apps.md#bugs-by-subsystem): applications and packages, the demo apps.
@@ -192,7 +192,7 @@ document's "residual risks accepted" paragraph.
 * [Drivers and platforms](docs/todo-drivers.md#planned-features): drivers and the device layer: PCIe, DMA, the device tree, GENET, SD, UART, pin control, the platforms and boards.
   42 items (23 Medium, 19 Low).
 * [Shell and programs](docs/todo-shell.md#planned-features): the command shell (rc), programs, the console line and the terminal.
-  15 items (4 Medium, 11 Low).
+  16 items (4 Medium, 12 Low).
 * [Sessions and SSH](docs/todo-session.md#planned-features): sessions, SSH, the vault and login.
   26 items (11 Medium, 15 Low).
 * [Apps and the start service](docs/todo-apps.md#planned-features): applications and packages, the demo apps.

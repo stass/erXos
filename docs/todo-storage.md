@@ -90,7 +90,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      domain, 3, which the manifest's rows for other configured peers do not reckon either.
   5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume. Its read path is built (mount,
      directories, lookups and reads, with `erx_fat`'s fuzz target); what remains: its batches, dirty
-     flag and finish; lookups through the generated simple-uppercase case table of
+     flag and finish, the write path behind them with `msdosfs` added to `erx_media_volume`'s
+     `WRITE_PATHS` (until then every FAT volume mounts `ro`, `erXos has no msdosfs write path`); lookups through the generated simple-uppercase case table of
      design-storage.md's "Names", where they ignore only ASCII case today, so a name differing from
      a stored one only in a non-ASCII letter's case is `not_found`; the root directory's label
      entry as `sN_label` beside the boot sector's; and `erx_fat_read:root_file/3` reading through
@@ -142,8 +143,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   * [Medium] `erx_lfs` lies in `erx_storage`, which the media domain's release may not name, so
     step 4's littlefs volumes need it moved to an application of its own, as `erx_fat_read` moved to
     `erx_fat`, before the release check of step 4 can pass with littlefs in a development build.
-  * [Medium] `erx_media_volume` shows a clean FAT volume that flushes as `rw`, though `erx_fat` has
-    no write path yet, so a write through the media tree fails until that path lands.
+  * [Medium] `erx_media_volume`'s read-only log line names the volume (`volume s1`) but not its drive,
+    which the volume process does not know, so two sticks' lines read alike; pass `diskN` to the volume
+    at its start. And `erx_media_tree` refuses every write in a volume with `erofs` from the node, not
+    from the volume's outcome: it agrees with status only while `WRITE_PATHS` is empty, so the FAT write
+    path must route the tree's writes through the volume, refused unless its mount is `rw`.
   * [Low] `erx_media_tree` shows a drive status's `transport` and `flush` as `unknown`: the window's
     `info` answers neither (design-drives.md, "Status"). Show them once the window reports them.
   * [Medium] `erx_media_volume`'s qid path table caps at 2^40 entries and frees none, where design-storage.md's

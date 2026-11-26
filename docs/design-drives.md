@@ -525,7 +525,7 @@ An eject a restart cuts short never
 answers `ok`: its answer comes only from the drive process after every
 finish, and that drive process has ended, so the writer of `eject` gets
 `eio`; a finish whose flush was refused `gone` leaves its FAT volume
-`ro dirty` at the next mount.
+read-only for its dirty flag at the next mount.
 
 ### How the grant reaches the media domain
 
@@ -976,8 +976,12 @@ volume's mount: the mount is made when it starts, and ends when it ends.
 ### The writable rule
 
 A volume mounts **writable** exactly when all of these hold, and
-otherwise **read-only**, naming in its `status` line the first that
-does not:
+otherwise **read-only**, naming the first that does not in one plain
+line: the `sN_ro_reason` line of its drive's `status` file, and one
+line of the system log when the volume mounts. Both are made from the
+rule's one outcome, the one the volume's refusals follow; a write
+refused on it answers `erofs`, since a 9P error carries an errno
+alone:
 
 1. its format is one erXos writes on a drive (`format`): FAT16, FAT32 or
    littlefs, not EROFS;
@@ -1316,7 +1320,8 @@ parser reads both:
 | `transport`, `sectors`, `flush` | the transport's name, the medium's capacity, and `yes` or `no` |
 | `table` | `mbr`, `gpt`, `none` or `refused FINDING` |
 | `sN` | volume N's format, a name of the probe's table or `unknown`; `extended` for an MBR's extended entry |
-| `sN_mount` | one of three outcomes: `rw`; `ro REASON`, the writable rule's `format`, `also NAME`, `flush` or `dirty`; or `none REASON`, no files: `format` for a format not served, FAT12 among them, `unknown`, `extended`, `flush` with the flush's answer, or `failed` with why the volume ended |
+| `sN_mount` | one of three outcomes: `rw`; `ro`, with the reason on `sN_ro_reason`; or `none REASON`, no files: `format` for a format not served, FAT12 among them, `unknown`, `extended`, `flush` with the flush's answer, or `failed` with why the volume ended |
+| `sN_ro_reason` | a read-only volume's alone: the writable rule's first condition that does not hold, as one plain line: `erXos does not write NAME` (`format`), `a NAME signature is also on the volume` (`also`), `the medium cannot flush` (`flush`) or `the FAT's dirty flag is set` (`dirty`); the volume's mount logs the same line |
 | `sN_sectors` | its length |
 | `sN_fat` | FAT's type, `12`, `16` or `32` |
 | `sN_label`, `sN_serial` | the volume's label and serial number, or a GPT entry's name and unique GUID, as the medium gives them |
@@ -1567,7 +1572,7 @@ it whose failure the domain's restart intensity counts.
 | the medium removed, changed or failing | the window's end ([design-usb.md](design-usb.md#media-and-drives)) | the medium's supervisor: every volume and port of it | open files answer `eio`; `diskN` empty but for `status` and `ctl`; the next medium mounts at the next walk |
 | a finish whose writes or flush fail | its answer | the medium, as an eject ends it | `eject` answers `eio`; FAT volumes show `dirty` at the next mount |
 | a write on a trial boot | the write path (U4) | that write, `erofs` | a FAT write answers `erofs`; a littlefs volume, whose block write failed, ends |
-| a FAT volume removed while written | its next mount: the dirty flag | nothing | that volume read-only, `ro dirty`, until repaired on another machine |
+| a FAT volume removed while written | its next mount: the dirty flag | nothing | that volume read-only, `sN_ro_reason` naming the dirty flag, until repaired on another machine |
 | the drive process ends | `erx_media_sup` | that drive's medium mounts | `eio` on its open files; the next walk mounts the medium afresh, its block service restarted first |
 | the media domain ends | the domain service | every drive's mounts | `/media` answers `eio` until the restarted domain's re-grant; open files keep answering `eio`; each medium mounts afresh at its next walk |
 | the serving domain ends (the USB domain, a block device's driver domain) | the proxies' end, seen as `noconnection` | that domain's drives' media, its facets and proxies with its connection | as a removal, and its drives leave the `/media` listing; the restarted domain's ready report has its drives' facets minted again, and they return, with fresh windows |
@@ -1592,7 +1597,7 @@ it whose failure the domain's restart intensity counts.
 | `erx_media_table:place/3` | `{error, erange}` | a request that reaches past its volume |
 | a littlefs port's program or erase | an error answer | the volume is read-only or finished |
 | a walk into `sN` | `eio` | the volume's outcome is `none`, or it is finished or ended |
-| a write on a read-only volume | `erofs` | the writable rule mounted it read-only |
+| a write on a read-only volume | `erofs` | the writable rule mounted it read-only; `sN_ro_reason` and the mount's log line say why |
 | a write on a grant that is not `rw` | `erofs` | before any callback (F5) |
 | a write after the ordered end's freeze | `erofs` | at the grant (`erx_fs`'s freeze) |
 | a rename or link between two volumes | `exdev` | before either volume is asked |
@@ -1677,7 +1682,7 @@ so a pass shows the code under test ran.
 | `erx_media_table` over written cases of each rule: an MBR with one and with four entries; a FAT boot sector with zero entries and a plausible BPB, read as no table; a boot sector whose status bytes are not 0 or `0x80`, read as no table; entries of type `0x00` and of start or length 0 skipped; an extended entry listed and not served; an entry past the end, one that runs backwards and two overlapping entries, each refusing the table, the overlap in both orders | the status-byte test dropped, so a boot sector with code is read as a table; the overlap check made order-dependent, so the second order passes; the backwards check dropped |
 | the GPT cases: a GPT behind its protective entry; a primary header that fails its signature, its CRC, its usable area's bounds, an area past the medium's end among them, and its array's bounds in turn, each read from the backup at the last sector; a primary header that passes over an array that fails its CRC, read from the backup at the primary's alternate sector, which is not the last; both copies failing, refused and never read as an MBR or as no table; a signed sector 0 with an `0xEE` entry and a status byte neither `0x00` nor `0x80` over an otherwise mountable FAT boot sector, refused and never mounted whole; an array of 17 KiB; nine used entries, eight served; a primary array that starts at sector 0, one that starts and one that ends inside the usable area, each read from the backup, and one that ends on the last sector, where the backup header is then read, refused; both arrays inside their usable areas, refused `gpt header`; a usable area that meets a header, the other copy's array, and an array that encloses the usable area, each refused `gpt metadata` | a missing primary signature taken as no GPT, so the medium falls back to no table; the status-byte test made before the `0xEE` test, so the protective sector's FAT mounts whole; the usable area's bounds dropped, so the primary whose area lies past the end is taken and the backup never read; the backup read at the last sector after a passing header, so the alternate copy is missed; the array compared by its ends alone, so the enclosing array passes; the other copy's array left out of the metadata set; the array bound removed; the array's place bounded by the medium alone, so the array at sector 0 is taken |
 | the table as a property test: for every MBR and GPT the generator writes, the served volumes lie inside the medium, pairwise apart and apart from every metadata sector, and `place/3` never answers a sector outside its volume | the end check written `<` for `=<` |
-| `erx_media_probe` on a seed of each table row; on a FAT32 volume holding EROFS's magic at 1,024 bytes, which selects `erofs`; on a FAT32 volume that kept a littlefs superblock in block 1, which selects `littlefs` with `msdosfs` also found, mounting `ro also msdosfs` in a development build and `none format` in a release, which serves no littlefs; and on a FAT12 volume fsimg writes, refused `none format` | the order reversed, so the first volume selects `msdosfs`; the written-formats check dropped, so the littlefs volume is found alone; the FAT type left to the mount, so the FAT12 volume is selected and mounted |
+| `erx_media_probe` on a seed of each table row; on a FAT32 volume holding EROFS's magic at 1,024 bytes, which selects `erofs`; on a FAT32 volume that kept a littlefs superblock in block 1, which selects `littlefs` with `msdosfs` also found, mounting `ro` for `msdosfs` also found in a development build and `none format` in a release, which serves no littlefs; and on a FAT12 volume fsimg writes, refused `none format` | the order reversed, so the first volume selects `msdosfs`; the written-formats check dropped, so the littlefs volume is found alone; the FAT type left to the mount, so the FAT12 volume is selected and mounted |
 | littlefs's signature over volumes the tree's littlefs writes with `erx_lfs_config`: freshly formatted, after many commits, after compactions of the root pair that leave its current superblock in block 1, and cut mid-commit and mounted again, each found by the probe and mounted | the signature read in block 0 alone, so the compacted volume is `unknown` |
 | the writable rule over every combination of format, written formats also found, flush answer and dirty flag | the `also` condition removed, so the doubly formatted volume mounts writable; every flush answer but `ok` taken as `enotsup` |
 | a selected format whose mount fails: the FAT32 volume holding EROFS's magic is `none failed` and nothing is written | a fall-through to the next format found, which mounts it as FAT |

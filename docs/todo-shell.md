@@ -87,6 +87,11 @@ handles and its `code_objects_max` copies fit its handle table (`BOOT_CAP_LIMIT`
 
 ## Bugs by subsystem
 
+* [Low] shell, `ls -l` (`erlang/apps/erx_shell/src/erx_cmd_ls.erl`, `print/5`): every directory's
+  `total` line prints `-`, since the file information it reads carries no block count; FreeBSD's
+  `ls` sums each entry's `st_blocks`. Seen on a FAT stick under `/media/disk0/s1`, but the same on
+  every tree. Needs a block count in the attributes `erx_fs` answers (9P2000.L's `getattr` has
+  `blocks`), then the sum.
 * [Low] shell, rc's lines through the Erlang shell's formatter (`otp/lib/kernel/src/group.erl`,
   `format_expression/2`): the group redraws every ended line in the output of the node-wide
   `stdlib` `format_shell_func`, so with an Erlang formatter set by `shell:format_shell_func/1`
@@ -760,6 +765,11 @@ to the corpus and follow rc
 
 ## Planned features
 
+* [Low] shell, `df`: rc has no `df` (`df: not found`), which a FreeBSD user tries first to see a
+  mounted stick's space, and no design document names one. Each tree already answers `statfs`
+  (`erx_fs`'s `statfs/1`, e.g. `erx_media_tree:statfs/1`, design-tmp.md's `statfs()` row), so a
+  `df` over the session's namespace table is a small Erlang command; design-shell.md's command
+  list needs it first.
 * [Medium] shell, an Erlang command's streams over pipe-server ends
   ([design-pipes.md](design-pipes.md#the-sessions-pipe-nif)): that is the
   long-term shape of `erx_cmd`; a job's message pipes (`erx_shell_pipe`,

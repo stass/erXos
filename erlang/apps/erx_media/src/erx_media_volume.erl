@@ -14,14 +14,24 @@ It reads its volume through the window proxy alone, each sector placed by
 erx_media_table:place/3, so no request reaches a sector outside the volume. Before
 it answers anything it probes the volume (erx_media_probe:format/3), mounts the
 selected format if it serves it, and applies the writable rule (writable/4), so a
-call made while it mounts waits for the mount. Its outcome is what `sN_mount` shows:
+call made while it mounts waits for the mount. Its outcome is what `sN_mount` and
+`sN_ro_reason` show:
 
 * `rw`;
 * `{ro, Reason}`, the writable rule's first condition that does not hold: `format`,
-  `{also, Name}`, `flush` (the medium cannot flush) or `dirty`;
+  `{also, Name}`, `flush` (the medium cannot flush), `dirty`, or `no_write_path`, a
+  format whose server here writes nothing, which erx_fat is, so no volume mounts `rw`;
 * `{none, Reason}`, no files: `format` for a format not served, FAT12 among them,
   `unknown`, `{flush, Reason}` for a flush that answered neither `ok` nor `enotsup`,
   or `{failed, Why}` for a probe whose read failed or a mount the format refused.
+
+A read-only outcome's reason reads as one plain line, ro_reason/1, which the media
+tree shows as `sN_ro_reason` and the volume logs once when it mounts, so status and
+the log line come from the one outcome the rule gave. The media tree refuses every
+write in a volume with `erofs` from the node alone, which agrees with every outcome
+only because no format here has a write path: the write path that adds a format to
+`WRITE_PATHS` also routes the tree's writes through the volume, refused unless its
+mount is `rw`.
 
 The formats served are FAT16 and FAT32, through the FAT server (erx_fat); no other
 format falls back to another. Every byte of the volume is untrusted, and its label
@@ -47,7 +57,7 @@ answers `enfile`.
 
 -behaviour(gen_server).
 
--export([start_link/2, outcome/1, writable/4, new_mounts/0]).
+-export([start_link/2, outcome/1, writable/4, ro_reason/1, new_mounts/0]).
 -export([root/1, root_path/1, walk/3, attr/2, list/2]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
 -export_type([outcome/0, mount/0, path/0]).
@@ -62,9 +72,13 @@ answers `enfile`.
 %% The formats the media domain writes on a drive: FAT alone, the format table's one
 %% row that writes and is served here (docs/design-drives.md, "The writable rule").
 -define(WRITTEN, [msdosfs]).
+%% Of those, the formats whose server here has a write path: none, since erx_fat
+%% serves reads alone. A format joins this list with its server's write path, and
+%% only then can a volume of it mount rw.
+-define(WRITE_PATHS, []).
 
 -type mount() :: rw
-               | {ro, format | {also, erx_media_probe:name()} | flush | dirty}
+               | {ro, format | {also, erx_media_probe:name()} | flush | dirty | no_write_path}
                | {none, format | unknown | {flush, atom()} | {failed, term()}}.
 -type outcome() :: #{format := erx_media_probe:name() | unknown, mount := mount(),
                      fat => erx_fat_read:fat_type(), label => binary() | none,
@@ -129,7 +143,8 @@ whose format's own state is Clean: `rw` when every condition holds, else
 `{ro, Reason}` for the first that does not, or `{none, {flush, Reason}}` for a flush
 that answered anything but `ok` or `enotsup`, which refuses the mount with nothing
 written. Flush sends the mount's one flush; it is called only once the first two
-conditions hold, and before anything is written.
+conditions hold, and before anything is written. A volume that passes every condition
+is still `{ro, no_write_path}` while its format's server here writes nothing.
 """.
 -spec writable(erx_media_probe:name(), [erx_media_probe:name()], fun(() -> ok | {error, term()}),
                boolean()) -> mount().
@@ -137,14 +152,30 @@ writable(Format, Also, Flush, Clean) ->
     case {lists:member(Format, ?WRITTEN), Also} of
         {false, _} -> {ro, format};
         {true, [Name | _]} -> {ro, {also, Name}};
-        {true, []} -> flushed(Flush(), Clean)
+        {true, []} -> flushed(Flush(), Clean, lists:member(Format, ?WRITE_PATHS))
     end.
 
-flushed(ok, true) -> rw;
-flushed(ok, false) -> {ro, dirty};
-flushed({error, enotsup}, _Clean) -> {ro, flush};
-flushed({error, Reason}, _Clean) when is_atom(Reason) -> {none, {flush, Reason}};
-flushed(_Malformed, _Clean) -> {none, {flush, eio}}.
+flushed(ok, true, true) -> rw;
+flushed(ok, true, false) -> {ro, no_write_path};
+flushed(ok, false, _Writes) -> {ro, dirty};
+flushed({error, enotsup}, _Clean, _Writes) -> {ro, flush};
+flushed({error, Reason}, _Clean, _Writes) when is_atom(Reason) -> {none, {flush, Reason}};
+flushed(_Malformed, _Clean, _Writes) -> {none, {flush, eio}}.
+
+-doc """
+The reason a read-only outcome gives, as one plain line for `sN_ro_reason` and the
+mount's log line; `none` for an outcome that is not read-only. A format's name is an
+atom of the probe's closed set, never a byte of the medium.
+""".
+-spec ro_reason(outcome()) -> binary() | none.
+ro_reason(#{format := Format, mount := {ro, Reason}}) -> reason(Format, Reason);
+ro_reason(#{mount := _NotReadOnly}) -> none.
+
+reason(Format, format) -> <<"erXos does not write ", (atom_to_binary(Format))/binary>>;
+reason(_Format, {also, Name}) -> <<"a ", (atom_to_binary(Name))/binary, " signature is also on the volume">>;
+reason(_Format, flush) -> <<"the medium cannot flush">>;
+reason(_Format, dirty) -> <<"the FAT's dirty flag is set">>;
+reason(Format, no_write_path) -> <<"erXos has no ", (atom_to_binary(Format))/binary, " write path">>.
 
 %% The process ---------------------------------------------------------------------
 
@@ -159,6 +190,7 @@ handle_continue(mount, #{proxy := Proxy, volume := #{length := Length} = Volume}
         {ok, Mount} ->
             Read = fun(Sector) -> read_sector(Proxy, Volume, Sector) end,
             {Outcome, Fat} = mounted(erx_media_probe:format(Read, Length, ?WRITTEN), Read, Length, Proxy),
+            log_read_only(Volume, Outcome),
             {noreply, State#{outcome => Outcome, mount => Mount, fat => Fat, paths => root_paths(Fat)}};
         enfile ->
             Outcome = #{format => unknown, mount => {none, {failed, enfile}}},
@@ -287,6 +319,13 @@ mounted({ok, #{format := unknown}}, _Read, _Length, _Proxy) ->
     {#{format => unknown, mount => {none, unknown}}, none};
 mounted({ok, #{format := Format}}, _Read, _Length, _Proxy) ->
     {#{format => Format, mount => {none, format}}, none}.
+
+%% A read-only mount's one log line, naming the volume and the rule's reason.
+log_read_only(#{number := Number}, #{format := Format} = Outcome) ->
+    case ro_reason(Outcome) of
+        none -> ok;
+        Reason -> logger:notice("erx_media: volume s~b (~s) mounted read-only: ~s", [Number, Format, Reason])
+    end.
 
 %% A mount the writable rule refused, for a flush that failed, serves no files.
 served({none, _Reason}, _Fat) -> none;
