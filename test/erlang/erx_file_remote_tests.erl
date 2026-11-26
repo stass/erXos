@@ -123,12 +123,13 @@ sent_read_takes_only_its_own_reply_test() ->
     Down = receive {'DOWN', _, process, _, _} = Message -> Message after 1000 -> erlang:error(no_down) end,
     ?assertEqual({reply, {ok, <<"k">>}}, erx_file_remote:take(Down, Id)).
 
-%% The send half refuses what exchange/2 refuses, before anything is sent.
+%% The send half refuses what exchange/2 refuses, before anything is sent: a write
+%% through rights other than rw, and a walk naming ".", ".." or an empty name.
 send_refuses_as_the_exchange_does_test() ->
     Server = server(1, fun(_Alias, 1) -> [] end),
-    ?assertEqual({error, einval}, erx_file_remote:send({Server, <<"t">>, rw}, {read, -1, 0, 8})),
     ?assertEqual({error, erofs}, erx_file_remote:send({Server, <<"t">>, ro}, {write, 1, 0, <<"k">>})),
-    ?assertEqual({error, einval}, erx_file_remote:send({Server, <<"t">>, rw}, {walk, 1, 2, [<<"..">>]})),
+    [?assertEqual({error, einval}, erx_file_remote:send({Server, <<"t">>, rw}, {walk, 1, 2, Names}))
+     || Names <- [[<<"..">>], [<<".">>], [<<>>], [<<"d">>, <<"..">>]]],
     ?assertEqual(true, is_process_alive(Server)),
     exit(Server, kill).
 
@@ -155,14 +156,14 @@ flush_names_the_sent_read_test() ->
 %% A native program's open, open_flags/4, against a server of one tree: a directory d, a
 %% file f and a link l at its root. Its walk stops at the first name that is not a
 %% directory, its lopen refuses a link (eloop) and its lcreate meets the link at l
-%% (eloop), as erx_fs_grant's do. The client's fids come from the test's stand-in for
-%% prim_file:erx_fid/0.
+%% (eloop), as erx_fs_grant's do; a walk from NOFID starts at the root. The client's
+%% fids come from the test's stand-in for prim_file:erx_fid/0.
 -define(QDIR, {?ERX_P9_QTDIR, 0, 1}).
 -define(QFILE, {0, 0, 2}).
 -define(QLINK, {?ERX_P9_QTSYMLINK, 0, 3}).
 
 tree_server() ->
-    spawn(fun() -> tree_loop(#{}) end).
+    spawn(fun() -> tree_loop(#{?ERX_P9_NOFID => ?QDIR}) end).
 
 tree_loop(Fids) ->
     receive
@@ -172,8 +173,6 @@ tree_loop(Fids) ->
             tree_loop(Next)
     end.
 
-tree_reply({attach, Fid, _, _, _, _}, Fids) ->
-    {{ok, ?QDIR}, Fids#{Fid => ?QDIR}};
 tree_reply({walk, From, New, Names}, Fids) ->
     Qids = walked(Names),
     {{ok, Qids}, Fids#{New => lists:last([maps:get(From, Fids) | Qids])}};

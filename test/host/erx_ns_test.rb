@@ -55,6 +55,22 @@ class ErxNsTest < Minitest::Test
   FILE_REMOTE = 'otp/erts/preloaded/src/erx_file_remote.erl'
   FID = "fid() ->\n    prim_file:erx_fid().\n"
   STAND_IN_FID = "fid() ->\n    erlang:unique_integer([positive]).\n"
+  # Seeded faults of the 9P client (design-files.md, Erlang clients): the text replaced,
+  # its replacement and the case that must fail. An attach sent again ahead of every
+  # exchange's requests, its reply dropped so each operation still answers; and the
+  # grammar's full decode back in the client's refusals, so a request only the grammar
+  # refuses never reaches the grant's funnel.
+  ClientFault = Data.define(:name, :from, :to, :caught_by)
+  CLIENT_FAULTS = [
+    ClientFault.new(name: 'an attach sent with every exchange',
+                    from: "        none -> sent(Pid, Requests);\n",
+                    to: "        none -> tl(sent(Pid, [{attach, 0, ?ERX_P9_NOFID, <<>>, <<\"data\">>, 0} | Requests]));\n",
+                    caught_by: 'a_file_call_walks_from_nofid_and_never_attaches_test'),
+    ClientFault.new(name: "the grammar's full decode back in the client's refusals",
+                    from: 'case {dot_walk(Request), ',
+                    to: 'case {dot_walk(Request) orelse element(1, erx_9p_grammar:decode_request(Request)) =:= error, ',
+                    caught_by: 'the_funnel_alone_checks_a_request_against_the_grammar_test')
+  ].freeze
   PACKAGE_SALT = ("\x0d".b * 9).freeze
   NS = 'erlang/apps/erx/src/erx_ns.erl'
   # A seeded erx_facets:table/1 that derives no nofollow mark, so a resolution follows a
@@ -110,6 +126,17 @@ class ErxNsTest < Minitest::Test
     refute status.success?, output
     assert_match(/app_mount_refusals\.\.\.\*failed\*/, output)
     assert_match(/Failed: 1\./, output)
+  end
+
+  # One test per client fault, named by its place in CLIENT_FAULTS.
+  CLIENT_FAULTS.each_with_index do |fault, index|
+    define_method(:"test_client_fault_#{index}_is_caught") do
+      text = file_remote
+      assert_equal 1, text.scan(fault.from).size, "#{fault.name}: the text to seed not found once"
+      output, status = eunit(FILE_REMOTE => text.sub(fault.from) { fault.to })
+      refute status.success?, "#{fault.name}: the tests passed\n#{output}"
+      assert_match(/#{Regexp.escape(fault.caught_by)}\.\.\.\*failed\*/, output, fault.name)
+    end
   end
 
   private

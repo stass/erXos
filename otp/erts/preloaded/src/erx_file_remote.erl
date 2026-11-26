@@ -11,10 +11,12 @@
 %% arrives read-only, and a request that writes is refused with erofs here, before
 %% anything is sent. This module never reads a path's text.
 %%
-%% Each operation attaches a fid of its own, walks from it into new fids, acts on the fid
-%% the walks reached and clunks every fid it made, all sent together. A request names
-%% only a walk's new fid, which exists only if the walk passed every name, so after a walk
-%% that stops early the request fails with ebadf and changes nothing. The operation then
+%% Each operation walks from NOFID, the grant's root (design-files.md, Version and
+%% attach), into new fids of its own, acts on the fid the walks reached and clunks every
+%% fid it made, all sent together; it sends no attach and so has no root fid to clunk.
+%% A request names only a walk's new fid, which exists only if the walk passed every
+%% name, so after a walk that stops early the request fails with ebadf and changes
+%% nothing. The operation then
 %% answers {resume, Which, Reply}, the walk's reply for the Which'th of its paths, as it
 %% does when the walk ends on a link it follows, or a parent's walk on a name that is not
 %% a directory;
@@ -35,11 +37,12 @@
 %% offsets (offset_after/4).
 %%
 %% Every request passes exchange/2, or send/2, its send half for one request, which
-%% checks it against the generated protocol grammar, erx_9p_grammar, refuses a walk that
-%% names "..", which the grammar lets a server take, so no walk this client sends names
-%% ".", ".." or an empty name, and sends nothing that writes through rights other than
-%% rw; the grammar holds each reply to its request. A server's reply is untrusted: a reply of any other shape answers eio and
-%% raises nothing in the caller, which may be the code server. A server of another
+%% makes the client's two refusals and no other check: a walk that names ".", ".." or an
+%% empty name is refused, so no walk this client sends carries one, and nothing that
+%% writes through rights other than rw is sent. The grant's funnel checks every request
+%% against the generated protocol grammar, erx_9p_grammar, and refuses a malformed one
+%% einval; the grammar holds each reply to its request. A server's reply is untrusted:
+%% a reply of any other shape answers eio and raises nothing in the caller, which may be the code server. A server of another
 %% domain's reply arrives in the envelope of edit 16, {erx_origin, D, {erx_9p, Alias,
 %% Reply}}, and is taken as a bare one is, whatever D, as gen takes a call's reply (edit
 %% 58): each request has an alias of its own, handed only to the server, and an alias
@@ -388,7 +391,8 @@ open(Grant, {parent, Dir, Name}, Modes) ->
 %% Opens the regular file at Names below the grant's tree, its last name walked as it
 %% is, for reading as a fid the calling process owns and no OTP descriptor holds: the
 %% EROFS file mount's, which erx_ns's process keeps and erx_verity reads. A walk that
-%% stops short answers enoent, a directory eisdir, a link eloop.
+%% stops answers its error (enoent, enotdir, or eio once the grant has ended), a
+%% directory eisdir, a link eloop.
 -spec open_fid(grant(), [binary()]) -> {ok, non_neg_integer()} | {error, posix()}.
 open_fid(Grant, Names) ->
     case kept(Grant, {Names, nofollow}, fun(Fid) -> {lopen, Fid, 0} end) of
@@ -399,8 +403,8 @@ open_fid(Grant, Names) ->
             {error, eisdir};
         {error, _} = Error ->
             Error;
-        _Resume ->
-            {error, enoent}
+        {resume, 1, {_, Error}} ->
+            Error
     end.
 
 %% A native program's open (design-programs.md, Descriptors and files), with 9P2000.L's
@@ -522,14 +526,13 @@ stat([Fid | _]) -> {getattr, Fid, ?INFO_MASK}.
 %% Reaches a path into a new fid and sends Open on that fid with the walks. The fid is
 %% kept for the caller when the walk passed and Open succeeded, as {ok, Fid, Qid,
 %% Iounit}; otherwise it is clunked with the walk's other fids, and the answer is the
-%% attach's failure, the walk's resumption or Open's failure.
-kept({_, Tree, _} = Grant, Path, Open) ->
-    {Root, [{_, Fid, _}] = Reaches, Walks} = reaches([Path]),
-    Others = [Root | [New || {walk, _, New, _} <- Walks, New =/= Fid]],
-    [Attached | Replies] = exchange(Grant, [attach(Root, Tree) | Walks]
-                                    ++ [Open(Fid) | [{clunk, Other} || Other <- Others]]),
+%% walk's resumption or Open's failure.
+kept(Grant, Path, Open) ->
+    {[{_, Fid, _}] = Reaches, Walks} = reaches([Path]),
+    Others = [New || {walk, _, New, _} <- Walks, New =/= Fid],
+    Replies = exchange(Grant, Walks ++ [Open(Fid) | [{clunk, Other} || Other <- Others]]),
     {Walked, [Reply | _]} = split_at(length(Walks), Replies),
-    case on_ok(reached(Attached, Reaches, Walked), Reply) of
+    case on_ok(reached(Reaches, Walked), Reply) of
         {ok, Qid, Iounit} ->
             {ok, Fid, Qid, Iounit};
         Failed ->
@@ -1104,18 +1107,13 @@ identity({Pid, Tree, _} = Grant, {target, Names}) ->
 
 %% erx_path's callbacks ------------------------------------------------------
 
-%% A walk the resolver asks for, from a fid attached to the tree's root, into fids that
-%% are clunked with it, all sent together: the kind of each name it passed, up to and
-%% including the first that is not a directory, and how it ended.
+%% A walk the resolver asks for, from the grant's root into fids that are clunked with
+%% it, all sent together: the kind of each name it passed, up to and including the
+%% first that is not a directory, and how it ended.
 -spec walk(grant(), [binary()]) -> reply().
-walk({_, Tree, _} = Grant, Names) ->
-    Root = fid(),
-    {Walks, _} = walks(Root, Names),
-    Made = [Root | [New || {walk, _, New, _} <- Walks]],
-    case exchange(Grant, [attach(Root, Tree) | Walks] ++ [{clunk, Fid} || Fid <- Made]) of
-        [{ok, _} | Walked] -> walk_reply(Walks, Walked);
-        [{error, _} = Error | _] -> {[], Error}
-    end.
+walk(Grant, Names) ->
+    {Walks, _} = walks(?ERX_P9_NOFID, Names),
+    walk_reply(Walks, exchange(Grant, Walks ++ [{clunk, Fid} || {walk, _, Fid, _} <- Walks])).
 
 %% A link's text, read on a walk to the link sent with its readlink. A walk that stops
 %% answers its error.
@@ -1141,44 +1139,36 @@ last_passed(Kind, directory) -> Kind =:= directory.
 
 %% The exchange ---------------------------------------------------------------
 
-%% Reaches each path from one new attach, sends Act on the fids the paths reached, then
-%% clunks every fid made, all together. The answer is the attach's failure, the first
-%% path's resumption, in order, else Act's reply.
+%% Reaches each path from the grant's root, sends Act on the fids the paths reached,
+%% then clunks every fid the walks made, all together. The answer is the first path's
+%% resumption, in order, else Act's reply.
 -spec act(grant(), [{[binary()], mode()}], fun(([non_neg_integer()]) -> tuple())) -> term().
-act({_, Tree, _} = Grant, Paths, Act) ->
-    {Root, Reaches, Walks} = reaches(Paths),
-    Made = [Root | [New || {walk, _, New, _} <- Walks]],
-    Requests = [attach(Root, Tree) | Walks]
-        ++ [Act([Fid || {_, Fid, _} <- Reaches]) | [{clunk, Fid} || Fid <- Made]],
-    [Attached | Replies] = exchange(Grant, Requests),
-    {Walked, [Reply | _]} = split_at(length(Walks), Replies),
-    on_ok(reached(Attached, Reaches, Walked), Reply).
+act(Grant, Paths, Act) ->
+    {Reaches, Walks} = reaches(Paths),
+    Clunks = [{clunk, Fid} || {walk, _, Fid, _} <- Walks],
+    Requests = Walks ++ [Act([Fid || {_, Fid, _} <- Reaches]) | Clunks],
+    {Walked, [Reply | _]} = split_at(length(Walks), exchange(Grant, Requests)),
+    on_ok(reached(Reaches, Walked), Reply).
 
 %% As act/3, but First's requests go with the walks, and Then runs on the fids and
 %% First's replies before the clunks are sent, for an operation of several round trips.
-session({_, Tree, _} = Grant, Paths, First, Then) ->
-    {Root, Reaches, Walks} = reaches(Paths),
+session(Grant, Paths, First, Then) ->
+    {Reaches, Walks} = reaches(Paths),
     Fids = [Fid || {_, Fid, _} <- Reaches],
-    Made = [Root | [New || {walk, _, New, _} <- Walks]],
-    [Attached | Replies] = exchange(Grant, [attach(Root, Tree) | Walks] ++ First(Fids)),
-    {Walked, Opened} = split_at(length(Walks), Replies),
-    Answer = case reached(Attached, Reaches, Walked) of
+    {Walked, Opened} = split_at(length(Walks), exchange(Grant, Walks ++ First(Fids))),
+    Answer = case reached(Reaches, Walked) of
                  ok -> Then(Fids, Opened);
                  Other -> Other
              end,
-    _ = exchange(Grant, [{clunk, Fid} || Fid <- Made]),
+    _ = exchange(Grant, [{clunk, Fid} || {walk, _, Fid, _} <- Walks]),
     Answer.
 
-attach(Fid, Tree) ->
-    {attach, Fid, ?ERX_P9_NOFID, <<>>, Tree, 0}.
-
-%% Each path's walks from the root fid, at most ?ERX_P9_MAXWELEM names each, each into a
-%% new fid. A path of no names still walks, into a copy of the root, so every request
-%% acts on a fid its own walk made.
+%% Each path's walks from NOFID, the grant's root (design-files.md, Version and attach),
+%% at most ?ERX_P9_MAXWELEM names each, each into a new fid. A path of no names still
+%% walks, into a fid on the root, so every request acts on a fid its own walk made.
 reaches(Paths) ->
-    Root = fid(),
-    Reaches = [reach(Root, Names, Mode) || {Names, Mode} <- Paths],
-    {Root, Reaches, [Walk || {Walks, _, _} <- Reaches, Walk <- Walks]}.
+    Reaches = [reach(?ERX_P9_NOFID, Names, Mode) || {Names, Mode} <- Paths],
+    {Reaches, [Walk || {Walks, _, _} <- Reaches, Walk <- Walks]}.
 
 reach(From, Names, Mode) ->
     {Walks, Last} = walks(From, Names),
@@ -1196,22 +1186,19 @@ walks(From, NameList) ->
 fid() ->
     prim_file:erx_fid().
 
-%% ok when the attach succeeded and every path's walks passed as its mode asks; else the
-%% attach's failure, or {resume, Which, Reply} for the first path that did not, by its
-%% place in Paths.
-reached({ok, _}, Reaches, Walked) ->
-    reached_paths(Reaches, Walked, 1);
-reached({error, _} = Error, _, _) ->
-    Error.
+%% ok when every path's walks passed as its mode asks; else {resume, Which, Reply} for
+%% the first path that did not, by its place in Paths.
+reached(Reaches, Walked) ->
+    reached(Reaches, Walked, 1).
 
-reached_paths([], _, _) ->
+reached([], _, _) ->
     ok;
-reached_paths([{Walks, _, Mode} | Reaches], Walked, Which) ->
+reached([{Walks, _, Mode} | Reaches], Walked, Which) ->
     {Mine, Others} = split_at(length(Walks), Walked),
     case walk_reply(Walks, Mine) of
         {Kinds, ok} = Reply ->
             case passed(Kinds, Mode) of
-                true -> reached_paths(Reaches, Others, Which + 1);
+                true -> reached(Reaches, Others, Which + 1);
                 false -> {resume, Which, Reply}
             end;
         Reply ->
@@ -1274,12 +1261,14 @@ text(Path) ->
     Path.
 
 %% Every request the client sends passes here or send/2, so what holds here holds for
-%% every operation: a request the protocol's grammar refuses sends nothing and answers
-%% einval, as does a walk that names "..", which the grammar lets a server take but which
-%% only the resolver acts on (design-files.md, Resolving a path); and a request that
-%% writes, through rights other than rw, sends nothing and answers erofs, as the grant's
-%% own funnel would. Nothing else is sent; else each request goes to an alias of its own,
-%% all at once, and the replies are answered in order.
+%% every operation: a walk that names ".", ".." or an empty name sends nothing and
+%% answers einval, since only the resolver acts on those (design-files.md, Resolving a
+%% path); and a request that writes, through rights other than rw, sends nothing and
+%% answers erofs, as the grant's own funnel would. Nothing else is checked here: the
+%% grant's funnel decodes every request against the grammar and refuses a malformed one
+%% einval (design-files.md, Erlang clients). If one is refused, nothing is sent; else
+%% each request goes to an alias of its own, all at once, and the replies are answered
+%% in order.
 -spec exchange(grant(), [tuple()]) -> [term()].
 exchange({Pid, _, Rights}, Requests) ->
     case refused(Requests, Rights) of
@@ -1323,21 +1312,20 @@ take(Message, #request_id{monitor = Monitor} = Id) ->
 refused([], _) ->
     none;
 refused([Request | Requests], Rights) ->
-    case {erx_9p_grammar:decode_request(Request), dot_dot(Request)} of
-        {_, true} -> einval;
-        {{ok, _}, false} when Rights =:= rw -> refused(Requests, Rights);
-        {{ok, _}, false} ->
-            case erx_9p_grammar:writes(Request) of
-                true -> erofs;
-                false -> refused(Requests, Rights)
-            end;
-        {{error, einval}, false} -> einval
+    case {dot_walk(Request), Rights =/= rw andalso erx_9p_grammar:writes(Request)} of
+        {true, _} -> einval;
+        {false, true} -> erofs;
+        {false, false} -> refused(Requests, Rights)
     end.
 
-dot_dot({walk, _, _, [<<"..">> | _]}) -> true;
-dot_dot({walk, Fid, NewFid, [_ | Names]}) -> dot_dot({walk, Fid, NewFid, Names});
-dot_dot(_) -> false.
+%% Whether Request is a walk naming ".", ".." or an empty name. It never raises, as
+%% writes/1 never does, whatever term a caller hands the exchange.
+dot_walk({walk, _, _, Names}) -> dot_names(Names);
+dot_walk(_) -> false.
 
+dot_names([Name | _]) when Name =:= <<>>; Name =:= <<".">>; Name =:= <<"..">> -> true;
+dot_names([_ | Names]) -> dot_names(Names);
+dot_names(_) -> false.
 
 %% Each reply is held to its request by the grammar; any other term is eio. Once the
 %% grant's process has ended, a request whose reply has not arrived answers eio. The

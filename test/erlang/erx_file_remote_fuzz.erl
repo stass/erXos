@@ -6,9 +6,9 @@
 %% "..", empty names and names that are not UTF-8 or hold "/" or NUL, among stats and
 %% mkdirs, go through refused/2 under each set of rights. It must not raise and must
 %% agree with a model that reads each request in order: a walk that names ".", ".." or
-%% an empty name, or any name the grammar refuses, or more than ?ERX_P9_MAXWELEM names,
-%% and a mkdir of such a name, are einval; a write through rights other than rw is erofs;
-%% a batch with neither is sent (none).
+%% an empty name is einval; a write through rights other than rw is erofs; a batch with
+%% neither is sent (none), names the grammar refuses and walks of more than
+%% ?ERX_P9_MAXWELEM names among them, which the grant's funnel refuses.
 %%
 %% Then the reader of a server's walk replies, walk_reply/2 (Erlang clients, Errors):
 %% random walks of up to 40 names, chunked as the client chunks them, each chunk
@@ -75,23 +75,17 @@ request() ->
 model([], _) ->
     none;
 model([Request | Batch], Rights) ->
-    case {valid(Request), writes(Request)} of
-        {false, _} -> einval;
-        {true, true} when Rights =/= rw -> erofs;
-        {true, _} -> model(Batch, Rights)
+    case {dot_walk(Request), writes(Request)} of
+        {true, _} -> einval;
+        {false, true} when Rights =/= rw -> erofs;
+        {false, _} -> model(Batch, Rights)
     end.
 
-valid({walk, _, _, Names}) -> length(Names) =< 16 andalso lists:all(fun plain/1, Names);
-valid({getattr, _, _}) -> true;
-valid({mkdir, _, Name, _, _}) -> plain(Name).
+dot_walk({walk, _, _, Names}) -> lists:any(fun(Name) -> lists:member(Name, [<<>>, <<".">>, <<"..">>]) end, Names);
+dot_walk(_) -> false.
 
 writes({mkdir, _, _, _, _}) -> true;
 writes(_) -> false.
-
-plain(Name) ->
-    Name =/= <<>> andalso Name =/= <<".">> andalso Name =/= <<"..">> andalso
-        binary:match(Name, [<<"/">>, <<0>>]) =:= nomatch andalso
-        unicode:characters_to_binary(Name) =:= Name.
 
 pick(List) ->
     lists:nth(rand:uniform(length(List)), List).

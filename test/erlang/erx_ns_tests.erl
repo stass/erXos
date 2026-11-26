@@ -546,3 +546,68 @@ every_pair_of_the_abis_rights_is_ordered_test() ->
      || Asked <- Members, Granted <- Members],
     ?assertMatch([#{provider := ended}],
                  with_registry([Entry(rw)], #{data => {?ERX_SERVICE_FILES, {Pid, <<"data">>, bogus}}})).
+
+%% The client on a grant of erx_fs (design-files.md, Version and attach, and Erlang
+%% clients): each operation walks from NOFID, the grant's root, into fids of its own and
+%% clunks only those, so no request it sends is an attach and no clunk names a root fid.
+%% The requests are as the grant's own process received them, by a trace of it.
+a_file_call_walks_from_nofid_and_never_attaches_test() ->
+    {Grant, Entry} = traced_grant([{file, <<"f">>, <<"hello">>}]),
+    {ok, Fd} = erx_file_remote:open(Entry, {target, [<<"f">>]}, [read, binary]),
+    ?assertMatch({ok, _}, erx_file_remote:read_handle_info(Fd, [])),
+    ?assertEqual({ok, <<"hello">>}, erx_file_remote:read(Fd, 5)),
+    ?assertEqual(ok, erx_file_remote:close(Fd)),
+    Requests = received(Grant),
+    Made = [New || {walk, _, New, _} <- Requests],
+    ?assertMatch([{walk, ?ERX_P9_NOFID, _, [<<"f">>]}, {lopen, _, _}, {getattr, _, _}, {read, _, _, _}, {clunk, _}],
+                 Requests),
+    ?assertEqual([], [Request || Request <- Requests, element(1, Request) =:= attach]),
+    ?assertEqual([], [Fid || {clunk, Fid} <- Requests, not lists:member(Fid, Made)]),
+    stop_grant(Grant).
+
+%% The client refuses only what its own properties rest on, writes through rights other
+%% than rw (erofs) and a walk naming ".", ".." or an empty name (einval), sending
+%% nothing; every other malformed request is the funnel's to refuse, so it reaches the
+%% grant and comes back as the funnel's einval, as a negative count does.
+the_funnel_alone_checks_a_request_against_the_grammar_test() ->
+    {Grant, {Pid, Tree, rw} = Entry} = traced_grant([]),
+    ?assertEqual([{error, einval}], erx_file_remote:exchange(Entry, [{read, 1, 0, -1}])),
+    ?assertMatch([{read, 1, 0, -1}], received(Grant)),
+    [?assertEqual([{error, einval}], erx_file_remote:exchange(Entry, [{walk, ?ERX_P9_NOFID, 1, Names}]))
+     || Names <- [[<<".">>], [<<"..">>], [<<>>], [<<"d">>, <<"..">>]]],
+    ?assertEqual([{error, erofs}], erx_file_remote:exchange({Pid, Tree, ro}, [{write, 1, 0, <<"k">>}])),
+    ?assertEqual([], received(Grant)),
+    stop_grant(Grant).
+
+%% With no attach, a walk is the first request an open sends, so a grant that has ended
+%% answers at the walk: open_fid/2 answers that eio, never a missing file.
+an_open_fid_on_an_ended_grant_answers_eio_test() ->
+    {Grant, Entry} = traced_grant([{file, <<"f">>, <<"hello">>}]),
+    stop_grant(Grant),
+    ?assertEqual({error, eio}, erx_file_remote:open_fid(Entry, [<<"f">>])).
+
+%% A writable grant of erx_fs_test_tree whose received messages the case traces, and its
+%% entry as a namespace holds it.
+traced_grant(Args) ->
+    {ok, Grant, Entry} = erx_fs:start_link(erx_fs_test_tree, [{name, <<"data">>} | Args], rw),
+    unlink(Grant),
+    1 = erlang:trace(Grant, true, ['receive']),
+    {Grant, Entry}.
+
+%% The requests the grant received since the last call, in order.
+received(Grant) ->
+    Ref = erlang:trace_delivered(Grant),
+    receive {trace_delivered, Grant, Ref} -> ok end,
+    traced(Grant).
+
+traced(Grant) ->
+    receive
+        {trace, Grant, 'receive', {erx_9p, _, _, Request}} -> [Request | traced(Grant)];
+        {trace, Grant, 'receive', _} -> traced(Grant)
+    after 0 -> []
+    end.
+
+stop_grant(Grant) ->
+    Ref = monitor(process, Grant),
+    exit(Grant, kill),
+    receive {'DOWN', Ref, process, Grant, _} -> ok end.

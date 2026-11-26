@@ -51,8 +51,9 @@ clips the buffer to the window; keeping it inside the range it names is
 the caller's. Of a window with no buffer, `image/1`, `lease/2` and
 `present/2` answer `{error, none}`, and `resized/1` answers `none` for the image.
 
-Every request to the display passes `erx_file_remote:exchange/2`, which
-holds it to the file protocol's grammar and each reply to its request, and
+Every request to the display passes `erx_file_remote:exchange/2`, whose
+grant's funnel holds it to the file protocol's grammar and which holds each
+reply to its request, and
 every answer read back passes a reader of `erx_win_core`, so a display's
 bytes reach the caller only as a checked term or `{error, eio}`.
 

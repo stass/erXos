@@ -29,8 +29,9 @@ module ErxFileRemoteFuzz
   INCLUDES = %w[otp/lib/kernel/include build/gen/erlang/apps/erx/include].map { |dir| File.join(ROOT, dir) }.freeze
   Mutant = Data.define(:what, :from, :to, :caught_by)
   MUTANTS = [
-    Mutant.new(what: 'a client sending ".."', from: "dot_dot({walk, _, _, [<<\"..\">> | _]}) -> true;\n",
-               to: '', caught_by: 'refused'),
+    Mutant.new(what: 'a client sending ".."',
+               from: "dot_names([Name | _]) when Name =:= <<>>; Name =:= <<\".\">>; Name =:= <<\"..\">> -> true;\n",
+               to: "dot_names([Name | _]) when Name =:= <<>>; Name =:= <<\".\">> -> true;\n", caught_by: 'refused'),
     Mutant.new(what: 'a reader walking past a file', from: "        {_, [_ | _]} -> past_a_file\n",
                to: "        {Kind, _} -> kinds(Qids, [Kind | Kinds])\n", caught_by: 'walk_reply'),
     Mutant.new(what: 'a reader forgetting earlier chunks',
