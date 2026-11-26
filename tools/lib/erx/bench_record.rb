@@ -477,8 +477,14 @@ module Erx
     # order, written as boot-<n>.serial.log and boot-<n>.qemu.log for the boot at
     # position n. Everything is serialized and bounded before the directory is made, a
     # bound applying to each file, and run.json is written last, by rename, so a run is
-    # complete once it exists.
+    # complete once it exists. An erXos run must state the kernel command line it booted
+    # with (docs/design-bench.md, "The kernel's trace rings"): every erXos bench path writes
+    # through here, so one that forgets the line, and with it the rings-off default, is
+    # refused rather than recorded as comparable with one that has it.
     def write(record, history:, erxos_root:, logs: [])
+      environment = record.environment
+      check(environment.system != 'erxos' || environment.details.key?('command_line'),
+            "#{environment.name}: an erxos run's record states no kernel command line")
       files = serialized(record).merge(boot_logs(record, logs))
       oversized = files.find { |name, bytes| bytes.bytesize > (name.end_with?('.log') ? LOG_BYTES : FILE_BYTES) }
       check(oversized.nil?, "#{oversized&.first} exceeds its size bound")

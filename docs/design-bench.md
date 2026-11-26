@@ -619,12 +619,14 @@ splits on spaces and a board's `cmdline.txt` stays one line.
 
 The line is part of where a run happened. A session's or the landing
 gate's record keeps it in its environment's details as `command_line`,
-which every erXos guest must give (`BenchLanding.booted` takes none without it),
 and a board run's record keeps its set's `cmdline.txt`, read from the
 set and refused unless its SHA-256 is the one the set's build record
 lists ([The record of a board run](#the-record-of-a-board-run)); the
 single benchmarks' reports keep QEMU's argument vector, whose `-append`
-is the line. [Comparison](#comparison) refuses two records whose lines
+is the line. Every erXos run states its line: `BenchRecord.write`, the
+one way a run reaches the history, refuses an `erxos` record without
+one, so a bench path that forgets the line, and with it the default,
+fails instead of recording. [Comparison](#comparison) refuses two records whose lines
 differ, so a run with the rings on, by `--kernel-words erx.trace=1`, or
 a record whose line lacks `erx.trace=0` or that has no line, is never
 compared with one with them off.

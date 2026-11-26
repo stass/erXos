@@ -62,15 +62,26 @@ class BenchRecordTest < Minitest::Test
   def run_facts(date: Time.utc(2026, 11, 23, 12, 0, 0), details: {}) =
     Record::Run.new(date: date, started_by: 'manual', load: [0.5, 0.6], host_cpus: 12, reused_from: nil, details: details)
 
-  def record(cells: [cell], date: Time.utc(2026, 11, 23, 12, 0, 0), boots: [boot(cells: cells)], subject: {}, run: run_facts(date: date))
+  def record(cells: [cell], date: Time.utc(2026, 11, 23, 12, 0, 0), boots: [boot(cells: cells)], subject: {}, run: run_facts(date: date),
+             environment: { 'command_line' => 'erx.arg=0 erx.trace=0' })
     Record::Record.new(
-      environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: 'erxos', details: {}),
+      environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: 'erxos', details: environment),
       subject: Record::Subject.new(revision: REVISION, dirty: false, details: subject),
       run: run, boots: boots
     )
   end
 
   def write(history, logs: [], **options) = Record.write(record(**options), history: history, erxos_root: @erxos, logs: logs)
+
+  # An erXos run states the kernel command line it booted with (docs/design-bench.md,
+  # "The kernel's trace rings"), so a bench path that forgets the line, and with it the
+  # rings-off default, cannot add a run to the history; another system's run has no such line.
+  def test_an_erxos_record_without_its_kernel_command_line_is_never_written
+    error = assert_raises(Erx::Error) { write(@history, environment: {}) }
+    assert_match(/kernel command line/, error.message)
+    assert_empty Dir.glob(File.join(@history, 'bench', '*')), 'nothing is written'
+    assert Record.write(mean_record, history: @history, erxos_root: @erxos), "an l4re record needs no line"
+  end
 
   def test_a_record_under_a_separate_repository_is_written
     run = write(@history)

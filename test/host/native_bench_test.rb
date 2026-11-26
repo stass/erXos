@@ -237,4 +237,38 @@ class NativeBenchTest < Minitest::Test
   end
 
   NAME = '0123456789abcdef' * 2
+  # Runs the block with each named instance method of klass replaced, restoring them after.
+  def replacing_methods(klass, **replacements)
+    originals = replacements.to_h { |name, _| [name, klass.instance_method(name)] }
+    replacements.each { |name, replacement| klass.define_method(name, &replacement) }
+    yield
+  ensure
+    originals.each { |name, original| klass.define_method(name, original) }
+  end
+
+  # A board set's line carries every benchmark boot's words, the kernel's trace rings
+  # off, or the caller's in their place: BoardSets hands them to the set's layout, whose
+  # plan writes them into cmdline.txt (boot_partition_test). Only the kernel's and the
+  # image's builds are replaced.
+  def test_a_board_set_is_laid_out_with_the_benchmark_words
+    root = File.expand_path('../..', __dir__)
+    platform = Erx::Platform.load(root: root, name: 'raspi4b')
+    built = Struct.new(:single).new('kernel8.img')
+    laid = []
+    lay_out_set = Erx::BootPartition.method(:lay_out_set)
+    Erx::BootPartition.define_singleton_method(:lay_out_set) { |kernel_words:, **| laid << kernel_words; :set }
+    Dir.mktmpdir('erx-bench-board-', File.join(root, 'build')) do |scratch|
+      replacing_methods(Erx::Fiasco, build_for: ->(*, **) {}) do
+        replacing_methods(Erx::NativeBench::Run, image: ->(*, **) { built }) do
+          [[[], %w[erx.trace=0]], [%w[erx.trace=1], %w[erx.trace=1]]].each do |words, expected|
+            sets = Erx::NativeBench::BoardSets.new(root: scratch, platform: platform, runner: nil, kernel_words: words)
+            assert_equal :set, sets.call(['nullcall']).fetch('nullcall').set
+            assert_equal expected, laid.pop
+          end
+        end
+      end
+    end
+  ensure
+    Erx::BootPartition.define_singleton_method(:lay_out_set, lay_out_set)
+  end
 end
