@@ -829,23 +829,27 @@ system benchmarks, UnixBench first, finds their operations among its
 rows (**designed**): a 512-byte write and read through a pipe, two
 processes passing a number back and forth, starting a program and
 waiting for it, `exec` over and over, a file copy at three buffer
-sizes, and a shell running a small pipeline of text commands, each run
-for a fixed time as one copy and as one copy per processor, and reported
-as a rate. The suites themselves never run: each measures its own acts
-and needs what erXos does not offer, so the operations are erXos's own
-acts, run as the same code on every system compared, and an Erlang
-module runs the ones that make sense to an Erlang program (spawning a
-process, a message back and forth, copying a file through `file`) on
-erXos and on stock OTP. The operations other suites share join them
-the same way (**designed**): waiting on many descriptors, opening and
-closing a TCP connection, `fork` where a system has it, signals, a storm
-of messages among many senders and receivers, mapped files and their
-page faults, random-offset file input and output with `fsync`, many
-small files, semaphores, `malloc`, and a contended mutex, and every
-operation also runs as one copy per processor. One summary number per group, a geometric mean
-of each row's rate against Linux's on the same machine, follows
-UnixBench's own way of keeping one row from dominating; it is not a
-UnixBench score and is never set beside one.
+sizes, and a shell running a small pipeline of text commands. Each is
+a complete act that can repeat for as long as it is asked to, run for
+a fixed time as one copy and as one copy per processor, wherever the
+system places them, and reported as a rate. The suites themselves
+never run: each measures its own acts and needs what erXos does not
+offer, so the operations are erXos's own acts, run as the same code on
+every system compared, and an Erlang module runs the ones that make
+sense to an Erlang program (spawning a process, a message back and
+forth, copying a file through `file`) on erXos and on stock OTP. The
+operations most other suites share join them as ordinary timed rows
+(**designed**): waiting on many descriptors, opening and closing a TCP
+connection, `fork` where a system has it, signals, a storm of messages
+among many senders and receivers, mapped files, and random-offset file
+input and output with `fsync`; operations that would only time the
+same path again, or the C library rather than the system, are left out
+with the reason written down. One summary number per group, a
+geometric mean over the counted rows that do the same act on every
+system, each row's rate against Linux's on the same machine, follows
+UnixBench's own way of keeping one row from dominating; it is shown
+in the comparison tables only, is not a UnixBench score and is never
+set beside one.
 
 The same Raspberry Pi 4 also boots stock L4Re and Linux, with
 the same firmware settings, and each runs the counterpart of an
