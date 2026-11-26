@@ -33,12 +33,14 @@ module Erx
   #   with no login and erx_clock_test logs what its session holds (CLOCK_REPORT): its
   #   template's one grant, `home`, and nothing of root's, no `start` among them, so
   #   erx:cap(start) is undefined and /etc/start does not exist where /home/clock lists. At
-  #   root_1's command shell `service ghost enable` is refused, ghost having no manifest
-  #   row. At the system's Erlang shell the row is running; clock's session is killed, a
+  #   the system's Erlang shell the row is running; clock's session is killed, a
   #   new one takes its place, that one is killed too, and the row is then down
   #   (KILL_CLOCK).
   #   Back at root_1, `service clock status` says the row is down, and so does
   #   /proc/apps/clock/status, and `service -e` still lists the row, which is enabled.
+  #   Then `service ghost enable` is refused, ghost having no manifest row: asked once
+  #   `service -e` has listed the table, since before the start service first makes it
+  #   every row's state is unknown (erx_app_records), ghost's among them.
   # * disabled: the same row with `enable NO`, the kept boot's seeded fault: no session
   #   of clock starts and the row is disabled (NO_CLOCK).
   # * unlisted: no `start` row: no session but root's console login (AP2), and
@@ -266,7 +268,7 @@ module Erx
     end
 
     # The production checkpoints to the system's command shell, then, in every boot,
-    # root_1's command shell refusing ghost and the system's Erlang shell started from
+    # root_1's command shell and the system's Erlang shell started from
     # the console's Ctrl-G menu, and the steps of boot from that Erlang shell on.
     #
     # A checkpoint's type is typed once its pattern is seen, so a step that ends at one
@@ -284,9 +286,7 @@ module Erx
               in :reenable then reenable_steps(erlang)
               in :enabled then enabled_steps(erlang)
               end
-      [*points, SessionDomain.session_shell('root_1-shell', SERVICE_GHOST),
-       { name: 'ghost-why', pattern: line(GHOST_WHY), seconds: 60 }.freeze,
-       { name: 'ghost-refused', pattern: line('ghost-refused'), seconds: 60, type: CTRL_G }.freeze,
+      [*points, SessionDomain.session_shell('root_1-shell', CTRL_G),
        *to_system(ERL, name: 'system'),
        *steps].freeze
     end
@@ -299,7 +299,9 @@ module Erx
        { name: 'status-failed', pattern: line('status-failed'), seconds: 60, type: PROC_GREP }.freeze,
        { name: 'proc-down', pattern: proc_state('down'), seconds: 60, type: SERVICE_E }.freeze,
        { name: 'service-e-clock', pattern: line(PRINCIPAL), seconds: 60 }.freeze,
-       { name: 'service-listed', pattern: line('service-listed'), seconds: 60 }.freeze]
+       { name: 'service-listed', pattern: line('service-listed'), seconds: 60, type: SERVICE_GHOST }.freeze,
+       { name: 'ghost-why', pattern: line(GHOST_WHY), seconds: 60 }.freeze,
+       { name: 'ghost-refused', pattern: line('ghost-refused'), seconds: 60 }.freeze]
     end
 
     def no_clock_steps(erlang, boot, then_type: nil)
