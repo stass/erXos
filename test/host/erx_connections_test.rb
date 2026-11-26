@@ -64,8 +64,14 @@ class ErxConnectionsTest < Minitest::Test
       Mutant.new(original: 'is_atom(Name), erx_facets:is_interface(Interface),', replacement: 'is_atom(Name),',
                  caught_by: 'untyped_facets_are_dropped'),
     'an agent that installs a facet of a tree whose tree is no plain name' =>
-      Mutant.new(file: FACETS, original: 'is_pid(Pid) andalso erx_9p_grammar:is_name(Tree) andalso',
-                 replacement: 'is_pid(Pid) andalso is_binary(Tree) andalso', caught_by: 'installs')
+      Mutant.new(file: FACETS, original: 'is_pid(Pid) andalso erx_9p_grammar:is_name(Tree)',
+                 replacement: 'is_pid(Pid) andalso is_binary(Tree)', caught_by: 'installs'),
+    'an agent that installs a bare pid under an interface served as a tree' =>
+      Mutant.new(file: FACETS, original: 'not lists:member(Interface, ?ERX_TREE_SERVICES) andalso is_pid(Pid)',
+                 replacement: 'is_pid(Pid)', caught_by: 'installs'),
+    'an agent that installs a pid with a tree under an interface served as messages' =>
+      Mutant.new(file: FACETS, original: 'lists:member(Interface, ?ERX_TREE_SERVICES) andalso is_pid(Pid) andalso',
+                 replacement: 'is_pid(Pid) andalso', caught_by: 'installs')
   }.freeze
 
   def test_seeded_faults_are_caught

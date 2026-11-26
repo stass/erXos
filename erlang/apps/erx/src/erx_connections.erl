@@ -443,7 +443,7 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             %% domain takes from the manifest (erx_facets:program_table/1).
             Valid = #{Name => {Interface, Facet} || Name := {Interface, Facet} <- Facets,
                                                     is_atom(Name), erx_facets:is_interface(Interface),
-                                                    erx_facets:is_facet(Facet)},
+                                                    erx_facets:is_facet(Interface, Facet)},
             %% One installation, an empty one included: the granted names first, which
             %% erx:granted/0,1 read, then the facets, whose installation raises the
             %% generation, so a waiter that finds it past the one it read finds the names
@@ -457,7 +457,7 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             records(app_came(App, Env), Held, Dropped);
         {erx_origin, SystemId, {erx_facets_install, Tag, Name, Interface, Facet}} when is_integer(Tag) ->
             case erx_facets:is_name(Name) andalso erx_facets:is_interface(Interface)
-                andalso erx_facets:is_facet(Facet) of
+                andalso erx_facets:is_facet(Interface, Facet) of
                 true ->
                     records(minted_install(Env, Tag, Name, {Interface, Facet}), Held, Dropped);
                 false ->

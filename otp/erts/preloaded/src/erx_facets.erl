@@ -43,7 +43,7 @@ It is preloaded beside prim_file and erx_path, since every resolution of a
 path reads it, the code loader's included.
 """.
 
--export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_name/1, is_interface/1, is_facet/1,
+-export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_name/1, is_interface/1, is_facet/2,
          files/3, table/1, program/1, program_table/1, file_grant/2]).
 -export_type([name/0, interface/0, facet/0, program/0]).
 
@@ -193,14 +193,19 @@ is_name(Name) -> is_atom(Name).
 is_interface(Interface) -> is_integer(Interface) andalso Interface > 0.
 
 -doc """
-Whether `Term` is a facet as the system domain sends it: a pid, or a pid with
-a plain name, its tree (the 9P grammar's `is_name/1`), and a member of
-`files_rights`. The connection agent installs nothing else.
+Whether `Term` is a facet of the service of interface `Interface` as the
+system domain sends it, its shape following from the interface: under one
+abi/services declares served as a tree (`?ERX_TREE_SERVICES`), a pid with a
+plain name, its tree (the 9P grammar's `is_name/1`), and a member of
+`files_rights`; under any other, a bare pid. The connection agent installs
+nothing else.
 """.
--spec is_facet(term()) -> boolean().
-is_facet({Pid, Tree, Rights}) ->
-    is_pid(Pid) andalso erx_9p_grammar:is_name(Tree) andalso lists:keymember(Rights, 1, ?ERX_FILES_RIGHTS_MEMBERS);
-is_facet(Facet) -> is_pid(Facet).
+-spec is_facet(interface(), term()) -> boolean().
+is_facet(Interface, {Pid, Tree, Rights}) ->
+    lists:member(Interface, ?ERX_TREE_SERVICES) andalso is_pid(Pid) andalso erx_9p_grammar:is_name(Tree)
+        andalso lists:keymember(Rights, 1, ?ERX_FILES_RIGHTS_MEMBERS);
+is_facet(Interface, Pid) ->
+    not lists:member(Interface, ?ERX_TREE_SERVICES) andalso is_pid(Pid).
 
 -doc """
 The facet of the grant `Pid` of a service served as a tree, on the tree named

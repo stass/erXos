@@ -237,9 +237,11 @@ close_side(Id, Reason) ->
     log({close_side, Id, Reason}).
 %% The agent's installation in the system domain's registry (erx_connections:grant/1),
 %% written as the agent writes it, each facet with its service's interface number, which
-%% the domain service must give it; no process of a host test waits on it.
+%% the domain service must give it and in the shape that interface takes
+%% (erx_facets:is_facet/2); no process of a host test waits on it.
 grant(Facets) ->
-    true = lists:all(fun({Interface, _Facet}) -> erx_facets:is_interface(Interface) end, maps:values(Facets)),
+    true = lists:all(fun({Interface, Facet}) -> erx_facets:is_interface(Interface) andalso erx_facets:is_facet(Interface, Facet) end,
+                     maps:values(Facets)),
     erx_facets:install(Facets).
 %% The service as the agent's installer: a host test's service is the only installer.
 become_installer() -> ok.

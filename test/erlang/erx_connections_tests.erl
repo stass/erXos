@@ -283,7 +283,9 @@ facets(Agent) ->
     %% envelope, and as a map, of which init gets the entries naming a facet's pid by an
     %% atom, a facet of a tree as the pid with its tree, a plain name, and its grant's
     %% rights, ro, rw or rx, each with its service's interface number; one of a tree
-    %% without its tree, or whose tree is no plain name, is left out. One a peer
+    %% without its tree, or whose tree is no plain name, is left out, as are a bare pid
+    %% under an interface served as a tree and a pid with a tree under one served as
+    %% messages, since a facet's shape follows from its interface. One a peer
     %% sends, one sent bare, one that is not a map and one wrapped twice are dropped and
     %% counted, so no domain but the system domain names init's facets.
     %% The answer's names of the facets the manifest grants the domain, which come later
@@ -303,7 +305,9 @@ facets(Agent) ->
                                      wide => {?ERX_SERVICE_FILES, {Facet, <<"wide">>, rwx}},
                                      nopid => {?ERX_SERVICE_FILES, {3, <<"nopid">>, rw}},
                                      no_tree =>{?ERX_SERVICE_FILES, {Facet, ro}},
-                                     climbing => {?ERX_SERVICE_FILES, {Facet, <<"../x">>, ro}}},
+                                     climbing => {?ERX_SERVICE_FILES, {Facet, <<"../x">>, ro}},
+                                     bare => {?ERX_SERVICE_FILES, Facet},
+                                     triple => {?ERX_SERVICE_CONSOLE, {Facet, <<"triple">>, ro}}},
                        [{data, 5}, data, {<<"bin">>, 5}, {data, files}, 3 | tail]}),
         ?assertEqual(4, erx_connections:dropped()),
         First = init_facets(2000),
@@ -359,7 +363,8 @@ installs(Agent) ->
     %% beside the answer's facets, and acknowledged to the domain pid with its tag, only
     %% from the system connection's envelope: one a peer sends, one sent bare and one
     %% with a name that is no atom, with rights other than ro, rw and rx, or with a tree
-    %% that is no plain name or no tree at all, are dropped and counted, and install
+    %% that is no plain name or no tree at all, a bare pid under the files interface and
+    %% a pid with a tree under a message service's interface, are dropped and counted, and install
     %% nothing. A files facet is installed with the tree and the rights the installation
     %% carries, which erx:cap/1 leaves out. A later installation under a name
     %% replaces the older pid.
@@ -373,11 +378,13 @@ installs(Agent) ->
         record(Agent, {erx_facets_install, 6, data, ?ERX_SERVICE_FILES, {Old, <<"data">>, rwx}}),
         record(Agent, {erx_facets_install, 7, data, ?ERX_SERVICE_FILES, {Old, <<"a/b">>, rw}}),
         record(Agent, {erx_facets_install, 8, data, ?ERX_SERVICE_FILES, {Old, rw}}),
+        record(Agent, {erx_facets_install, 9, data, ?ERX_SERVICE_FILES, Old}),
+        record(Agent, {erx_facets_install, 10, data, ?ERX_SERVICE_CONSOLE, {Old, <<"data">>, rw}}),
         %% Every dropped installation comes before tag 4, so an answer for 4 first proves
         %% that none of them was acknowledged.
         record(Agent, {erx_facets_install, 4, data, ?ERX_SERVICE_FILES, {Old, <<"data">>, rw}}),
         ?assertEqual({erx_facets_installed, 4}, answer()),
-        ?assertEqual(6, erx_connections:dropped()),
+        ?assertEqual(8, erx_connections:dropped()),
         ?assertEqual({2, #{echo => {?ERX_SERVICE_CONSOLE, Answer}, data => {?ERX_SERVICE_FILES, {Old, <<"data">>, rw}}}},
                      persistent_term:get({erx, facets})),
         ?assertEqual(Old, erx:cap(data)),
@@ -392,7 +399,8 @@ installs(Agent) ->
 
 untyped_facets_are_dropped(Agent) ->
     %% An installation that names no interface number, sent as {Tag, Name, Facet}, or
-    %% that names none or 0, is dropped and counted and installs nothing; an entry of the
+    %% that names none or 0 (with a bare pid, the shape any interface not served as a tree
+    %% takes), is dropped and counted and installs nothing; an entry of the
     %% ready answer that is a facet alone, a files facet's included, or whose interface
     %% is none or 0, is left out of the registry: every facet the registry holds carries the
     %% interface that keeps a display from the domain's programs
@@ -400,10 +408,10 @@ untyped_facets_are_dropped(Agent) ->
     Facet = spawn(fun() -> receive stop -> ok end end),
     try
         record(Agent, {erx_facets, #{bare => Facet, files => {Facet, <<"files">>, rw}, untyped => {none, Facet},
-                                     zero => {0, {Facet, <<"zero">>, rw}}}, []}),
+                                     zero => {0, Facet}}, []}),
         [record(Agent, Install) || Install <- [{erx_facets_install, 1, data, {Facet, <<"data">>, rw}},
-                                               {erx_facets_install, 2, data, none, {Facet, <<"data">>, rw}},
-                                               {erx_facets_install, 3, data, 0, {Facet, <<"data">>, rw}}]],
+                                               {erx_facets_install, 2, data, none, Facet},
+                                               {erx_facets_install, 3, data, 0, Facet}]],
         record(Agent, {erx_facets_install, 4, echo, ?ERX_SERVICE_FILES, {Facet, <<"echo">>, rw}}),
         ?assertEqual({erx_facets_installed, 4}, answer()),
         ?assertEqual(3, erx_connections:dropped()),

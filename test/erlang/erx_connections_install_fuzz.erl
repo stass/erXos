@@ -6,7 +6,9 @@
 %% installations {erx_facets_install, Tag, Name, Interface, Facet} in the system connection's
 %% envelope, in another domain's envelope and bare, with tags, names, interfaces and facets
 %% of every shape (no integer, no atom, no pid, another domain's pid, an interface that is no
-%% positive integer, a facet of a tree without its tree or whose tree is no plain name),
+%% positive integer, a facet of a tree without its tree or whose tree is no plain name,
+%% a bare pid under an interface served as a tree and a facet of a tree under one served as
+%% messages),
 %% tuples of the wrong size,
 %% the facets answer in another domain's envelope, and arbitrary terms. The test process
 %% plays the agent's kernel and its domain pid, as erx_connections_tests does.
@@ -16,8 +18,10 @@
 %%   and exactly the installations a
 %%   model took: those in the system connection's envelope with an integer tag, a name
 %%   (an atom, or a drive's {drive, N}, N a non-negative integer), a positive integer
-%%   interface and a facet, a pid or {Pid, Tree, Rights} with Tree a plain name and
-%%   Rights ro, rw or rx, each replacing an older {Interface, Facet} of its name;
+%%   interface and a facet of the shape the interface takes: under one abi/services
+%%   serves as a tree (?ERX_TREE_SERVICES), {Pid, Tree, Rights} with Tree a plain name
+%%   and Rights ro, rw or rx, and under any other a pid, each replacing an older
+%%   {Interface, Facet} of its name;
 %% * each such installation, and nothing else, is acknowledged to the domain pid with
 %%   its tag, in order;
 %% * every other message is dropped and counted.
@@ -25,6 +29,8 @@
 
 -module(erx_connections_install_fuzz).
 -export([run/1]).
+
+-include("generated/erx_abi.hrl").
 
 -define(SYSTEM, 4).
 -define(SEQUENCES, 2000).
@@ -81,11 +87,14 @@ message(Agent, {Model, Dropped, Tally}) ->
 %% A name is an atom or a drive's {drive, N}, N a non-negative integer.
 accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Interface, Facet}})
   when is_integer(Tag), is_integer(Interface), Interface > 0, is_pid(Facet) ->
-    named(Tag, Name, {Interface, Facet});
+    case lists:member(Interface, ?ERX_TREE_SERVICES) of
+        false -> named(Tag, Name, {Interface, Facet});
+        true -> no
+    end;
 accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Interface, {Pid, Tree, Rights} = Facet}})
   when is_integer(Tag), is_integer(Interface), Interface > 0, is_pid(Pid),
        (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx) ->
-    case lists:member(Tree, plain_trees()) of
+    case lists:member(Interface, ?ERX_TREE_SERVICES) andalso lists:member(Tree, plain_trees()) of
         true -> named(Tag, Name, {Interface, Facet});
         false -> no
     end;
