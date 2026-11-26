@@ -326,7 +326,7 @@ shell and for `erx:` functions that run commands:
 2. an **Erlang command**, a module of the session's releases that
    implements the `erx_cmd` behaviour and declares its name
    (`-erx_command(ps)`): the UNIX utilities `ps`, `echo`, `cat`, `ls`,
-   `pwd`, `mkdir`, `rm`, `mv`, `cp`, `grep`, `sort`, `wc`, `uname`,
+   `pwd`, `mkdir`, `rmdir`, `rm`, `mv`, `cp`, `grep`, `sort`, `wc`, `uname`,
    `date`, `dmesg`, `true` and `false`, which follow FreeBSD's utilities of the same names
    ([Text commands](#text-commands)), so toybox's applets of those names
    are never built; the screen editor `vi`, which behaves like FreeBSD's

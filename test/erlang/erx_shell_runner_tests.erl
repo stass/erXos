@@ -233,7 +233,7 @@ runner_state(Facets, Err) when is_map(Facets) ->
 runner_state(Facets, Err) ->
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)}
-                     || Module <- [?MODULE, erx_cmd_ps, erx_cmd_echo, erx_cmd_true, erx_cmd_cp, erx_cmd_mv, erx_cmd_rm]]
+                     || Module <- [?MODULE, erx_cmd_ps, erx_cmd_echo, erx_cmd_true, erx_cmd_cp, erx_cmd_mv, erx_cmd_rm, erx_cmd_rmdir]]
                     ++ [{needy, attributes(needy, "needy") ++ [{erx_needs, [inspect]}], [{run, 2}]}]),
     erx_shell_runner:state(#{cwd => <<"/">>, fds => #{0 => null, 1 => null, 2 => Err},
                            table => Table, facets => Facets}).
@@ -329,6 +329,38 @@ runner_rm_dot_test() ->
     {ok, Shell} = run_source(<<"rm -r ", Dir/binary, "/.">>),
     ?assertEqual(<<"invalid argument">>, erx_shell_eval:status(Shell)),
     ?assert(filelib:is_dir(Dir)).
+
+%% rmdir removes an empty directory and leaves one that is not empty, reporting
+%% it as FreeBSD's rmdir(1) does; with no operand it is a usage error.
+runner_rmdir_test() ->
+    Dir = list_to_binary(scratch_dir()),
+    ok = filelib:ensure_path(filename:join([Dir, "full", "empty"])),
+    ok = file:write_file(filename:join([Dir, "full", "f"]), <<"x">>),
+    {ok, Removed} = run_source(<<"rmdir ", Dir/binary, "/full/empty">>),
+    ?assertEqual(<<>>, erx_shell_eval:status(Removed)),
+    ?assertNot(filelib:is_dir(filename:join([Dir, "full", "empty"]))),
+    {ok, Full} = run_source(<<"rmdir ", Dir/binary, "/full">>),
+    ?assertEqual(<<"directory not empty">>, erx_shell_eval:status(Full)),
+    ?assert(filelib:is_dir(filename:join(Dir, "full"))),
+    {ok, Bare} = run_source(<<"rmdir">>),
+    ?assertEqual(<<"usage">>, erx_shell_eval:status(Bare)).
+
+%% rmdir -p removes the operand and then each parent it names, up to its first
+%% component, and -v prints each as it goes; a parent that is not empty stops
+%% it with that parent's failure.
+runner_rmdir_parents_test() ->
+    Dir = list_to_binary(scratch_dir()),
+    ok = filelib:ensure_path(filename:join([Dir, "a", "b", "c"])),
+    {ok, Shell} = run_source(<<"cd ", Dir/binary, "; rmdir -pv a/b//c/ > out">>),
+    ?assertEqual(<<>>, erx_shell_eval:status(Shell)),
+    ?assertEqual({ok, <<"a/b//c/\na/b\na\n">>}, file:read_file(filename:join(Dir, "out"))),
+    ?assertEqual({ok, ["out"]}, file:list_dir(Dir)),
+    ok = filelib:ensure_path(filename:join([Dir, "k", "d"])),
+    ok = file:write_file(filename:join([Dir, "k", "f"]), <<"x">>),
+    {ok, Stopped} = run_source(<<"cd ", Dir/binary, "; rmdir -p k/d">>),
+    ?assertEqual(<<"directory not empty">>, erx_shell_eval:status(Stopped)),
+    ?assertNot(filelib:is_dir(filename:join([Dir, "k", "d"]))),
+    ?assert(filelib:is_dir(filename:join(Dir, "k"))).
 
 %% A state with no job control, as a script's, has the job builtins refuse,
 %% each with its diagnostic, and kill reports a malformed job by name,

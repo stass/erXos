@@ -43,6 +43,7 @@
              erx_cmd_pwd,
              erx_cmd_reboot,
              erx_cmd_rm,
+             erx_cmd_rmdir,
              erx_cmd_service,
              erx_cmd_sort,
              erx_cmd_top,
