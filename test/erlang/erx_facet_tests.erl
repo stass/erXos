@@ -223,6 +223,9 @@ minted_replies_through_the_domain_pid_test() ->
         ?assertEqual(ok, erx_facet:minted(7, {ok, self()})),
         Self = self(),
         ?assertEqual({ok, Self}, receive {erx_facet_minted, 7, Reply} -> Reply after 1000 -> timeout end),
+        %% A tree service's reply crosses with the tree its grant names.
+        ?assertEqual(ok, erx_facet:minted(9, {ok, self(), <<"data">>})),
+        ?assertEqual({ok, Self, <<"data">>}, receive {erx_facet_minted, 9, Tree} -> Tree after 1000 -> timeout end),
         %% A refusal crosses as refused, whatever its reason.
         ?assertEqual(ok, erx_facet:minted(8, {error, {enospc, "data"}})),
         ?assertEqual(refused, receive {erx_facet_minted, 8, Refusal} -> Refusal after 1000 -> timeout end)

@@ -172,11 +172,12 @@ class ErxProgHandlerTest < Minitest::Test
                  caught_by: 'an_end_of_another_process_is_refused'),
     'a program table that knows a display by its name, which keeps one installed as notes' =>
       Mutant.new(file: FACETS, original: '        Interface =/= ?ERX_SERVICE_WINDOWS].',
-                 replacement: '        case Provider of {facet, display, _} -> false; _ -> true end].',
+                 replacement: '        case Provider of {facet, display} -> false; _ -> true end].',
                  caught_by: 'a_display_under_another_name_and_its_bind_are_left_out'),
     'a program table that knows a display by the tree its server names' =>
       Mutant.new(file: FACETS, original: '        Interface =/= ?ERX_SERVICE_WINDOWS].',
-                 replacement: '        case Provider of {facet, _, ?ERX_WINDOWS_TREE_BYTES} -> false; _ -> true end].',
+                 replacement: '        case Provider of {facet, N} when element(2, element(2, map_get(N, Registry))) =:= ' \
+                              '?ERX_WINDOWS_TREE_BYTES -> false; _ -> true end].',
                  caught_by: 'a_display_under_another_name_and_its_bind_are_left_out'),
     'a program table that is table/1\'s, which a display installed after the start reaches' =>
       Mutant.new(file: FACETS,

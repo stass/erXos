@@ -16,12 +16,17 @@ require_relative '../lib/erx/generated'
 # it is, then each copy with a fault the target exists to catch: report, an owner check
 # that reads only a mint's creation, so a pid with the server's creation and another
 # domain's node is accepted; reply, a reply check that takes any pid as the server's
-# facet, one that refuses the server's honest reply, and an installation that carries the
-# files interface whatever the grant's service row states.
+# facet, one that refuses the server's honest reply, one that takes a tree service's reply
+# whatever tree it names, and an installation that carries the files interface whatever
+# the grant's service row states.
 module ErxDomainMintsFuzz
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_domain/src/erx_domain_mints.erl'
   FUZZ = 'test/erlang/erx_domain_mints_fuzz.erl'
+  # What the core calls to admit a tree service's reply and build its facet: the 9P
+  # grammar's is_name/1, generated, erx_fs_grants:facet/3 and erx_facets:files/3.
+  CALLED = [File.join(Erx::Generated::OUTPUT, 'otp/erts/preloaded/src/erx_9p_grammar.erl'),
+            'erlang/apps/erx_files/src/erx_fs_grants.erl', 'otp/erts/preloaded/src/erx_facets.erl'].freeze
   # The generated ABI header the core includes, which run makes first.
   INCLUDE = File.join(ROOT, Erx::Generated::OUTPUT, 'erlang/apps/erx/include')
   Fault = Data.define(:what, :anchor, :replacement)
@@ -33,11 +38,14 @@ module ErxDomainMintsFuzz
                            anchor: 'session_limits(Limits, false) -> maps:remove(session, Limits).',
                            replacement: 'session_limits(Limits, false) -> Limits.')],
     'reply' => [Fault.new(what: 'a reply check that takes any facet',
-                          anchor: 'is_owned(Facet, {ServerId, Node}, State)',
+                          anchor: 'is_owned(Pid, {ServerId, Node}, State)',
                           replacement: 'is_atom(Node) orelse State =:= ServerId'),
                 Fault.new(what: 'a reply check that refuses the server\'s own facet',
-                          anchor: 'is_owned(Facet, {ServerId, Node}, State)',
-                          replacement: 'not is_owned(Facet, {ServerId, Node}, State)'),
+                          anchor: 'is_owned(Pid, {ServerId, Node}, State)',
+                          replacement: 'not is_owned(Pid, {ServerId, Node}, State)'),
+                Fault.new(what: 'a reply check that takes any tree',
+                          anchor: 'andalso erx_9p_grammar:is_name(Tree) of',
+                          replacement: 'andalso Tree =/= none of'),
                 Fault.new(what: 'an installation that carries the files interface for every service',
                           anchor: 'maps:get({Server, Service}, Interfaces)',
                           replacement: 'maps:get({Server, Service}, maps:map(fun(_, _) -> ?ERX_SERVICE_FILES end, Interfaces))')]
@@ -69,6 +77,7 @@ module ErxDomainMintsFuzz
       core_path = File.join(work, File.basename(CORE))
       File.binwrite(core_path, core_text)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, core_path, File.join(ROOT, FUZZ),
+                                       *CALLED.map { |called| File.join(ROOT, called) },
                                        stdin_data: '')
       raise output unless status.success?
 

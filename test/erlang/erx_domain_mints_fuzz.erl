@@ -12,7 +12,8 @@
 %% * reply: mint replies and installation acknowledgements with the right and wrong
 %%   tags (finished, never issued, not integers), from the server, the grantee and a
 %%   third domain, naming facets the server owns, facets of a third domain and forged
-%%   pids, or no {ok, Pid} at all; interleaved with ends, restarts and deadlines.
+%%   pids, trees that are no plain name, the reply shape of the other kind of service,
+%%   or no {ok, Pid} at all; interleaved with ends, restarts and deadlines.
 %% A shell here performs the core's actions as erx_domain_srv does: it arms and disarms
 %% deadlines, answers an installation in the system domain at once, and feeds back
 %% introductions, replies and deadlines later, in any order.
@@ -38,6 +39,8 @@
 -module(erx_domain_mints_fuzz).
 -export([run/1, owner/1]).
 
+-include("generated/erx_abi.hrl").
+
 -define(CORE, erx_domain_mints).
 -define(SEQUENCES, 20000).
 -define(STEPS, 40).
@@ -49,7 +52,8 @@
 -define(SYSTEM, 4).
 -define(THIRD, 99).
 -define(DECLARED, #{?S => [data, log], ?T => [other]}).
-%% Each service row's interface number, distinct, as the manifest would state them.
+%% Each service row's interface number, distinct, as the manifest would state them: data's
+%% and other's served as trees (?ERX_TREE_SERVICES), log's as messages.
 -define(INTERFACES, #{{?S, data} => 5, {?S, log} => 13, {?T, other} => 8}).
 -define(GRANTS, [{?G, data, ?S}, {system, data, ?S}, {?G, other, ?T}, {system, log, ?S}]).
 %% Every grant's facet row limits, naming session, as no facet row may; and the limits
@@ -159,25 +163,27 @@ introduced(#shell{intros = Intros} = Shell) ->
 
 %% A mint's reply: to a request the shell sent, from its server, mostly with a facet the
 %% server owns; or from the wrong domain, with the wrong tag, or with a facet of a
-%% third domain, a forged pid or no {ok, Pid}.
+%% third domain, a forged pid, a tree that is no plain name, the other kind of service's
+%% reply or no {ok, Pid}.
 minted(#shell{mints = Mints, ids = Ids} = Shell) ->
-    {Origin, Tag, Facet} =
+    {Origin, Tag, Facet, Name} =
         case maps:to_list(Mints) of
-            [] -> {pick([?THIRD | Ids]), random_tag(Shell), pid(node_of(?THIRD), ?THIRD, 2)};
+            [] -> {pick([?THIRD | Ids]), random_tag(Shell), pid(node_of(?THIRD), ?THIRD, 2), pick([data, log])};
             Asked ->
-                {T, {ServerId, _Name}} = pick(Asked),
+                {T, {ServerId, Service}} = pick(Asked),
                 case rand:uniform(8) of
-                    1 -> {pick([?THIRD, ?SYSTEM | Ids]), T, pid(node_of(ServerId), ServerId, 2)};
-                    2 -> {ServerId, random_tag(Shell), pid(node_of(ServerId), ServerId, 2)};
+                    1 -> {pick([?THIRD, ?SYSTEM | Ids]), T, pid(node_of(ServerId), ServerId, 2), Service};
+                    2 -> {ServerId, random_tag(Shell), pid(node_of(ServerId), ServerId, 2), Service};
                     _ -> {ServerId, T, pick([pid(node_of(ServerId), ServerId, 2), pid(node_of(ServerId), ServerId, 2),
                                              pid(node_of(?THIRD), ?THIRD, 2), pid(node_of(?THIRD), ServerId, 2),
-                                             pid(node_of(ServerId), ?THIRD, 2)])}
+                                             pid(node_of(ServerId), ?THIRD, 2)]), Service}
                 end
         end,
     Reply = case rand:uniform(6) of
                 1 -> random_term();
-                2 -> pick([{error, busy}, {ok, self()}, {ok, Facet, extra}, ok, {ok, fun() -> Facet end}]);
-                _ -> {ok, Facet}
+                2 -> pick([{error, busy}, {ok, self()}, {ok, Facet, extra}, ok, {ok, fun() -> Facet end},
+                           {ok, Facet, <<"../x">>}, {ok, Facet, <<"a/b">>}, {ok, Facet}, {ok, Facet, <<"t">>}]);
+                _ -> honest_reply(Name, Facet)
             end,
     step({minted, Origin, Tag, Reply}, Shell#shell{mints = maps:remove(Tag, Mints)}).
 
@@ -237,8 +243,20 @@ act({install, Tag, GranteeId, Name, Interface, Facet}, Event, Core, Shell) ->
     {{_, Name} = Key, {installing, {ServerId, GranteeId}, Tag, Facet}} = pending(Tag, Core),
     {Server, _} = grant_of(Key),
     #{Server := {ServerId, ready, Node, _}} = Shell#shell.rows,
-    Event =:= {minted, ServerId, Tag, {ok, Facet}} orelse fail(install_without_reply, Tag),
-    (node(Facet) =:= Node andalso owner(Facet) =:= ServerId) orelse fail(install_of_foreign_facet, Tag),
+    %% A tree service's facet carries the plain name its server's reply gave and the rights
+    %% of its row, rw since no facet row of the model states rights; any other's is the pid.
+    {Pid, Reply} = case Facet of
+                       {P, Tree, Rights} ->
+                           (is_tree(Name) andalso erx_9p_grammar:is_name(Tree))
+                               orelse fail(install_of_unnamed_tree, Tag),
+                           Rights =:= rw orelse fail(install_with_other_rights, Tag),
+                           {P, {ok, P, Tree}};
+                       P ->
+                           is_tree(Name) andalso fail(install_without_tree, Tag),
+                           {P, {ok, P}}
+                   end,
+    Event =:= {minted, ServerId, Tag, Reply} orelse fail(install_without_reply, Tag),
+    (node(Pid) =:= Node andalso owner(Pid) =:= ServerId) orelse fail(install_of_foreign_facet, Tag),
     Interface =:= map_get({Server, Name}, ?INTERFACES) orelse fail(install_of_another_interface, Tag),
     case GranteeId of
         %% erx_domain_srv installs in the system domain's own registry and feeds the
@@ -263,8 +281,11 @@ progressed({introduced, Tag, ok}, Before, Actions, _After, _Shell) ->
         [_] -> lists:keymember(mint, 1, Actions) orelse fail(introduction_stalled, Tag);
         [] -> ok
     end;
-progressed({minted, Origin, Tag, {ok, Facet}}, Before, Actions, _After, #shell{rows = Rows}) when is_pid(Facet) ->
-    Owned = [Key || Key := {minting, {S, _}, T} <- Before, T =:= Tag, S =:= Origin,
+progressed({minted, Origin, Tag, Reply}, Before, Actions, _After, #shell{rows = Rows})
+  when is_tuple(Reply), tuple_size(Reply) >= 2, element(1, Reply) =:= ok, is_pid(element(2, Reply)) ->
+    Facet = element(2, Reply),
+    Owned = [Key || {_, Name} = Key := {minting, {S, _}, T} <- Before, T =:= Tag, S =:= Origin,
+                    Reply =:= honest_reply(Name, Facet),
                     {S2, ready, Node, _} <- [maps:get(element(1, grant_of(Key)), Rows, none)], S2 =:= S,
                     node(Facet) =:= Node, owner(Facet) =:= S],
     case Owned of
@@ -326,6 +347,20 @@ pending(Tag, Core) ->
         [Found] -> Found;
         Other -> fail(no_pending_operation, {Tag, Other})
     end.
+
+%% The reply an honest server sends to a mint of service Name with facet Facet: for a
+%% service served as a tree, the facet with its tree, named after the service; for any
+%% other, the facet alone.
+honest_reply(Name, Facet) ->
+    case is_tree(Name) of
+        true -> {ok, Facet, atom_to_binary(Name)};
+        false -> {ok, Facet}
+    end.
+
+%% Whether service Name's interface is served as a tree.
+is_tree(Name) ->
+    [Interface] = [I || {_Row, N} := I <- ?INTERFACES, N =:= Name],
+    lists:member(Interface, ?ERX_TREE_SERVICES).
 
 grant_of({Grantee, Name}) ->
     [Server] = [S || {G, N, S} <- ?GRANTS, G =:= Grantee, N =:= Name],

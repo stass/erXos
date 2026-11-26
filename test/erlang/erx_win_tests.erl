@@ -96,7 +96,7 @@ start() ->
     Tag = erlang:unique_integer([positive]),
     erx_winfs ! {erx_origin, ?SYSTEM,
                  {erx_facet_mint, Tag, ?SERVICE, ?SESSION, root, #{session => true, windows => 2}}},
-    Grant = receive {minted, Tag, {ok, G}} -> G after ?WAIT -> error(no_mint) end,
+    Grant = receive {minted, Tag, {ok, G, _Tree}} -> G after ?WAIT -> error(no_mint) end,
     persistent_term:put({erx_stand_in, cap, ?SERVICE}, Grant),
     persistent_term:put({erx_stand_in, owner, Grant}, ?SESSION),
     #{image => Image, grant => Grant, procs => [Client, Screen, Winfs, Driver]}.

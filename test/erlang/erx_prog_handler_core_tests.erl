@@ -382,8 +382,7 @@ narrowing_test_() ->
 %% erx_facets:program_table/1 leaves it out at each resolution; so a narrowing to a
 %% place on it is not refused.
 display_facet_entries_pass_the_core_test_() ->
-    Display = #{point => [<<"n">>, <<"display">>], provider => {facet, display, ?ERX_WINDOWS_TREE_BYTES},
-                root => [], rights => rw},
+    Display = #{point => [<<"n">>, <<"display">>], provider => {facet, display}, root => [], rights => rw},
     Alias = Display#{point := [<<"mnt">>, <<"w">>], root := [<<"client">>]},
     Table = ?TABLE ++ [Display, Alias],
     Narrow = fun(Within) -> files_of(erx_prog_handler_core:new(?PID, [], (files())#{table := Table, within := Within})) end,

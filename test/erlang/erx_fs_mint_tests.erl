@@ -87,11 +87,12 @@ unrooted_tree_starts_no_grant_test() ->
 
 %% A row's tree roots the grant where the tree's module answers for that tree and that
 %% grantee (erx_fs's subtree/3): the grant starts from the rooted arguments, so it
-%% attaches as the tree named installed and not as the unrooted test, and the module
+%% attaches as the tree named installed and not as the unrooted test, its mint answers with
+%% that tree (docs/design-system.md, "the mint's reply"), and the module
 %% was asked with the grantee's domain and the principal its mint request named.
 a_rooted_grant_starts_from_its_tree_s_arguments_test() ->
     with_grants([{subtree, installed}, {observer, self()}], fun(Grants) ->
-        {ok, Grant} = grant(Grants, #{rights => rx, tree => installed}, connection()),
+        {ok, Grant, <<"installed">>} = grant(Grants, #{rights => rx, tree => installed}, connection()),
         receive {exported, Grant, _, _, _} -> ok after 0 -> error(not_exported) end,
         receive
             {tree_subtree, installed, Grantee} ->
@@ -117,7 +118,7 @@ a_rooted_grant_starts_from_its_tree_s_arguments_test() ->
 %% start returns, so no answer names a grant the grantee cannot reach.
 the_export_comes_before_the_start_returns_test() ->
     with_grants(fun(Grants) ->
-        {ok, Grant} = grant(Grants, #{}, connection()),
+        {ok, Grant, _Tree} = grant(Grants, #{}, connection()),
         receive
             {exported, Exported, Rights, Peer, Alive} ->
                 ?assertEqual({Grant, [send], ?GRANTEE, true}, {Exported, Rights, Peer, Alive})
@@ -142,7 +143,7 @@ a_refused_export_leaves_no_grant_test() ->
 %% the row's max_request; a frame in a third domain's envelope, or bare, is dropped.
 an_enveloped_exchange_is_served_test() ->
     with_grants(fun(Grants) ->
-        {ok, Grant} = grant(Grants, #{max_request => 8192}, connection()),
+        {ok, Grant, _Tree} = grant(Grants, #{max_request => 8192}, connection()),
         Alias = domain_ref(?GRANTEE),
         Frame = {erx_9p, Alias, domain_pid(?GRANTEE), {version, 65560, ?VERSION}},
         trace_sends(Grant),
@@ -175,7 +176,7 @@ a_grant_serves_its_row_s_rights_test_() ->
 the_grant_ends_with_its_connection_test() ->
     with_grants(fun(Grants) ->
         Old = connection(),
-        {ok, Grant} = grant(Grants, #{}, Old),
+        {ok, Grant, _Tree} = grant(Grants, #{}, Old),
         Ref = monitor(process, Grant),
         true = port_close(Old),
         receive {'DOWN', Ref, process, Grant, Reason} -> ?assertEqual({shutdown, connection_ended}, Reason)
@@ -185,7 +186,7 @@ the_grant_ends_with_its_connection_test() ->
         dropped(Grants, Grant, ?WAIT),
         Next = ?GRANTEE + 1,
         ok = erx_connections:set(Next, connection()),
-        {ok, NewGrant} = erx_fs_mint:grant(Grants, ?SYSTEM, Next, ?PRINCIPAL, #{}, ?MODULE),
+        {ok, NewGrant, _NewTree} = erx_fs_mint:grant(Grants, ?SYSTEM, Next, ?PRINCIPAL, #{}, ?MODULE),
         Stale = {erx_9p, domain_ref(?GRANTEE), domain_pid(?GRANTEE), {version, 8192, ?VERSION}},
         trace_sends(NewGrant),
         NewGrant ! {erx_origin, ?GRANTEE, Stale},
@@ -199,7 +200,7 @@ the_grant_ends_with_its_connection_test() ->
 %% domain; another grantee with no connection to this domain gets no grant.
 only_the_system_domains_grant_has_no_connection_test() ->
     with_grants(fun(Grants) ->
-        {ok, Grant} = erx_fs_mint:grant(Grants, ?SYSTEM, ?SYSTEM, ?PRINCIPAL, #{}, ?MODULE),
+        {ok, Grant, _Tree} = erx_fs_mint:grant(Grants, ?SYSTEM, ?SYSTEM, ?PRINCIPAL, #{}, ?MODULE),
         ?assertEqual([Grant], grants(Grants)),
         ?assertEqual({error, noconnection}, erx_fs_mint:grant(Grants, ?SYSTEM, ?THIRD, ?PRINCIPAL, #{}, ?MODULE)),
         ?assertEqual([Grant], grants(Grants))
@@ -234,7 +235,7 @@ grant(Grants, Limits, Connection) ->
 %% The answer to Request, in the grantee's envelope, from the grantee's grant with Limits.
 granted_exchange(Limits, Request) ->
     with_grants(fun(Grants) ->
-        {ok, Grant} = grant(Grants, Limits, connection()),
+        {ok, Grant, _Tree} = grant(Grants, Limits, connection()),
         Alias = domain_ref(?GRANTEE),
         trace_sends(Grant),
         Grant ! {erx_origin, ?GRANTEE, {erx_9p, Alias, domain_pid(?GRANTEE), Request}},

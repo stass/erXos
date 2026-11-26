@@ -129,7 +129,7 @@ area_of(Grantee) ->
 mint(Grantee, Limits) ->
     Tag = erlang:unique_integer([positive]),
     erx_winfs ! {erx_origin, ?SYSTEM, {erx_facet_mint, Tag, ?SERVICE, Grantee, root, Limits}},
-    Grant = receive {minted, Tag, {ok, G}} -> G after ?WAIT -> error(no_mint) end,
+    Grant = receive {minted, Tag, {ok, G, _Tree}} -> G after ?WAIT -> error(no_mint) end,
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"user">>, <<"windows">>, 0}),
     Grant.
 

@@ -95,6 +95,13 @@ mint(Domain) -> pid(node_of(Domain), Domain, 1).
 facet(Domain) -> pid(node_of(Domain), Domain, 2).
 forged(Domain) -> pid(node_of(?THIRD), Domain, 2).
 
+%% Data is a files service, served as a tree: its mint's honest reply names the grant's
+%% tree, and the grantee holds the facet on that tree with the rights of the grant's
+%% row, rw where the row states none.
+-define(TREE, <<"data">>).
+reply(Domain) -> {ok, facet(Domain), ?TREE}.
+held(Domain) -> {facet(Domain), ?TREE, rw}.
+
 ready(Row, Id, Provides) -> {ready, Row, Id, node_of(Id), Provides}.
 
 config(Grantees) ->
@@ -120,21 +127,40 @@ minting() ->
 
 %% Named scenarios.
 
-%% A files facet goes to its grantee with its facet row's rights, rw where the row states
-%% none, and a facet of any other service as its pid alone: the rights come from the
-%% manifest's row, which the service holds, never from the server's reply
-%% (docs/design-files.md, "Rights beneath an entry").
-a_files_install_carries_its_rows_rights_test() ->
-    Install = fun(Files, Limits) ->
-                      Config = (config([?G]))#{grants := [{?G, data, ?S, Limits}], files => Files},
-                      {Actions, _} = run([ready(?S, 5, #{data => mint(5)}), ready(?G, 6, #{}), {introduced, 1, ok},
-                                          {minted, 5, 1, {ok, facet(5)}}], erx_domain_mints:new(Config)),
-                      lists:last(Actions)
-              end,
-    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), rx}}], Install([data], #{rights => rx})),
-    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), ro}}], Install([data], #{rights => ro, max_request => 4096})),
-    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), rw}}], Install([data], #{})),
-    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, facet(5)}], Install([], #{rights => ro})).
+%% The last actions of a grant of data whose service row has interface Interface and
+%% whose facet row has limits Limits, once data's server replies Reply to its mint.
+installed_by(Interface, Limits, Reply) ->
+    Config = (config([?G]))#{grants := [{?G, data, ?S, Limits}],
+                             interfaces := maps:put({?S, data}, Interface, ?INTERFACES)},
+    {Actions, _} = run([ready(?S, 5, #{data => mint(5)}), ready(?G, 6, #{}), {introduced, 1, ok},
+                        {minted, 5, 1, Reply}], erx_domain_mints:new(Config)),
+    lists:last(Actions).
+
+%% A facet of a service served as a tree goes to its grantee on the tree its server's
+%% reply names, with its facet row's rights, rw where the row states none, and a facet of
+%% any other service as its pid alone: the rights come from the manifest's row, which the
+%% service holds, never from the server's reply (docs/design-files.md, "The tree beneath
+%% an entry" and "Rights beneath an entry").
+a_tree_install_carries_its_replys_tree_and_its_rows_rights_test() ->
+    Files = fun(Limits) -> installed_by(?ERX_SERVICE_FILES, Limits, reply(5)) end,
+    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), ?TREE, rx}}], Files(#{rights => rx})),
+    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), ?TREE, ro}}],
+                 Files(#{rights => ro, max_request => 4096})),
+    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, held(5)}], Files(#{})),
+    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_LOG, facet(5)}],
+                 installed_by(?ERX_SERVICE_LOG, #{rights => ro}, {ok, facet(5)})).
+
+%% The mint's reply is untrusted (docs/design-system.md, "the mint's reply"). A tree
+%% service's reply names its tree as a plain name (erx_9p_grammar:is_name/1), so a tree
+%% that climbs out of the grant's or reaches beneath another, or that is no binary, fails
+%% the operation, as does a bare pid, which names no tree; a message service's reply
+%% that names a tree fails it too. Nothing is installed.
+a_reply_names_a_plain_tree_exactly_for_a_tree_service_test() ->
+    Failed = [{disarm, 1}, {failed, {?G, data}, {5, 6}, bad_reply}],
+    [?assertEqual(Failed, installed_by(?ERX_SERVICE_FILES, ?LIMITS, {ok, facet(5), Tree}))
+     || Tree <- [<<"../x">>, <<"..">>, <<"a/b">>, <<>>, data]],
+    ?assertEqual(Failed, installed_by(?ERX_SERVICE_FILES, ?LIMITS, {ok, facet(5)})),
+    ?assertEqual(Failed, installed_by(?ERX_SERVICE_LOG, ?LIMITS, reply(5))).
 
 %% A grant of an input service is read-only by construction (abi/services/input.txt): its
 %% server is asked to mint it with rights ro and its grantee holds it with ro, whatever its
@@ -143,21 +169,21 @@ an_input_grant_is_minted_and_held_read_only_test() ->
     Mint = fun(Limits) ->
                    Config = (config([?G]))#{grants := [{?G, data, ?S, Limits}], inputs => [data]},
                    {Actions, _} = run([ready(?S, 5, #{data => mint(5)}), ready(?G, 6, #{}), {introduced, 1, ok},
-                                       {minted, 5, 1, {ok, facet(5)}}], erx_domain_mints:new(Config)),
+                                       {minted, 5, 1, reply(5)}], erx_domain_mints:new(Config)),
                    lists:nthtail(2, Actions)
            end,
-    [?assertEqual([[{mint, 1, mint(5), data, 6, maps:put(rights, ro, ?LIMITS)}], [{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), ro}}]],
+    [?assertEqual([[{mint, 1, mint(5), data, 6, maps:put(rights, ro, ?LIMITS)}], [{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), ?TREE, ro}}]],
                   Mint(Limits)) || Limits <- [?LIMITS, maps:put(rights, rw, ?LIMITS)]].
 
 in_order_test() ->
     {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), ready(?G, 6, #{}), {introduced, 1, ok},
-                            {minted, 5, 1, {ok, facet(5)}}, {installed, 6, 1}], new()),
+                            {minted, 5, 1, reply(5)}, {installed, 6, 1}], new()),
     ?assertEqual([[],
                   [{arm, 1, 10000}, {introduce, 1, 5, 6}],
                   [{mint, 1, mint(5), data, 6, ?LIMITS}],
-                  [{install, 1, 6, data, ?ERX_SERVICE_FILES, facet(5)}],
+                  [{install, 1, 6, data, ?ERX_SERVICE_FILES, held(5)}],
                   [{disarm, 1}]], Actions),
-    ?assertEqual({installed, {5, 6}, facet(5)}, grant(State)).
+    ?assertEqual({installed, {5, 6}, held(5)}, grant(State)).
 
 %% The pixel area is a fact of the pair (pair_area/3): a windows grant's server reads
 %% an area of the grant's pixels in whole pages, or windows_pixels_default where its
@@ -220,7 +246,7 @@ an_install_carries_its_service_rows_interface_test() ->
     {Actions, Stepped} = run([ready(?S, 5, #{display => mint(5), data => mint(5)}), ready(?G, 6, #{})],
                              windows([{?G, display, ?S, #{}}, {?G, data, ?S, ?LIMITS}])),
     {Mints, Minting} = run([{introduced, Tag, ok} || {introduce, Tag, _, _} <- lists:append(Actions)], Stepped),
-    {Installs, _} = run([{minted, 5, Tag, {ok, facet(5)}} || {mint, Tag, _, _, _, _} <- lists:append(Mints)], Minting),
+    {Installs, _} = run([{minted, 5, Tag, reply(5)} || {mint, Tag, _, _, _, _} <- lists:append(Mints)], Minting),
     ?assertEqual([{data, ?ERX_SERVICE_FILES}, {display, ?ERX_SERVICE_WINDOWS}],
                  lists:sort([{Name, Interface} || {install, _, 6, Name, Interface, _} <- lists:append(Installs)])).
 
@@ -229,12 +255,12 @@ grantee_first_test() ->
     ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 7, 6}]], Actions).
 
 system_grantee_skips_the_introduction_test() ->
-    {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), {minted, 5, 1, {ok, facet(5)}},
+    {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), {minted, 5, 1, reply(5)},
                             {installed, 4, 1}], erx_domain_mints:new(config([system]))),
     ?assertEqual([[{arm, 1, 10000}, {mint, 1, mint(5), data, 4, ?LIMITS}],
-                  [{install, 1, 4, data, ?ERX_SERVICE_FILES, facet(5)}],
+                  [{install, 1, 4, data, ?ERX_SERVICE_FILES, held(5)}],
                   [{disarm, 1}]], Actions),
-    ?assertEqual(#{{system, data} => {installed, {5, 4}, facet(5)}}, erx_domain_mints:grants(State)).
+    ?assertEqual(#{{system, data} => {installed, {5, 4}, held(5)}}, erx_domain_mints:grants(State)).
 
 %% The settlement wait (docs/design-system.md, "Waiting for a grant"): settled/3 answers
 %% each query as its decision does. The system domain's namespace waits for its data
@@ -253,9 +279,9 @@ settled_answers_each_query_as_its_decision_test() ->
     {_, Minting} = run([ready(?S, 5, #{data => mint(5)})], Idle),
     ?assertEqual(wait, Settled(namespace, [], Minting)),
     ?assertEqual(wait, Settled({grant, data, 5}, [], Minting)),
-    {_, Installed} = run([{minted, 5, 1, {ok, facet(5)}}, {installed, 4, 1}], Minting),
+    {_, Installed} = run([{minted, 5, 1, reply(5)}, {installed, 4, 1}], Minting),
     ?assertEqual(ok, Settled(namespace, [], Installed)),
-    ?assertEqual({ok, {facet(5), rw}}, Settled({grant, data, 5}, [], Installed)),
+    ?assertEqual({ok, held(5)}, Settled({grant, data, 5}, [], Installed)),
     ?assertEqual({error, ended}, Settled({grant, data, 8}, [], Installed)),
     ?assertEqual({error, unprovided}, Settled({grant, other, 5}, [], Installed)),
     {_, Failed} = run([{deadline, 1}], Minting),
@@ -285,7 +311,7 @@ a_grant_query_for_no_incarnation_of_its_row_is_answered_test() ->
     ?assertEqual(wait, Settled({grant, data, 9}, [?S], Ended)).
 
 two_grants_keep_their_own_operations_test() ->
-    {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), ready(?G, 6, #{}), {minted, 5, 2, {ok, facet(5)}},
+    {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), ready(?G, 6, #{}), {minted, 5, 2, reply(5)},
                             {installed, 6, 1}, {installed, 4, 1}],
                            erx_domain_mints:new(config([?G, system]))),
     ?assertEqual([[{arm, 1, 10000}, {mint, 1, mint(5), data, 4, ?LIMITS}],
@@ -297,16 +323,16 @@ two_grants_keep_their_own_operations_test() ->
                  erx_domain_mints:grants(State)).
 
 restart_installs_the_new_facet_test() ->
-    {_, Installed} = run([{minted, 5, 1, {ok, facet(5)}}, {installed, 6, 1}], minting()),
+    {_, Installed} = run([{minted, 5, 1, reply(5)}, {installed, 6, 1}], minting()),
     {Actions, State} = run([{ended, ?S, 5}, ready(?S, 8, #{data => mint(8)}), {introduced, 2, ok},
-                            {minted, 8, 2, {ok, facet(8)}}, {installed, 6, 2}], Installed),
+                            {minted, 8, 2, reply(8)}, {installed, 6, 2}], Installed),
     ?assertEqual([[], [{arm, 2, 10000}, {introduce, 2, 8, 6}], [{mint, 2, mint(8), data, 6, ?LIMITS}],
-                  [{install, 2, 6, data, ?ERX_SERVICE_FILES, facet(8)}], [{disarm, 2}]], Actions),
-    ?assertEqual({installed, {8, 6}, facet(8)}, grant(State)).
+                  [{install, 2, 6, data, ?ERX_SERVICE_FILES, held(8)}], [{disarm, 2}]], Actions),
+    ?assertEqual({installed, {8, 6}, held(8)}, grant(State)).
 
 reply_with_a_facet_of_another_domain_fails_test() ->
     lists:foreach(fun(Facet) ->
-                          {[Actions], State} = run([{minted, 5, 1, {ok, Facet}}], minting()),
+                          {[Actions], State} = run([{minted, 5, 1, {ok, Facet, ?TREE}}], minting()),
                           ?assertEqual([{disarm, 1}, {failed, {?G, data}, {5, 6}, bad_reply}], Actions),
                           ?assertEqual({failed, {5, 6}, bad_reply}, grant(State))
                   end, [facet(?THIRD), forged(5)]).
@@ -318,8 +344,8 @@ malformed_replies_fail_test() ->
                   end, [ok, {ok, "<0.5.2>"}, {ok, facet(5), extra}, {error, enospc}, facet(5)]).
 
 malformed_tags_match_nothing_test() ->
-    {Actions, State} = run([{minted, 5, 1.0, {ok, facet(5)}}, {minted, 5, none, {ok, facet(5)}},
-                            {minted, 5, [1], {ok, facet(5)}}, {installed, 6, 1.0}], minting()),
+    {Actions, State} = run([{minted, 5, 1.0, reply(5)}, {minted, 5, none, reply(5)},
+                            {minted, 5, [1], reply(5)}, {installed, 6, 1.0}], minting()),
     ?assertEqual([[{dropped, unknown_tag, {minted, 5}}], [{dropped, unknown_tag, {minted, 5}}],
                   [{dropped, unknown_tag, {minted, 5}}], [{dropped, unknown_tag, {installed, 6}}]], Actions),
     ?assertEqual({minting, {5, 6}, 1}, grant(State)).
@@ -362,7 +388,7 @@ stale_report_provides_nothing_test() ->
     ?assertEqual({introducing, {8, 6}, 1}, grant(State)).
 
 silent_mint_meets_its_deadline_test() ->
-    {Actions, State} = run([{deadline, 1}, ready(?T, 7, #{}), {minted, 5, 1, {ok, facet(5)}}, {deadline, 1}],
+    {Actions, State} = run([{deadline, 1}, ready(?T, 7, #{}), {minted, 5, 1, reply(5)}, {deadline, 1}],
                            minting()),
     ?assertEqual([[{failed, {?G, data}, {5, 6}, {deadline, minting}}], [], [{dropped, unknown_tag, {minted, 5}}], []],
                  Actions),
@@ -370,17 +396,17 @@ silent_mint_meets_its_deadline_test() ->
 
 old_reply_after_a_new_grant_is_dropped_test() ->
     {Actions, State} = run([{ended, ?S, 5}, ready(?S, 8, #{data => mint(8)}), {introduced, 2, ok},
-                            {minted, 5, 1, {ok, facet(5)}}, {minted, 5, 2, {ok, facet(5)}},
-                            {minted, 8, 2, {ok, facet(8)}}, {installed, 6, 2}],
+                            {minted, 5, 1, reply(5)}, {minted, 5, 2, reply(5)},
+                            {minted, 8, 2, reply(8)}, {installed, 6, 2}],
                            minting()),
     ?assertEqual([[{disarm, 1}], [{arm, 2, 10000}, {introduce, 2, 8, 6}], [{mint, 2, mint(8), data, 6, ?LIMITS}],
                   [{dropped, unknown_tag, {minted, 5}}], [{dropped, wrong_domain, {minted, 5}}],
-                  [{install, 2, 6, data, ?ERX_SERVICE_FILES, facet(8)}], [{disarm, 2}]],
+                  [{install, 2, 6, data, ?ERX_SERVICE_FILES, held(8)}], [{disarm, 2}]],
                  Actions),
-    ?assertEqual({installed, {8, 6}, facet(8)}, grant(State)).
+    ?assertEqual({installed, {8, 6}, held(8)}, grant(State)).
 
 grantee_exit_while_minting_cancels_test() ->
-    {Actions, State} = run([{ended, ?G, 6}, {minted, 5, 1, {ok, facet(5)}}], minting()),
+    {Actions, State} = run([{ended, ?G, 6}, {minted, 5, 1, reply(5)}], minting()),
     ?assertEqual([[{disarm, 1}], [{dropped, unknown_tag, {minted, 5}}]], Actions),
     ?assertEqual(idle, grant(State)).
 
@@ -390,12 +416,12 @@ second_trigger_leaves_one_operation_test() ->
     ?assertEqual({minting, {5, 6}, 1}, grant(State)).
 
 replies_from_the_wrong_domain_or_step_are_dropped_test() ->
-    {Actions, _} = run([{minted, ?THIRD, 1, {ok, facet(?THIRD)}}, {minted, 6, 1, {ok, facet(6)}}, {installed, 6, 1},
-                        {minted, 5, 7, {ok, facet(5)}}, {minted, 5, 1, {ok, facet(5)}}, {minted, 5, 1, {ok, facet(5)}},
+    {Actions, _} = run([{minted, ?THIRD, 1, reply(?THIRD)}, {minted, 6, 1, reply(6)}, {installed, 6, 1},
+                        {minted, 5, 7, reply(5)}, {minted, 5, 1, reply(5)}, {minted, 5, 1, reply(5)},
                         {installed, ?THIRD, 1}, {installed, 5, 1}, {installed, 6, 1}, {installed, 6, 1}], minting()),
     ?assertEqual([[{dropped, wrong_domain, {minted, ?THIRD}}], [{dropped, wrong_domain, {minted, 6}}],
                   [{dropped, unexpected, {installed, 6}}], [{dropped, unknown_tag, {minted, 5}}],
-                  [{install, 1, 6, data, ?ERX_SERVICE_FILES, facet(5)}], [{dropped, unexpected, {minted, 5}}],
+                  [{install, 1, 6, data, ?ERX_SERVICE_FILES, held(5)}], [{dropped, unexpected, {minted, 5}}],
                   [{dropped, wrong_domain, {installed, ?THIRD}}], [{dropped, wrong_domain, {installed, 5}}],
                   [{disarm, 1}], [{dropped, unknown_tag, {installed, 6}}]], Actions).
 
@@ -439,20 +465,20 @@ session_minting() ->
 
 %% Session 9's grant installed, and session 10's.
 two_sessions_installed() ->
-    {_, State} = run([{session_ready, ?ROWS, 10, node_of(10), none, #{}}, {introduced, 2, ok}, {minted, 5, 1, {ok, facet(5)}},
-                      {minted, 5, 2, {ok, facet(5)}}, {installed, 9, 1}, {installed, 10, 2}],
+    {_, State} = run([{session_ready, ?ROWS, 10, node_of(10), none, #{}}, {introduced, 2, ok}, {minted, 5, 1, reply(5)},
+                      {minted, 5, 2, reply(5)}, {installed, 9, 1}, {installed, 10, 2}],
                      session_minting()),
     State.
 
 session_ready_installs_test() ->
     {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), {session_ready, ?ROWS, 9, node_of(9), none, #{}}, {introduced, 1, ok},
-                            {minted, 5, 1, {ok, facet(5)}}, {installed, 9, 1}], sessions()),
+                            {minted, 5, 1, reply(5)}, {installed, 9, 1}], sessions()),
     ?assertEqual([[],
                   [{arm, 1, 10000}, {introduce, 1, 5, 9}],
                   [{mint, 1, mint(5), data, 9, ?LIMITS}],
-                  [{install, 1, 9, data, ?ERX_SERVICE_FILES, facet(5)}],
+                  [{install, 1, 9, data, ?ERX_SERVICE_FILES, held(5)}],
                   [{disarm, 1}]], Actions),
-    ?assertEqual(#{{{session, 9}, data} => {installed, {5, 9}, facet(5)}}, session_grants(State)).
+    ?assertEqual(#{{{session, 9}, data} => {installed, {5, 9}, held(5)}}, session_grants(State)).
 
 %% A namespace in place (docs/design-system.md, "A session takes the console"): each
 %% grant of a files service to the grantee is installed or failed, or has no operation
@@ -469,7 +495,7 @@ namespace_waits_for_its_files_grants_test() ->
     ?assert(in_place([], Idle)),
     {_, Minting} = run([ready(?S, 5, #{data => mint(5)}), {introduced, 1, ok}], Idle),
     ?assertNot(in_place([], Minting)),
-    {_, Installed} = run([{minted, 5, 1, {ok, facet(5)}}, {installed, 9, 1}], Minting),
+    {_, Installed} = run([{minted, 5, 1, reply(5)}, {installed, 9, 1}], Minting),
     ?assert(in_place([], Installed)),
     {_, Failed} = run([{deadline, 1}], Minting),
     ?assert(in_place([], Failed)),
@@ -492,31 +518,31 @@ session_before_its_server_waits_test() ->
     ?assertEqual(#{{{session, 9}, data} => {introducing, {5, 9}, 1}}, session_grants(State)).
 
 session_end_cancels_and_drops_its_late_replies_test() ->
-    {Actions, State} = run([{session_ended, 9}, {minted, 5, 1, {ok, facet(5)}}, {installed, 9, 1}],
+    {Actions, State} = run([{session_ended, 9}, {minted, 5, 1, reply(5)}, {installed, 9, 1}],
                            session_minting()),
     ?assertEqual([[{disarm, 1}], [{dropped, unknown_tag, {minted, 5}}], [{dropped, unknown_tag, {installed, 9}}]],
                  Actions),
     ?assertEqual(#{}, session_grants(State)).
 
 two_sessions_get_two_grants_test() ->
-    {Actions, State} = run([{session_ready, ?ROWS, 10, node_of(10), none, #{}}, {introduced, 2, ok}, {minted, 5, 1, {ok, facet(5)}},
-                            {minted, 5, 2, {ok, facet(5)}}, {installed, 10, 1}, {installed, 9, 2},
+    {Actions, State} = run([{session_ready, ?ROWS, 10, node_of(10), none, #{}}, {introduced, 2, ok}, {minted, 5, 1, reply(5)},
+                            {minted, 5, 2, reply(5)}, {installed, 10, 1}, {installed, 9, 2},
                             {installed, 9, 1}, {installed, 10, 2}], session_minting()),
     ?assertEqual([[{arm, 2, 10000}, {introduce, 2, 5, 10}],
                   [{mint, 2, mint(5), data, 10, ?LIMITS}],
-                  [{install, 1, 9, data, ?ERX_SERVICE_FILES, facet(5)}],
-                  [{install, 2, 10, data, ?ERX_SERVICE_FILES, facet(5)}],
+                  [{install, 1, 9, data, ?ERX_SERVICE_FILES, held(5)}],
+                  [{install, 2, 10, data, ?ERX_SERVICE_FILES, held(5)}],
                   [{dropped, wrong_domain, {installed, 10}}],
                   [{dropped, wrong_domain, {installed, 9}}],
                   [{disarm, 1}],
                   [{disarm, 2}]], Actions),
-    ?assertEqual(#{{{session, 9}, data} => {installed, {5, 9}, facet(5)},
-                   {{session, 10}, data} => {installed, {5, 10}, facet(5)}}, session_grants(State)).
+    ?assertEqual(#{{{session, 9}, data} => {installed, {5, 9}, held(5)},
+                   {{session, 10}, data} => {installed, {5, 10}, held(5)}}, session_grants(State)).
 
 one_session_ending_leaves_the_other_its_grant_test() ->
     {Actions, State} = run([{session_ended, 9}, {deadline, 2}], two_sessions_installed()),
     ?assertEqual([[], []], Actions),
-    ?assertEqual(#{{{session, 10}, data} => {installed, {5, 10}, facet(5)}}, session_grants(State)).
+    ?assertEqual(#{{{session, 10}, data} => {installed, {5, 10}, held(5)}}, session_grants(State)).
 
 server_restart_regrants_every_live_session_test() ->
     {Actions, State} = run([{ended, ?S, 5}, ready(?S, 8, #{data => mint(8)})], two_sessions_installed()),
@@ -541,12 +567,12 @@ repeated_sessions_leave_no_entry_test() ->
     Cycle = fun(Id, State) ->
                     {[_, [{arm, Tag, _}, _] | _], Next} =
                         run([{session_ended, Id - 1}, {session_ready, ?ROWS, Id, node_of(Id), none, #{}}], State),
-                    {_, Done} = run([{introduced, Tag, ok}, {minted, 5, Tag, {ok, facet(5)}}, {installed, Id, Tag}], Next),
+                    {_, Done} = run([{introduced, Tag, ok}, {minted, 5, Tag, reply(5)}, {installed, Id, Tag}], Next),
                     Done
             end,
     One = Cycle(1000, Ready),
     Many = lists:foldl(Cycle, One, lists:seq(1001, 1100)),
-    ?assertEqual(#{{{session, 1100}, data} => {installed, {5, 1100}, facet(5)}}, session_grants(Many)),
+    ?assertEqual(#{{{session, 1100}, data} => {installed, {5, 1100}, held(5)}}, session_grants(Many)),
     ?assertEqual(erts_debug:flat_size(One), erts_debug:flat_size(Many)).
 
 %% The session mark (docs/design-system.md, "Facets a configured domain serves"): template
@@ -717,7 +743,7 @@ apply_action({mint, Tag, Mint, data, GranteeId, Limits}, #{reqs := Reqs} = Env, 
     Env#{reqs := lists:sort([{mint, Tag, ServerId} | Reqs])};
 apply_action({install, Tag, GranteeId, data, Interface, Facet},
              #{reqs := Reqs, introduced := Introduced, installs := Installs} = Env, Node, Label, Seen) ->
-    (is_grantee(GranteeId, Env) andalso Interface =:= ?ERX_SERVICE_FILES andalso Facet =:= facet(ready_id(?S, Env))
+    (is_grantee(GranteeId, Env) andalso Interface =:= ?ERX_SERVICE_FILES andalso Facet =:= held(ready_id(?S, Env))
      andalso (GranteeId =:= 4 orelse lists:member(Tag, Introduced)))
         orelse violation(authentic_install, Node, Label, Seen),
     Env#{reqs := lists:sort([{install, Tag, GranteeId} | Reqs]), installs := [{Tag, GranteeId} | Installs]};
@@ -742,7 +768,7 @@ check_grant_answer(Core, #{next_id := NextId, armed := Armed} = Env, Node, Seen)
     lists:foreach(fun(Id) ->
                           Answer = erx_domain_mints:settled({grant, data, Id}, [], Core),
                           Expected = case Answer of
-                                         {ok, Facet} -> Id =:= Ready andalso Facet =:= facet(Id);
+                                         {ok, Facet} -> Id =:= Ready andalso Facet =:= held(Id);
                                          _ when is_integer(Ready), Id < Ready -> Answer =:= {error, ended};
                                          wait -> not (Id =:= Ready andalso Armed =:= []);
                                          {error, ended} -> Id =/= Ready;
@@ -759,7 +785,7 @@ check_one_timer(Grants, #{armed := Armed}, Node, Seen) ->
 check_current_pair(Grants, Env, Node, Seen) ->
     maps:foreach(fun(_Key, idle) -> ok;
                     (Key, {installed, Pair, Facet}) ->
-                         (Pair =:= current_pair(Key, Env) andalso Facet =:= facet(element(1, Pair)))
+                         (Pair =:= current_pair(Key, Env) andalso Facet =:= held(element(1, Pair)))
                              orelse violation(current_pair, Node, state, Seen);
                     (Key, Grant) ->
                          element(2, Grant) =:= current_pair(Key, Env) orelse violation(current_pair, Node, state, Seen)
@@ -876,9 +902,9 @@ answers({introduce, Tag}, #{introduced := Introduced} = Env) ->
     [{{introduced, Tag}, {introduced, Tag, ok}, Env#{introduced := lists:sort([Tag | Introduced])}} |
      [{{introduce_refused, Tag}, {introduced, Tag, {error, elimit}}, spend(hostile, Env)} || hostile(Env)]];
 answers({mint, Tag, ServerId}, Env) ->
-    Replies = [{honest, {ok, facet(ServerId)}}] ++
-        [{Kind, Reply} || hostile(Env), {Kind, Reply} <- [{third_facet, {ok, facet(?THIRD)}},
-                                                          {forged_facet, {ok, forged(ServerId)}},
+    Replies = [{honest, reply(ServerId)}] ++
+        [{Kind, Reply} || hostile(Env), {Kind, Reply} <- [{third_facet, reply(?THIRD)},
+                                                          {forged_facet, {ok, forged(ServerId), ?TREE}},
                                                           {refused, {error, enospc}}]],
     [{{answer, Tag, Kind}, none, spend(Kind, send({minted, ServerId, Tag, Reply}, Env))} || {Kind, Reply} <- Replies];
 answers({install, Tag, GranteeId}, Env) ->
@@ -892,7 +918,7 @@ deadline_moves(#{armed := Armed} = Env) ->
 third_moves(#{tags := Tags, next_id := NextId} = Env) ->
     [{{third, Event}, Event, spend(hostile, Env)}
      || hostile(Env), Domain <- [?THIRD, 50 | lists:seq(5, NextId - 1)], Tag <- lists:seq(1, Tags),
-        Event <- [{minted, Domain, Tag, {ok, facet(Domain)}}, {installed, Domain, Tag}]].
+        Event <- [{minted, Domain, Tag, reply(Domain)}, {installed, Domain, Tag}]].
 
 hostile(#{hostile := Left}) -> Left =:= 1.
 

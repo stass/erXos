@@ -506,7 +506,7 @@ granted_answers(Pids, Answers) ->
 %% eio until the grant is installed; with no grant there is no mount, so /data is the
 %% root's own entry, as FreeBSD shows a mount point with nothing mounted on it.
 system_data_mount_test_() ->
-    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"data">>], provider := {facet, data, <<"data">>}, rights := rw}],
+    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"data">>], provider := {facet, data}, rights := rw}],
                                        system_mounts([{system, data, 1, #{}}, {0, data, 1, #{}}])) end},
      {"not granted", fun() -> ?assertEqual([#{point => [], provider => release, root => [], rights => ro}],
                                            system_mounts([{0, data, 1, #{}}])) end}].
@@ -515,7 +515,7 @@ system_data_mount_test_() ->
 %% place, /packages (erx_ns:packages_place/0), where erx_pkg_medium reads the installed
 %% packages, and only when the manifest grants it packages.
 system_packages_mount_test_() ->
-    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"packages">>], provider := {facet, packages, <<"data">>},
+    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"packages">>], provider := {facet, packages},
                                              rights := rw}],
                                        system_mounts([{system, packages, 1, #{}}, {0, packages, 1, #{}}])) end},
      {"not granted", fun() -> ?assertEqual([#{point => [], provider => release, root => [], rights => ro}],
@@ -617,7 +617,7 @@ session_files_grant_test() ->
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
         DomainPid = domain_pid(Id),
-        #{start := {?ERX_SERVICE_FILES, {Grant, rw}}} = Facets = maps:get(DomainPid, answers([DomainPid], #{})),
+        #{start := {?ERX_SERVICE_FILES, {Grant, <<"test">>, rw}}} = Facets = maps:get(DomainPid, answers([DomainPid], #{})),
         ?assertEqual([code_objects, start], lists:sort(maps:keys(Facets))),
         ?assertEqual([Grant], [Child || {_, Child, _, _} <- supervisor:which_children(Grants)]),
         %% The grant exports itself to the session, after the session's start.
@@ -653,7 +653,7 @@ session_line_grant_test() ->
                                           [{{template, 0}, line, system, #{max_request => 131072}}]),
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
-        #{line := {?ERX_SERVICE_LINE, {Grant, rw}}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
+        #{line := {?ERX_SERVICE_LINE, {Grant, <<"test">>, rw}}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
         ?assertEqual([Grant], [Child || {_, Child, _, _} <- supervisor:which_children(Grants)])
     after
         files_cleanup(Started)
@@ -670,7 +670,7 @@ session_machine_grant_test() ->
     erlang:trace(all, true, [call, {tracer, self()}]),
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
-        #{machine := {?ERX_SERVICE_FILES, {_Grant, rw}}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
+        #{machine := {?ERX_SERVICE_FILES, {_Grant, <<"machine">>, rw}}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
         ?assertEqual([<<"root">>], [Arg || {trace, _, call, {erx_machine_fs, init, [Arg]}} <- flush_traces()])
     after
         erlang:trace(all, false, [call]),
@@ -761,16 +761,20 @@ sessions() ->
     ?assertMatch({erx_facet_mint, Tag, echo, 7, <<"root">>, #{max_request := 64, session := true}},
                  receive {trace, PidA, 'receive', {_, mint, _, {erx_facet_mint, Tag, _, _, _, _} = R}} -> R
                  after 2000 -> none end),
+    %% Echo is of the windows interface, served as a tree: the reply names the tree, and
+    %% the session holds the facet on it with the rights of the template's row, rw.
     Facet = pid('a@erxos', 5, 7),
-    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},
-    ?assertEqual(Facet, receive {trace, Pid7, 'receive', {_, install, Tag, echo, _, F}} -> F after 2000 -> none end),
+    Reply = {ok, Facet, <<"echo">>},
+    Held = {Facet, <<"echo">>, rw},
+    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, Reply}},
+    ?assertEqual(Held, receive {trace, Pid7, 'receive', {_, install, Tag, echo, _, F}} -> F after 2000 -> none end),
     PidB ! {erx_origin, 6, {erx_facets_installed, Tag}},
     wait_counts(fun(#{{dropped, wrong_domain} := N}) -> N =:= 1 end),
     Pid7 ! {erx_origin, 7, {erx_facets_installed, Tag}},
-    wait(fun(#{Key := {installed, {5, 7}, F}}) -> F =:= Facet end),
+    wait(fun(#{Key := {installed, {5, 7}, F}}) -> F =:= Held end),
     ok = erx_domain:stop(Session, kill),
     wait(fun(Grants) -> not is_map_key(Key, Grants) end),
-    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},
+    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, Reply}},
     wait_counts(fun(#{{dropped, unknown_tag} := N}) -> N =:= 1 end).
 
 %% A session's line (docs/design-system.md, "A session's lines"): erx_domain:line/4 is
@@ -818,7 +822,7 @@ namespace() ->
     PidA ! {erx_origin, 5, {erx_connection_mapped, 7}},
     Pid7 ! {erx_origin, 7, {erx_connection_mapped, 5}},
     #{Key := {minting, {5, 7}, Tag}} = wait(fun(#{Key := {minting, _, _}}) -> true end),
-    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 7)}}},
+    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 7), <<"echo">>}}},
     receive {trace, Pid7, 'receive', {_, install, Tag, echo, _, _}} -> ok after 2000 -> error(no_install) end,
     ?assertEqual(none, answer(Started, 200)),
     Pid7 ! {erx_origin, 7, {erx_facets_installed, Tag}},
@@ -842,7 +846,7 @@ system_namespace() ->
     #{{system, echo} := {minting, {5, 4}, Tag}} = wait(fun(#{{system, echo} := {minting, _, _}}) -> true end),
     %% wait_response/2 keeps the request on its timeout, where receive_response/2 abandons it.
     ?assertEqual(timeout, gen_server:wait_response(First, 200)),
-    domain_pid(5) ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 3)}}},
+    domain_pid(5) ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 3), <<"echo">>}}},
     ?assertEqual({reply, ok}, gen_server:receive_response(First, 2000)),
     ?assertEqual({reply, ok}, gen_server:receive_response(erx_domain:system_namespace(), 2000)).
 
@@ -1040,7 +1044,7 @@ app_session() ->
         ?assertMatch({erx_facet_mint, Tag, clip, 7, <<"clock">>, #{max_request := 32}},
                      receive {trace, PidA, 'receive', {_, mint, _, {erx_facet_mint, Tag, _, _, _, _} = R}} -> R
                      after 2000 -> none end),
-        PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 7)}}},
+        PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 7), <<"clip">>}}},
         Installation = fun({_, install, _, _, _, _}) -> true end,
         {Before, {_, install, Tag, clip, ?ERX_SERVICE_FILES, _}} = received(Pid7, Installation, []),
         ?assertEqual([[{clip, ?ERX_SERVICE_FILES}]], [Granted || {_, facets, _, Granted} <- Before]),

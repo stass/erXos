@@ -516,15 +516,15 @@ program_table_test_() ->
       fun a_files_facet_replaced_by_a_display_is_left_out/1,
       fun a_display_under_another_name_and_its_bind_are_left_out/1]}.
 
--define(FACET_ENTRY(Point, Name, Tree), #{point => Point, provider => {facet, Name, Tree}, root => [], rights => rw}).
+-define(FACET_ENTRY(Point, Name), #{point => Point, provider => {facet, Name}, root => [], rights => rw}).
 
 %% The program's table is taken while the registry holds nothing under display: a
 %% resolution then finds the entry ended, as the session's does, and once the
 %% display's facet is installed no entry at all, from the same table.
 a_display_installed_after_the_start_is_left_out(_) ->
-    Table = [?FACET_ENTRY([<<"n">>, <<"display">>], display, ?ERX_WINDOWS_TREE_BYTES)],
+    Table = [?FACET_ENTRY([<<"n">>, <<"display">>], display)],
     Before = erx_facets:program_table(erx_facets:program(Table)),
-    ok = erx_facets:install(#{display => {?ERX_SERVICE_WINDOWS, {self(), rw}}}),
+    ok = erx_facets:install(#{display => {?ERX_SERVICE_WINDOWS, {self(), ?ERX_WINDOWS_TREE_BYTES, rw}}}),
     After = erx_facets:program_table(erx_facets:program(Table)),
     [?_assertMatch([#{provider := ended}], Before),
      ?_assertEqual([], After)].
@@ -533,10 +533,10 @@ a_display_installed_after_the_start_is_left_out(_) ->
 %% under the same name by a display's: the next resolution has no entry there.
 a_files_facet_replaced_by_a_display_is_left_out(_) ->
     Server = self(),
-    Data = ?FACET_ENTRY([<<"data">>], data, <<"data">>),
-    ok = erx_facets:install(#{data => {?ERX_SERVICE_FILES, {Server, rw}}}),
+    Data = ?FACET_ENTRY([<<"data">>], data),
+    ok = erx_facets:install(#{data => {?ERX_SERVICE_FILES, {Server, <<"data">>, rw}}}),
     Files = erx_facets:program_table(erx_facets:program([Data])),
-    ok = erx_facets:install(#{data => {?ERX_SERVICE_WINDOWS, {Server, rw}}}),
+    ok = erx_facets:install(#{data => {?ERX_SERVICE_WINDOWS, {Server, <<"data">>, rw}}}),
     Display = erx_facets:program_table(erx_facets:program([Data])),
     [?_assertEqual([Data#{provider := {grant, Server, <<"data">>}}], Files),
      ?_assertEqual([], Display)].
@@ -546,11 +546,11 @@ a_files_facet_replaced_by_a_display_is_left_out(_) ->
 %% facet beside it does.
 a_display_under_another_name_and_its_bind_are_left_out(_) ->
     Server = self(),
-    Notes = ?FACET_ENTRY([<<"n">>, <<"notes">>], notes, <<"notes">>),
+    Notes = ?FACET_ENTRY([<<"n">>, <<"notes">>], notes),
     Bind = Notes#{point := [<<"mnt">>, <<"w">>], root := [<<"client">>]},
-    Data = ?FACET_ENTRY([<<"data">>], data, <<"data">>),
-    ok = erx_facets:install(#{notes => {?ERX_SERVICE_WINDOWS, {Server, rw}},
-                              data => {?ERX_SERVICE_FILES, {Server, rw}}}),
+    Data = ?FACET_ENTRY([<<"data">>], data),
+    ok = erx_facets:install(#{notes => {?ERX_SERVICE_WINDOWS, {Server, <<"notes">>, rw}},
+                              data => {?ERX_SERVICE_FILES, {Server, <<"data">>, rw}}}),
     Granted = erx_facets:program_table(erx_facets:program([Notes, Bind, Data])),
     ?_assertEqual([Data#{provider := {grant, Server, <<"data">>}}], Granted).
 
@@ -582,9 +582,9 @@ an_open_walks_no_display(_) ->
 %% Case with the stand-in's table holding Entries and a display's facet at /n/display,
 %% which the registry holds as one of the windows interface.
 on_a_display(Entries, Case) ->
-    Display = ?FACET_ENTRY([<<"n">>, <<"display">>], display, ?ERX_WINDOWS_TREE_BYTES),
+    Display = ?FACET_ENTRY([<<"n">>, <<"display">>], display),
     persistent_term:put({erx_file_description, table}, Entries ++ [Display]),
-    ok = erx_facets:install(#{display => {?ERX_SERVICE_WINDOWS, {self(), rw}}}),
+    ok = erx_facets:install(#{display => {?ERX_SERVICE_WINDOWS, {self(), ?ERX_WINDOWS_TREE_BYTES, rw}}}),
     try Case()
     after
         [persistent_term:erase(Key) || Key <- [{erx_file_description, table}, {erx, facets}, erx_win]]

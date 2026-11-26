@@ -254,8 +254,8 @@ class ErxDomainTest < Minitest::Test
     # after the ended row's successor starts leaves a server's asker waiting through the
     # successor's boot.
     Fault.new(name: 'a settled grant query matched by its service alone', file: MINTS,
-              from: '#{Key := #{state := {installed, {Id, _}, Pid}}} ->',
-              to: '#{Key := #{state := {installed, _Pair, Pid}}} ->',
+              from: '#{Key := #{state := {installed, {Id, _}, Facet}}} ->',
+              to: '#{Key := #{state := {installed, _Pair, Facet}}} ->',
               tests: 'erx_domain_mints_tests', caught_by: 'settled_answers_each_query_as_its_decision_test'),
     Fault.new(name: 'every settlement asker answered when any query settles', file: SERVICE,
               from: 'lists:partition(fun({_Asker, Answer}) -> Answer =:= wait end, Answers)',
@@ -274,8 +274,8 @@ class ErxDomainTest < Minitest::Test
     # one incarnation with another's installed facet; and without the idle case the wait
     # for an incarnation that provides no pcie is never answered.
     Fault.new(name: 'a grant wait matched by its service alone', file: MINTS,
-              from: '#{Key := #{state := {installed, {Id, _}, Pid}}} ->',
-              to: '#{Key := #{state := {installed, _Pair, Pid}}} ->',
+              from: '#{Key := #{state := {installed, {Id, _}, Facet}}} ->',
+              to: '#{Key := #{state := {installed, _Pair, Facet}}} ->',
               tests: 'erx_domain_mints_srv_tests', caught_by: 'await_installed'),
     Fault.new(name: 'a grant wait without its idle case', file: MINTS,
               from: 'idle_grant(ready, _Starting) -> {error, unprovided};', to: 'idle_grant(ready, _Starting) -> wait;',
