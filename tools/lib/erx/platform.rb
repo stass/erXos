@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'board_clock'
 require_relative 'error'
 require_relative 'pin_table'
 require_relative 'json_input'
@@ -75,9 +76,7 @@ module Erx
       unknown = record.keys - KEYS
       raise Error, "#{self.class.record_path(name)}: unknown key #{unknown.first.inspect}" unless unknown.empty?
 
-      clock = record['arm_clock_hz']
-      raise Error, "#{self.class.record_path(name)}: arm_clock_hz must be a positive whole number of megahertz" unless
-        clock.nil? || (clock.is_a?(Integer) && clock.positive? && (clock % 1_000_000).zero?)
+      BoardClock.stated_hz(record, label: self.class.record_path(name))
 
       MIB_FIELDS.each do |field, mib|
         bytes = record.fetch(field) { raise Error, "#{self.class.record_path(name)}: no #{field}" }

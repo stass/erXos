@@ -33,11 +33,14 @@ module Erx
   module BoardRecord
     # The board every walk runs on (docs/design-bench.md, "Running on the Raspberry Pi 4").
     CPUS = 4
-    MEMORY_MIB = 4096
 
     # What a set's record holds of the set: its environment, its subject, and the ARM clock
     # its config.txt set (BoardClock), nil when its build record states none.
     SetFacts = Data.define(:environment, :subject, :arm_clock_hz)
+    # What a set's config.txt set that its records keep, as its build record states them
+    # (BootPartition.card_settings): the ARM clock in hertz and total_mem in MiB, each nil
+    # when the record states none.
+    Card = Data.define(:arm_clock_hz, :memory_mib)
 
     module_function
 
@@ -60,21 +63,35 @@ module Erx
       files = BootPartition.listed_files(receipt)
       receipt.fetch('source').fetch_values('commit', 'dirty') => [String => commit, dirty]
       receipt.fetch('inputs').fetch('firmware') => Array => firmware
+      card = card(receipt, label: path)
       SetFacts.new(
         environment: BenchRecord::Environment.new(
           kind: 'pi4', model: nil, cpus: CPUS, system: 'erxos',
-          details: { 'memory_mib' => MEMORY_MIB,
+          details: { 'memory_mib' => card.memory_mib,
                      'firmware' => firmware.to_h { |source| [source.fetch('filename'), files.fetch(source.fetch('filename'))] } }
+            .compact
         ),
         subject: BenchRecord::Subject.new(
           revision: commit, dirty: dirty,
           details: { 'kernel8_sha256' => files.fetch(BootPartition::KERNEL), 'record_sha256' => boot_set.record_sha256,
                      'root_flags' => boot_set.root_flags, 'compiler' => receipt.dig('inputs', 'bl31', 'compiler') }.compact
         ),
-        arm_clock_hz: BoardClock.stated_hz(receipt)
+        arm_clock_hz: card.arm_clock_hz
       )
     rescue NoMatchingPatternError, KeyError, TypeError, NoMethodError
       raise Error, "board record: #{path} does not name the set's source, firmware and kernel"
+    end
+
+    # What the set's build record receipt, which label names, states of its card (Card); a
+    # receipt that is not a JSON object, or a value that is not one of these, is refused.
+    def card(receipt, label:)
+      raise Error, "board record: #{label} is not a JSON object" unless receipt.is_a?(Hash)
+
+      memory = receipt[BootPartition::TOTAL_MEM_KEY]
+      raise Error, "board record: #{label}: #{BootPartition::TOTAL_MEM_KEY} is not a positive whole number" unless
+        memory.nil? || (memory.is_a?(Integer) && memory.positive?)
+
+      Card.new(arm_clock_hz: BoardClock.stated_hz(receipt, label: label), memory_mib: memory)
     end
 
     # The run's facts: the queue's date; the ARM clock its sets' config.txt set (BoardClock),

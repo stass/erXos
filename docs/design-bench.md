@@ -1278,9 +1278,11 @@ comparison, so a walk of three entries of one set is a whole
 baseline, and an entry that never began or booted twice stays a boot
 of its record and makes the comparison inconclusive:
 
-* **environment**: kind `pi4`, system `erxos`, four CPUs and 4,096 MiB,
-  and the SHA-256 of every firmware file from the build record of the
-  set the record is of;
+* **environment**: kind `pi4`, system `erxos`, four CPUs, the memory
+  the set's `config.txt` makes the firmware report (`total_mem`, 1,024
+  MiB on every board, of which `gpu_mem` goes to the VideoCore) as
+  `memory_mib`, and the SHA-256 of every firmware file, all from the
+  build record of the set the record is of;
 * **subject**: the source revision, the SHA-256 of the set's
   `kernel8.img` and of its build record, the root's flags as the queue
   names them (absent for a set handed to the walk with `--set`, whose
@@ -1939,13 +1941,17 @@ How each system's clock is known:
 | L4Re | the clock its `config.txt` sets, recorded as the run's `arm_clock_hz`; nothing in L4Re's boot measures it | none: L4Re's run reads no sensors |
 | Linux | the same `config.txt`; the governor is not relied on | Linux's own report, where the set reads it, else none |
 
-A bench set's build record states the clock its `config.txt` sets
-(`BootPartition.lay_out_set`, from the platform record that `config.txt`
-is written from), and every board run's record keeps it as `arm_clock_hz`
-in its run's details: erXos's walk from the build records of the sets it
-booted (none when they differ), L4Re's run from its set's build record,
-which the run copies beside its console log; a log without it gives no
-clock. The side-by-side table converts a
+A bench set's build record states the clock and the `total_mem` its
+`config.txt` sets (`BootPartition.card_settings`, from the same values
+`config.txt` is written from), and every board run's record keeps the
+clock as `arm_clock_hz` in its run's details and the memory as
+`memory_mib` in its environment: erXos's walk from the build records of
+the sets it booted (no clock when they differ), L4Re's run from its
+set's build record, which the run copies beside its console log and
+whose SHA-256 its record keeps; a log without it gives neither. A build
+record that states a clock other than a whole number of megahertz, or a
+memory other than a positive whole number, is refused rather than read
+as one that states none. The side-by-side table converts a
 `cycles` cell to nanoseconds at its own run's `arm_clock_hz`, never at
 another run's or another boot's count, and its row says so (`cycles,
 shown in ns at the 1500 MHz ARM clock its config.txt set, not measured`),

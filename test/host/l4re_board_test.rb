@@ -72,7 +72,9 @@ class L4ReBoardTest < Minitest::Test
     raise "git init failed: #{error}" unless status.success?
   end
 
-  def imported(lines, set_record: { 'arm_clock_hz' => 1_500_000_000 })
+  SET_RECORD = { 'arm_clock_hz' => 1_500_000_000, 'total_mem_mib' => 1024 }.freeze
+
+  def imported(lines, set_record: SET_RECORD)
     log = File.join(@scratch, 'console.log')
     File.write(File.join(@scratch, Erx::BootPartition::SET_RECORD), JSON.generate(set_record)) if set_record
     File.binwrite(log, "#{lines.join("\r\n")}\r\n")
@@ -88,6 +90,9 @@ class L4ReBoardTest < Minitest::Test
     assert_equal ['pi4-4gb-l4re', 'l4re', 1], [record.environment.name, record.environment.system, record.environment.cpus]
     assert_equal 'b' * 64, record.subject.details.fetch('bootstrap_sha256')
     assert_equal 1_500_000_000, record.run.details.fetch('arm_clock_hz')
+    assert_equal({ 'memory_mib' => 1024 }, record.environment.details)
+    assert_equal Digest::SHA256.file(File.join(@scratch, Erx::BootPartition::SET_RECORD)).hexdigest,
+                 record.run.details.fetch('set_record_sha256')
     kernel = record.boot.cells.find { |cell| cell.operation == 'kernel' }
     assert_equal ['measured', 123], [kernel.status, kernel.detail.fetch('total') / kernel.detail.fetch('count')]
     assert File.file?(File.join(run, 'run.json'))
@@ -99,7 +104,13 @@ class L4ReBoardTest < Minitest::Test
                 *(1..3).map { |cpu| "CPU#{cpu} booted (same IDs as CPU0)." }]
     _, record = imported([*LOG, *returned], set_record: nil)
     assert_nil record.run.details.fetch('arm_clock_hz')
-    assert_equal 1, record.environment.cpus
+    assert_equal [1, {}], [record.environment.cpus, record.environment.details]
+  end
+
+  def test_a_set_record_that_is_no_object_or_states_a_broken_clock_is_refused
+    [[1], { 'arm_clock_hz' => '1500' }, { 'arm_clock_hz' => 1_500_500_000 }, { 'total_mem_mib' => -1 }].each do |broken|
+      assert_raises(Erx::Error) { imported(LOG, set_record: broken) }
+    end
   end
 
   def test_a_log_showing_more_than_one_cpu_is_not_imported
@@ -142,18 +153,28 @@ class L4ReBoardTest < Minitest::Test
     run = Board::Run.new(root: @scratch, www: link, shell: shell, prepare: prepare, console: console,
                          clock: -> { 0 }, out: ->(_line) {}, pause: ->(_seconds) {})
     outcome = begin
-      run.call(set: nil, key: nil)
+      run.call(set: board_set, key: nil)
     rescue Erx::Error => e
       e
     end
     [outcome, File.readlink(link), Dir.children(@scratch).grep(/\Aqueue/)]
   end
 
+  # A set as lay_out answers it: its partition's directory, with its build record beside it.
+  def board_set
+    directory = File.join(@scratch, 'set', 'boot')
+    FileUtils.mkdir_p(directory)
+    File.write(File.join(@scratch, 'set', Erx::BootPartition::SET_RECORD), JSON.generate(SET_RECORD))
+    Erx::BoardFiles::BootSet.new(directory: directory, record_sha256: '0' * 64, root_flags: [])
+  end
+
+  # The run leaves the set's build record beside its log, where the import reads the card.
   def test_the_run_types_only_reboot_and_the_debuggers_keys_and_points_the_link_back
     console = Console.new([line('Benchmarks done.', 1), line("erx: boot image build #{'0' * 16} index #{'a' * 64} rest", 2)])
     outcome, target, queues = ran(->(**) { console })
     assert_equal [true, 'returned', ["reboot\r", "\e", '^', "\r"], 'found', []],
                  [outcome.done, outcome.ending, console.typed, target, queues]
+    assert_equal SET_RECORD, JSON.parse(File.read(File.join(outcome.directory, Erx::BootPartition::SET_RECORD)))
   end
 
   def test_a_console_that_cannot_be_written_ends_the_run_with_the_link_on_the_found_target

@@ -100,6 +100,9 @@ module Erx
     # fiasco_reserve were measured. A larger board runs on that 1 GB.
     TOTAL_MEM_MIB = 1024
     GPU_MEM_MIB = 76
+    # The key under which a set's build record states the total_mem its config.txt sets
+    # (card_settings).
+    TOTAL_MEM_KEY = 'total_mem_mib'
 
     # What write left in the image's directory: path, the card's image (the medium, as
     # ReleaseMedium::Written#path is QEMU's); compressed, the image compressed (compress);
@@ -190,7 +193,7 @@ module Erx
     # The ARM clock lines for platform's record: arm_freq in MHz, the unit config.txt takes,
     # held by force_turbo; none for a record that names no clock (BoardClock).
     def arm_clock_lines(platform)
-      hz = BoardClock.configured_hz(platform.record) or return ''
+      hz = BoardClock.stated_hz(platform.record, label: platform.record_path) or return ''
 
       "arm_freq=#{hz / 1_000_000}\nforce_turbo=1\n"
     end
@@ -474,7 +477,7 @@ module Erx
     # Lays the partition's files for bootable out into directory with their build record,
     # as lay_out does, without the card: a bench set (write_set). With boot_cpu_only, the
     # board's tree keeps only the boot CPU (BoardTree.boot_cpu_only), and the record says so.
-    # The record states the ARM clock config.txt sets, when the platform's record names one.
+    # The record states what config.txt sets that a run's record keeps (card_settings).
     def lay_out_set(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:,
                     revision: SourceRevision.read(root: root, runner: runner), boot_cpu_only: false)
       plan, record = layout(root: root, runner: runner, platform: platform, build_kind: build_kind, bootable: bootable,
@@ -483,10 +486,16 @@ module Erx
       # A set has no card, so its record names no card's tool.
       record = record.merge('inputs' => record.fetch('inputs').except('card'))
       record = record.merge('board_tree_cpus' => 'boot CPU only') if boot_cpu_only
-      # The ARM clock the set's config.txt sets, which a board run's record keeps (BoardClock).
-      clock = BoardClock.configured_hz(platform.record)
-      record = record.merge(BoardClock::KEY => clock) if clock
-      write_set(root: root, directory: directory, plan: plan, record: record)
+      write_set(root: root, directory: directory, plan: plan, record: record.merge(card_settings(platform)))
+    end
+
+    # What platform's config.txt sets that a board run's record keeps, as a set's build
+    # record states it: the ARM clock (BoardClock), when the platform's record names one,
+    # and total_mem, the memory the firmware reports, of which gpu_mem goes to the
+    # VideoCore. config_txt writes the same values.
+    def card_settings(platform)
+      { BoardClock::KEY => BoardClock.stated_hz(platform.record, label: platform.record_path),
+        TOTAL_MEM_KEY => total_mem_mib(platform) }.compact
     end
 
     # The plan and the build record of bootable's partition on platform: BL31 and the

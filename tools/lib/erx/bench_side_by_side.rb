@@ -18,11 +18,12 @@ module Erx
   # is never a comparison.
   #
   # A number is converted to nanoseconds only by its own run's clocks: a clock with a
-  # frequency by its run's clock group, and a cell in CPU cycles by the ARM clock its run
-  # recorded the board's cards holding (BoardClock), which the row then names; a cell in
-  # cycles from a run with no such clock, as under QEMU, stays in cycles whatever another
-  # boot's CLOCK line measured, since a calibration describes only its own boot. A ratio is
-  # set only between two histograms in nanoseconds.
+  # frequency by its run's clock group, and a cell in CPU cycles by the ARM clock its sets'
+  # build records state the cards were configured to hold (BoardClock), which the row then
+  # names; a cell in cycles from a run with no such clock, as under QEMU, stays in cycles
+  # whatever another boot's CLOCK line measured, since a calibration describes only its own
+  # boot. A ratio is set only between two histograms in nanoseconds, neither converted
+  # from cycles at a configured clock.
   module BenchSideBySide
     # One boot of the session: the round it booted in and its record.
     Run = Data.define(:round, :record)
@@ -93,19 +94,30 @@ module Erx
       end
       return nil unless cell
 
-      arm_hz = BoardClock.stated_hz(run.record.run.details) if cell.conditions.clock == 'cycles'
+      cycles = cell.conditions.clock == 'cycles'
+      hz = frequency(cell.conditions.clock, boot.clock, run.record.run.details)
       Entry.new(round: run.round, status: cell.status, reason: cell.reason, clock: cell.conditions.clock, form: cell.form,
-                values: values(cell, boot.clock, arm_hz), converted_hz: arm_hz, ratio: nil)
+                values: values(cell, hz, cycles ? 'cycles' : 'ticks'), converted_hz: (hz if cycles), ratio: nil)
     end
 
-    # What a cell's summary reports, each amount in its own run's units: a histogram's
-    # statistics, and the mean of a cell that kept its count and total, a mean's or a
-    # batched histogram's. arm_hz is the clock a cell in cycles is converted at, or nil.
-    def values(cell, clock, arm_hz)
+    # The frequency a cell counted on clock_name is converted to nanoseconds at, from its
+    # own run: for cycles the ARM clock the run's details state, for a frequency clock the
+    # positive frequency its clock group recorded; nil when there is none.
+    def frequency(clock_name, clock, details)
+      case clock_name
+      when 'cycles' then BoardClock.stated_hz(details, label: 'bench: a board run')
+      when *FREQUENCY_CLOCKS
+        clock&.fetch('frequency_hz', nil).then { |hz| hz if hz.is_a?(Integer) && hz.positive? }
+      end
+    end
+
+    # What a cell's summary reports, each amount at hz (amount): a histogram's statistics,
+    # and the mean of a cell that kept its count and total, a mean's or a batched
+    # histogram's.
+    def values(cell, hz, unit)
       summary = cell.summary
       statistics = cell.form == 'mean' ? {} : STATISTICS.to_h { |name| [name, reported(summary[name])] }.compact
-      statistics.transform_values { |ticks| amount(ticks, cell.conditions.clock, clock, arm_hz) }
-                .merge(mean(summary, cell.conditions.clock, clock, arm_hz))
+      statistics.transform_values { |ticks| amount(ticks, hz, unit) }.merge(mean(summary, hz, unit))
     end
 
     # A statistic's amount: a percentile is reported as a map holding its value.
@@ -115,24 +127,17 @@ module Erx
     # printed mean may count each operation as more than one (ipcbench's IPC mean is half
     # a round trip), and the record keeps it as printed; a batched histogram's count is
     # its calls, not its samples.
-    def mean(summary, clock_name, clock, arm_hz)
+    def mean(summary, hz, unit)
       return {} unless summary.key?('total')
 
       count = summary.fetch('count')
       { 'count' => Quantity.new(amount: count, unit: 'operations'),
-        'mean' => amount(Rational(summary.fetch('total'), count), clock_name, clock, arm_hz) }
+        'mean' => amount(Rational(summary.fetch('total'), count), hz, unit) }
     end
 
-    # ticks of clock_name as one run gives them: nanoseconds for a clock with a frequency
-    # its clock group recorded, and for cycles at arm_hz, the ARM clock its run recorded;
-    # cycles for cycles without one, ticks otherwise.
-    def amount(ticks, clock_name, clock, arm_hz)
-      frequency = clock_name == 'cycles' ? arm_hz : clock&.fetch('frequency_hz', nil)
-      if (FREQUENCY_CLOCKS.include?(clock_name) || clock_name == 'cycles') && frequency.is_a?(Integer)
-        Quantity.new(amount: Rational(ticks * 1_000_000_000, frequency), unit: 'ns')
-      else
-        Quantity.new(amount: ticks, unit: clock_name == 'cycles' ? 'cycles' : 'ticks')
-      end
+    # ticks in nanoseconds at hz (frequency), or in unit, cycles or ticks, without one.
+    def amount(ticks, hz, unit)
+      hz ? Quantity.new(amount: Rational(ticks * 1_000_000_000, hz), unit: 'ns') : Quantity.new(amount: ticks, unit: unit)
     end
 
     # entry's median over erXos's, where both are histograms in nanoseconds and neither was

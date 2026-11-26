@@ -43,6 +43,7 @@ class BoardRecordTest < Minitest::Test
                                              { 'id' => 'rpi-firmware-fixup4', 'filename' => 'fixup4.dat' }],
                               'bl31' => { 'compiler' => COMPILER } } }
     receipt['arm_clock_hz'] = clock if clock
+    receipt['total_mem_mib'] = 1024
     path = File.join(directory, 'boot.receipt.json')
     File.write(path, JSON.generate(receipt))
     Erx::BoardFiles::BootSet.new(directory: directory, record_sha256: Digest::SHA256.file(path).hexdigest,
@@ -83,7 +84,7 @@ class BoardRecordTest < Minitest::Test
     assert_equal [%w[ended done]] * 3, record.boots.map { |boot| boot.details.values_at('outcome', 'ended') }
     assert(record.boots.all? { |boot| boot.cells.all? { |cell| cell.status == 'measured' } })
     assert_equal 'pi4-4gb-erxos', record.environment.name
-    assert_equal({ 'memory_mib' => 4096, 'firmware' => { 'start4.elf' => '22' * 32, 'fixup4.dat' => '33' * 32 } },
+    assert_equal({ 'memory_mib' => 1024, 'firmware' => { 'start4.elf' => '22' * 32, 'fixup4.dat' => '33' * 32 } },
                  record.environment.details)
     assert_equal COMMIT, record.subject.revision
     assert_equal({ 'kernel8_sha256' => '11' * 32, 'record_sha256' => one.record_sha256,

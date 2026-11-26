@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require 'fileutils'
 require 'securerandom'
 require 'time'
@@ -131,8 +132,10 @@ module Erx
     end
 
     # The record of L4Re's board run of benchmark name from its console log and the build
-    # record at subject, written under history, with the ARM clock its set's config.txt set,
-    # from the set's build record the run left beside log (BoardClock), nil without it; answers [the run directory, the record].
+    # record at subject, written under history; answers [the run directory, the record].
+    # What the set's config.txt set, the ARM clock and total_mem (BoardRecord::Card), comes
+    # from the set's build record the run left beside log, whose SHA-256 the run's details
+    # keep, and is unknown without it.
     # revision is the harness's (SourceRevision::Revision). A log in which Fiasco started
     # more than one CPU is refused: ipcbench's threads have a known placement only on one.
     def import(name, subject:, log:, root:, history:, revision:)
@@ -144,24 +147,28 @@ module Erx
         cpus.size > 1
 
       answer = Ipcbench.import(lines, benchmark: name, cells: asked(benchmark))
+      card, card_sha256 = set_card(log)
       record = BenchRecord::Record.new(
         environment: BenchRecord::Environment.new(kind: 'pi4', model: nil, cpus: 1, system: 'l4re',
-                                                  details: { 'memory_mib' => BoardRecord::MEMORY_MIB }),
+                                                  details: { 'memory_mib' => card.memory_mib }.compact),
         subject: BenchRecord::Subject.new(revision: revision.commit, dirty: revision.dirty, details: subject_record(subject)),
         run: BenchRecord::Run.new(date: File.mtime(log).utc, started_by: 'manual', load: nil, host_cpus: nil, reused_from: nil,
-                                  details: { BoardClock::KEY => set_clock(log), 'refused' => answer.fetch(:refused) }),
+                                  details: { BoardClock::KEY => card.arm_clock_hz, 'set_record_sha256' => card_sha256,
+                                             'refused' => answer.fetch(:refused) }),
         boots: [BenchRecord::Boot.new(position: 1, clock: nil, cells: answer.fetch(:cells), details: {})]
       )
       [BenchRecord.write(record, history: history, erxos_root: root, logs: [{ serial: bytes }]), record]
     end
 
-    # The ARM clock the build record of the set the run booted, beside log, states, or nil.
-    def set_clock(log)
+    # What the build record of the set the run booted, beside log, states of its card, and
+    # that record's SHA-256; an unknown card and nil without the record.
+    def set_card(log)
       path = File.join(File.dirname(log), BootPartition::SET_RECORD)
-      return nil unless File.file?(path)
+      return [BoardRecord::Card.new(arm_clock_hz: nil, memory_mib: nil), nil] unless File.file?(path)
 
-      BoardClock.stated_hz(JsonInput.parse(BoundedFile.read(path, maximum: BootPartition::RECORD_BYTES),
-                                           max_bytes: BootPartition::RECORD_BYTES, label: path))
+      bytes = BoundedFile.read(path, maximum: BootPartition::RECORD_BYTES)
+      [BoardRecord.card(JsonInput.parse(bytes, max_bytes: BootPartition::RECORD_BYTES, label: path), label: path),
+       Digest::SHA256.hexdigest(bytes)]
     end
 
     # The build record at path: a JSON object of printable ASCII, as L4ReBench::Build reads it.
@@ -213,14 +220,13 @@ module Erx
 
       # Runs set, the boot set lay_out answered, signed with the key at key; answers Ran.
       def call(set:, key:)
-        @set = set
         Netboot.locked(@link) do
           found = Netboot.found(@link)
           raise Error, "bench: #{BoardRun::QUEUE_LEFT}" if found.target && NetbootEntry.entries(found.target) > 1
 
           queue = @prepare.call(root: @link, sets: [set], names: [SecureRandom.hex(16)], key: key, found: found)
           begin
-            served(queue)
+            served(queue, set)
           ensure
             point_back(found, queue)
           end
@@ -229,11 +235,11 @@ module Erx
 
       private
 
-      def served(queue)
+      def served(queue, set)
         directory = run_directory
         log = File.join(directory, LOG)
-        # The set's build record goes beside the log, where the import reads its ARM clock.
-        FileUtils.cp(File.join(File.dirname(@set.directory), BootPartition::SET_RECORD), directory) if @set
+        # The set's build record goes beside the log, where the import reads what its card set.
+        FileUtils.cp(File.join(File.dirname(set.directory), BootPartition::SET_RECORD), directory)
         console = @console.call(log: log, classify: L4ReBoard.method(:classify))
         begin
           Netboot.point(root: @link, target: queue)
