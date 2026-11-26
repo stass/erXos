@@ -284,7 +284,7 @@ domain service's `machine` reach root's sessions the same way, at
 | **AT3.** No grant outlives its server or reaches a later one | every `svc` facet is a process of the serving domain, minted there, so it ends with that session or that incarnation; the registry removes a facet at its end; a descriptor keeps the grant it was opened on, which answers `eio` once ended (F10) | a facet hosted outside its server's domain, or a registry entry kept across the facet's end | the restart test of [Verification](#verification-and-testing) |
 | **AT4.** No link in a service tree is followed | `erx_facets:table/1` marks every entry whose interface's row says `links none`, at each resolution, from the interface number of the facet the registry holds, or, for an own service's mount, from the generated service table's row for its name; `svc` says it, so the mark follows no name, no mount point and no option, and every entry that reaches a service tree (the `/svc` entry, a facet's mount, an own service's mount, a bind, a program's table) carries it ([Links](#links)) | a resolver that ignores the mark; an `svc` facet installed with another interface's number, such as an app's tree as `files`; an own service's mount that keeps no name | the link test and its seeded faults below; the resolver's fuzz target with marked entries |
 | **AT5.** Nothing in a service tree runs | the interface's rights are `ro` or `rw`, with no `rx`; an app's grant takes its grantee's `start` grant's rights with anything but `rw` as `ro` ([The grant](#the-grant)); and no grant both writes and runs ([design-files.md](design-files.md#invariants), F6) | an `rx` member of `svc`'s rights; an app's grant copying an `rx` grant of `start` | `svc_rights` has no `rx`, so no row can state one; the grant's rights test |
-| **AT6.** No system command waits on a service tree beyond the deadline it gives | every command reads, writes and opens under `/svc` only through `erx_svc_client`, whose `read/4` and `command/3` make the call in a process they end at the deadline their caller gives, ending its fids ([design-files.md](design-files.md#fid-owners)), and whose `open/3` opens in the caller's own process, a process of the foreground job, which `Ctrl-C` ends | a command that calls `file` on `/svc` in its own process; a non-interactive caller passing `infinity` | a chokepoint source check that only `erx_svc_client` names `/svc` among the shell's, the commands' and the start service's modules, with a seeded direct read; the hung-server test |
+| **AT6.** No system command waits on a service tree beyond the deadline it gives | every command reads, writes and opens under `/svc` only through `erx_svc_client`, whose `read/4` and `command/3` make the call in a process they end at the deadline their caller gives, ending its fids ([design-files.md](design-files.md#fid-owners)), and whose `open/3` opens in the caller's own process, a process of the foreground job, which `Ctrl-C` ends | a command that calls `file` on `/svc` in its own process; a non-interactive caller passing `infinity` | a chokepoint source check that only `erx_svc_client` names `/svc` among the modules of `erlang/apps`, its sites an allow-list, with a seeded direct read; the hung-server test |
 | **AT7.** A line shown under a service's name holds no control | `service` and `ntpctl` show a status line only after `erx_svc_status:parse/1` accepts it, an identifier, a tab and a field the field escape writes, which holds no character the line escape changes ([design-live.md](design-live.md#attributed-text)); any other line shows as `[invalid]` | a reader that prints a line it did not parse, or unescapes a value for display | the parser's fuzz target and properties; the escape test below |
 | **AT8.** An app's tree is held only by sessions whose template holds `start`, with that grant's rights; a manifest service's tree only by its facet rows' grantees; the system domain holds no `svc` grant | the domain service derives an app tree's grantees and rights from the manifest's `start` grants, and an app's tree has no `service` row, so no facet row names it; the manifest check refuses a facet row that grants a service of interface `svc` to the system domain | an app tree granted to every session; an `rw` grant to a session whose `start` is read-only; a facet row granting `bluetooth` to the system domain | the domain service's host test; the manifest check with a seeded row; the rights test below |
 | **AT9.** No two service trees share a name | the manifest check refuses a service of interface `svc` named like another such service or like a principal, which every start row's name is; admission refuses an app named like any principal, domain, service or facet row of the manifest ([design-packaging.md](design-packaging.md#admission)); the domain service refuses a session's provide of `svc` whose name is a service of interface `svc` of the running manifest, which a system update can add after the app was admitted | a manifest with two `svc` services of one name on two servers; an admitted app whose name a later manifest gives a service | the manifest check's seeded rows; the admission test; the provide test below |
@@ -729,8 +729,10 @@ tree, never a path: `Name` is the service's name as `/svc` lists it, and
 `File` a relative path within its tree, such as `<<"status">>`. The
 client alone joins them into `/svc/Name/File`, so `/svc` is written in
 one module, and it answers `{error, einval}`, reaching nothing, for a
-`Name` that is not one name or a `File` that is absolute or holds a `.`
-or `..` component, so no caller reaches outside the tree it names.
+`Name` that is not one name (empty, `.`, `..`, or holding a `/` or a
+NUL) or a `File` that is not one or more such names joined by `/`, so no
+caller reaches outside the tree it names. The client is in `erx`, on
+which every application with a command depends.
 Each call that waits takes the deadline as a parameter, so a command
 states how long it may wait:
 
@@ -741,14 +743,17 @@ states how long it may wait:
   `{ok, Bytes}`, `{error, Errno}`, `not_serving` or `timeout`. `Bytes`
   longer than `Max` say that the file is longer than `Max`, so its caller
   knows a cut file from a whole one. At the deadline it ends the process
-  with `kill`. Its reply goes to an alias that ended with it, and its
+  with `kill`; an answer already received by then is the answer, being
+  known. Its reply goes to an alias that ended with it, and its
   fids are clunked when its end reaches the grant
   ([design-files.md](design-files.md#fid-owners)); a hung server keeps
   the request, within its grant's 64 in flight, in its own memory, and
   answers the clunk when it settles it or never.
 * `command(Name, Line, Deadline)` does the same with one write of `Line`
   to the tree's `ctl`, and
-  answers `ok`, `{error, Errno}`, `not_serving` or `unknown`. `unknown`
+  answers `ok`, `{error, Errno}`, `not_serving` or `unknown`. A `Line`
+  longer than `svc_ctl_max` answers `{error, einval}` unwritten, so one
+  write holds it whatever the server's largest write. `unknown`
   is the answer whenever the write may have reached the server and its
   answer is lost: the deadline passed, or the write failed `eio`, which
   the file protocol answers for a request whose handler, grant or server
@@ -1169,8 +1174,9 @@ Each test is paired with the fault that proves the code ran.
   process; the test's deadline fails, and the chokepoint check of AT6
   fails on the source.
 * **The chokepoint.** The source check that only `erx_svc_client` names
-  `/svc` among the shell's, the commands' and the start service's
-  modules. Seeded: `erx_cmd_reboot` writing `/svc/machine/ctl` with
+  `/svc` among the modules of `erlang/apps`, a command outside the
+  command shell's application among them; the modules that place `/svc`
+  in the namespace join its allow-list of sites. Seeded: `erx_cmd_reboot` writing `/svc/machine/ctl` with
   `file:write_file/2`; the check fails the build. A host test of the
   client: `read(<<"app">>, <<"../start/ctl">>, ...)`,
   `read(<<"app">>, <<"/etc/passwd">>, ...)` and

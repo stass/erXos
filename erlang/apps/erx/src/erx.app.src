@@ -106,6 +106,7 @@
              erx_session_line,
              erx_source,
              erx_stdio,
+             erx_svc_client,
              erx_syslog,
              erx_syslog_core,
              erx_text,

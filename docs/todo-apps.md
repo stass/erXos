@@ -9,9 +9,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   service's control tree is at `/svc/NAME`, and the code still mounts the start table's at `/etc/start`, the
   machine's at `/machine` and the controller's line at `/line` (`erx_ns:place/1`), and reports the start table
   at `/proc/apps`. In the design's order of work, each path moving in the same step as its readers and writers:
-  `erx_svc_client` with `read/4`, `command/3`, `open/3`, taking a
-  service name and a file of its tree, and the chokepoint check that only it names `/svc`; then in one step the
-  `/svc` entry in every domain, `{facets, svc}` selecting by interface, `place/1` without `start` and
+  in one step the `/svc` entry in every domain, `{facets, svc}` selecting by interface, `place/1` without `start` and
   `machine`, `mount_own/2` placing an `svc` service at `/svc/NAME` with its name kept as the entry's provider,
   and `reboot`, `halt` and `service` writing through the client, with the guide and README; then in one step
   the inspection path `[apps]` renamed `[svc]` in `abi/inspection.txt` with every reader (`service`, the

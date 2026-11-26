@@ -2450,7 +2450,7 @@ own session, whose public functions the SDK lists
 
 A holder of the control tree needs no facet, only files: it opens
 `/svc/bluetooth/pair` for reading and writing, an app with
-`file:open/2` and a system command through `erx_svc_client:open/2`, the
+`file:open/2` and a system command through `erx_svc_client:open/3`, the
 one way a system command opens a file under `/svc`, writes the
 window's mode and reads its lines
 ([The pairing window](#the-pairing-window)). One more module of the
@@ -3207,7 +3207,7 @@ for reading and writing ([design-shell.md](design-shell.md#the-language)),
 and a window is one open file, so a person drives it with a command:
 `btpair display` or `btpair nodisplay`, an Erlang command of the command
 shell ([design-shell.md](design-shell.md#commands)) that declares
-`-erx_needs([bluetooth])`, as `reboot` declares `machine`. It opens `/svc/bluetooth/pair` through `erx_svc_client:open/2`, in
+`-erx_needs([bluetooth])`, as `reboot` declares `machine`. It opens `/svc/bluetooth/pair` through `erx_svc_client:open/3`, in
 its own process, which sets no deadline, writes the mode, and prints each
 line it reads, through `erx_bt_pair:next/1`, until the file ends; its
 own end, an interrupt's included, closes the file and so the window. It
