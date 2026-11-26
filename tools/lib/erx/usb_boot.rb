@@ -187,8 +187,9 @@ module Erx
         return false unless volume&.bytesize == VOLUME_SECTORS * SECTOR
 
         reserved, copies, fat_sectors = volume.unpack('@14v C @22v')
-        copies.positive? && (0...copies).all? do |copy|
-          (volume.byteslice(((reserved + (copy * fat_sectors)) * SECTOR) + 2, 2).unpack1('v') & 0x8000) != 0
+        entries = (0...copies).map { |copy| ((reserved + (copy * fat_sectors)) * SECTOR) + 2 }
+        reserved.positive? && copies.positive? && entries.all? do |at|
+          at + 2 <= volume.bytesize && (volume.byteslice(at, 2).unpack1('v') & 0x8000) != 0
         end
       end
 
@@ -458,7 +459,7 @@ MEDIA_BODY = [
                  exact: "hello\n", has: [], lacks: []),
       RcStep.new(stage: 'appended', template: 'echo again >> %<v>s/hello.txt && cat %<v>s/hello.txt',
                  exact: "hello\nagain\n", has: [], lacks: []),
-      RcStep.new(stage: 'made_dir', template: 'mkdir %<v>s/docs && ls %<v>s', exact: nil, has: ['docs'], lacks: []),
+      RcStep.new(stage: 'made_dir', template: 'mkdir %<v>s/docs && ls %<v>s', exact: nil, has: ['docs'], lacks: ['mkdir']),
       RcStep.new(stage: 'moved', template: 'mv %<v>s/hello.txt %<v>s/docs/hello.txt && cat %<v>s/docs/hello.txt',
                  exact: "hello\nagain\n", has: [], lacks: []),
       RcStep.new(stage: 'removed', template: 'echo bye > %<v>s/bye.txt && rm %<v>s/bye.txt && ls %<v>s',

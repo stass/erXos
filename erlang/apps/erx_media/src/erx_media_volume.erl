@@ -551,14 +551,23 @@ made(Make, Holder, State) ->
     {Reply, Next} = named_node(Node, Holder, State#{batch := B}),
     {Reply, held(Next)}.
 
-%% The file lcreate found at its name, held for Holder once nothing can refuse it:
-%% emptied first for truncate, whose refusal throws before the hold is kept.
+%% The file lcreate found at its name, held for Holder, and emptied for truncate; a
+%% truncate refused drops the hold again from the state it leaves, so no refusal
+%% keeps one.
 opened_existing(Node, Existing, Holder, State) ->
     kind(Node) =:= file orelse refuse(eisdir),
     {{ok, file, Path} = Reply, Held} = named_node(Node, Holder, State),
     case Existing of
         open -> {Reply, Held};
-        truncate -> {ok, Emptied} = request({truncate, Path, 0}, Held), {Reply, Emptied}
+        truncate -> {Reply, emptied(Path, Holder, Held)}
+    end.
+
+emptied(Path, Holder, Held) ->
+    try request({truncate, Path, 0}, Held) of
+        {ok, Emptied} -> Emptied
+    catch
+        throw:{?MODULE, refused_after, Errno, Partial} ->
+            throw({?MODULE, refused_after, Errno, forgotten(Path, Holder, Partial)})
     end.
 
 dir_changed({ok, Result, B}) -> {Result, B};

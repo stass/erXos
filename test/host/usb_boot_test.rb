@@ -186,8 +186,8 @@ class UsbBootTest < Minitest::Test
     body = Erx::UsbBoot.rc_body(volume: 'a"b')
     refute_includes body, 'a"b'
     assert_includes body, "<<#{'echo hello > a"b/hello.txt && cat a"b/hello.txt'.bytes.join(',')}>>"
-    assert_operator Erx::UsbBoot.written_line.bytesize, :<, 4096
-    assert_operator Erx::UsbBoot.stick_line.bytesize, :<, 4096
+    assert_operator Erx::UsbBoot.written_line.bytesize, :<, Erx::ABI::Generated.constant('tty_max_input')
+    assert_operator Erx::UsbBoot.stick_line.bytesize, :<, Erx::ABI::Generated.constant('tty_max_input')
   end
 
   # The stick's answer, the USB domain's text and then the media domain's, names its stages
