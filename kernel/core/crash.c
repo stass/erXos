@@ -34,8 +34,6 @@ _Static_assert(ERX_CRASH_RECORD_ALIGN == ERX_CRASH_BUFFER_ALIGN, "alignment");
 
 /* Bytes after the crc field, where the CRC starts. */
 #define ERX_CRASH_CRC_START	(ERX_CRASH_BRIEF_OFF_CRC + sizeof(uint32_t))
-#define ERX_CRASH_FRAMES_MAX	\
-	((ERX_CRASH_RECORD_OFF_CPUS - ERX_CRASH_RECORD_OFF_FRAMES) / sizeof(uint64_t))
 #define ERX_CRASH_TEXT_ROOM	(ERX_CRASH_SIZE - ERX_CRASH_RECORD_SIZE)
 /* A panic message gets one log record's text, so it never crowds out the log. */
 #define ERX_CRASH_MESSAGE_MAX	ERX_LOG_TEXT_MAX
@@ -308,8 +306,8 @@ erx_crash_write_body(const erx_crash_input_t *input, erx_crash_record_t *record,
 		__builtin_memcpy(&record->regs, input->regs, sizeof(record->regs));
 	if (input->frames != NULL && cause == ERX_CRASH_CAUSE_PANIC) {
 		nframes = input->nframes;
-		if (nframes > ERX_CRASH_FRAMES_MAX)
-			nframes = (uint32_t)ERX_CRASH_FRAMES_MAX;
+		if (nframes > ERX_CRASH_FRAMES)
+			nframes = ERX_CRASH_FRAMES;
 		__builtin_memcpy(record->frames, input->frames,
 		    nframes * sizeof(uint64_t));
 		record->header.nframes = nframes;
@@ -451,7 +449,7 @@ erx_crash_check(const void *bytes, size_t available)
 	if (header.ncpus > ERX_CPU_LIMIT ||
 	    (header.ncpus != 0 && header.form != ERX_CRASH_FORM_FULL))
 		return (ERX_CRASH_CHECK_NCPUS);
-	if (header.nframes > ERX_CRASH_FRAMES_MAX || (header.nframes != 0 &&
+	if (header.nframes > ERX_CRASH_FRAMES || (header.nframes != 0 &&
 	    (header.form != ERX_CRASH_FORM_FULL ||
 	    header.cause != ERX_CRASH_CAUSE_PANIC)))
 		return (ERX_CRASH_CHECK_NFRAMES);
