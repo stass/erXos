@@ -23,6 +23,11 @@ module ErxFatFuzz
   DECODER = 'erlang/apps/erx_fat/src/erx_fat_read.erl'
   ALLOC = 'erlang/apps/erx_fat/src/erx_fat_alloc.erl'
   FUZZ = 'test/erlang/erx_fat_fuzz.erl'
+  # The directory changes the rounds make on a volume that passes the ownership
+  # check, with the names and the case table they read, which the build generates.
+  CHANGES = %w[erlang/apps/erx_fat/src/erx_fat_dir.erl erlang/apps/erx_fat/src/erx_fat_name.erl
+               erlang/apps/erx_fat/src/erx_fat_entry.erl].freeze
+  CASE = 'erlang/apps/erx_fat/src/erx_fat_case.erl'
   CHECKED = 'when is_integer(Cluster), Cluster >= 2, Cluster < Clusters + 2 ->'
   UNCHECKED = 'when is_integer(Cluster), Clusters > 0 ->'
   DEADLINE_SECONDS = '300'
@@ -51,8 +56,10 @@ module ErxFatFuzz
       core_path = File.join(work, File.basename(CORE))
       File.binwrite(core_path, core_text)
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, core_path,
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-I', File.join(ROOT, File.dirname(CORE)), '-o', work, core_path,
                                        File.join(ROOT, DECODER), File.join(ROOT, ALLOC), File.join(ROOT, FUZZ),
+                                       *CHANGES.map { |source| File.join(ROOT, source) },
+                                       Erx::Generated.path(CASE, root: ROOT),
                                        stdin_data: '')
       raise output unless status.success?
 

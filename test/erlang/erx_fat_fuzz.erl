@@ -11,8 +11,12 @@
 %% reads no sector outside the volume, serves no name holding a slash or a NUL, and
 %% answers only its closed set of findings; an unmutated seed reads hello.txt as the
 %% tree holds it. A mounted volume also runs the ownership check, and one it finds
-%% no tree is one fsimg's verify (ERX_FSIMG) also rejects. The seed comes from make
-%% check-fuzz.
+%% no tree is one fsimg's verify (ERX_FSIMG) also rejects. Every ?CHANGES_EVERY-th
+%% volume that passes the check, whatever fsimg's verify says of it, then takes a
+%% sequence of creates, mkdirs, renames and removals through erx_fat_dir, committed
+%% and finished: each answers a result or one of its closed set of errors, the
+%% volume it leaves passes the check again, and one fsimg's verify passed before
+%% the changes it passes after them.
 
 -module(erx_fat_fuzz).
 
@@ -24,6 +28,15 @@
 -define(DEPTH, 8).
 -define(READ, 65536).
 -define(FINDINGS, [not_its_volume, does_not_read, read_failed, not_dir, not_found, is_dir]).
+-define(CHANGES_EVERY, 6).
+-define(CHANGES, 8).
+-define(DIR_ERRORS, [einval, enametoolong, eexist, enoent, enospc, enotempty, enotdir, eisdir, does_not_read,
+                     read_failed]).
+%% The names a change picks from: short and long ones, case variants, characters
+%% beyond Latin-1 and the plane, and names the server refuses.
+-define(NAMES, [<<"a">>, <<"A">>, <<"hello.txt">>, <<"HELLO.TXT">>, <<"a longer name.text">>,
+                <<"\x{3a9}mega"/utf8>>, <<"\x{3c9}MEGA"/utf8>>, <<16#10400/utf8, "x">>, <<"sub">>,
+                <<"x.y.z">>, <<"bad:name">>, <<"trail.">>, <<" lead">>, <<>>]).
 
 run([Seed, Directory]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
@@ -31,8 +44,9 @@ run([Seed, Directory]) ->
     Volumes =/= [] orelse error(no_seed_volumes),
     {ok, Hello} = file:read_file(filename:join([Directory, "tree", "hello.txt"])),
     %% Loaded before the first round counts atoms, since loading a module makes its atoms.
-    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_fat, erx_fat_read, erx_fat_alloc, binary, lists, maps,
-                                                             unicode, calendar]],
+    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_fat, erx_fat_read, erx_fat_alloc, erx_fat_dir,
+                                                             erx_fat_name, erx_fat_entry, erx_fat_case, atomics, binary, lists,
+                                                             maps, unicode, unicode_util, calendar, string, proplists, filename]],
     Mounted = lists:sum([round_of(lists:nth(rand:uniform(length(Volumes)), Volumes), Hello)
                          || _ <- lists:seq(1, ?ROUNDS)]),
     case Mounted >= ?MIN_MOUNTED of
@@ -75,8 +89,8 @@ round_of({Seed, Count}, Hello) ->
 %% volume it finds no tree is one fsimg's verify (ERX_FSIMG) also rejects.
 owned(Fat, Sectors, Count) ->
     case erx_fat:check(Fat) of
-        ok -> ok;
-        {read_only, too_large} -> error(too_large_seed);
+        ok -> rand:uniform(?CHANGES_EVERY) =:= 1 andalso changed_volume(Fat, Sectors, Count), ok;
+        {read_only, too_large} -> ok;
         {error, read_failed} -> ok;
         {read_only, tree} ->
             Path = filename:absname("owned.img"),
@@ -89,6 +103,111 @@ owned(Fat, Sectors, Count) ->
                 _ -> ok
             end
     end.
+
+%% A volume that passed the check, changed: the image is held in the process
+%% dictionary, which the volume's read function reads, so every plan applied is the
+%% medium the next change reads. Verified says whether fsimg's verify passed it
+%% before the changes, so the verify after them is asked only of such a volume.
+changed_volume(Fat, Sectors, Count) ->
+    put(fuzz_image, Sectors),
+    Verified = verify(Count) =:= 0,
+    Read = fun(Index) when is_integer(Index), Index >= 0, Index < Count ->
+                   {ok, maps:get(Index, get(fuzz_image), <<0:(?SECTOR * 8)>>)};
+              (Index) -> error({outside_the_volume, Index})
+           end,
+    Volume = erx_fat:with_read(Fat, Read),
+    case erx_fat_alloc:dirty(erx_fat_alloc:new(erx_fat:layout(Volume))) of
+        {ok, Plan} -> applied(Plan), changes(Volume, erx_fat_dir:new(Volume), ?CHANGES, {Count, Verified});
+        {error, _} -> ok
+    end.
+
+%% Left changes more to batch B; Image is the volume's count of sectors and whether
+%% fsimg's verify passed it before them.
+changes(Fat, B, 0, {Count, Verified}) ->
+    case committed(B) of
+        ok ->
+            ok =:= erx_fat:check(Fat) orelse error({changes_broke_the_tree, changed_image(Count)}),
+            not Verified orelse verify(Count) =:= 0 orelse error({changes_fail_fsimg, changed_image(Count)});
+        {error, Error} ->
+            dir_error(Error)
+    end;
+changes(Fat, B, Left, Image) ->
+    View = erx_fat_dir:view(B),
+    Root = erx_fat:root(View),
+    Dirs = [Root | [Node || {ok, Entries} <- [erx_fat:list(Root, View)], {_, Node} <- Entries,
+                            maps:get(kind, erx_fat:attr(Node)) =:= dir]],
+    Dir = pick(Dirs),
+    To = pick(Dirs),
+    Name = pick(?NAMES),
+    %% Gone answers the nodes a change takes away, whose chains are freed as the
+    %% volume frees them once no fid names them.
+    None = fun(_) -> [] end,
+    Itself = fun(Node) -> [Node] end,
+    {Answer, Gone} = case rand:uniform(5) of
+                         1 -> {erx_fat_dir:create(B, Dir, Name, 1700000000), None};
+                         2 -> {erx_fat_dir:mkdir(B, Dir, Name, 1700000000), None};
+                         3 -> {erx_fat_dir:rename(B, Dir, pick(names(Dir, View)), To, Name),
+                               fun({_Renamed, Replaced}) -> [Replaced || Replaced =/= none] end};
+                         4 -> {erx_fat_dir:remove(B, Dir, pick(names(Dir, View))), Itself};
+                         5 -> {erx_fat_dir:rmdir(B, Dir, pick(names(Dir, View))), Itself}
+                     end,
+    case Answer of
+        {ok, Result, B1} -> changes(Fat, freed(B1, Gone(Result)), Left - 1, Image);
+        {error, Error} -> dir_error(Error), changes(Fat, B, Left - 1, Image)
+    end.
+
+freed(B, Nodes) ->
+    lists:foldl(fun(Node, Acc) ->
+                        case erx_fat:first(Node) of
+                            First when is_integer(First), First >= 2 ->
+                                case erx_fat_dir:free(Acc, First) of
+                                    {ok, Freed} -> Freed;
+                                    {error, Error} -> dir_error(Error), Acc
+                                end;
+                            _ ->
+                                Acc
+                        end
+                end, B, Nodes).
+
+%% The batch committed and finished, every plan applied.
+committed(B) ->
+    case erx_fat_dir:commit(B) of
+        {ok, Plan, B1} -> applied(Plan), finished(B1);
+        {error, _} = Error -> Error
+    end.
+
+finished(B) ->
+    case erx_fat_dir:finish(B) of
+        {ok, Plan, finished} -> applied(Plan), ok;
+        {ok, Plan, B1} -> applied(Plan), finished(B1);
+        {error, _} = Error -> Error
+    end.
+
+applied(Plan) ->
+    put(fuzz_image, maps:merge(get(fuzz_image), maps:from_list([W || {_Step, Writes} <- Plan, W <- Writes]))).
+
+names(Dir, Fat) ->
+    case erx_fat:list(Dir, Fat) of
+        {ok, [_ | _] = Entries} -> [Name || {Name, _} <- Entries];
+        _ -> [<<"absent">>]
+    end.
+
+pick(List) -> lists:nth(rand:uniform(length(List)), List).
+
+dir_error(Error) -> lists:member(Error, ?DIR_ERRORS) orelse error({unknown_dir_error, Error}).
+
+%% fsimg's verify of the image the process dictionary holds.
+verify(Count) ->
+    Port = open_port({spawn_executable, os:getenv("ERX_FSIMG")},
+                     [{args, ["W", "-f", changed_image(Count)]}, exit_status, stderr_to_stdout, binary]),
+    verified(Port).
+
+changed_image(Count) ->
+    Path = filename:absname("changed.img"),
+    Zero = <<0:(?SECTOR * 8)>>,
+    Image = get(fuzz_image),
+    ok = file:write_file(Path, [maps:get(Index, Image, Zero) || Index <- lists:seq(0, Count - 1)]),
+    Path.
 
 verified(Port) ->
     receive
