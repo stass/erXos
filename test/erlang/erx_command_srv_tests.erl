@@ -58,14 +58,40 @@ a_handler_ends_with_its_starter_before_the_start(_) ->
     [?_assertEqual(normal, Ended),
      ?_assertEqual([], gone())].
 
+%% A handler that takes a start goes on to erx_prog_handler:init/2, whatever then
+%% becomes of this spec, so the case traces H's calls of it instead of waiting a
+%% time; the starter's end then ends a handler that took nothing, and its exit
+%% (or the first call) settles the case.
 a_handler_takes_no_start_without_its_key(_) ->
-    {ok, H, _} = erx_command_srv:handler({process, job_a}, make_ref()),
+    Self = self(),
+    Starter = spawn(fun() -> Self ! {handler, erx_command_srv:handler({process, job_a}, make_ref())},
+                             receive stop -> ok end
+                    end),
+    {ok, H, _} = receive {handler, Answer} -> Answer end,
+    Watch = monitor(process, H),
+    {module, erx_prog_handler} = code:ensure_loaded(erx_prog_handler),
+    1 = erlang:trace_pattern({erx_prog_handler, init, 2}, true, [local]),
+    1 = erlang:trace(H, true, [call]),
     H ! {start, #{image => <<"bin/x">>}},
     H ! {start, make_ref(), #{image => <<"bin/x">>}},
-    timer:sleep(50),
-    Waiting = process_info(H, [current_function, message_queue_len]),
-    exit(H, kill),
-    ?_assertEqual([{current_function, {erx_prog_handler, serve, 1}}, {message_queue_len, 2}], Waiting).
+    Starter ! stop,
+    Built = program_built(H, Watch),
+    erlang:trace_pattern({erx_prog_handler, init, 2}, false, [local]),
+    [?_assertEqual(false, Built)].
+
+%% Whether H began building a program: its first call of init/2 that
+%% this sees, or, after H ended, any it made (trace_delivered orders the last).
+program_built(H, Watch) ->
+    receive
+        {trace, H, call, {erx_prog_handler, init, _}} ->
+            exit(H, kill),
+            true;
+        {'DOWN', Watch, process, H, _} ->
+            Delivered = erlang:trace_delivered(H),
+            receive {trace_delivered, H, Delivered} -> ok end,
+            receive {trace, H, call, {erx_prog_handler, init, _}} -> true
+            after 0 -> false end
+    end.
 
 an_ended_handlers_id_is_not_given_again(_) ->
     {ok, H1, Pid1} = erx_command_srv:handler({process, job_a}, make_ref()),
