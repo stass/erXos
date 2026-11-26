@@ -150,12 +150,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     `erx_fat`, before the release check of step 4 can pass with littlefs in a development build.
   * [Medium] `erx_media_volume`'s read-only log line names the volume (`volume s1`) but not its drive,
     which the volume process does not know, so two sticks' lines read alike; pass `diskN` to the volume
-    at its start. And `erx_media_tree` refuses every write in a volume with `erofs` from the node, not
-    from the volume's outcome: it agrees with status only while `WRITE_PATHS` is empty, so the FAT write
-    path must route the tree's writes through the volume, refused unless its mount is `rw`.
+    at its start.
   * [Low] `erx_media_tree` shows a drive status's `transport` and `flush` as `unknown`: the window's
     `info` answers neither (design-drives.md, "Status"). Show them once the window reports them.
-  * [Low] `erx_media_tree`: a link across two volumes answers `erofs`, not "Links and rights"' `exdev`; a
+  * [Low] `erx_media_tree`: a
     volume's waiting read answers its alias directly rather than through `erx_fs_waits`, as design-files.md's
     "Waiting requests" asks; a GPT entry's name and GUID do not show as `sN_label` and `sN_serial`; the
     `{volume, ...}` node carries a qid path no clause reads; `erx_media_app`'s moduledoc says the domain has no

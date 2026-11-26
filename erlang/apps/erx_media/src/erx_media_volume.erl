@@ -42,7 +42,7 @@ and at the volume's finish, its last batches and the clean bit: at finish/1, or
 when its process ends without one. A change answers once the batch holds it. A write or flush that fails ends
 the volume, `{shutdown, {failed, Why}}`, so every request after answers `eio` and
 the medium mounts read-only as dirty when it next mounts. The changes are calls,
-each naming its file or directory by its qid path: create/3, mkdir/3, write/4,
+each naming its file or directory by its qid path: create/3 and create/4, mkdir/3, write/4,
 truncate/3, setattr/3, remove/3, rmdir/3, rename/5 and fsync/1; a volume mounted
 `ro` answers each `erofs`.
 
@@ -102,7 +102,7 @@ number answers `enfile`.
 
 -export([start_link/2, outcome/1, writable/4, ro_reason/1, new_mounts/0]).
 -export([root/1, root_path/1, walk/3, attr/2, list/2, finish/1]).
--export([create/3, mkdir/3, write/4, append/3, truncate/3, setattr/3, remove/3, rmdir/3, unlink_node/4, rename/5, fsync/1,
+-export([create/3, create/4, mkdir/3, write/4, append/3, truncate/3, setattr/3, remove/3, rmdir/3, unlink_node/4, rename/5, fsync/1,
          forget/2]).
 -export([format_status/1]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -198,9 +198,20 @@ the flush; or `eio` for a volume already finished or ended.
 -spec finish(pid()) -> ok | {error, atom()}.
 finish(Pid) -> call(Pid, finish).
 
--doc "A new empty file Name in the directory at Dir.".
+-doc "A new empty file Name in the directory at Dir: create/4 refusing a name already there.".
 -spec create(pid(), path(), binary()) -> named() | {error, errno()}.
-create(Pid, Dir, Name) -> call(Pid, {create, Dir, Name, self()}).
+create(Pid, Dir, Name) -> create(Pid, Dir, Name, refuse).
+
+-doc """
+The file Name in the directory at Dir, as one decision: a new empty file when the name
+is free; for a regular file already there, `eexist` when Existing is `refuse`, else
+that file, emptied first when Existing is `truncate`; `eisdir` for a directory there,
+`eexist` when Existing is `refuse`. Only an answered file is held for the caller, so
+no refusal leaves a hold behind.
+""".
+-spec create(pid(), path(), binary(), refuse | open | truncate) -> named() | {error, errno()}.
+create(Pid, Dir, Name, Existing) when Existing =:= refuse; Existing =:= open; Existing =:= truncate ->
+    call(Pid, {create, Dir, Name, Existing, self()}).
 
 -doc "A new empty directory Name in the directory at Dir.".
 -spec mkdir(pid(), path(), binary()) -> named() | {error, errno()}.
@@ -427,8 +438,14 @@ request(_Change, #{batch := read_only} = State) ->
     {{error, erofs}, State};
 request(fsync, State) ->
     {ok, committed(State)};
-request({create, Dir, Name, Holder}, State) ->
-    made(fun(B) -> erx_fat_dir:create(B, node(Dir, State), Name, now_s()) end, Holder, State);
+request({create, Dir, Name, Existing, Holder}, State) ->
+    case {erx_fat:walk(node(Dir, State), Name, view(State)), Existing} of
+        {{error, not_found}, _} ->
+            made(fun(B) -> erx_fat_dir:create(B, node(Dir, State), Name, now_s()) end, Holder, State);
+        {{ok, _Node}, refuse} -> refuse(eexist);
+        {{ok, Node}, _} -> opened_existing(Node, Existing, Holder, State);
+        {{error, Why}, _} -> refuse(errno(Why))
+    end;
 request({mkdir, Dir, Name, Holder}, State) ->
     made(fun(B) -> erx_fat_dir:mkdir(B, node(Dir, State), Name, now_s()) end, Holder, State);
 request({write, Path, Offset, Bytes}, State) ->
@@ -533,6 +550,16 @@ made(Make, Holder, State) ->
     {Node, B} = dir_changed(Make(batch(State))),
     {Reply, Next} = named_node(Node, Holder, State#{batch := B}),
     {Reply, held(Next)}.
+
+%% The file lcreate found at its name, held for Holder once nothing can refuse it:
+%% emptied first for truncate, whose refusal throws before the hold is kept.
+opened_existing(Node, Existing, Holder, State) ->
+    kind(Node) =:= file orelse refuse(eisdir),
+    {{ok, file, Path} = Reply, Held} = named_node(Node, Holder, State),
+    case Existing of
+        open -> {Reply, Held};
+        truncate -> {ok, Emptied} = request({truncate, Path, 0}, Held), {Reply, Emptied}
+    end.
 
 dir_changed({ok, Result, B}) -> {Result, B};
 dir_changed({ok, B}) -> {ok, B};

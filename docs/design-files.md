@@ -2373,8 +2373,8 @@ writes in Erlang form the `erx_files` application
 -callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
 -callback walk(Node :: term(), Name :: binary(), Fs :: term()) ->
               {ok, Node1 :: term(), qid()} | {error, file:posix()}.
-%% A tree that adds forget keeps each node its walk answers alive for the
-%% calling grant until the grant forgets it or ends. The one callback without a reply.
+%% A tree that adds forget keeps each node its walk or make answers alive for
+%% the calling grant until the grant forgets it or ends. The one callback without a reply.
 -callback forget(Node :: term(), Fs :: term()) -> term().
 -callback getattr(Node :: term(), Fs :: term()) ->
               {ok, attr()} | {error, file:posix()}.
@@ -2441,14 +2441,18 @@ other client's request can come between its parts:
 
 * `walk` and `forget` keep a walked fid's node, for a tree that adds
   `forget`, as FreeBSD's vnodes keep a tmpfs node. `walk` holds the node
-  it answers for the calling grant in the same step as its lookup, so a
+  it answers for the calling grant in the same step as its lookup, and
+  `make`, for `mkdir`, `mknod`, `symlink` and `lcreate`, the node it
+  made or, for `lcreate` without `O_EXCL`, opened, so a
   fid never names a node the tree has freed, whatever another client
   renames or removes between two requests through it. The grant counts,
   per node, the fids that name it as their node or as their entry's
   directory, at most two nodes for a fid; one function replaces what a
   fid names, for a new fid, a walk in place, a clunk or a fid owner's
-  end, and a node no fid names any more, or one a walk passed on its way,
-  is forgotten once, at the end of the request. For a
+  end, and a node no fid names any more, one a walk passed on its way, or
+  one whose reply the grant's check refused, is forgotten once, at the end
+  of the request. A tree answers a node only from the call that holds it,
+  and holds none for a refusal. For a
   tree kept in a process of its own, `forget` answers nothing (an own
   tree's answers only its next tree, in the grant's process): the grant
   sends it and goes on, and since one

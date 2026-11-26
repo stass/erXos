@@ -1737,7 +1737,14 @@ designed. It maps the format onto the file protocol as follows:
 * **Attributes.** FAT has no owners and no permission bits: a file reports
   mode `0644`, or `0444` with the read-only attribute, and a directory
   `0755`; `setattr` of `mode` sets the read-only attribute exactly when the
-  owner's write bit is clear and changes nothing else. Times are read and
+  owner's write bit is clear and changes nothing else. The read-only
+  attribute is shown, not enforced: an open for writing, a write and a
+  truncate of such a file succeed, as FreeBSD's msdosfs grants them
+  (14.3's `msdosfs_vnops.c`: `msdosfs_access` at lines 219-248 decides
+  from the mount's masks alone, `msdosfs_getattr` at 283-287 and 309-310
+  only reports the attribute, as the mode and as `UF_READONLY`, and
+  `msdosfs_setattr`'s size change at 436-449 refuses only a read-only
+  mount). Times are read and
   written as UTC, with the modification time's two-second resolution. A
   file holds at most 4 GiB less one byte, and a write beyond fails with
   `efbig`; a directory holds at most 65,536 entries, as the specification

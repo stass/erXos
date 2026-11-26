@@ -240,25 +240,21 @@ write(_TreeHandle, _Offset, _Bytes, _Fs) ->
 make({drive, N}, Name, {file, _Mode, Flags}, Fs) when Name =:= <<"status">>; Name =:= <<"ctl">> ->
     {ok, Node, Qid} = walk({drive, N}, Name, Fs),
     erx_fs_node:open_by_create(Node, Qid, Flags, fun(Opened) -> open(Node, Opened, Fs) end);
-make({volume, Pid, dir, Dir} = Parent, Name, {file, _Mode, Flags}, Fs) ->
-    case {named(Pid, erx_media_volume:create(Pid, Dir, Name)), Flags band ?ERX_P9_O_EXCL} of
-        {{ok, {volume, Pid, file, File} = Node, Qid}, _} -> {ok, Node, Qid, file_handle(Pid, File, Flags)};
-        {{error, eexist}, 0} -> opened_existing(walk(Parent, Name, Fs), Flags, Fs);
-        {{error, _} = Refused, _} -> Refused
+make({volume, Pid, dir, Dir}, Name, {file, _Mode, Flags}, _Fs) ->
+    case named(Pid, erx_media_volume:create(Pid, Dir, Name, existing(Flags))) of
+        {ok, {volume, Pid, file, File} = Node, Qid} -> {ok, Node, Qid, file_handle(Pid, File, Flags)};
+        {error, _} = Refused -> Refused
     end;
 make({volume, Pid, dir, Dir}, Name, {directory, _Mode, _Owner}, _Fs) ->
     named(Pid, erx_media_volume:mkdir(Pid, Dir, Name));
 make({volume, _, _, _}, _Name, _What, _Fs) -> {error, eperm};
 make(_TreeNode, _Name, _What, _Fs) -> {error, eacces}.
 
-%% The file lcreate found already there, opened as it asks.
-opened_existing({ok, {volume, _, file, _} = Node, Qid}, Flags, Fs) ->
-    case open(Node, Flags, Fs) of
-        {ok, Handle} -> {ok, Node, Qid, Handle};
-        {error, _} = Refused -> Refused
-    end;
-opened_existing({ok, {volume, _, dir, _}, _Qid}, _Flags, _Fs) -> {error, eisdir};
-opened_existing({error, _} = Refused, _Flags, _Fs) -> Refused.
+%% What lcreate's Flags ask of a file already at the name (erx_media_volume:create/4):
+%% refused for O_EXCL, emptied for O_TRUNC on an open for writing, else opened.
+existing(Flags) when Flags band ?ERX_P9_O_EXCL =/= 0 -> refuse;
+existing(Flags) when Flags band ?ERX_P9_O_TRUNC =/= 0, Flags band ?ERX_P9_O_ACCMODE =/= ?READ -> truncate;
+existing(_Flags) -> open.
 
 %% A change of attributes of a volume's node, as setattr_changes/1 reads it; a
 %% change of the tree's own nodes answers eacces.

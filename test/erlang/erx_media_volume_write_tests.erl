@@ -369,3 +369,57 @@ files(Dir, Prefix) ->
                           false -> {ok, Data} = file:read_file(Path), [{Rel, Data}]
                       end
                   end || Name <- Names]).
+
+%% ---------------------------------------------------------------------------
+%% Create or open
+%% ---------------------------------------------------------------------------
+
+%% lcreate's create-or-open is one call: a directory at the name answers eisdir and an
+%% O_EXCL create of a name there eexist, each holding nothing for the caller; a file
+%% there is opened, or emptied for truncate, and held.
+create_or_open_holds_only_what_it_answers_test_() ->
+    {timeout, 300, fun create_or_open/0}.
+
+create_or_open() ->
+    Base = image("fat16.img"),
+    Pid = volume(ram(Base, infinity), Base),
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    {ok, dir, _} = erx_media_volume:mkdir(Pid, Root, <<"Docs">>),
+    {ok, file, Notes} = erx_media_volume:create(Pid, Root, <<"notes.txt">>),
+    {ok, 6} = erx_media_volume:write(Pid, Notes, 0, <<"hello\n">>),
+    Before = held_by_me(Pid),
+    ?assertEqual({error, eisdir}, erx_media_volume:create(Pid, Root, <<"docs">>, open)),
+    ?assertEqual({error, eisdir}, erx_media_volume:create(Pid, Root, <<"DOCS">>, truncate)),
+    ?assertEqual({error, eexist}, erx_media_volume:create(Pid, Root, <<"docs">>, refuse)),
+    ?assertEqual({error, eexist}, erx_media_volume:create(Pid, Root, <<"Notes.TXT">>, refuse)),
+    ?assertEqual(Before, held_by_me(Pid)),
+    ?assertEqual({ok, file, Notes}, erx_media_volume:create(Pid, Root, <<"NOTES.txt">>, open)),
+    ?assertEqual({ok, <<"hello\n">>}, read(Pid, Notes, 0, 10)),
+    ?assertEqual({ok, file, Notes}, erx_media_volume:create(Pid, Root, <<"notes.txt">>, truncate)),
+    ?assertMatch({ok, #{size := 0}, Notes}, erx_media_volume:attr(Pid, Notes)),
+    {ok, file, New} = erx_media_volume:create(Pid, Root, <<"new.txt">>, truncate),
+    ?assertEqual(lists:sort([New | Before]), held_by_me(Pid)),
+    finish(Pid).
+
+%% The paths of the nodes the volume holds for the calling process.
+held_by_me(Pid) ->
+    #{nodes := Nodes} = sys:get_state(Pid),
+    lists:sort([Path || Path := {named, _, Holders} <- Nodes, is_map_key(self(), Holders)]).
+
+%% FAT's read-only attribute is shown, not enforced, as FreeBSD's msdosfs grants a
+%% write and a truncate of such a file (docs/design-storage.md, "Attributes").
+a_read_only_file_still_writes_test_() ->
+    {timeout, 300, fun read_only_writes/0}.
+
+read_only_writes() ->
+    Base = image("fat16.img"),
+    Pid = volume(ram(Base, infinity), Base),
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    {ok, file, File} = erx_media_volume:create(Pid, Root, <<"locked.txt">>),
+    ok = erx_media_volume:setattr(Pid, File, #{read_only => true}),
+    ?assertMatch({ok, #{read_only := true}, File}, erx_media_volume:attr(Pid, File)),
+    ?assertEqual({ok, file, File}, erx_media_volume:create(Pid, Root, <<"locked.txt">>, truncate)),
+    ?assertEqual({ok, 3}, erx_media_volume:write(Pid, File, 0, <<"abc">>)),
+    ?assertEqual(ok, erx_media_volume:truncate(Pid, File, 1)),
+    ?assertEqual({ok, <<"a">>}, read(Pid, File, 0, 10)),
+    finish(Pid).

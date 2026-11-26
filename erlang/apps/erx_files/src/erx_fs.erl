@@ -89,9 +89,10 @@ reaches the client as `eio`.
 -callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()} | {error, file:posix()}.
 -callback walk(Node :: term(), Name :: binary(), Fs :: term()) ->
               {ok, Node1 :: term(), qid()} | {error, file:posix()}.
-%% A tree that adds forget keeps each node its walk answers alive for the
-%% calling grant until the grant forgets it or ends; the grant forgets a node
-%% once none of its fids names it. The one callback without a reply.
+%% A tree that adds forget keeps each node its walk, make or lcreate's make
+%% answers alive for the calling grant until the grant forgets it or ends; the
+%% grant forgets a node once none of its fids names it, and at once one whose
+%% answer it refused. The one callback without a reply.
 -callback forget(Node :: term(), Fs :: term()) -> term().
 -callback getattr(Node :: term(), Fs :: term()) ->
               {ok, attr()} | {error, file:posix()}.

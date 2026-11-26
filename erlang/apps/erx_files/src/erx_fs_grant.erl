@@ -988,8 +988,8 @@ lopen(Fid, Flags, #grant{fids = Fids} = Grant) ->
 %% opens the regular file already there, and either way counts the open. Its
 %% reply is checked here, before the open is recorded: a handle the tree
 %% opened for a reply the check rejects is held by no fid, so it is clunked
-%% at once, since dropping the grant this operation built cannot release
-%% what the tree acquired.
+%% at once, and its node, which the make held, is loose, so the step's end
+%% forgets it.
 lcreate({lcreate, Fid, Name, Flags, Mode, _} = Request,
         #grant{fids = Fids} = Grant) ->
     case Fids of
@@ -1003,11 +1003,11 @@ lcreate({lcreate, Fid, Name, Flags, Mode, _} = Request,
                     Reply = {ok, Qid, ?IOUNIT},
                     case accepted(Request, Reply) of
                         true ->
-Grant1 = set_at(Fid, {Node, Qid, {Dir, Kept}}, held_node(Node, Made)),
-{Reply, opened(Fid, Handle, Grant1)};
+                            Grant1 = set_at(Fid, {Node, Qid, {Dir, Kept}}, held_node(Node, Made)),
+                            {Reply, opened(Fid, Handle, Grant1)};
                         false ->
                             {_, Clunked} = tree(clunk, [Handle], Made),
-                            {{error, eio}, Clunked}
+                            {{error, eio}, held_node(Node, Clunked)}
                     end;
                 {Other, Made} ->
                     {failed(Other), Made}
