@@ -1069,8 +1069,11 @@ An open's requests go together, in one exchange with the grant: the
 walk from `NOFID`, the clone and the `lopen`, or with `O_CREAT` the
 walk to the directory, the clone, the `lcreate` and the walk of the
 name. The grant runs them in the order sent, so an open is one round
-trip to the grant whatever its kind; a request behind a walk that did
-not make its fid fails, since that fid was never made, and the
+trip to the grant when its walk reaches the file; a request behind a
+walk or clone that did not make its fid fails with `ebadf` and changes
+nothing, since no fid of that number exists or ever will, a domain
+drawing no fid number twice
+([design-files.md](design-files.md#version-and-attach)), and the
 description reads the walk's reply first, hands it to the resolution's
 resumption when the walk stopped short or ended on a link the open
 follows, and clunks, in one more exchange, only the fids the replies
@@ -4153,16 +4156,29 @@ read of 16 MiB, about 3.2 GB/s, and 47 us for an `open` (one boot, one
 CPU, HVF on an Apple M3 Max at a one-minute load of 3, QEMU 11.1.3,
 Homebrew clang 23.1.3). Of a 4 KiB read, 4.4 us were the description's
 one request through `/tmp`'s grant and a tree process of its own, and of
-an `fstat`'s 16.1 us, 5.4; an `open` spent 38 us of its 50.6 us in the
-description's open, one exchange of four requests that called the tree
-process four times
+an `fstat`'s 16.1 us, 5.4; an `open` spent 38 us of its 50.6 us in
+`prim_file:erx_open_at/5`, the resolution, one exchange of four
+requests that called the tree process four times, and the
+description's file record, which the record times only together
 ([research-file-call-path.md](research-file-call-path.md),
 [design-files.md](design-files.md#performance)). With `/tmp`'s tree in
 its grant, no `attach`, the client's two refusals as its only request
-checks and the open's requests in one exchange, a 4 KiB read is
-expected at about 10.5 us, an `fstat` at 13.5 us, an `open` at 25 us and
-a `close` at 20 us, a close sending two clunks where it sends one now
-(estimates, until the bench measures them). The same read costs an Erlang process
+checks and the open's requests in one exchange, the targets below take
+a request at 2.5 to 3 us, the target of
+[design-files.md](design-files.md#performance), and leave every other
+leg as measured. They are targets, not forecasts, until the bench
+separates the request's costs or times the calls again:
+
+| Call | Measured (p50) | Arithmetic | Target |
+| --- | --- | --- | --- |
+| 4 KiB `read` | 13.1 us | 13.1 - 4.4 + 2.5 to 3 | 11.2 to 11.7 us |
+| `fstat` | 16.1 us | 16.1 - 5.4 + 2.5 to 3 | 13.2 to 13.7 us |
+| `open` | 50.6 us | four tree calls at about 2.5 us each, and the `attach` and the root fid's `clunk`, about 1 us between them, leave the 38 us; a clone is added, about 0.5 us | about 40 us |
+| `close` | 21.6 us | one tree call leaves, about 2.5 us; a second clunk, the unopened fid's beside the opened clone's, is added to the one exchange, about 0.5 us | about 19.5 us |
+
+The `open` row assumes that the tree's calls cost what a request
+loses, which no stamp has yet separated from the resolution and the
+file record; a stamp of each of `erx_open_at`'s parts settles it. The same read costs an Erlang process
 of the session one round trip, 3 to 10 us, and three copies. The handler's
 hop is the price of decision B, and experiment E-P2 below measures whether
 file-heavy programs pay it visibly.

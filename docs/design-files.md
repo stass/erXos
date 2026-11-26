@@ -559,21 +559,44 @@ the host's `attach` to the grant of that entry, a whole grant whose
 `root` is `[]`, with that grant's own tree as `Aname`
 ([design-live.md](design-live.md#files-between-the-host-and-the-machine)).
 
-Fids are the client's to choose, as in 9P. A runtime draws them for all
-its processes from one counter, a 64-bit atomic in `prim_file`'s NIF,
-and a session's handlers from the session's: the NIF adds one and takes the low 32 bits, drawing again for `NOFID`, so a
-draw is one atomic add in the calling process and no process allocates
-fids. A number therefore comes back, on any grant and to any owner,
-only after every other number has been drawn, over four billion fids
-later, and two processes of one domain never share a fid on one grant:
-if a fid is still alive when its number comes round again, the `attach`
-or `walk` that names it as new fails with `einval`, as QEMU's server
-answers a fid in use, and the client's operation fails with it rather
-than act on another's fid. A request that names a fid after its end,
-sent late on an ended owner's behalf, meets no fid and fails with
-`ebadf`. The counter keeps no record of the fids it drew: the grant's
-fid table and its monitors on owners are the one record of which are
-alive ([Fid owners](#fid-owners)).
+Fids are the client's to choose, as in 9P. Inside the machine a fid is
+a 64-bit number, and a domain never draws one twice. A runtime draws
+them for all its processes from one counter, a 64-bit atomic in
+`prim_file`'s NIF, which a session's handlers share with the session's
+other processes: the NIF adds one with a `compare_exchange` loop that
+refuses at 2^64 - 1, as the file version counter does
+([Identity and version](#identity-and-version)), and draws again for
+`NOFID`, so a draw is one atomic step in the calling process and no
+process allocates fids. A refused draw fails the operation with `eio`;
+at a billion draws a second it comes after more than five hundred
+years. Only at an edge is a fid 9P2000.L's u32: a 9P bridge renames
+every fid between its edge and the grants it reaches through the
+codec's `map_fids/2`
+([design-live.md](design-live.md#files-between-the-host-and-the-machine)),
+so an edge's numbers never reach a grant, and the host-tree bridge
+picks each fid it sends QEMU's server from its own table of the fids
+it holds there.
+
+**A failed request leaves its new fid's number naming nothing.** Since
+no number comes round, a request that was to make a fid and did not, a
+walk that stopped short or was refused, leaves its number naming no
+fid on any grant, now or later. Every request sent behind it on that
+number, a clone of it, an `lopen` with `O_TRUNC`, a `setattr`, a
+`remove`, finds no fid and fails with `ebadf`, changing nothing; a
+failed clone in turn leaves its own new number naming nothing, so a
+chain of pipelined requests stops at its first failure, whatever its
+length, and never acts on a fid another request made. The grant keeps
+no record of which requests went together: the property follows from
+the numbers alone ([Pipelined requests](#pipelined-requests)). A grant
+still refuses an `attach` or `walk` that names a live fid as new, with
+`einval`, as QEMU's server answers a fid in use, but only a client
+that does not draw from its runtime's counter can meet that refusal,
+and any process of a domain may already use any of the domain's fids
+([Fid owners](#fid-owners)), so naming one gains it nothing. A request
+that names a fid after its end, sent late on an ended owner's behalf,
+meets no fid and fails with `ebadf`. The counter keeps no record of
+the fids it drew: the grant's fid table and its monitors on owners are
+the one record of which are alive.
 
 #### Fid owners
 
@@ -1012,8 +1035,10 @@ flight and the flushes and clunks waiting on them alike, and counts
 every bound from it; a frame sent to an alias in that table is dropped and counted,
 not answered, since an answer would reach the alias as the reply to
 its earlier request. A walk that stops before its last name makes
-no new fid, as 9P2000.L says, so a request sent with it on that fid fails
-with `ebadf`; a walk in place that stops leaves its fid where it was, so
+no new fid, as 9P2000.L says, and no fid of that number exists, since a
+domain draws no number twice ([Version and attach](#version-and-attach)),
+so a request sent with it on that fid fails with `ebadf`, and so does
+every request sent behind that one on a fid it was to make; a walk in place that stops leaves its fid where it was, so
 a client sends a request with a walk only on the walk's new fid, and
 uses a fid it walked in place only once the walk's reply has arrived. A
 walk that ends on a symbolic link leaves the fid on
@@ -2412,8 +2437,10 @@ other client's request can come between its parts:
   per node, the steps of its fid paths that name it; one function
   replaces a fid's path, for a new fid, a walk in place, `..`, a clunk or
   a fid owner's end, and a node no step names any more, or one a walk that
-  stopped passed, is forgotten once, at the end of the request. `forget`
-  answers nothing: the grant sends it and goes on, and since one
+  stopped passed, is forgotten once, at the end of the request. For a
+  tree kept in a process of its own, `forget` answers nothing (an own
+  tree's answers only its next tree, in the grant's process): the grant
+  sends it and goes on, and since one
   process's messages arrive in order, it never overtakes the grant's
   later walk of the same node. A hold is keyed by its grant, so walking
   a node twice holds it once and a forget of a node not held does
@@ -3898,6 +3925,22 @@ its server under interleaved stores, reads, writes taken whole, in part
 or not at all, extensions, truncations, failed fills and write-backs, up
 to depth 8, against a flat file (F7).
 
+**Requests behind a failed request.** On a grant whose client holds a
+live fid on a file `f` with data, two exchanges are each sent as one:
+a walk from `NOFID` to a missing name into a new fid, a clone of that
+fid and an `lopen` of the clone with `O_TRUNC`; and a walk to `f`, a
+clone of it into a fid that the grant refuses because its pool is full,
+and an `lopen` of that clone with `O_TRUNC`. In each, every request
+after the failed walk answers `ebadf`, the live fid still reads `f`'s
+data, and the fid table holds no fid either exchange was to make. The
+NIF's counter, set in the test so that its next value is `NOFID`,
+skips it and draws 2^32, not 0, and set to 2^64 - 1 it refuses with
+`eio`. Seeded: a counter that takes the low 32 bits, set so that the
+first exchange's walk draws the live fid's number, which the grant
+refuses as in use, so the clone reaches the live fid and its `lopen`
+truncates `f`; a clone refused for a full pool that still enters its
+new fid in the table, so the second exchange's `lopen` truncates `f`.
+
 **Source checks** of [design.md](design.md#chokepoint-checks), each with
 a seeded violation: only `erx_ns`'s process writes the namespace's
 persistent term; only `prim_file:set_cwd/1` calls the NIF that stores the
@@ -4131,22 +4174,34 @@ grant and one reply to an alias of the caller, the grant's funnel and
 reply check, and the client's two refusals and reply check. A callback
 of a tree kept in a process of its own adds a round trip to that
 process with a monitor; a callback of an own tree adds none. An
-operation's requests go together, so each operation is one exchange
-whatever its count of requests, and the client sends no `attach` and
-clunks no root fid ([Version and attach](#version-and-attach)).
+operation's requests go together, so an operation whose walks reach
+their names is one exchange whatever its count of requests, and the
+client sends no `attach` and clunks no root fid
+([Version and attach](#version-and-attach)). An operation takes more
+exchanges when its path does: one for each run of names the resolver
+walks before the last ([Resolving a path](#resolving-a-path)), one for
+each link it follows, and one to clunk the fids a failed operation
+made.
+
 Measured with `tools/erx bench posix` under HVF (Apple M3 Max, QEMU
 11.1.3, Homebrew clang 23.1.3, landing profile;
 [research-file-call-path.md](research-file-call-path.md)), the one
 request of a program's `fstat` of a `/tmp` file, the description's
-`getattr`, cost 5.4 us of the call's 16.1 us, with `/tmp`'s tree in a
-process of its own and the client checking each request against the
-grammar; and a program's `open` spent 38 us of its 50.6 us in the
-description's open, one exchange of four requests (`attach`, `walk`,
-`lopen` and the root fid's `clunk`) of which three called the tree's
-process four times. With `/tmp`'s tree in its grant and the client
-sending what this section states, a request is expected to cost about
-3 us and the open's exchange about 10 us (estimates; [design-programs.md](design-programs.md#performance)
-gives the program's calls), until the same bench measures them.
+`getattr`, cost 5.4 us of the call's 16.1 us, and of a 4 KiB `pread`'s
+13.1 us, 4.4, with `/tmp`'s tree in a process of its own: two local
+round trips, two monitors with aliases and the grammar checked on both
+sides of the grant, which the record times only together. A program's
+`open` spent 38 us of its 50.6 us in `prim_file:erx_open_at/5`, which
+includes the resolution and the description's file record besides
+the one exchange of four requests (`attach`, `walk`, `lopen` and the
+root fid's `clunk`, three of them calling the tree's process, four
+calls in all; a count with throwaway counters on the record's tree,
+not in the record). With the tree in its grant one round trip, one
+monitor and the client's grammar check go from each request; if they
+are about half of it, a request costs 2.5 to 3 us. That is a target,
+not a forecast, until the bench separates the request's costs or times
+it again; [design-programs.md](design-programs.md#performance) carries
+it to the program's calls.
 
 Resolving a path costs one walk for each run of names the resolver asks
 for, and the last run is sent with the operation, so a path without `.`,

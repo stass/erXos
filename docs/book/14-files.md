@@ -323,10 +323,15 @@ walk and the open together saves a round trip across the wall, and
 walking from the grant's root rather than from a fid that an `attach`
 made spares the server an `attach` and a `clunk` on every open.
 If the walk fails, fid 1 was never made, so the `lopen` fails too,
-with `ebadf`, and changes nothing. Every step above is built but the
-walk from `NOFID`, which is designed: the built client sends an
-`attach` for a fid on the root first and clunks that fid with the
-open.
+with `ebadf`, and changes nothing. No other fid can be numbered 1 by
+then: inside the machine a fid is a 64-bit number from one counter
+of the domain's runtime, which refuses rather than wrap, so a domain
+never draws a number twice, and a request sent behind a failed one
+can never land on a fid that some other request made. Every step
+above is built but the walk from `NOFID` and the 64-bit fid, which
+are designed: the built client sends an `attach` for a fid on the
+root first and clunks that fid with the open, and its counter keeps
+the low 32 bits.
 
 ### 14.2.3 The file grant: one client, one tree, one process
 
@@ -545,7 +550,11 @@ Three choices, after FreeBSD's tmpfs, shape the tree.
   zeros.
 * **A cap.** The tree counts its chunks, plus a fixed charge for each
   node and name, against a cap in the domain's startup limits. A step that would pass the cap
-  changes nothing and answers `{error, enospc}`.
+  changes nothing and answers `{error, enospc}`. The grant's heap
+  bound is set above the cap: a reserve for its fids and requests in
+  flight, which every grant has, plus room for the tree at its cap
+  and as much again for what a step leaves for the collector, so a
+  legal request meets the cap, never the bound.
 
 Take `echo hello > /tmp/hi` from root's shell. The client sends
 `lcreate` of `hi`, then `write`, then `clunk` to the domain's own

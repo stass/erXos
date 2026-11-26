@@ -195,7 +195,7 @@ the name of in between ([Fids and nodes](#fids-and-nodes)).
 | --- | --- | --- | --- |
 | **T1.** Every request is atomic with respect to every other | the tree is one value held by `/tmp`'s one grant, which runs one callback at a time, and every callback runs one step to completion | a callback that reads or writes tree state outside its step; a step that waits for another process; a second grant made to share the tree | a source check that only `erx_ramfs`'s callbacks call `erx_ramfs_core:step/4`; concurrent rename and lookup tests (below) |
 | **T2.** `held` equals the sum of the charges of what the tree holds, and never passes `cap` | every step computes its charge change from the request and the tree before it builds anything, and is refused whole, with nothing changed, when `held` plus the change would pass `cap` | a step that adds a chunk, node or name without charging it, or frees one without returning its charge | `erx_ramfs_core:check/1` recomputes `held` from the tree; it runs after every step of the sequence tests |
-| **T3.** A node lives exactly while a directory entry names it, an open holds it or a grant holds it, and a fid reaches no node but the one it was walked to | `links` counts the entries naming a node, as tmpfs counts them (a directory also counts its own `.` and each subdirectory's `..`, and drops to 0 when its name is removed), `opens` its opens, and `holds` the grants that hold it, each at most once, which the tree's one map from holder to held nodes records; `walk` takes its grant's hold in the step that finds the node, so a fid never names a freed node; a step that brings all three to zero deletes the node and returns its charge; the grant forgets a node once no step of its fids' paths names it, and the tree ends with its grant, so no hold outlives the grant that took it; fids name nodes by inode number, never reused (T5) | a rename that replaces a name without lowering the old node's `links`; a clunk that skips the count; a walk that holds nothing; a grant that forgets a node a fid still names, or never forgets one; an inode number drawn twice | `check/1`: every node with `links` above 0 is reachable from the root, every other has `opens` or `holds` above 0, each `links` equals the entries naming it (a directory: 2 plus its subdirectories), and each `holds` the holders holding it; the stale-fid, rename-race, stopped-walk, `..`, clunk and two-grant tests (below) |
+| **T3.** A node lives exactly while a directory entry names it, an open holds it or a grant holds it, and a fid reaches no node but the one it was walked to | `links` counts the entries naming a node, as tmpfs counts them (a directory also counts its own `.` and each subdirectory's `..`, and drops to 0 when its name is removed), `opens` its opens, and the tree's set `walked` the nodes the grant's fids name; `walk` adds the node it finds to `walked` in the same step, so a fid never names a freed node; a step that leaves a node with no links, no opens and no place in `walked` deletes it and returns its charge; the grant forgets a node once no step of its fids' paths names it, and the tree ends with its grant, so no hold outlives the grant that took it; fids name nodes by inode number, never reused (T5) | a rename that replaces a name without lowering the old node's `links`; a clunk that skips the count; a walk that holds nothing; a grant that forgets a node a fid still names, or never forgets one; an inode number drawn twice | `check/1`: every node with `links` above 0 is reachable from the root, every other has `opens` above 0 or is in `walked`, every member of `walked` is a node of the tree, and each `links` equals the entries naming it (a directory: 2 plus its subdirectories); the stale-fid, rename-race, stopped-walk, `..` and clunk tests (below) |
 | **T4.** Directories with a name form a tree under the root | a directory's `parent` is set where it is made and moved only by `rename`, which refuses to move a directory below itself (`einval`); a hard link to a directory is refused (`eperm`); removing a directory's name, which needs it empty, sets its `parent` to `none`, and a directory with no name takes no new one (`enoent`) | a rename that skips the ancestor check; a name added to a removed directory | `check/1` walks every named directory's parent chain to the root and checks that a directory with no name is empty; a test renames a directory into its own subdirectory |
 | **T5.** No inode number or version is drawn twice while the domain lives | both come from the domain's file version counter ([design-files.md](design-files.md#identity-and-version)), which outlives the grant | an inode number drawn from the tree's own state, which a restart would reset | the restart test (below) compares inode numbers before and after |
 | **T6.** No process on `/tmp`'s path loads code while it serves: the client in whatever process calls, and the grant, which holds the tree, the whole path, since `erx_path` resolves the path and the NIF draws the fids in the caller and no other process takes part | `erx_file_remote` is preloaded and calls only preloaded modules, `erx_path` and `prim_file`'s NIF included, and BIFs, as `prim_file` does; `erx_ramfs`'s start loads, before it mounts, the modules the serving processes can call, a list the build generates with `xref` from `erx_ramfs`, `erx_ramfs_core` and `erx_fs`, so no hand-kept list can miss one | a module loaded on first use on either side. The code server reads its path through `erl_prim_loader` in its own process (`code_server:mod_to_bin/3`, `with_cache/4`), and `erl_prim_loader:read_file/1` runs `prim_file` in its caller (`client_or_request/2`), so with a `/tmp` directory on the code path the code server is itself `/tmp`'s client: an unloaded client module there halts the node (`error_handler:ensure_loaded/1`: "The code server called the unloaded module"), and an unloaded serving module asks the code server, which is waiting on that very process | a build check fails when a module `erx_file_remote` calls is not preloaded; the cold-path test (below) |
@@ -223,6 +223,7 @@ the name of in between ([Fids and nodes](#fids-and-nodes)).
 -record(tree, {
     nodes :: #{ino() => #node{}},
     root  :: ino(),
+    walked :: sets:set(ino()),              %% the nodes the grant's fids name
     held  :: non_neg_integer(),              %% bytes charged
     cap   :: non_neg_integer()               %% the specification's tmp
 }).
@@ -286,26 +287,28 @@ tables below write them as Linux does (`ENOENT` for `enoent`).
 ### Fids and nodes
 
 `erx_fs` holds every fid and ends it ([design-files.md](design-files.md#fid-owners)).
-The tree holds, per node, the set of grants whose fids name it, as
-FreeBSD's tmpfs keeps a node while a vnode references it, and counts its
-opens:
+The tree keeps `walked`, the set of nodes the grant's fids name, as
+FreeBSD's tmpfs keeps a node while a vnode references it, and counts
+each node's opens:
 
 | A fid is | The tree |
 | --- | --- |
 | attached | nothing: it names the root, which lives as long as the tree |
-| walked, cloned or walked in place | each name's `walk` adds the grant to the found node's holders in the step that finds it; a walk that stops makes no fid, and the grant forgets what it walked |
-| moved by `..`, walked in place past its node, or clunked | nothing until no step of the grant's fid paths names a node; then the grant's `forget` removes the grant from its holders and frees a node left with no links, no opens and no holders |
+| walked, cloned or walked in place | each name's `walk` adds the found node to `walked` in the step that finds it; a walk that stops makes no fid, and the grant forgets what it walked |
+| moved by `..`, walked in place past its node, or clunked | nothing until no step of the grant's fid paths names a node; then the grant's `forget` removes the node from `walked` and frees it if it has no links and no opens |
 | opened by `lopen`, or made and opened by `lcreate` | counts an open of the node, by `open` or by `make` of a file |
 | clunked while open, by its client, its `remove` or its owner's end | `clunk` drops the open, and the fid's end its steps, as for an unopened fid |
 | left by a grant that ends | the tree ends with its grant, holds and all |
 
-Holding is idempotent: a grant is one holder of a node however many of
-its fids name it, and the grant keeps the count of its own steps naming
-each node, so it forgets a node exactly once, when that count reaches
-zero. `forget` is the one callback without a reply: messages from one
-process arrive in the order sent, so it never overtakes a later walk
-from the same grant, and holds keyed by grant make two grants' walks and
-forgets independent. The node's open keeps its own count, so a node
+Holding is idempotent: a node is in `walked` once however many fids
+name it, and the grant keeps the count of its fids' steps naming each
+node ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)),
+so it forgets a node exactly once, when that count reaches zero.
+`forget`, like every callback of an own tree, runs in the grant and
+returns the next tree, so it is ordered with the grant's walks by
+construction. The tree has one grant, so it keeps no holder: a hold is
+membership of `walked`, and the grant's end drops every hold because
+the tree ends with it. The node's open keeps its own count, so a node
 outlives the later of its handle's clunk and its grant's forget.
 
 A fid whose node lost its names still reaches it: `getattr` answers with
@@ -440,10 +443,37 @@ into the one `erx_fs` grant it starts for the domain itself, with rights
 `rw` and tree name `tmp`, mounted at `/tmp` with those rights, by
 `erx_fs:start_mounted(erx_ramfs, Cap, rw, "/tmp")`; the grant's
 `init/1` makes the empty tree and answers it as an own tree. Before
-mounting, it loads every module the grant can call (T6). The grant's
-`max_heap_size`, which bounds a grant's own state
-([design-files.md](design-files.md#serving-the-erx_fs-behaviour)),
-counts the tree here, so the supervisor sets it from the cap.
+mounting, it loads every module the grant can call (T6).
+
+**The grant's heap bound.** Every grant runs under a `max_heap_size`
+that counts its binaries and bounds its own state
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)); here
+that state includes the tree, so the supervisor sets the bound as the
+sum of three parts:
+
+* **The reserve**, what any grant of `erx_fs` may hold at its bounds
+  with no tree at all: its root, its pool of fids with their paths and
+  per-node counts, its owners' monitors and its 64 requests in flight
+  with up to 64 KiB of payload each ([design-files.md](design-files.md#bounds)).
+  `erx_fs` computes it from the grant's bounds, the same figure for
+  every grant of one pool, so it is never zero and a `tmp` of 0 still
+  serves every request its bounds admit.
+* **The tree at its cap**, `cap` times `1 + o`, where `o` is ERTS's
+  memory per charged byte beyond the charge (headers, map entries,
+  records), a constant of `erx_ramfs` set above the ratio the [watch
+  list](todo-performance.md) measures.
+* **The same again for what a step leaves behind**: a write rebuilds
+  each chunk it touches, a step rebuilds the nodes and maps on its
+  path, and the old ones stay allocated until the grant's next
+  collection, so the bound doubles the tree's part.
+
+The cap, not the heap bound, is what a legal request meets: a request
+that would pass the cap is refused with `enospc` before it builds
+anything (T2), so the heap bound is reached only if `o` is set too low
+or a bug leaks, and then the grant is killed and `/tmp` restarts empty,
+as for any crash ([Failure handling](#failure-handling)). Whether
+twice the tree's part covers collection under every request mix is
+not derived from ERTS's collector here; the tests below settle it.
 
 The grant and the lock table the grant starts, as a grant that is a
 tree of its own does ([design-files.md](design-files.md#locks)), are one
@@ -499,7 +529,7 @@ runs only in tests.
 | --- | --- | --- | --- | --- |
 | A write request, create or link would pass the cap | the step's charge check, before it builds anything | the tree as before the step; of a caller's write over 64 KiB, the requests before it | none | `{error, enospc}`, with an open file's offset past what was written; `ENOSPC` to a program |
 | The domain's budget is exhausted | ERTS's allocator | nothing: the domain ends | the domain library | as any ERTS allocation failure ([design-runtime.md](design-runtime.md#crash-handling)); the cap keeps `/tmp`'s charges to their share, ERTS's overhead on top ([Charges](#data-model)) |
-| A bug crashes the grant or the lock table | the link, then the supervisor | nothing of `/tmp` | both end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log |
+| A bug crashes the grant or the lock table, or the grant passes its heap bound | the link, then the supervisor | nothing of `/tmp` | both end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log, which for the heap bound names the bound and the tree's `held` |
 | A caller ends during a request or with files open | the grant's monitor on the fid's owner ([design-files.md](design-files.md#fid-owners)) | the effects of the steps that ran | the grant clunks every fid the caller owned, after every request it sent; a removed file it held open is freed | nothing |
 | A request names a fid whose node lost its names | the node's `links`, 0 | the node, held by the fid | the grant forgets it when no fid names it | `getattr` answers with `nlink` 0; `lopen` of a file opens it; `lopen` of a directory and `walk` answer `{error, enoent}` |
 | The version counter is exhausted | the counter's refusal | the tree | none | `{error, eio}` and a report, as for every server |
@@ -581,10 +611,10 @@ the code under test ran.
   naming it is clunked, and its inode number is never given again; a
   rename between a walk and its `getattr` or `lopen` finds the old file;
   a walk that stops keeps nothing; `..` from a removed directory returns
-  to its parent; in the core, a file two holders hold needs both to let
-  go. Seeded: a freed inode number reused; a walk that holds nothing; a
-  grant that never forgets; a core that keeps a holder's holds after
-  its `forget_holder`.
+  to its parent; in the core, an unlinked file a fid walked to is freed,
+  and its charge returned, at the `forget` of its last fid. Seeded: a
+  freed inode number reused; a walk that holds nothing; a grant that
+  never forgets; a `forget` that leaves the node in `walked`.
 * **Open after unlink and rename, and killed openers.** `held` returns to
   where it started after a removed file's handle is closed and after its
   opener is killed. Seeded: a clunk that does not free a node with no
@@ -604,10 +634,25 @@ the code under test ran.
   into remove then add.
 * **One message each way.** A trace of `/tmp`'s grant while a process
   reads a file's `#file_info{}`, opens it and reads it shows, for each
-  request, one message in and one reply out, and no monitor or message
-  to any other process; an open is one exchange of a walk from `NOFID`
-  and an `lopen`. Seeded: a callback that calls a process of its own,
-  as a tree process would be called; a client that sends `attach`.
+  request, one message in and one reply out, and no message sent from
+  a callback and no monitor taken by one; the grant's own monitor of a
+  fid's owner, taken once for an owner it does not yet monitor
+  ([design-files.md](design-files.md#fid-owners)), is allowed. An open
+  is one exchange of a walk from `NOFID`, a clone and an `lopen`.
+Seeded: a callback that calls a process of its own, as a tree process
+  would be called; a client that sends `attach`.
+* **The heap bound.** On the hosted runtime, with the bound the
+  supervisor computes and no other change: at a `tmp` of 0, every
+  creation answers `enospc` while the grant holds its whole pool of
+  fids on the root and its 64 requests in flight each carry a 64 KiB
+  write; at a `tmp` of 64 KiB and of 32 MiB, the same full pool, its
+  fids walked into the deepest directory chain the cap allows, and the
+  tree filled to its cap with 4 KiB files and then with one file, then
+  every chunk overwritten a hundred times, then everything removed
+  and filled again. The grant serves throughout, is never killed, and
+  `check/1` holds at the end. Seeded: a bound of the tree's part alone,
+  without the reserve, which the 64 KiB run's full pool and requests
+  in flight pass, killing the grant.
 * **Restart.** The grant killed with files open: their operations
   answer `eio`, `/tmp` is mounted again and empty, and new inode numbers
   lie above every old one. Seeded: inode numbers drawn from a counter in
