@@ -2294,10 +2294,10 @@ What runs on erXos is derived, not declared. Before its timed loop each
 cell makes its calls once, untimed; a call that answers `ENOSYS` or
 `ENOTSUP` makes the cell `unsupported` with that call and its `errno`
 named as the reason (`unsupported: stat answered ENOSYS`), the
-status the record already has for an operation the environment lacks;
-so does a call whose answer POSIX does not allow, with the answer named
-(`unsupported: getpid answered 0`, where a process ID is a positive
-integer).
+status the record already has for an operation the environment lacks.
+A `getpid` that answers a value which is not a process ID, a positive
+integer, makes the cell `failed` with the answer named
+(`failed: getpid answered 0`).
 The rows that wait on an unbuilt part therefore report so from the
 system itself, a row measures once its part exists, and no list of
 which rows run is kept anywhere to fall out of date. The statuses below

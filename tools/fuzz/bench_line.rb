@@ -195,12 +195,12 @@ module Erx
       nil
     end
 
-    # A split boot's lines: the reader builds no line past its bound and judges each line
-    # it joined.
+    # A split boot's lines: the reader builds no line past its bound (a line that came
+    # whole is the decoder's to refuse) and judges each line it joined.
     def split_boot(text)
       lines = text.split("\n")
       whole, = MEASUREMENT.joined(lines)
-      raise 'a joined line past its bound' if whole.any? { |joined| joined.bytesize > MEASUREMENT::LINE_BYTES }
+      raise 'a joined line past its bound' if (whole - lines).any? { |joined| joined.bytesize > MEASUREMENT::LINE_BYTES }
 
       MEASUREMENT.boot(lines, ASKED)
     rescue Erx::Error

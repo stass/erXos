@@ -196,17 +196,25 @@ module Erx
     # first piece and then MORE lines, each MORE, a space and the next piece
     # (docs/design-bench.md, "A benchmark"). A MORE line that continues no line or carries
     # no byte, or pieces that join to more than LINE_BYTES, are refused with the line they
-    # continue; nothing longer than LINE_BYTES is ever built.
+    # continue; nothing longer than LINE_BYTES is ever built. A line with no MORE lines
+    # passes as it came, whatever it is, for the line's own reader to judge.
     def joined(lines)
-      lines.slice_before { |text| !line_of?(text, 'MORE') }.each_with_object([[], []]) do |(head, *more), (whole, refused)|
-        pieces = more.map { |text| text.b.delete_prefix('MORE ') }
-        if line_of?(head, 'MORE') || (!head.is_a?(String) && !more.empty?) then refused << 'a MORE line continues no line'
-        elsif more.empty? then whole << head
-        elsif pieces.any?(&:empty?) then refused << 'a MORE line carries no bytes'
-        elsif head.bytesize + pieces.sum(&:bytesize) > LINE_BYTES then refused << "a line and its MORE lines are longer than #{LINE_BYTES} bytes"
-        else whole << head.b + pieces.join
-        end
+      answers = lines.slice_before { |text| !line_of?(text, 'MORE') }.map do |head, *more|
+        more.empty? && !line_of?(head, 'MORE') ? [head] : judged { join(head, more) }
       end
+      answers.partition { |answer| answer.is_a?(Array) }.then { |whole, refused| [whole.flatten(1), refused] }
+    end
+
+    # A line and its MORE lines as one line, or Erx::Error naming why they are refused.
+    def join(head, more)
+      raise Error, 'a MORE line continues no line' if line_of?(head, 'MORE') || !head.is_a?(String)
+
+      pieces = more.map { |text| text.b.delete_prefix('MORE ') }
+      raise Error, 'a MORE line carries no bytes' if pieces.any?(&:empty?)
+      raise Error, "a line and its MORE lines are longer than #{LINE_BYTES} bytes" if
+        head.bytesize + pieces.sum(&:bytesize) > LINE_BYTES
+
+      [head.b + pieces.join]
     end
 
     # Each line but a WINDOW line, with the WINDOW lines between it and the line before

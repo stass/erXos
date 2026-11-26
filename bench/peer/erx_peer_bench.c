@@ -119,7 +119,8 @@
 #define PIECE_BYTES	LINE_BYTES
 #endif
 #define MORE		"MORE "
-_Static_assert(PIECE_BYTES > sizeof(MORE) - 1 && PIECE_BYTES <= LINE_BYTES, "a piece holds more than its MORE");
+_Static_assert(PIECE_BYTES > sizeof(MORE) - 1 && PIECE_BYTES <= LINE_BYTES,
+    "a piece holds more than its MORE and fits a line");
 #define NS_PER_SECOND	UINT64_C(1000000000)
 #define MS_PER_SECOND	UINT64_C(1000)
 /* A park-deadline period: 1 ms. The first deadline is this many periods after the run starts. */
@@ -205,7 +206,11 @@ peer_print_piece(const char *prefix, const char *text, size_t n)
 		peer_fail("a line was not written");
 }
 
-/* Writes the length bytes of line, split into pieces of at most PIECE_BYTES. */
+/*
+ * Writes the length bytes of line, split into pieces of at most PIECE_BYTES, with stdout
+ * locked so no other thread's output lands among its pieces. A line that filled line is
+ * one the formatter may have cut.
+ */
 static void
 peer_print_line(size_t length)
 {
@@ -214,6 +219,7 @@ peer_print_line(size_t length)
 
 	if (length == 0 || length >= sizeof(line) - 1)
 		peer_fail("a line did not fit");
+	flockfile(stdout);
 	peer_print_piece("", line, at);
 	while (at < length) {
 		const size_t n = length - at < more ? length - at : more;
@@ -221,6 +227,7 @@ peer_print_line(size_t length)
 		peer_print_piece(MORE, line + at, n);
 		at += n;
 	}
+	funlockfile(stdout);
 }
 
 /* The clocks. */
@@ -330,10 +337,10 @@ clock_choose(void)
 #endif
 
 /*
- * The probe (docs/design-bench.md, "What a program sees: `posix` and `erl`"): the call
- * that last failed and its error, or the answer POSIX does not allow it gave where invalid
- * is set, which a cell's untimed first run reads to tell a call the system does not offer
- * from a wrong answer. Each failure sets all of it.
+ * The probe (docs/design-bench.md, "What a program sees: `posix` and `erl`"), which a
+ * cell's untimed first run reads to tell a call the system does not offer from a wrong
+ * answer: the call that last failed and either its error or, where invalid is set, the
+ * answer it gave that POSIX does not allow. Every failure sets call, error and invalid.
  */
 static struct {
 	const char *call;
@@ -366,12 +373,10 @@ pthread_ok(const char *call, int error)
 	return (false);
 }
 
-/* Whether a call's answer is one POSIX allows, valid; an answer it does not is kept for the probe. */
+/* Records call's answer, one POSIX does not allow, for the probe; always false. */
 static bool
-answer_ok(const char *call, long answer, bool valid)
+answer_invalid(const char *call, long answer)
 {
-	if (valid)
-		return (true);
 	refusal.call = call;
 	refusal.error = 0;
 	refusal.invalid = true;
@@ -617,23 +622,24 @@ batch_run(const peer_op_t *op, uint64_t n, uint64_t *ticks)
 }
 
 /*
- * A run its probe ended: unsupported where the last refusal was ENOSYS or ENOTSUP, or an
- * answer POSIX does not allow, naming the call and its answer; else failed.
+ * A run its probe ended: unsupported where the last refusal was ENOSYS or ENOTSUP, naming
+ * the call; failed, naming the call and its answer, where that answer is one POSIX does
+ * not allow; else failed with a wrong result.
  */
 static peer_run_t
 probe_refused(void)
 {
 	static char reason[80];
-	const bool lacking = refusal.call != NULL &&
-	    (refusal.invalid || refusal.error == ENOSYS || refusal.error == ENOTSUP);
+	const bool lacking = refusal.call != NULL && !refusal.invalid &&
+	    (refusal.error == ENOSYS || refusal.error == ENOTSUP);
 
+	if (refusal.call != NULL && refusal.invalid) {
+		snprintf(reason, sizeof(reason), "%s answered %ld", refusal.call, refusal.answer);
+		return ((peer_run_t){ .batch = 1, .taken = 0, .status = "failed", .reason = reason });
+	}
 	if (!lacking)
 		return ((peer_run_t){ .batch = 1, .taken = 0, .status = "failed", .reason = WRONG_RESULT });
-	if (refusal.invalid)
-		snprintf(reason, sizeof(reason), "%s answered %ld", refusal.call, refusal.answer);
-	else
-		snprintf(reason, sizeof(reason), "%s answered %s", refusal.call,
-		    refusal.error == ENOSYS ? "ENOSYS" : "ENOTSUP");
+	snprintf(reason, sizeof(reason), "%s answered %s", refusal.call, refusal.error == ENOSYS ? "ENOSYS" : "ENOTSUP");
 	return ((peer_run_t){ .batch = 1, .taken = 0, .status = "unsupported", .reason = reason });
 }
 
@@ -1732,7 +1738,7 @@ static bool
 getpid_begin(void)
 {
 	posix.pid = getpid();
-	return (answer_ok("getpid", (long)posix.pid, posix.pid > 0));
+	return (posix.pid > 0 || answer_invalid("getpid", (long)posix.pid));
 }
 
 static bool

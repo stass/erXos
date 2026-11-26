@@ -152,7 +152,7 @@ module Erx
     # ended at its deadline that it did not report are timed_out.
     def cells(run, asked) = BenchMeasurement.boot(run.fetch(:lines), asked, timed_out: !run[:timed_out].nil?).fetch(:cells)
 
-    # The BENCH and CLOCK lines of a serial log, each without its line end: a newline and
+    # The BENCH, CLOCK, WINDOW and MORE lines of a serial log, each without its line end: a newline and
     # every carriage return before it, as END_LINE takes them, since a line a program
     # writes through root's session reaches the serial log ending "\r\r\n". They are the
     # guest's, untrusted: BenchMeasurement.boot is their one judge.

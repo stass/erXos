@@ -179,9 +179,9 @@ module Erx
 
     # What a build for a posix run of arguments on cpus CPUs stages from erXos into the
     # container's /tmp/inputs, by path under it, sorted: the container script, and erXos's
-    # Genode repository (the component's target description, its flags from their one
-    # source, PeerBench.flags, and MACHINE's piece_bytes, every regular file under SOURCES
-    # at its tree path under the component's root/, and the run script). The build writes exactly this map and its
+    # Genode repository (the component's target description; its flags, PeerBench.flags
+    # and MACHINE's piece_bytes; every regular file under SOURCES at its tree path under
+    # the component's root/; and the run script). The build writes exactly this map and its
     # record names its digest (staged_sha256), so a boot recomputes it from the tree and
     # refuses an image staged from anything else.
     def staged_inputs(root, arguments:, cpus:)
