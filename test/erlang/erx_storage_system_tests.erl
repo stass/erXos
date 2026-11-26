@@ -95,7 +95,8 @@ logged() ->
 %% A good partition ----------------------------------------------------------
 
 %% The tree roots at apps/: it lists the packages, reads each whole and in pieces across
-%% its blocks, and reaches nothing outside apps/, `..` staying at its root.
+%% its blocks, and reaches nothing outside apps/: the grammar refuses a walk naming `.`
+%% or `..` before the tree sees it.
 good_partition_serves_apps_test() ->
     Grant = grant(open("good"), rx),
     {ok, []} = call(Grant, {walk, 1, 9, []}),
@@ -114,8 +115,10 @@ good_partition_serves_apps_test() ->
     ?assertEqual({ok, erx_erofs_tests:contents(100, 1)}, read_all(Grant, 3, 4096)),
     ?assertEqual({error, enoent}, call(Grant, {walk, 1, 4, [<<"README">>]})),
     ?assertEqual({error, enoent}, call(Grant, {walk, 1, 4, [<<"apps">>]})),
-    {ok, [RootQid]} = call(Grant, {walk, 1, 4, [<<"..">>]}),
-    ?assertMatch({ok, #{qid := RootQid}}, call(Grant, {getattr, 1, 16#7ff})),
+    ?assertEqual({error, einval}, call(Grant, {walk, 1, 4, [<<"..">>]})),
+    ?assertEqual({error, einval}, call(Grant, {walk, 1, 4, [<<".">>]})),
+    %% Neither refused walk took fid 4.
+    {ok, []} = call(Grant, {walk, 1, 4, []}),
     {ok, _, _} = call(Grant, {lopen, 4, ?O_RDONLY}),
     ?assertEqual({ok, listed()}, names(Grant, 4)),
     ?assertMatch({ok, #{type := ?ERX_P9_MAGIC_EROFS}}, call(Grant, {statfs, 1})),

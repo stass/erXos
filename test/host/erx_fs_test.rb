@@ -14,8 +14,8 @@ require_relative '../fixtures/erlang_build'
 # test/erlang/erx_fs_tests.erl, erx_fs_version_tests.erl and erx_fs_mint_tests.erl run on
 # stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies) against the sources
 # as they are, and against each seeded fault of docs/design-files.md#verification-and-testing
-# and of the mint, where the named test must fail. A fault in the protocol table reaches
-# the grant through the grammar generated from it.
+# and of the mint, where the named test, run alone, must fail. A fault in the protocol
+# table reaches the grant through the grammar generated from it.
 class ErxFsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   GRAMMAR = 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'
@@ -343,7 +343,7 @@ class ErxFsTest < Minitest::Test
     define_method(:"test_seeded_fault_#{index}_is_caught") do
       original = File.read(File.join(ROOT, fault.file))
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
-      output, status = eunit(replacements(fault.file, original.sub(fault.from) { fault.to }))
+      output, status = eunit(replacements(fault.file, original.sub(fault.from) { fault.to }), only: fault.caught_by)
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
       # EUnit's verbose line for one test: its name, then its verdict on the same line.
       assert_match(/#{Regexp.escape(fault.caught_by)}[^\n]*\*(?:failed|timed out)\*/, output, fault.name)
@@ -366,17 +366,32 @@ class ErxFsTest < Minitest::Test
     end
   end
 
-  # Compiles the applications and the cases, with any source replaced by the given text, and runs the suites.
-  def eunit(replaced)
+  # Compiles the applications and the cases, with any source replaced by the given text, and
+  # runs the suites: all of them, or with only: the one case named, which a seeded fault must
+  # fail (the full pool's deep-fid case alone takes seconds, so the seeds' runs skip it).
+  def eunit(replaced, only: nil)
     Dir.mktmpdir('erx-fs-test') do |work|
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       # A grant a seeded fault crashes would print a crash report into the middle of
       # EUnit's line for its test; the logger stays quiet so each verdict keeps its line.
       Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'logger:set_primary_config(level, none), ' \
-                      'halt(case eunit:test([erx_fs_tests, erx_fs_core_model_tests, erx_fs_version_tests, erx_fs_waits_tests, erx_fs_mint_tests], [verbose]) ' \
+                      "halt(case eunit:test(#{eunit_spec(only)}, [verbose]) " \
                       'of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')
     end
+  end
+
+  # What eunit runs: the five test modules, or the one case, from the module that defines it.
+  def eunit_spec(only)
+    return '[erx_fs_tests, erx_fs_core_model_tests, erx_fs_version_tests, erx_fs_waits_tests, erx_fs_mint_tests]' if only.nil?
+
+    source = TESTS.find { |path| File.read(File.join(ROOT, path)).match?(/^#{Regexp.escape(only)}\(/) }
+    raise ArgumentError, "no test module defines #{only}" if source.nil?
+
+    owner = File.basename(source, '.erl')
+    # eunit runs {Module, Name} as a plain test, which would take a generator's
+    # returned tests for the result, so a generator (a name ending in _) is named as one.
+    only.end_with?('_') ? "{generator, fun #{owner}:#{only}/0}" : "{#{owner}, #{only}}"
   end
 end

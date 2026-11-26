@@ -332,6 +332,13 @@ design does not have, to be deleted so no side-by-side table can show it under s
 * [Low] tests, `test/host/erx_hostlink_session_test.rb`: the EUnit run takes 295 s alone on an Apple Silicon host
   and once passed its own 600 s deadline under `make check`'s parallel load, failing the check with every case
   shown passing. Find the slow case and bound it, or give the run a deadline that fits the load.
+* [Medium] tests, `test/host/erx_domain_test.rb`: the file takes 726 s on an Apple Silicon host beside one other
+  test file, and 810 to 870 s on the FreeBSD x86-64 test host under `make check`'s load, against the 900 s
+  deadline of each host test file, which it once passed, failing the check. Each of its seeded faults compiles and
+  runs its whole test module; running only the case a fault names, as `erx_fs_test.rb` and `erx_bt_hci_test.rb`
+  do, would bring it well under. That needs exact case names first: its fault check matches `caught_by`
+  unescaped and across lines (`/#{fault.caught_by}.*\*failed\*/m`), so any later failing case satisfies it, and
+  one fault names `funnel`, a prefix of the generator `funnel_test_`.
 * [Low] tests, `test/integration/runtime_prim_file_test.rb`, `test_a_changed_byte_is_refused_at_open`: it
   compares the damaged image's lines with the intact run's and drops only a supervisor report's header
   line, so the report's `supervisor:` and `offender: [{pid,...}` lines fail it whenever the two runs
