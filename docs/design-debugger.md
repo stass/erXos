@@ -604,9 +604,11 @@ trace and the hold's `trace`.
 **Checks.** The writer cannot refuse, and what it writes passes the
 check by construction. `erx_crash_check`, `kernel/core/crash_read.c` and
 `tools/lib/erx/crash_frame.rb` refuse a nonzero slot after a zero one, a
-slot whose `seq` is odd or zero, a `cpu` at or past `cpu_limit`, one
-CPU's records apart or out of order, and any nonzero slot in the brief
-form, and they are held to the same answer on mutated frames.
+slot whose `seq` is odd or zero, a `cpu` at or past `cpu_limit`, and a
+record that does not follow the one before it in CPU order and, within one
+CPU, oldest first, which refuses one CPU's records apart; the brief form
+has no slot to hold one. They are held to the same answer on mutated
+frames.
 
 **Who sees it.** The brief form carries no tail, since records hold other
 domains' user addresses and timing, as registers may hold what the

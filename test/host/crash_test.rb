@@ -67,7 +67,7 @@ class CrashTest < Minitest::Test
 
   # Full paths: the sanitizer gate looks for each core source's path in this file's text.
   def core_sources
-    %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c]
+    %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c kernel/core/trace_ring.c]
       .map { |file| File.join(@root, file) }
   end
 
@@ -101,12 +101,13 @@ class CrashTest < Minitest::Test
   # ends is :fault for a frame written as the machine goes down on a fault,
   # :watchdog for one the watchdog's end writes, :task for a task's fault the
   # machine survives. states are the stop's states of CPUs 0, 1, ..., or nil
-  # for no entries.
+  # for no entries. trace is the driver's TRACE word for the kernel's rings,
+  # nil for none.
   def write(form: FULL, cause: CAUSE.fetch(:panic), cpu: 1, value: NORMAL, slot: SLOT_A, nframes: 3, frames: 1, regs: 1,
-            kind: 0, message: 'boom', lines: 2, ends: :fault, ncpus: 0, states: nil)
+            kind: 0, message: 'boom', lines: 2, ends: :fault, ncpus: 0, states: nil, trace: nil)
     message_hex = message.nil? ? '-' : message.b.unpack1('H*')
     answer = drive(["write #{form} #{cause} #{cpu} #{value} #{slot} #{nframes} #{frames} #{regs} #{kind} " \
-                    "#{message_hex.empty? ? '-' : message_hex} #{lines} #{ends} #{ncpus} #{states_word(states)}"])
+                    "#{message_hex.empty? ? '-' : message_hex} #{lines} #{ends} #{ncpus} #{states_word(states)} #{trace || '-'}"])
     _, length, check, record = answer.fetch(0).split
     printed = unhex(answer.fetch(1).split.fetch(1))
     assert printed.start_with?("\n"), 'the writer opens with a newline'
@@ -441,7 +442,7 @@ class CrashTest < Minitest::Test
       'an entry past the census count' => patch(full, entry_offset(3) + 4, [STATE.fetch('leader')].pack('L<')),
       'a number past the count' => patch(full, entry_offset(3), "\1"),
       'a number that is not its index' => patch(full, entry_offset(1), [2].pack('L<')),
-      'the last entry set' => patch(full, FRAME::RECORD_SIZE - 1, "\1")
+      'the last entry set' => patch(full, FRAME::TRACE_OFFSET - 1, "\1")
     }.each do |name, record|
       assert_equal :cpus, FRAME.check(record), "ruby: #{name}"
       assert_equal :cpus, check_c(record), "c: #{name}"
@@ -611,8 +612,12 @@ class CrashTest < Minitest::Test
     assert_equal :base64, read_both(good.lines.then { |l| l[1] = "#{'!' * FRAME::LINE_CHARS}\n"; l }.join).reason
   end
 
-  # A frame of a full-form length whose last line ends in group: 1802 bytes end
-  # in a group of two bytes and 1801 in a group of one.
+  # The shortest full-form lengths whose last base64 group holds two bytes and one.
+  LAST_TWO = FRAME::RECORD_SIZE + ((2 - FRAME::RECORD_SIZE) % 3)
+  LAST_ONE = LAST_TWO + 2
+
+  # A frame of a full-form length whose last line ends in group: LAST_TWO bytes
+  # end in a group of two bytes and LAST_ONE in a group of one.
   def frame_with_last(length, group)
     count = (length - 1) / FRAME::LINE_BYTES
     filler = 'A' * (((length - 1) % FRAME::LINE_BYTES + 3) / 3 - 1) * 4
@@ -620,8 +625,8 @@ class CrashTest < Minitest::Test
   end
 
   def test_base64_has_one_spelling
-    { [1802, 'AAQ='] => :record, [1802, 'AAR='] => :base64, [1801, 'AQ=='] => :record, [1801, 'AR=='] => :base64,
-      [1802, 'AA=='] => :base64, [1801, 'AAA='] => :base64, [1802, 'A=A='] => :base64, [1801, '=A=='] => :base64 }.each do |(length, group), reason|
+    { [LAST_TWO, 'AAQ='] => :record, [LAST_TWO, 'AAR='] => :base64, [LAST_ONE, 'AQ=='] => :record, [LAST_ONE, 'AR=='] => :base64,
+      [LAST_TWO, 'AA=='] => :base64, [LAST_ONE, 'AAA='] => :base64, [LAST_TWO, 'A=A='] => :base64, [LAST_ONE, '=A=='] => :base64 }.each do |(length, group), reason|
       answer = read_both(frame_with_last(length, group))
       assert_equal [:corrupt, reason], [answer.status, answer.reason], "#{length} #{group}"
     end
@@ -700,6 +705,110 @@ class CrashTest < Minitest::Test
     assert_equal 0, handed_on(BRIEF, ''.b)
   end
 
+  # The trace tail (docs/design-debugger.md, "The record's trace tail"). The
+  # driver's ring of head H holds its newest DRIVER_FILL (40) records, each
+  # naming its CPU and index; "x" is an exhausted ring, "hI" leaves index I half
+  # written and "oI" gives index I the next CPU's number.
+  RING_FILL = 40
+  TRACE_TERMINAL = FRAME::SCHEMA.types.fetch('erx_trace_record').sequence.fetch(:terminal)
+  # trace_ring.h's head of an exhausted ring: one past the last index whose even
+  # count is below the sequence's terminal value.
+  RING_EXHAUSTED = (TRACE_TERMINAL - 3) / 2 + 1
+  TAIL_CASES = {
+    'one written among eight' => ['100', *Array.new(7, '0')],
+    'four written of eight, one younger than its share, one half written, one exhausted' =>
+      %w[100 0 50h45 0 5 0 x 0],
+    'three written, whose shares round down' => %w[0 60 70 80],
+    'sixteen written among twenty' => [*Array.new(16) { |cpu| (200 + cpu).to_s }, '0', '0', '0', '0'],
+    'seventeen written among twenty' => ['0', *Array.new(17) { |cpu| (300 + cpu).to_s }, '0', '0'],
+    "a record carrying another CPU's number" => %w[100o97 100]
+  }.freeze
+
+  # [cpu, index] of each record the tail must hold for rings, in slot order.
+  def expected_tail(rings)
+    written = rings.each_with_index.reject { |word, _| word.start_with?('0') }.first(FRAME::CPU_ENTRIES)
+    share = FRAME::TRACE_RECORDS / written.size
+    written.flat_map do |word, cpu|
+      head = word.start_with?('x') ? RING_EXHAUSTED : word.to_i
+      dropped = word.scan(/[ho](\d+)/).flatten.map(&:to_i)
+      ([head - share, 0].max...head).reject { |index| dropped.include?(index) }.map { |index| [cpu, index] }
+    end
+  end
+
+  def tail_of(written) = read_both(written.frame).record.fetch('trace').map { |entry| [entry.fetch('cpu'), (entry.fetch('seq') - 2) / 2] }
+
+  def test_the_trace_tail_takes_each_written_rings_share_oldest_first
+    TAIL_CASES.each do |name, rings|
+      written = write(trace: rings.join(','))
+      assert_equal 'ok', written.check, name
+      assert_equal expected_tail(rings), tail_of(written), name
+    end
+    four = expected_tail(TAIL_CASES.values.fetch(1))
+    assert_equal({ 0 => 8, 2 => 7, 4 => 5, 6 => 8 }, four.map(&:first).tally, 'eight each for four written of eight')
+  end
+
+  def test_a_tail_record_keeps_every_field_of_its_ring
+    entry = read_both(write(trace: '3').frame).record.fetch('trace').last
+    assert_equal({ 'seq' => 6, 'time_ns' => 1_000_002, 'event' => 1, 'cpu' => 0, 'flags' => 0, 'thread' => 2, 'space' => 1,
+                   'arg' => [2, 0, 7] }, entry)
+    assert_includes FRAME.report(FRAME.read(write(trace: '3').frame)), 'trace cpu 0 index 2 time_ns 1000002 park'
+  end
+
+  def test_no_rings_rings_never_written_and_the_brief_form_carry_no_tail
+    [write(trace: nil), write(trace: Array.new(8, '0').join(','))].each do |written|
+      assert_equal [], tail_of(written)
+    end
+    brief = write(form: BRIEF, trace: '100,100')
+    assert_equal FRAME::BRIEF_SIZE, brief.length
+  end
+
+  def test_each_tail_rule_refuses_on_both_sides
+    full = write(trace: '100,100,100,100', lines: 0).record
+    slot = ->(index) { FRAME::TRACE_OFFSET + index * FRAME::TRACE_SIZE }
+    empty = "\0".b * FRAME::TRACE_SIZE
+    {
+      'a record after an empty slot' => patch(patch(full, slot.call(31), full.byteslice(slot.call(0), FRAME::TRACE_SIZE)),
+                                              slot.call(30), empty),
+      'an odd seq' => patch(full, slot.call(3), [7].pack('Q<')),
+      'a zero seq in a record' => patch(full, slot.call(3), [0].pack('Q<')),
+      'a CPU past the limit' => patch(full, slot.call(31) + 20, [FRAME::CPU_LIMIT].pack('S<')),
+      "one CPU's records apart" => patch(full, slot.call(31) + 20, [0].pack('S<')),
+      'records out of order' => patch(full, slot.call(2), [10].pack('Q<')),
+      'CPUs out of order' => patch(full, slot.call(0) + 20, [3].pack('S<'))
+    }.each do |name, record|
+      assert_equal :trace, FRAME.check(record), "ruby: #{name}"
+      assert_equal :trace, check_c(record), "c: #{name}"
+    end
+  end
+
+  # The C and Ruby checks give the same answer on tails mutated at random.
+  def test_the_checks_agree_on_mutated_tails
+    full = write(trace: '100,0,100,7,100', lines: 0).record
+    random = Random.new(7)
+    records = Array.new(200) do
+      record = full.dup
+      random.rand(1..3).times do
+        offset = FRAME::TRACE_OFFSET + random.rand(FRAME::TRACE_RECORDS * FRAME::TRACE_SIZE)
+        record.setbyte(offset, [0, 1, 2, 0xff, random.rand(256)].sample(random: random))
+      end
+      recrc(record)
+    end
+    native = drive(records.map { |record| "check #{hex(record)}" }).map { |line| line.split.fetch(1).to_sym }
+    assert_equal records.map { |record| FRAME.check(record) }, native
+    assert_includes native, :trace
+  end
+
+  # What the driver writes for each tail case, and its check of a tail whose
+  # last record names CPU 0 again, after CPU 3's.
+  def trace_answers(driver)
+    written = TAIL_CASES.values.map do |rings|
+      drive(["write #{FULL} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} 0 1 0 0 - 0 fault 0 - #{rings.join(',')}"],
+            driver: driver).fetch(0)
+    end
+    apart = patch(write(trace: '100,100,100,100', lines: 0).record, FRAME::TRACE_OFFSET + 31 * FRAME::TRACE_SIZE + 20, [0].pack('S<'))
+    written + drive(["check #{hex(apart)}"], driver: driver)
+  end
+
   # One-line mutants of the core: each must change what these cases see.
   MUTANTS = {
     'crash.c' => [
@@ -711,6 +820,16 @@ class CrashTest < Minitest::Test
       ['the writer leaves the buffer', '__builtin_memset(buffer, 0, ERX_CRASH_SIZE);', '(void)0;'],
       ['the check accepts a state outside the enum', 'erx_stop_cpu_state_name(entry.state) == NULL',
        'entry.state == 0'],
+      ['the tail is not written', "	erx_crash_write_trace(input, record);", "	(void)erx_crash_write_trace;"],
+      ["the writer keeps a record of another CPU", 'seq != 2 * index + 2 || owner != cpu',
+       'seq != 2 * index + 2 || (owner != cpu && cpu >= ERX_CPU_LIMIT)'],
+      ['the share is taken over one ring too many', 'share = ERX_CRASH_TRACE_RECORDS / covered;',
+       'share = ERX_CRASH_TRACE_RECORDS / (covered + 1);'],
+      ['the share is taken over every ring', 'share = ERX_CRASH_TRACE_RECORDS / covered;',
+       'share = ERX_CRASH_TRACE_RECORDS / input->ntrace;'],
+      ['the share is rounded up past the tail', 'share = ERX_CRASH_TRACE_RECORDS / covered;',
+       'share = (ERX_CRASH_TRACE_RECORDS + covered - 1) / covered;'],
+      ['the check lets a CPU apart through', 'slot.cpu < last.cpu ||', ''],
       ['entries go into the brief form', '	erx_crash_settle(input, &record->header);',
        '	erx_crash_settle(input, &record->header);
 	erx_crash_write_cpus(input, record);'],
@@ -727,7 +846,7 @@ class CrashTest < Minitest::Test
   def test_the_cases_catch_seeded_mutants
     probes = lambda do |driver|
       full, brief = [write_with(driver, form: FULL, lines: 0, regs: 0, nframes: 0), write_with(driver, form: BRIEF)]
-      [check_answers(driver, full, brief), read_answers(driver, brief)]
+      [check_answers(driver, full, brief), read_answers(driver, brief), trace_answers(driver)]
     end
     baseline = probes.call(@driver)
     MUTANTS.each_with_index do |(file, mutants), group|
@@ -752,7 +871,7 @@ class CrashTest < Minitest::Test
   def write_with(driver, form:, lines: 1, regs: 1, nframes: 1)
     states = states_word([STATE.fetch('leader'), STATE.fetch('offline')])
     answer = drive(["write #{form} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} #{nframes} 1 #{regs} 0 #{hex("m\ek".b)} #{lines} fault " \
-                    "2 #{states}"],
+                    "2 #{states} -"],
                    driver: driver)
     unhex(answer.fetch(0).split.fetch(3))
   end
@@ -769,6 +888,6 @@ class CrashTest < Minitest::Test
 
   def read_answers(driver, brief)
     too_long = "#{FRAME::BEGIN_MARKER} full #{FRAME::CRASH_SIZE + 1}\n"
-    drive([frame_of(brief), too_long, frame_with_last(1801, 'AR==')].map { |log| "read #{hex(log.b)}" }, driver: driver)
+    drive([frame_of(brief), too_long, frame_with_last(LAST_ONE, 'AR==')].map { |log| "read #{hex(log.b)}" }, driver: driver)
   end
 end

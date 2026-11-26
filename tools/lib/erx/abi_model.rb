@@ -489,14 +489,16 @@ module Erx
           depth = 1 + (dependencies.fetch(name).map { |dependency| depths.fetch(dependency) }.max || 0)
           pending.fetch(name).fail!("by-value type depth exceeds #{MAX_TYPE_DEPTH}") if depth > MAX_TYPE_DEPTH
           depths[name] = depth
+          known = types.keys
           types[name] = build_type(pending.fetch(name), types, constants)
-          order << name
+          # The new keys are name and, before it, any wire form its build derived.
+          order.concat(types.keys - known)
           users[name].sort.reverse_each do |user|
             remaining[user] -= 1
             ready << user if remaining[user].zero?
           end
         end
-        if order.size != pending.size
+        unless (pending.keys - order).empty?
           name = (pending.keys - order).sort.first
           pending.fetch(name).fail!('cyclic by-value type dependency')
         end
@@ -729,6 +731,7 @@ module Erx
               line.fail!("#{DEVICE_ADDRESS} marks one unsigned integer")
             end
             line.fail!('variable layout cannot be embedded') if type.is_a?(Layout) && type.tail
+            type = wire_form(type, types, line) if storage == 'wire_le' && type.is_a?(Layout) && type.storage == 'shared'
             line.fail!('nested layout storage differs from its owner') if type.is_a?(Layout) && type.storage != storage
             line.fail!('a private layout cannot be embedded') if type.is_a?(Layout) && type.private?
             numbered_by = index_name(line)
@@ -801,6 +804,24 @@ module Erx
                    private_owner: private_owner,
                    bindings: field_bindings(names, completed, types, tail: tail),
                    line: declaration.line).freeze
+      end
+
+      # A wire layout that embeds a shared one embeds its wire form, derived and
+      # never declared (docs/design-abi.md, "The wire form of a shared layout"): NAME_wire, the same
+      # fields, offsets, names and zero masks, read and written without atomics,
+      # for a copy one writer made once. What only shared memory has, the atomic,
+      # writer, owner and visibility metadata and the sequence protocol, is dropped.
+      def wire_form(shared, types, line)
+        line.fail!('a private layout cannot be embedded') if shared.private?
+        types["#{shared.name}_wire"] ||= begin
+          fields = shared.fields.map do |field|
+            type = field.type.is_a?(Layout) ? wire_form(field.type, types, line) : field.type
+            Field.new(**field.to_h.merge(type: type, atomic: nil, writer: nil, owners: {}.freeze,
+                                         visibility: nil)).freeze
+          end
+          Layout.new(**shared.to_h.merge(name: "#{shared.name}_wire", storage: 'wire_le',
+                                         fields: fields.freeze, sequence: nil)).freeze
+        end
       end
 
       # The enum a `field NAME TYPE OFFSET count ENUM` line counts its array

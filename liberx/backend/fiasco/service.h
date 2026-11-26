@@ -229,6 +229,13 @@ _Noreturn void	erx_fiasco_end_watchdog(const erx_watchdog_end_t *end);
 bool	erx_fiasco_end_taken(void);
 /* A task's fault: its crash frame on the console, with the machine going on. Only the service calls it. */
 void	erx_fiasco_task_crash_write(const erx_fault_t *fault);
+/*
+ * Tells the root's ends that the kernel's rings, rings of them, are mapped at the trace
+ * window, so its own crash record carries their trace tail (docs/design-debugger.md, "The
+ * record's trace tail"). The trace window's map, once, on the first thread; a boot whose
+ * window did not map never calls it, and its records carry no tail.
+ */
+void	erx_fiasco_end_trace_rings(uint32_t rings);
 
 #ifdef ERX_FIASCO_TEST_HOOKS
 #include <stdatomic.h>

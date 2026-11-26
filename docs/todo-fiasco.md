@@ -116,7 +116,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      `erx_machine_stop.cpp`'s assertion, which needs the seam's offsets in a header that `ivt.S`, an inherited
      module, may include (`Makeconf` gives the core's include directory to the glue's modules alone); every development boot is one of a kernel without the
      object, and a boot checks that `sigma0` ignores its object-naming calls failing (P9);
-  2. `tools/erx debug` over crash records and memory images, the debug bundle with its layout table and
+  2. `tools/erx debug` over crash records and memory images (its `trace` reads a record's trace tail), the debug bundle with its layout table and
      walkers, and the harness's image and report on a failing QEMU run;
   3. the hold and `erx.hold=1`, in the kernel, with the anchor's remaining fields and its crc, its readable-RAM map, the
      classification of Fiasco's memory descriptors and the `Modules.generic` line that keeps the UART's polling members for it, the root's watchdog
@@ -137,7 +137,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   ten events' hooks; `erx:trace`'s kernel row in `native_trace` as the Verification row states it, which also needs
   the tracer to keep its own console output from feeding the kernel row it prints (the case selects
   the backend row alone meanwhile); the "window is read-only" test
-  root; the crash record's trace tail; and the before-and-after numbers of `tools/erx bench nullcall`, `wake` and
+  root; and the before-and-after numbers of `tools/erx bench nullcall`, `wake` and
   `vm` ([todo-performance.md](todo-performance.md)).
 * [Low] 0.2 on Fiasco, `fiasco/kernel/src/erx/erx_trace.cpp` and `kern/task.cpp`: `map_trace`'s hardening.
   The rings are aligned and padded to `ERX_PAGE_SIZE` while the map uses `Config::PAGE_SHIFT`, and nothing
@@ -1256,3 +1256,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   catch it, so a forged reply crashes the resolver's caller. erXos keeps their data raw (edit 62);
   `test/erlang/erx_net_resolver_fuzz.erl`'s `dns` target found it. Send it with a reproduction run against
   stock OTP.
+* [Medium] 0.2 on Fiasco, `kernel/core/crash.c` (`erx_crash_trace_one`): the copy of a trace record
+  into the crash record's wire form lists the record's fields by hand, a third list beside the ring
+  core's `trace_snapshot` and `trace_copy`; a field added to `erx_trace_record` would be left zero
+  in the tail with every check passing. The ABI generator should derive the copy with the wire form
+  (a generated `NAME_wire_load`), or the ring reader should return the wire form.

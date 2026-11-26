@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -11,6 +12,7 @@
 
 #include "erx/crash.h"
 #include "erx/log.h"
+#include "erx/core/trace_ring.h"
 
 /*
  * The first byte picks the target; the writer and the reader share it over
@@ -20,7 +22,8 @@
  *      that the fields past the CRC are reached
  *   2: erx_crash_frame_read over any log
  *   3: erx_crash_record_write from any input, through the frame and back. The
- *      next byte selects: 1 registers and CPU entries, 2 frames, 4 a log, 8 the
+ *      next byte selects: 1 registers, CPU entries and trace rings whose heads
+ *      and first records are the input's bytes, 2 frames, 4 a log, 8 the
  *      full form, 0x40
  *      the form as the input has it, 0x80 scribble on the log's counters and
  *      ring; 0x30 scales the log's lines. The frame is written and read back
@@ -33,6 +36,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
 static void fuzz_check(const uint8_t *, size_t);
 static bool fuzz_entries_expected(const uint8_t *, uint32_t);
+static bool fuzz_tail_expected(const uint8_t *);
 static bool fuzz_expected(const uint8_t *);
 static void fuzz_fixed(const uint8_t *, size_t);
 static void fuzz_handed_on(const uint8_t *, size_t);
@@ -46,6 +50,10 @@ static _Alignas(8) uint8_t fuzz_scratch[ERX_CRASH_SCRATCH_BYTES];
 static uint8_t fuzz_frame[FUZZ_FRAME_MAX];
 static size_t fuzz_frame_used;
 static erx_log_t fuzz_log;
+/* The rings the writer is handed; the input fills the first FUZZ_RING_BYTES of each. */
+#define FUZZ_RINGS	3
+#define FUZZ_RING_BYTES	(64 * ERX_TRACE_RECORD_SIZE)
+static erx_trace_ring_t fuzz_rings[FUZZ_RINGS];
 
 void
 erx_effect_console_write(const char *line, size_t length)
@@ -140,11 +148,45 @@ fuzz_expected(const uint8_t *bytes)
 		if (bytes[index] != 0)
 			return (false);
 	}
-	if (!fuzz_entries_expected(bytes, ncpus))
+	if (!fuzz_entries_expected(bytes, ncpus) || !fuzz_tail_expected(bytes))
 		return (false);
 	for (size_t index = ERX_CRASH_RECORD_SIZE; index < length; index++) {
 		if (bytes[index] != '\n' && (bytes[index] < 0x20 || bytes[index] > 0x7e))
 			return (false);
+	}
+	return (true);
+}
+
+/*
+ * The trace tail's rules, read on their own: no record after an empty slot;
+ * each with an even, nonzero seq and a CPU below 64; and each after the one
+ * before in CPU order and, within one CPU, by seq.
+ */
+static bool
+fuzz_tail_expected(const uint8_t *bytes)
+{
+	static const uint8_t none[ERX_TRACE_RECORD_WIRE_SIZE];
+	const uint8_t *slot;
+	uint64_t seq, last_seq = 0;
+	uint32_t cpu, last_cpu = 0;
+	bool ended = false, any = false;
+
+	for (uint32_t index = 0; index < ERX_CRASH_TRACE_RECORDS; index++) {
+		slot = bytes + ERX_CRASH_RECORD_OFF_TRACE + index * sizeof(none);
+		if (memcmp(slot, none, sizeof(none)) == 0) {
+			ended = true;
+			continue;
+		}
+		memcpy(&seq, slot + ERX_TRACE_RECORD_WIRE_OFF_SEQ, sizeof(seq));
+		cpu = (uint32_t)slot[ERX_TRACE_RECORD_WIRE_OFF_CPU] |
+		    (uint32_t)slot[ERX_TRACE_RECORD_WIRE_OFF_CPU + 1] << 8;
+		if (ended || seq == 0 || seq % 2 != 0 || cpu >= 64)
+			return (false);
+		if (any && (cpu < last_cpu || (cpu == last_cpu && seq <= last_seq)))
+			return (false);
+		any = true;
+		last_cpu = cpu;
+		last_seq = seq;
 	}
 	return (true);
 }
@@ -316,6 +358,16 @@ fuzz_write(const uint8_t *bytes, size_t length)
 	memset(cpus, 0, sizeof(cpus));
 	memcpy(cpus, bytes, length < sizeof(cpus) ? length : sizeof(cpus));
 	input.cpus = (selector & 1) != 0 ? cpus : NULL;
+	/* Ring n's head is the message's byte n and its first records the message. */
+	for (size_t ring = 0; ring < FUZZ_RINGS; ring++) {
+		memset(fuzz_rings[ring].records, 0, FUZZ_RING_BYTES);
+		memcpy(fuzz_rings[ring].records, bytes,
+		    length < FUZZ_RING_BYTES ? length : FUZZ_RING_BYTES);
+		atomic_store_explicit(&fuzz_rings[ring].head, length > ring ? bytes[ring] : 0,
+		    memory_order_relaxed);
+	}
+	input.trace = (selector & 1) != 0 ? fuzz_rings : NULL;
+	input.ntrace = (selector & 1) != 0 ? FUZZ_RINGS : 0;
 	input.message = (const char *)bytes;
 	input.message_length = length;
 	input.log = NULL;

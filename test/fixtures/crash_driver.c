@@ -14,7 +14,7 @@
  *   previous FORM HEX       -> previous LENGTH
  *   read HEX                -> read STATUS REASON CHECK LENGTH START END RECORD-HEX
  *   write FORM CAUSE CPU VALUE SLOT NFRAMES FRAMES REGS KIND MESSAGE-HEX LOG-LINES END
- *         NCPUS STATES
+ *         NCPUS STATES TRACE
  *                           -> record LENGTH CHECK HEX
  *                              frame HEX
  *
@@ -28,8 +28,15 @@
  * stop's states of CPUs 0, 1, ... as decimal numbers joined by commas, or "-"
  * for no entries (a NULL pointer). Every entry handed over has all its
  * register words set and a cpu field the writer must not copy.
+ *
+ * TRACE is "-" for no rings (a NULL pointer), or the kernel's rings 0, 1, ...
+ * joined by commas, each its head in decimal, or "x" for an exhausted ring,
+ * followed by any of "hINDEX", that index's record left half written, and
+ * "oINDEX", that index's record carrying the next CPU's number. A ring holds
+ * its newest DRIVER_FILL records below its head, each naming its CPU and index.
  */
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -38,11 +45,14 @@
 
 #include "erx/crash.h"
 #include "erx/log.h"
+#include "erx/core/trace_ring.h"
 
 #define DRIVER_HEX_MAX	(4 * ERX_CRASH_SIZE + 16)
 #define DRIVER_LINE_MAX	(2 * DRIVER_HEX_MAX + 256)
 #define DRIVER_FRAME_MAX (2 * ERX_CRASH_SIZE)
 #define DRIVER_LOG_CORRUPT (-2)
+#define DRIVER_RINGS	24
+#define DRIVER_FILL	40
 
 static _Alignas(8) uint8_t driver_record[ERX_CRASH_SIZE];
 static _Alignas(8) uint8_t driver_scratch[ERX_CRASH_SCRATCH_BYTES];
@@ -51,18 +61,21 @@ static uint8_t driver_bytes[DRIVER_HEX_MAX];
 static uint8_t driver_frame[DRIVER_FRAME_MAX];
 static size_t driver_frame_used;
 static erx_log_t driver_log;
+static erx_trace_ring_t driver_rings[DRIVER_RINGS];
 
 static void driver_command(char *);
 static const erx_crash_cpu_t *driver_cpus(char *);
 static erx_crash_end_t driver_end(const char *);
 static _Noreturn void driver_fail(const char *);
 static void driver_print_hex(const uint8_t *, size_t);
+static void driver_ring(uint32_t, const char *);
+static uint32_t driver_trace(char *);
 static size_t driver_unhex(const char *);
 static void driver_write(char *);
 
 static const char *const driver_checks[] = {
 	"ok", "short", "magic", "version", "form", "length", "crc", "cause", "cpu",
-	"boot", "ncpus", "nframes", "fault", "regs", "frames", "cpus", "text",
+	"boot", "ncpus", "nframes", "fault", "regs", "frames", "cpus", "trace", "text",
 	"not_run",
 };
 static const char *const driver_statuses[] = {
@@ -169,6 +182,68 @@ driver_cpus(char *states)
 	return (cpus);
 }
 
+/* Fills ring cpu as its word in TRACE says. */
+static void
+driver_ring(uint32_t cpu, const char *word)
+{
+	erx_trace_ring_t *ring = &driver_rings[cpu];
+	uint64_t head, from, index, half = UINT64_MAX, other = UINT64_MAX;
+	char *at, mark;
+
+	if (*word == 'x') {
+		head = ERX_TRACE_RING_HEAD_EXHAUSTED;
+		at = (char *)word + 1;
+	} else {
+		head = strtoull(word, &at, 10);
+	}
+	while (*at != '\0') {
+		mark = *at++;
+		index = strtoull(at, &at, 10);
+		if (mark == 'h')
+			half = index;
+		else if (mark == 'o')
+			other = index;
+		else
+			driver_fail("bad write: a ring's mark is h or o");
+	}
+	from = head > DRIVER_FILL ? head - DRIVER_FILL : 0;
+	atomic_store_explicit(&ring->head, from, memory_order_relaxed);
+	for (index = from; index < head; index++) {
+		if (!erx_trace_ring_put(ring, &(erx_trace_entry_t){
+		    .time_ns = UINT64_C(1000000) * (cpu + 1) + index, .event = 1,
+		    .cpu = (uint16_t)cpu, .thread = index, .space = cpu + 1,
+		    .arg = { index, cpu, 7 } }))
+			driver_fail("a ring refused a record");
+	}
+	if (half != UINT64_MAX) {
+		(void)erx_trace_record_seq_store(
+		    &ring->records[half % ERX_TRACE_RING_RECORDS], 2 * half + 1);
+	}
+	if (other != UINT64_MAX) {
+		(void)erx_trace_record_cpu_store(
+		    &ring->records[other % ERX_TRACE_RING_RECORDS], (uint16_t)(cpu + 1));
+	}
+}
+
+/* The rings TRACE names, filled; returns how many, 0 for "-". */
+static uint32_t
+driver_trace(char *words)
+{
+	char *word, *rest;
+	uint32_t count = 0;
+
+	memset(driver_rings, 0, sizeof(driver_rings));
+	if (strcmp(words, "-") == 0)
+		return (0);
+	for (word = strtok_r(words, ",", &rest); word != NULL;
+	    word = strtok_r(NULL, ",", &rest)) {
+		if (count == DRIVER_RINGS)
+			driver_fail("bad write: more rings than the driver has");
+		driver_ring(count++, word);
+	}
+	return (count);
+}
+
 static void
 driver_write(char *arguments)
 {
@@ -177,15 +252,16 @@ driver_write(char *arguments)
 	static char message[DRIVER_HEX_MAX];
 	erx_crash_input_t input;
 	char message_hex[DRIVER_LINE_MAX], states[DRIVER_LINE_MAX], end_word[16];
+	char trace[DRIVER_LINE_MAX];
 	erx_crash_end_t end;
 	unsigned int form, cause, cpu, value, slot, nframes, has_frames, has_regs, kind;
 	unsigned int ncpus;
 	size_t length, message_length;
 	int lines;
 
-	if (sscanf(arguments, "%u %u %u %u %u %u %u %u %u %s %d %15s %u %s", &form,
+	if (sscanf(arguments, "%u %u %u %u %u %u %u %u %u %s %d %15s %u %s %s", &form,
 	    &cause, &cpu, &value, &slot, &nframes, &has_frames, &has_regs, &kind,
-	    message_hex, &lines, end_word, &ncpus, states) != 14)
+	    message_hex, &lines, end_word, &ncpus, states, trace) != 15)
 		driver_fail("bad write");
 	end = driver_end(end_word);
 	for (size_t index = 0; index < 128; index++)
@@ -212,6 +288,8 @@ driver_write(char *arguments)
 	input.frames = has_frames != 0 ? frames : NULL;
 	input.ncpus = ncpus;
 	input.cpus = driver_cpus(states);
+	input.ntrace = driver_trace(trace);
+	input.trace = input.ntrace != 0 ? driver_rings : NULL;
 	input.message = strcmp(message_hex, "-") == 0 ? NULL : message;
 	input.message_length = message_length;
 

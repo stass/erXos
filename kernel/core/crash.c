@@ -13,8 +13,9 @@
  * is valid by construction even when the path that reached the end is broken;
  * the check trusts nothing, since what it reads went through a reset.
  *
- * Nothing here puts more than the header's copy on the stack: this runs on a
- * panic stack, so the log's working memory is the caller's scratch.
+ * Little goes on the stack: this runs on a panic stack, so the log's working
+ * memory is the caller's scratch, and the trace tail holds one ring record's
+ * copy and the covered rings' heads, a few hundred bytes.
  */
 
 #include <stdbool.h>
@@ -24,6 +25,7 @@
 #include "erx/core/boot_pair.h"
 #include "erx/crash.h"
 #include "erx/log.h"
+#include "erx/core/trace_ring.h"
 
 _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
     "the record's wire layout is the struct's own");
@@ -71,6 +73,10 @@ static size_t erx_crash_log_tail(const erx_log_t *, erx_crash_scratch_t *, char 
     size_t);
 static void erx_crash_settle(const erx_crash_input_t *, erx_crash_brief_t *);
 static void erx_crash_write_cpus(const erx_crash_input_t *, erx_crash_record_t *);
+static void erx_crash_write_trace(const erx_crash_input_t *, erx_crash_record_t *);
+static bool erx_crash_trace_fits(const uint8_t *);
+static bool erx_crash_trace_one(const erx_trace_ring_t *, uint64_t, uint32_t,
+    erx_trace_record_wire_t *);
 static uint32_t erx_crash_write_body(const erx_crash_input_t *, erx_crash_record_t *,
     erx_crash_scratch_t *);
 
@@ -290,6 +296,87 @@ erx_crash_write_cpus(const erx_crash_input_t *input, erx_crash_record_t *record)
 	}
 }
 
+/*
+ * Copies record number index of CPU cpu's ring into the empty slot out,
+ * through the ring's own reader, one record at a time. True only if the
+ * reader keeps it, it is the index asked for (a reader that found the ring
+ * lapped reads another) and its cpu is the ring's; otherwise out stays zero.
+ */
+static bool
+erx_crash_trace_one(const erx_trace_ring_t *ring, uint64_t index, uint32_t cpu,
+    erx_trace_record_wire_t *out)
+{
+	erx_trace_record_t copy;
+	erx_trace_read_result_t result;
+	uint64_t seq = 0;
+	uint16_t owner = 0;
+
+	if (erx_trace_ring_read(ring, index, &copy, 1, &result) != ERX_OK ||
+	    result.kept != 1)
+		return (false);
+	(void)erx_trace_record_seq_load(&copy, &seq);
+	(void)erx_trace_record_cpu_load(&copy, &owner);
+	if (seq != 2 * index + 2 || owner != cpu)
+		return (false);
+	out->seq = seq;
+	out->cpu = owner;
+	(void)erx_trace_record_time_ns_load(&copy, &out->time_ns);
+	(void)erx_trace_record_event_load(&copy, &out->event);
+	(void)erx_trace_record_flags_load(&copy, &out->flags);
+	(void)erx_trace_record_thread_load(&copy, &out->thread);
+	(void)erx_trace_record_space_load(&copy, &out->space);
+	for (size_t arg = 0; arg < ERX_TRACE_ENTRY_ARGS; arg++)
+		(void)erx_trace_record_arg_load(&copy, arg, &out->arg[arg]);
+	return (true);
+}
+
+/*
+ * The trace tail (docs/design-debugger.md, "The record's trace tail"). Each
+ * ring's head is loaded once; the first ERX_CRASH_CPUS rings ever written are
+ * covered, each with an equal share of the slots, rounded down, so the shares
+ * never pass ERX_CRASH_TRACE_RECORDS; each share's indices below its loaded
+ * head are read oldest first, and the kept records fill the slots in CPU order
+ * with no gap, leaving the rest zero. A ring at or past ERX_CPU_LIMIT is never
+ * covered, so no record names a CPU the check refuses.
+ */
+static void
+erx_crash_write_trace(const erx_crash_input_t *input, erx_crash_record_t *record)
+{
+	const erx_trace_ring_t *rings;
+	uint64_t heads[ERX_CRASH_CPUS], head, first;
+	uint32_t cpus[ERX_CRASH_CPUS], covered, share, slot;
+
+	rings = input->trace;
+	if (rings == NULL)
+		return;
+	covered = 0;
+	for (uint32_t ring = 0; ring < input->ntrace && ring < ERX_CPU_LIMIT &&
+	    covered < ERX_CRASH_CPUS; ring++) {
+		head = 0;
+		(void)erx_trace_ring_head_load(&rings[ring], &head);
+		if (head == 0)
+			continue;
+		heads[covered] = head < ERX_TRACE_RING_HEAD_EXHAUSTED ? head :
+		    ERX_TRACE_RING_HEAD_EXHAUSTED;
+		cpus[covered++] = ring;
+	}
+	if (covered == 0)
+		return;
+	share = ERX_CRASH_TRACE_RECORDS / covered;
+	slot = 0;
+	for (uint32_t ring = 0; ring < covered; ring++) {
+		first = heads[ring] > share ? heads[ring] - share : 0;
+		for (uint64_t at = first; at < heads[ring]; at++) {
+			if (erx_crash_trace_one(&rings[cpus[ring]], at, cpus[ring],
+			    &record->trace[slot]))
+				slot++;
+		}
+	}
+}
+
+_Static_assert(ERX_CRASH_TRACE_RECORDS >= ERX_CRASH_CPUS,
+    "every covered ring's share is at least one slot");
+
 /* The full form's fields past the brief form's end; returns the record's length. */
 static uint32_t
 erx_crash_write_body(const erx_crash_input_t *input, erx_crash_record_t *record,
@@ -313,6 +400,7 @@ erx_crash_write_body(const erx_crash_input_t *input, erx_crash_record_t *record,
 		record->header.nframes = nframes;
 	}
 	erx_crash_write_cpus(input, record);
+	erx_crash_write_trace(input, record);
 
 	text = (char *)record + ERX_CRASH_RECORD_SIZE;
 	room = ERX_CRASH_TEXT_ROOM;
@@ -381,6 +469,36 @@ erx_crash_cpus_fit(const uint8_t *bytes, uint32_t ncpus)
 	return (true);
 }
 
+/*
+ * The trace tail's order: its records fill the slots from the first with no
+ * gap; each has an even, nonzero seq and a cpu below ERX_CPU_LIMIT; and each
+ * comes after the one before in CPU order and, within one CPU, oldest first,
+ * so one CPU's records stand together.
+ */
+static bool
+erx_crash_trace_fits(const uint8_t *bytes)
+{
+	erx_trace_record_wire_t slot, last = { 0 };
+	const uint8_t *at;
+	bool ended = false;
+
+	for (uint32_t index = 0; index < ERX_CRASH_TRACE_RECORDS; index++) {
+		at = bytes + ERX_CRASH_RECORD_OFF_TRACE + index * sizeof(slot);
+		if (erx_crash_all_zero(at, sizeof(slot))) {
+			ended = true;
+			continue;
+		}
+		__builtin_memcpy(&slot, at, sizeof(slot));
+		if (ended || slot.seq == 0 || slot.seq % 2 != 0 || slot.cpu >= ERX_CPU_LIMIT)
+			return (false);
+		if (index != 0 && (slot.cpu < last.cpu ||
+		    (slot.cpu == last.cpu && slot.seq <= last.seq)))
+			return (false);
+		last = slot;
+	}
+	return (true);
+}
+
 /* The full form's fields past the brief form's end. */
 static erx_crash_check_t
 erx_crash_check_body(const uint8_t *bytes, const erx_crash_brief_t *header)
@@ -398,6 +516,8 @@ erx_crash_check_body(const uint8_t *bytes, const erx_crash_brief_t *header)
 		return (ERX_CRASH_CHECK_FRAMES);
 	if (!erx_crash_cpus_fit(bytes, header->ncpus))
 		return (ERX_CRASH_CHECK_CPUS);
+	if (!erx_crash_trace_fits(bytes))
+		return (ERX_CRASH_CHECK_TRACE);
 	for (uint32_t index = ERX_CRASH_RECORD_SIZE; index < header->length; index++) {
 		byte = bytes[index];
 		if (byte != '\n' && (byte < 0x20 || byte > 0x7e))
@@ -482,6 +602,7 @@ erx_crash_check_reason(erx_crash_check_t status)
 		[ERX_CRASH_CHECK_REGS] = "registers are set where the cause has none",
 		[ERX_CRASH_CHECK_FRAMES] = "frames are set past the frame count",
 		[ERX_CRASH_CHECK_CPUS] = "a CPU entry breaks its state's rules",
+		[ERX_CRASH_CHECK_TRACE] = "the trace tail has a gap, a bad record or records out of order",
 		[ERX_CRASH_CHECK_TEXT] = "the text holds a byte neither printable nor a newline",
 		[ERX_CRASH_CHECK_NOT_RUN] = "the frame stopped before the record",
 	};

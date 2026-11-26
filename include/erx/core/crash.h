@@ -44,7 +44,11 @@ extern "C" {
  * ERX_STOP_CPU_STATE_* value erx_machine_stop_final gave the CPU, its register
  * words are read only for a state that carries registers, and its cpu is not
  * read: an entry's CPU is its index. cpus is NULL for an end before any
- * census. log is the kernel's erx_log_t, or NULL for no log lines.
+ * census. log is the kernel's erx_log_t, or NULL for no log lines. trace is
+ * ntrace of the kernel's trace rings, erx_trace_ring_t laid one after another
+ * as erx_trace_kernel_pages gives them, for the record's trace tail
+ * (docs/design-debugger.md, "The record's trace tail"); NULL for none, as a
+ * task's fault the machine survives passes. ntrace counts rings, not CPUs.
  */
 typedef struct erx_crash_input {
 	uint32_t	 form;		/* ERX_CRASH_FORM_*, from the boot image */
@@ -64,6 +68,8 @@ typedef struct erx_crash_input {
 	const char	*message;	/* escaped by the writer; need not end in NUL */
 	size_t		 message_length;
 	const void	*log;
+	const void	*trace;
+	uint32_t	 ntrace;
 } erx_crash_input_t;
 
 /*

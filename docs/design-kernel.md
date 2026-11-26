@@ -2552,9 +2552,9 @@ fixed fields and the rest for the log's tail). It has two
   the system domain shows a record only to the system shell (below).
 
 Its layouts are `erx_crash_header` and `erx_crash_record` in
-`abi/kernel.txt`: a 120-byte header, and a 1,800-byte fixed prefix that
-adds registers, a backtrace and 16 CPU entries of 56 bytes
-(`erx_crash_cpu`) before the text. Both forms are that prefix; the brief
+`abi/kernel.txt`: a 120-byte header, and a 3,848-byte fixed prefix that
+adds registers, a backtrace, 16 CPU entries of 56 bytes
+(`erx_crash_cpu`) and the trace tail's 32 records before the text. Both forms are that prefix; the brief
 form fills fewer of its fields and carries no text but a kernel panic's
 message, at most `crash_message_max` bytes. The header
 carries a magic, the version, the bytes used (`length`), a CRC-32C of

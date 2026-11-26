@@ -52,6 +52,9 @@ module Erx
     CPU_SIZE = CODEC.layout_size('erx_crash_cpu')
     # An entry's words past its number and state, which only a state with registers sets.
     REGISTER_WORDS = (SCHEMA.types.fetch('erx_crash_cpu').fields.map(&:name) - %w[cpu state]).freeze
+    TRACE_RECORDS = CODEC.constant('crash_trace_records')
+    TRACE_SIZE = CODEC.layout_size('erx_trace_record_wire')
+    TRACE_EVENTS = SCHEMA.types.fetch('trace_event').members.invert.freeze
 
     # A field's offset from the generated schema, never a copied number.
     def self.offset(layout, field)
@@ -63,6 +66,7 @@ module Erx
     REGS_OFFSET = offset('erx_crash_record', 'regs')
     FRAMES_OFFSET = offset('erx_crash_record', 'frames')
     CPUS_OFFSET = offset('erx_crash_record', 'cpus')
+    TRACE_OFFSET = offset('erx_crash_record', 'trace')
     FRAMES_MAX = (CPUS_OFFSET - FRAMES_OFFSET) / 8
 
     # status is :absent, :valid, :truncated or :corrupt; reason says why, and
@@ -116,12 +120,22 @@ module Erx
       head = ["crash frame: #{result.status}#{" (#{result.reason})" if result.reason}" \
               "#{" check #{result.check}" if result.check}"]
       record = result.record || {}
-      fields = record.except('cpus').map { |name, value| "#{name}: #{value}" }
+      fields = record.except('cpus', 'trace').map { |name, value| "#{name}: #{value}" }
       cpus = record.fetch('cpus', []).map { |entry| cpu_line(entry) }
+      trace = record.fetch('trace', []).map { |entry| trace_line(entry) }
       text = (result.text || '').split("\n", -1)
       kept = result.status == :valid ? [] : result.lines
-      [*head, *fields, *cpus, *text, *kept].map { |line| Terminal.escape(line) }
+      [*head, *fields, *cpus, *trace, *text, *kept].map { |line| Terminal.escape(line) }
     end
+
+    # A record of a checked trace tail: its CPU, its index in its ring, its time and its event.
+    def trace_line(entry)
+      event = TRACE_EVENTS.fetch(entry.fetch('event'), entry.fetch('event'))
+      format('trace cpu %<cpu>d index %<index>d time_ns %<time>d %<event>s', cpu: entry.fetch('cpu'),
+                                                                            index: (entry.fetch('seq') - 2) / 2,
+                                                                            time: entry.fetch('time_ns'), event: event)
+    end
+    private_class_method :trace_line
 
     # A checked entry: its CPU, its state's name and the words its state has.
     def cpu_line(entry)
@@ -257,7 +271,8 @@ module Erx
       full = CODEC.decode_layout('erx_crash_record', record, prefix: true)
       header = full.fetch('header')
       cpus = full.fetch('cpus').first([header.fetch('ncpus'), CPU_ENTRIES].min)
-      header.merge('regs' => full.fetch('regs'), 'frames' => full.fetch('frames'), 'cpus' => cpus).freeze
+      trace = full.fetch('trace').reject { |entry| entry.fetch('seq').zero? }
+      header.merge('regs' => full.fetch('regs'), 'frames' => full.fetch('frames'), 'cpus' => cpus, 'trace' => trace).freeze
     end
     private_class_method :decode_valid
 
@@ -330,6 +345,7 @@ module Erx
       unused = FRAMES_OFFSET + header.fetch('nframes') * 8
       return :frames unless zero?(bytes.byteslice(unused, CPUS_OFFSET - unused))
       return :cpus unless cpus_fit?(bytes, header.fetch('ncpus'))
+      return :trace unless trace_fits?(bytes)
 
       text = bytes.byteslice(RECORD_SIZE, header.fetch('length') - RECORD_SIZE)
       text.match?(/\A[\x20-\x7e\n]*\z/n) ? nil : :text
@@ -345,6 +361,20 @@ module Erx
       end
     end
     private_class_method :cpus_fit?
+
+    # The trace tail's order, as erx_crash_check has it: no record after an
+    # empty slot; each with an even, nonzero seq and a CPU below the limit; and
+    # each after the one before in CPU order and, within one CPU, oldest first.
+    def trace_fits?(bytes)
+      slots = TRACE_RECORDS.times.map { |index| bytes.byteslice(TRACE_OFFSET + index * TRACE_SIZE, TRACE_SIZE) }
+      used = slots.take_while { |raw| !zero?(raw) }
+      return false unless slots.drop(used.size).all? { |raw| zero?(raw) }
+
+      keys = used.map { |raw| CODEC.decode_layout('erx_trace_record_wire', raw).values_at('cpu', 'seq') }
+      keys.all? { |cpu, seq| seq.positive? && seq.even? && cpu < CPU_LIMIT } &&
+        keys.each_cons(2).all? { |before, after| (before <=> after).negative? }
+    end
+    private_class_method :trace_fits?
 
     def entry_fits?(entry, index)
       return false unless entry.fetch('cpu') == index && STATES.key?(entry.fetch('state'))

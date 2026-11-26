@@ -169,12 +169,15 @@ layout erx_crash_cpu wire_le 8 56
   field return_address u64 32
   field processor_state u64 40
   field aux u64 48
-# The full form's text starts at this fixed prefix's generated size.
-layout erx_crash_record wire_le 8 1800
+# The full form's text starts at this fixed prefix's generated size. trace is
+# the trace tail, records of the kernel's trace rings in the trace record's
+# wire form (docs/design-debugger.md, "The record's trace tail").
+layout erx_crash_record wire_le 8 3848
   field header erx_crash_brief 0
   field regs erx_regs 120
   field frames u64 392 count @crash_frames
   field cpus erx_crash_cpu 904 count @crash_cpus
+  field trace erx_trace_record 1800 count @crash_trace_records
 
 layout erx_msgtag wire_le 8 8
   field raw u64 0

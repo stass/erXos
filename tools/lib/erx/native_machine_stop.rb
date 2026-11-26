@@ -77,6 +77,20 @@ module Erx
       end
     end
 
+    # The record's trace tail (docs/design-debugger.md, "The record's trace tail"): an
+    # equal share of its slots for each CPU, all of them for a CPU that answered the
+    # census, whose ring nothing was writing when it stopped, and none newer than the stop.
+    def trace_problems(record, states)
+      share = CrashFrame::TRACE_RECORDS / CPUS
+      counts = record.fetch('trace').map { |entry| entry.fetch('cpu') }.tally
+      problems = states.each_with_index.filter_map do |state, cpu|
+        wanted = state == 'unanswered' ? (1..share) : (share..share)
+        "trace of cpu #{cpu} #{counts.fetch(cpu, 0)}" unless wanted.cover?(counts.fetch(cpu, 0))
+      end
+      newer = record.fetch('trace').count { |entry| entry.fetch('time_ns') > record.fetch('uptime_ns') }
+      newer.zero? ? problems : [*problems, "#{newer} trace records newer than the stop"]
+    end
+
     # Holds one run's serial log to the stop. Raises on the first disagreement.
     def judge(serial, variant: VARIANTS.first)
       result = CrashFrame.read(serial)
@@ -89,6 +103,7 @@ module Erx
       problems << "cpu #{record.fetch('cpu')}" unless record.fetch('cpu') == LEADER
       problems << "ncpus #{record.fetch('ncpus', 0)}" unless record.fetch('ncpus', 0) == CPUS
       problems.concat(state_problems(states, variant))
+      problems.concat(trace_problems(record, states))
       problems << 'no reset' unless CrashFrame::RESET_LINE.match?(serial)
       problems.concat(text_problems(serial, variant, states))
       raise Error, "machine stop #{variant.name}: the record's #{problems.join('; ')} disagree" unless problems.empty?

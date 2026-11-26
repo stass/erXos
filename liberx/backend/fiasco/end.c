@@ -30,6 +30,7 @@
 #include "liberx/backend/fiasco/end_how.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/fiasco/trace_window.h"
 
 /* A refused boot's line, as long as the root's other lines (root.c). */
 #define END_LINE_MAX	640u
@@ -37,6 +38,22 @@
 static _Atomic uint32_t end_taken;
 static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t end_record[ERX_CRASH_SIZE];
 static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t end_scratch[ERX_CRASH_SCRATCH_BYTES];
+/* How many of the kernel's rings the trace window holds; 0 until it maps, and for good if it does not. */
+static _Atomic uint32_t end_trace_count;
+
+void
+erx_fiasco_end_trace_rings(uint32_t rings)
+{
+	atomic_store_explicit(&end_trace_count, rings, memory_order_release);
+}
+
+/* The kernel's rings as the window holds them, for a machine end's record: NULL, *rings 0, before it maps. */
+static const void *
+end_trace(uint32_t *rings)
+{
+	*rings = atomic_load_explicit(&end_trace_count, memory_order_acquire);
+	return (*rings != 0 ? (const void *)(uintptr_t)ERX_FIASCO_TRACE_WINDOW : NULL);
+}
 
 /*
  * The first caller goes on; every other sleeps. The winner closes the kernel's route at
@@ -86,11 +103,13 @@ erx_fiasco_end_watchdog(const erx_watchdog_end_t *end)
 {
 	static const char message[] = "the watchdog's pet was missed";
 
+	uint32_t rings;
+
 	end_take();
 	const erx_crash_input_t input = { .form = ERX_CRASH_FORM_FULL, .cause = end->cause,
 	    .boot_value = ERX_BOOT_VALUE_UNKNOWN, .boot_slot = ERX_BOOT_SLOT_NONE,
 	    .uptime_ns = end->uptime_ns, .since_pet_ns = end->since_pet_ns, .message = message,
-	    .message_length = sizeof(message) - 1 };
+	    .message_length = sizeof(message) - 1, .trace = end_trace(&rings), .ntrace = rings };
 
 	(void)erx_crash_record_write(&input, end_record, end_scratch);
 	erx_crash_frame_write(end_record, ERX_CRASH_END_WATCHDOG);
@@ -111,12 +130,14 @@ erx_fiasco_end(erx_fiasco_end_cause_t cause, const erx_fault_t *fault)
 {
 	static const char message[] = "root task fault";
 
+	uint32_t rings;
+
 	end_begin();
 	if (fault != NULL) {
 		const erx_crash_input_t input = { .form = ERX_CRASH_FORM_FULL, .cause = ERX_CRASH_CAUSE_FAULT,
 		    .boot_value = ERX_BOOT_VALUE_UNKNOWN, .boot_slot = ERX_BOOT_SLOT_NONE,
 		    .uptime_ns = erx_fiasco_clock_ns(), .fault = *fault, .message = message,
-		    .message_length = sizeof(message) - 1 };
+		    .message_length = sizeof(message) - 1, .trace = end_trace(&rings), .ntrace = rings };
 
 		(void)erx_crash_record_write(&input, end_record, end_scratch);
 		erx_crash_frame_write(end_record, ERX_CRASH_END_FAULT);

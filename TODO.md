@@ -107,6 +107,12 @@ goes to the document of the subsystem its component pointer names.
 
 ## Security residuals
 
+* [High] 0.2 on Fiasco, `liberx/backend/fiasco/end.c`: the root's machine ends (a missed pet, a
+  root-thread fault) always write the full crash record, whatever form the boot image asks for, so
+  a release build would print the root's log, registers and the kernel's trace tail (other
+  domains' thread and space ids, arguments and timing) on the console, where the kernel's own stop
+  writes the brief form. The ends must take the boot image's form and pass the rings only in the
+  full form ([design-debugger.md](docs/design-debugger.md#the-records-trace-tail)). Blocks the release.
 * [High] erx_uart, the Raspberry Pi 4's console: Fiasco's polled write to the mini UART
   (`fiasco/kernel/src/lib/uart/uart_16550.cc`, `write`) reads `LSR`, clearing the overrun bit
   before `erx_mini_uart` sees it, and saves and restores `IER` around the write. Since the

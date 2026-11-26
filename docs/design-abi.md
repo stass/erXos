@@ -195,6 +195,15 @@ snapshot retry and the writer's ownership remain the caller's protocol.
 Wire layouts cannot contain atomic fields, and shared layouts cannot be
 decoded by casting an untrusted byte span to an atomic object.
 
+**The wire form of a shared layout.** A wire layout may still embed a
+shared one, as the crash record's trace tail embeds trace records copied
+out of their rings. What it embeds is the shared layout's wire form,
+which the generator derives and no file declares: `NAME_wire`, with the
+same fields, offsets, names and zero masks, read and written without
+atomics, for a copy one writer made once. What only shared memory has,
+the atomic, writer, owner and visibility metadata and the sequence
+protocol, is not part of it.
+
 The exact layout metadata forms, at two-space indentation, are:
 
 | Member | Meaning |
