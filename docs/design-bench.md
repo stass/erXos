@@ -2149,7 +2149,9 @@ pi4-4gb-linux --queue FILE LOG` imports a kept log the same way: a set
 whose build record names Linux among its inputs is recorded in
 environment `pi4-4gb-linux`, with Linux's facts as its subject, and its
 boots are held to what `erx_peer_bench` runs for the benchmark rather
-than to erXos's native cells. An import whose queue holds a set of
+than to erXos's native cells. Its build record states the ARM clock and
+`total_mem` its `config.txt` sets, as erXos's sets' do, and its record
+keeps them ([The board's ARM clock](#the-boards-arm-clock)). An import whose queue holds a set of
 another environment than the one named is refused. A run takes the
 board's four CPUs, since the environment's name carries no count.
 

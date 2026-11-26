@@ -35,6 +35,7 @@ class LinuxBoardTest < Minitest::Test
     assert config.start_with?(erxos), "config.txt is not erXos's own"
     assert config.end_with?("initramfs initramfs.cpio 0x10000000\n")
     refute_match(/^dtoverlay=/, config)
+    assert_match(/^arm_freq=1500\nforce_turbo=1\n.*^total_mem=1024$/m, config)
     assert_equal 'console=ttyS0,115200 quiet cpufreq.default_governor=performance panic=-1 maxcpus=4 -- posix 4', laid.fetch('cmdline.txt').bytes
     laid.each_key { |name| assert_match Erx::BootPartition::NAME, name }
   end

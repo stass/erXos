@@ -154,6 +154,7 @@ class BoardRecordTest < Minitest::Test
     assert_equal COMPILER, set.subject.details.fetch('compiler')
     assert_equal '11' * 32, set.subject.details.fetch('kernel8_sha256')
     assert_equal Erx::PeerBench.asked('wake', cpus: 4, clock: 'counter'), set.asked
+    assert_equal [1_500_000_000, 1024], [set.arm_clock_hz, set.environment.details.fetch('memory_mib')]
     erxos = Erx::BoardRecord.set(set_directory('erxos', kernel: '11' * 32), benchmark: 'wake')
     assert_equal 'pi4-4gb-erxos', erxos.environment.name
     assert_equal Erx::NativeBench.asked(Erx::BenchSuite.benchmark('wake'), cpus: 4), erxos.asked

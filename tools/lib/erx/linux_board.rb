@@ -85,7 +85,8 @@ module Erx
     end
 
     # Lays the set of a run of benchmark name out into directory, an empty directory under
-    # root, with its build record (BootPartition.write_set): Linux's lock fetched, the
+    # root, with its build record (BootPartition.write_set), which states what its
+    # config.txt sets as erXos's sets' do (BootPartition.card_settings): Linux's lock fetched, the
     # initramfs built, BL31 built and the firmware as deps.lock pins it. Answers the walk's
     # subject of it (BoardRun::Subject): no banner names Linux's boot, and the walk waits
     # for its end as long as /init waits for the program.
@@ -104,7 +105,7 @@ module Erx
       record = { 'source' => (revision && { 'commit' => revision.commit, 'dirty' => revision.dirty }),
                  'inputs' => { 'platform' => platform.name, 'firmware' => pinned.map(&:first),
                                'bl31' => Bl31.record(root: root, compiler: compiler, linker: linker),
-                               'linux' => linux } }
+                               'linux' => linux } }.merge(BootPartition.card_settings(platform).to_record)
       written = BootPartition.write_set(root: root, directory: directory, plan: plan, record: record)
       BoardRun::Subject.new(set: Netboot.boot_set(File.dirname(written.record), record: BootPartition::SET_RECORD),
                             record: written.record, identity: nil, deadline_seconds: LinuxGuest::DEADLINE_SECONDS,
