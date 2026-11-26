@@ -10,6 +10,7 @@
 -module(erx_media_volume_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
+-include("erx_fs_waits.hrl").
 
 %% The fixtures the media tree's cases share (erx_media_tree_tests).
 -export([image/1, proxy/2, mbr/2, sectors/1, facet/1]).
@@ -253,4 +254,125 @@ a_refused_table_leaves_the_medium_idle_with_no_supervisor_test() ->
         ?assertEqual({links, []}, process_info(Drive, links))
     after
         [exit(P, kill) || P <- [Drive, Facet, Proxy]]
+    end.
+
+%% Finishing a volume ---------------------------------------------------------------
+
+%% A read of File's first bytes, waiting on Volume as the media tree hands it one, and
+%% the alias its answer comes to.
+wait_read(Volume, File) ->
+    Alias = alias(),
+    Volume ! ?ERX_FS_WAIT({self(), Alias}, {read, File, 0, 64}),
+    Alias.
+
+answered(Alias) ->
+    receive ?ERX_FS_ANSWER(Alias, Result) -> Result after 2000 -> unanswered end.
+
+%% A drive process of drive 0 over Proxy, unlinked, whose facet answers Proxy.
+drive(Proxy) ->
+    Facet = spawn(fun() -> facet(Proxy) end),
+    {ok, Drive} = erx_media_drive:start_link(0, fun() -> Facet end),
+    unlink(Drive),
+    {Drive, Facet}.
+
+two_volume_medium() ->
+    [Fat16, Fat32] = [image("fat16.img"), image("fat32.img")],
+    Second = ?START + sectors(Fat16),
+    mbr([{16#0e, ?START, sectors(Fat16)}, {16#0c, Second, sectors(Fat32)}], [{?START, Fat16}, {Second, Fat32}]).
+
+ended(Pid) ->
+    Monitor = monitor(process, Pid),
+    receive {'DOWN', Monitor, process, Pid, _} -> true after 2000 -> false end.
+
+%% The finish is the volume's one admission barrier: every read sent before it is
+%% answered, as is the finish; every request after it, a second finish among them,
+%% answers eio without reaching the format. A read-only volume holds nothing to write,
+%% so its finish has the window flush nothing.
+the_finish_answers_what_came_before_and_refuses_what_comes_after_test() ->
+    Proxy = proxy(image("fat16.img"), ok),
+    {_Sup, {none, [{_, Volume}], 0}} = through(Proxy),
+    {ok, Root, dir, _} = erx_media_volume:root(Volume),
+    {ok, File, file, _} = erx_media_volume:walk(Volume, Root, <<"hello.txt">>),
+    _MountsFlush = flushes(Proxy),
+    Before = [wait_read(Volume, File) || _ <- lists:seq(1, 8)],
+    ?assertEqual(ok, erx_media_volume:finish(Volume)),
+    ?assertEqual([{ok, <<"hello, stick\n">>} || _ <- Before], [answered(Alias) || Alias <- Before]),
+    ?assertEqual({error, eio}, answered(wait_read(Volume, File))),
+    ?assertEqual({error, eio}, erx_media_volume:root(Volume)),
+    ?assertEqual({error, eio}, erx_media_volume:walk(Volume, Root, <<"hello.txt">>)),
+    ?assertEqual({error, eio}, erx_media_volume:attr(Volume, File)),
+    ?assertEqual({error, eio}, erx_media_volume:list(Volume, Root)),
+    ?assertEqual({error, eio}, erx_media_volume:finish(Volume)),
+    ?assertEqual(0, flushes(Proxy)).
+
+%% A volume that mounted no files finishes too, with nothing to write.
+a_volume_with_no_files_finishes_test() ->
+    {_Sup, {none, [{_, Volume}], 0}} = read(<<0:(64 * ?SECTOR)/unit:8>>, ok),
+    ?assertMatch(#{mount := {none, unknown}}, erx_media_volume:outcome(Volume)),
+    ?assertEqual(ok, erx_media_volume:finish(Volume)),
+    ?assertEqual({error, eio}, erx_media_volume:finish(Volume)).
+
+%% Eject on a drive whose medium holds two volumes finishes both, then ends the
+%% medium's supervisor and holds the medium idle as ejected, mounting it again only
+%% once its proxy ends; a second eject, and an eject of a drive with no medium, find no
+%% mounted medium.
+eject_finishes_every_volume_then_ends_the_medium_test() ->
+    Proxy = proxy(two_volume_medium(), ok),
+    unlink(Proxy),
+    ok = erx_media_volume:new_mounts(),
+    {Drive, Facet} = drive(Proxy),
+    {ok, Empty} = erx_media_drive:start_link(1, fun() -> undefined end),
+    unlink(Empty),
+    try
+        {ok, #{table := {mbr, [{_, One}, {_, Two}], 0}}} = gen_server:call(Drive, medium, 5000),
+        Watched = [{V, monitor(process, V)} || V <- [One, Two]],
+        ?assertEqual(ok, gen_server:call(Drive, eject, 5000)),
+        [?assertEqual(shutdown, receive {'DOWN', M, process, V, Why} -> Why after 2000 -> running end)
+         || {V, M} <- Watched],
+        ?assertEqual({ok, #{proxy => Proxy, table => ejected}}, gen_server:call(Drive, medium, 5000)),
+        ?assertEqual({error, enxio}, gen_server:call(Drive, eject, 5000)),
+        ?assertEqual({links, []}, process_info(Drive, links)),
+        ?assertEqual({error, enxio}, gen_server:call(Empty, eject, 5000))
+    after
+        [exit(P, kill) || P <- [Drive, Empty, Facet, Proxy]]
+    end.
+
+%% A volume that had already ended makes the eject answer eio, and the medium is ended
+%% all the same.
+an_eject_over_an_ended_volume_answers_eio_test() ->
+    Proxy = proxy(two_volume_medium(), ok),
+    unlink(Proxy),
+    ok = erx_media_volume:new_mounts(),
+    {Drive, Facet} = drive(Proxy),
+    try
+        {ok, #{table := {mbr, [{_, One}, {_, Two}], 0}}} = gen_server:call(Drive, medium, 5000),
+        exit(One, kill),
+        true = ended(One),
+        ?assertEqual({error, eio}, gen_server:call(Drive, eject, 5000)),
+        ?assertNot(is_process_alive(Two)),
+        ?assertEqual({ok, #{proxy => Proxy, table => ejected}}, gen_server:call(Drive, medium, 5000))
+    after
+        [exit(P, kill) || P <- [Drive, Facet, Proxy]]
+    end.
+
+%% The freeze finishes every mounted volume of every drive at once and answers when all
+%% have: each volume then refuses its requests, the media stay held, and a drive with no
+%% medium has nothing to finish. A second freeze finds its volumes finished, and fails.
+the_freeze_finishes_every_volume_of_every_drive_test() ->
+    [P1, P2] = Proxies = [proxy(image("fat16.img"), ok), proxy(image("fat32.img"), ok)],
+    [unlink(P) || P <- Proxies],
+    ok = erx_media_volume:new_mounts(),
+    {D1, F1} = drive(P1),
+    {D2, F2} = drive(P2),
+    {ok, Empty} = erx_media_drive:start_link(2, fun() -> undefined end),
+    unlink(Empty),
+    try
+        {ok, #{table := {none, [{_, V1}], 0}} = M1} = gen_server:call(D1, medium, 5000),
+        {ok, #{table := {none, [{_, V2}], 0}}} = gen_server:call(D2, medium, 5000),
+        ?assertEqual(ok, erx_media_drive:freeze([D1, D2, Empty])),
+        [?assertEqual({error, eio}, erx_media_volume:root(V)) || V <- [V1, V2]],
+        ?assertEqual({ok, M1}, gen_server:call(D1, medium, 5000)),
+        ?assertEqual({error, eio}, erx_media_drive:freeze([D2]))
+    after
+        [exit(P, kill) || P <- [D1, D2, Empty, F1, F2 | Proxies]]
     end.

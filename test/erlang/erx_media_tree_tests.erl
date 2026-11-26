@@ -152,7 +152,8 @@ exdev_is_decided_before_any_volume_is_asked_test() ->
     [exit(Pid, kill) || Pid <- [One, Two]].
 
 %% Nothing is written: a change of the tree's own entries answers eacces, one inside a
-%% volume erofs, and ctl takes eject alone.
+%% volume erofs, and ctl takes eject alone, which finds no mounted medium on a drive
+%% the registry does not hold.
 the_tree_refuses_every_change_test() ->
     Volume = {volume, self(), dir_node, dir, 1},
     Tree = [root, {drive, 0}],
@@ -166,8 +167,8 @@ the_tree_refuses_every_change_test() ->
     ?assertEqual({error, eacces}, erx_media_tree:open({drive, 0}, ?ERX_P9_O_RDWR, media)),
     ?assertEqual({error, erofs}, erx_media_tree:open({volume, self(), file_node, file, 2}, ?ERX_P9_O_WRONLY, media)),
     ?assertEqual({error, erofs}, erx_media_tree:write({file, self(), file_node}, 0, <<"x">>, media)),
-    ?assertEqual({error, enotsup}, erx_media_tree:write({ctl, 0}, 0, <<"eject">>, media)),
-    ?assertEqual({error, enotsup}, erx_media_tree:write({ctl, 0}, 0, <<"eject\n">>, media)),
+    ?assertEqual({error, enxio}, erx_media_tree:write({ctl, 9}, 0, <<"eject">>, media)),
+    ?assertEqual({error, enxio}, erx_media_tree:write({ctl, 9}, 0, <<"eject\n">>, media)),
     [?assertEqual({error, einval}, erx_media_tree:write({ctl, 0}, 0, Command, media))
      || Command <- [<<"eject\n\n">>, <<"EJECT">>, <<" eject">>, <<>>]],
     [?assertEqual({error, Refused}, erx_media_tree:setattr(Target, #{size => 0}, media))
@@ -175,15 +176,21 @@ the_tree_refuses_every_change_test() ->
                               {{open, {file, self(), file_node}}, erofs}, {{open, {text, <<>>}}, eacces}]].
 
 %% ctl is reached as prim_file writes a file, by a create of the existing name: eject
-%% answers enotsup and anything else einval; a create of any other name is refused.
+%% finishes the drive's medium, after which the drive's directory lists status and ctl
+%% alone, status shows the medium idle as ejected, and a second eject finds no mounted
+%% medium; anything else answers einval, and a create of any other name is refused.
 ctl_takes_a_command_through_a_create_test() ->
     #{grant := Grant} = Tree = start(image("fat16.img")),
     try
         {ok, _} = call(Grant, {walk, 1, 2, [<<"disk0">>]}),
         {ok, _} = call(Grant, {walk, 2, 3, []}),
         ?assertMatch({ok, {0, 0, 3}, _}, call(Grant, {lcreate, 3, <<"ctl">>, ?ERX_P9_O_WRONLY bor ?ERX_P9_O_TRUNC, 8#644, 0})),
-        ?assertEqual({error, enotsup}, call(Grant, {write, 3, 0, <<"eject\n">>})),
         ?assertEqual({error, einval}, call(Grant, {write, 3, 0, <<"format\n">>})),
+        ?assertMatch({ok, 6, _}, call(Grant, {write, 3, 0, <<"eject\n">>})),
+        ?assertEqual([<<"status">>, <<"ctl">>], names(Grant, 2, 5)),
+        {ok, Status} = contents(Grant, [<<"disk0">>, <<"status">>], 6),
+        ?assertMatch([<<"medium\tidle ejected">> | _], binary:split(Status, <<"\n">>, [global])),
+        ?assertEqual({error, enxio}, call(Grant, {write, 3, 0, <<"eject\n">>})),
         {ok, _} = call(Grant, {walk, 2, 4, []}),
         ?assertEqual({error, eacces}, call(Grant, {lcreate, 4, <<"new">>, ?ERX_P9_O_WRONLY, 8#644, 0}))
     after
