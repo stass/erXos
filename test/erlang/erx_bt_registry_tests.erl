@@ -18,7 +18,7 @@
 -define(WAIT_MS, 2000).
 -define(GAP, #{name => <<"erxos">>, appearance => 16#03C1}).
 -define(ADDRESS, {random, <<16#C0, 16#FF, 16#EE, 16#12, 16#34, 16#56>>}).
--define(IDENTITY, {public, <<16#00, 16#1B, 16#DC, 16#0A, 16#0B, 16#0C>>}).
+-define(BOND, <<"0123456789abcdef0123456789abcdef">>).
 
 %% ---- the core, case by case ----
 
@@ -55,9 +55,9 @@ attach_answers_the_limits_and_refuses_test() ->
 attach_hears_the_live_links_test() ->
     C = make_ref(),
     {Actions, _} = steps([{join, ?L1, C, #{address => ?ADDRESS}, j},
-                          {link, ?L1, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}},
+                          {link, ?L1, {security, #{level => encrypted, bond => ?BOND}}},
                           {facet, ?H1, {attach, a}, f}]),
-    ?assertEqual({event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => true}}},
+    ?assertEqual({event, ?H1, {connected, C, #{level => encrypted, bond => ?BOND}}},
                  lists:last(Actions)).
 
 %% An attach while a phone stays connected hears `connected`, then the link's MTU and the
@@ -68,7 +68,7 @@ attach_replays_a_connected_link_test() ->
     Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {mtu, 247}},
               {link, ?L1, {subscribed, {a, x}, notify}}, {link, ?L1, {subscribed, {b, y}, indicate}}],
     {Actions, _} = steps(Joined ++ [{facet, ?H1, {attach, a}, f}]),
-    ?assertEqual([{connected, C, #{address => ?ADDRESS, level => open, bonded => false}}, {mtu, C, 247},
+    ?assertEqual([{connected, C, #{level => open, bond => none}}, {mtu, C, 247},
                   {subscribed, C, x, notify}],
                  [Event || {event, To, Event} <- Actions, To =:= ?H1]),
     %% A handler of another service has heard connected and the MTU, and hears only the
@@ -98,18 +98,24 @@ advertised_follows_the_handlers_test() ->
     ?assertEqual({[{advertised, Nothing}], Nothing},
                  begin {Down, Gone} = step({down, ?H1}, Both), {Down, erx_gatt_registry:advertised(Gone)} end).
 
-%% `connected` never carries a bond's identity address: a bonded link shows itself bonded,
-%% and the address the phone connected from in `address` either way.
-connected_carries_no_identity_test() ->
+%% `connected` holds the link's level and its bond, and no other key: at the join `open`
+%% and no bond, as every link starts, whether or not its address resolved, since a link is
+%% its bond's only from its encryption; after the link's security the bond it reports. No
+%% address reaches a handler, neither the join's nor any other (docs/design-bluetooth.md,
+%% "Host tests of the cores", the registry's `connected`).
+connected_holds_the_level_and_bond_test() ->
     C = make_ref(),
-    {Unbonded, Core} = steps([{facet, ?H1, {attach, a}, f}, {join, ?L1, C, #{address => ?ADDRESS}, j},
-                              {link, ?L1, {security, #{level => encrypted, bonded => false}}}]),
-    ?assertEqual([{event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => false}}}],
-                 Unbonded),
-    {Bonded, _} = step({link, ?L1, {security, #{level => authenticated, bonded => true, identity => ?IDENTITY}}},
-                       Core),
-    ?assertEqual([{event, ?H1, {connected, C, #{address => ?ADDRESS, level => authenticated, bonded => true}}}],
-                 Bonded).
+    {Joined, Core} = steps([{facet, ?H1, {attach, a}, f}, {join, ?L1, C, #{address => ?ADDRESS}, j}]),
+    ?assertEqual([{event, ?H1, {connected, C, #{level => open, bond => none}}}],
+                 [A || {event, _, _} = A <- Joined]),
+    {Unbonded, Encrypted} = step({link, ?L1, {security, #{level => encrypted, bond => none}}}, Core),
+    ?assertEqual([{event, ?H1, {connected, C, #{level => encrypted, bond => none}}}], Unbonded),
+    {Bonded, Proven} = step({link, ?L1, {security, #{level => authenticated, bond => ?BOND}}}, Encrypted),
+    ?assertEqual([{event, ?H1, {connected, C, #{level => authenticated, bond => ?BOND}}}], Bonded),
+    %% A handler that attaches later hears the bond in its replay.
+    {Replayed, _} = step({facet, ?H2, {attach, b}, f2}, Proven),
+    ?assertEqual([{event, ?H2, {connected, C, #{level => authenticated, bond => ?BOND}}}],
+                 [A || {event, _, {connected, _, _}} = A <- Replayed]).
 
 set_refusals_test() ->
     Set = fun(Op) -> {[A], _} = steps([{facet, ?H1, {attach, a}, f0}, {facet, ?H1, Op, f}]), A end,
@@ -207,7 +213,7 @@ input({notify, L}, _M) -> {facet, ?H1, {notify, conn(L), a, x, <<1>>}, from};
 input({reply, H}, #model{writes = N}) -> {facet, H, {reply, {req, N - 1}, ok}, from};
 input({reply_earlier, H}, #model{writes = N}) -> {facet, H, {reply, {req, N - 2}, ok}, from};
 input({down, P}, _M) -> {down, P};
-input({security, L}, _M) -> {link, L, {security, #{level => encrypted, bonded => false}}}.
+input({security, L}, _M) -> {link, L, {security, #{level => encrypted, bond => none}}}.
 
 %% Checks one step's actions against the model and returns the model after it.
 check({join, L, C, _, From}, Actions, #model{joined = J, values = V} = M) ->

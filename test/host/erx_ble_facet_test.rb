@@ -34,10 +34,11 @@ class ErxBleFacetTest < Minitest::Test
              path: SRV, anchor: "handle_call({facet, Caller, Op}, From, Srv) ->\n    step({facet, Caller, Op, From}, Srv).",
              replacement: "handle_call({facet, _Caller, Op}, {Facet, _} = From, Srv) ->\n    step({facet, Facet, Op, From}, Srv).",
              catching_case: 'the_caller_hears_the_events_and_alone_answers_its_writes_test'),
-    Seed.new(fault: "a bonded link's identity address left in the connected event",
-             path: CORE, anchor: '    #{address => Address, level => Level, bonded => true}.',
-             replacement: '    Security#{address => Address}.',
-             catching_case: 'bonded_identity_reaches_no_handler_test'),
+    Seed.new(fault: "the join's address copied into the connected event",
+             path: CORE, anchor: '      | connected_events(Conn, Security, Core)],',
+             replacement: '      | [{event, H, {connected, Conn, Security#{address => Address}}} ' \
+                          '|| H <- lists:usort(maps:values(Core#core.handlers))]],',
+             catching_case: 'no_address_reaches_a_handler_test'),
     Seed.new(fault: 'a reply of any shape forwarded, so the facet bounds no answer',
              path: FACET, anchor: 'answer(_Answer) -> false.', replacement: 'answer(_Answer) -> true.',
              catching_case: 'a_request_of_no_operation_s_shape_is_refused_badarg_test')

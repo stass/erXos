@@ -53,7 +53,7 @@ advertised() ->
 
 -doc """
 A link joins the registry at its start: the registry maps `Conn` to the calling link,
-tells the handlers `connected` at level `open` and not bonded, and answers the table and
+tells the handlers `connected` at level `open` with no bond, and answers the table and
 the values the handlers last set. It takes `join` and `set` in one order, so every `set`
 after the values it answered reaches the link.
 """.

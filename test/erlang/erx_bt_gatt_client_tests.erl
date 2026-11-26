@@ -19,7 +19,7 @@
 -define(OTHER, 9).
 -define(WAIT_MS, 2000).
 -define(ADDRESS, {random, <<16#C0, 16#FF, 16#EE, 16#12, 16#34, 16#56>>}).
--define(IDENTITY, {public, <<16#00, 16#1B, 16#DC, 16#0A, 16#0B, 16#0C>>}).
+-define(BOND, <<"0123456789abcdef0123456789abcdef">>).
 -define(GAP, #{name => <<"erxos">>, appearance => 0}).
 
 %% ---- the event reader ----
@@ -33,14 +33,17 @@ event_from_the_facet_owner_alone_test() ->
     ?assertEqual(unknown, erx_gatt:event(?BT, Write)),
     ?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {mtu, C, 22}})),
     ?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {write, R, C, <<"rx">>, <<>>}})),
-    Connected = #{address => ?ADDRESS, bonded => false, level => open},
-    ?assertMatch({ok, _}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected}})),
+    Connected = #{level => open, bond => none},
+    ?assertEqual({ok, {connected, C, Connected}}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected}})),
     ?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected#{extra => 1}}})),
-    Bonded = Connected#{bonded => true},
+    Bonded = #{level => authenticated, bond => ?BOND},
     ?assertEqual({ok, {connected, C, Bonded}}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Bonded}})),
-    %% No event carries a bond's identity address.
+    %% No event carries an address, and a bond is `none` or an id of 32 lower-case
+    %% hexadecimal digits.
     [?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Info}}))
-     || Info <- [Connected#{identity => ?IDENTITY}, Bonded#{identity => ?IDENTITY}, Connected#{bonded => yes},
+     || Info <- [Connected#{address => ?ADDRESS}, Bonded#{address => ?ADDRESS}, #{level => open},
+                 Connected#{bond => yes}, Connected#{bond => ?ADDRESS}, Connected#{bond => binary:part(?BOND, 0, 31)},
+                 Connected#{bond => string:uppercase(?BOND)}, Connected#{level => <<"open">>}, Connected#{level => bonded},
                  Bonded#{extra => 1}]].
 
 %% ---- attach and the owner's answers, over a facet that answers a script ----

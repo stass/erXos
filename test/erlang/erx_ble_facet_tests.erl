@@ -166,21 +166,22 @@ the_caller_hears_the_events_and_alone_answers_its_writes_test() ->
         exit(Link, kill)
     end).
 
-%% No handler hears a bonded link's identity address: a phone that connects from its
-%% identity address shows it in `address`, and a bonded link shows itself bonded alone.
-bonded_identity_reaches_no_handler_test() ->
-    Bonded = #{level => encrypted, bonded => true, identity => {random, <<16#C1, 2, 3, 4, 5, 6>>}},
+%% No handler hears an address: a link joins with the phone's address, and its handler
+%% hears the link's level and bond alone, `none` at the join and the bond's id once the
+%% link reports it.
+no_address_reaches_a_handler_test() ->
+    Bonded = #{level => encrypted, bond => <<"0123456789abcdef0123456789abcdef">>},
     with_registry([<<"nus">>], #{}, fun(Facet) ->
         Test = self(),
         ?assertMatch({ok, _}, call(Facet, {attach, nus})),
         Link = stand_in_link(Test),
         receive {joined, Link, _} -> ok after ?WAIT_MS -> error(no_join) end,
-        ?assertMatch({connected, _, #{level := open, bonded := false}},
+        ?assertMatch({connected, _, #{level := open, bond := none} = Info} when map_size(Info) =:= 2,
                      receive {connected, _, _} = Open -> Open after ?WAIT_MS -> none end),
         Link ! {security, Bonded},
         {connected, _, Heard} = receive {connected, _, _} = Connected -> Connected after ?WAIT_MS -> none end,
         exit(Link, kill),
-        ?assertEqual(#{level => encrypted, bonded => true, address => ?ADDRESS}, Heard)
+        ?assertEqual(Bonded, Heard)
     end).
 
 %% ---- the mint ----

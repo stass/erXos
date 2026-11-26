@@ -17,7 +17,8 @@
 %% * a link that holds a key tells the registry of no subscription before it is encrypted,
 %%   so a resolved bond's subscriptions and a configuration write wait for the key;
 %% * no `subscriptions` or `served` goes to the store from a link that is not its bond's;
-%% * the registry hears an identity with a link's security exactly when it is bonded.
+%% * the registry hears a bond's id with a link's security exactly when it is bonded, and
+%%   never an address.
 %%
 %% A step that ends the link starts a new one. The seed comes from make check-fuzz.
 
@@ -106,8 +107,8 @@ step(Input, Now, {Core, AclTxMax, Owed}, Table) ->
     [verdict({store_write_not_bonded, Input}) || {store, {Kind, _}} <- Actions, Kind =/= keep,
                                                  not maps:get(bonded, erx_bt_link_core:facts(Next))
                                                      orelse not Encrypted],
-    [verdict({identity_not_bonded, Input}) || {registry, {security, Security}} <- Actions,
-                                              maps:is_key(identity, Security) =/= maps:get(bonded, Security)],
+    [verdict({bond_not_bonded, Input}) || {registry, {security, Security}} <- Actions,
+                                          not is_security(Security, maps:get(bonded, erx_bt_link_core:facts(Next)))],
     Answered = case Input of
                    {store, {kept, _}} -> maps:remove(store, Owed);
                    {window, {wait, _}} -> maps:remove(wait, Owed);
@@ -179,3 +180,10 @@ payload(_Cid, _Table) ->
 verdict(Term) ->
     io:format("~p~n", [Term]),
     halt(1).
+
+%% A security report as the registry takes it: the level and the bond, and nothing else,
+%% the bond a bond's id exactly when the link is bonded.
+is_security(#{level := _, bond := Bond} = Security, Bonded) when map_size(Security) =:= 2 ->
+    (Bond =/= none) =:= Bonded;
+is_security(_Security, _Bonded) ->
+    false.

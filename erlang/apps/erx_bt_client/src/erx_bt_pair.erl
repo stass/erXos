@@ -36,7 +36,7 @@ keeps them out of what its crash reports and logs show, as the window does.
 
 -include("generated/erx_abi.hrl").
 
--export([format_bond/1, parse_bond/1, id/1, format/1, parse/1, reason/1, reader/1, next/1, bonds/1]).
+-export([format_bond/1, parse_bond/1, id/1, is_bond_id/1, format/1, parse/1, reason/1, reader/1, next/1, bonds/1]).
 -export_type([address/0, bond/0, bond_id/0, line/0, reason/0, reader/0]).
 
 %% An address as erx_hci decodes it, most significant octet first.
@@ -75,10 +75,11 @@ format_bond(#{id := <<_:256>> = Id, address := Address, type := Type, level := L
 
 -doc "The bond id Text is, its 32 lower-case hexadecimal digits, or `invalid`.".
 -spec id(binary()) -> bond_id() | invalid.
-id(<<_:256>> = Text) ->
-    try bond_id(Text) catch throw:invalid -> invalid end;
 id(Text) when is_binary(Text) ->
-    invalid.
+    case is_bond_id(Text) of
+        true -> Text;
+        false -> invalid
+    end.
 
 -doc "The bond a record names, or `invalid` for any text `format_bond/1` does not make.".
 -spec parse_bond(binary()) -> bond() | invalid.
@@ -214,7 +215,14 @@ seconds(_) -> throw(invalid).
 
 digits(Digits) -> only(fun(C) -> C >= $0 andalso C =< $9 end, Digits).
 
-bond_id(Id) -> only(fun(C) -> C >= $0 andalso C =< $9 orelse C >= $a andalso C =< $f end, Id).
+bond_id(Id) -> only(fun is_id_digit/1, Id).
+
+-doc "Whether `Term` is a bond's id: 32 lower-case hexadecimal digits.".
+-spec is_bond_id(term()) -> boolean().
+is_bond_id(<<_:256>> = Id) -> lists:all(fun is_id_digit/1, binary_to_list(Id));
+is_bond_id(_Term) -> false.
+
+is_id_digit(C) -> C >= $0 andalso C =< $9 orelse C >= $a andalso C =< $f.
 
 %% Text, when Allowed holds for each of its octets.
 only(Allowed, Text) ->

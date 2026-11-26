@@ -27,9 +27,6 @@
 -define(CENTRAL, {random, ?CENTRAL_ADDRESS}).
 -define(PERIPHERAL, {random, ?OWN_ADDRESS}).
 -define(BOND_LTK, <<16#B0:128>>).
-%% The identity address identity() distributes (type 1, random), decoded: most significant
-%% octet first, where the PDU sends it least significant octet first.
--define(DISTRIBUTED, {random, <<16#C1, 16#C2, 16#C3, 16#C4, 16#C5, 16#C6>>}).
 -define(BOND, #{id => <<"00000000000000000000000000000001">>, ltk => ?BOND_LTK, level => authenticated, identity => ?CENTRAL, hash => <<0:256>>,
                 subscriptions => #{{svc, n} => notify}}).
 -define(NAME, {16#40, 1}).
@@ -67,7 +64,7 @@ failed_join_ends_the_link_test() ->
 %% answered with the pairing's LTK and the registry hears the link encrypted. The step that
 %% ends the third phase sends `keep`, with the pairing's tag, to the store and `keeping` to
 %% the window; a withdrawal after it changes nothing. The store's ok makes the key a kept
-%% bond's, which the registry hears as `bonded`; the outcome is the store's to tell the
+%% bond's, which the registry hears with the id the store gave; the outcome is the store's to tell the
 %% window, so the link tells the window nothing more.
 just_works_pairing_to_the_store_test() ->
     with_owners(#{}, fun() ->
@@ -79,13 +76,13 @@ just_works_pairing_to_the_store_test() ->
         ?assertEqual({ltk_reply, Ltk}, from_link()),
         hci(Link, {ltk_reply_complete, ok}),
         hci(Link, {encryption_change, 0, 16#40, 1}),
-        ?assertEqual({security, #{level => encrypted, bonded => false}}, told(erx_gatt_srv)),
+        ?assertEqual({security, #{level => encrypted, bond => none}}, told(erx_gatt_srv)),
         [phone(Link, Pdu) || Pdu <- identity()],
         ?assertMatch({Link, {keep, Tag, #{ltk := Ltk, level := unauthenticated}, #{}}}, addressed(erx_bt_store)),
         ?assertEqual({Link, {keeping, Tag}}, addressed(erx_bt_fs)),
         Link ! {window, {withdraw, Tag}},
-        Link ! {store, {kept, {ok, <<"00000000000000000000000000000001">>}}},
-        ?assertEqual({security, #{level => encrypted, bonded => true, identity => ?DISTRIBUTED}}, told(erx_gatt_srv)),
+        Link ! {store, {kept, {ok, <<"000000000000000000000000000000a2">>}}},
+        ?assertEqual({security, #{level => encrypted, bond => <<"000000000000000000000000000000a2">>}}, told(erx_gatt_srv)),
         ?assertEqual([], [Code || <<_:16, 6:16/little, 16#05, Code>> <- sent()]),
         ?assertEqual(nothing, next(erx_bt_fs))
     end).
@@ -135,7 +132,7 @@ reconnection_with_a_kept_bond_test() ->
         ?assertEqual({ltk_reply, ?BOND_LTK}, from_link()),
         hci(Link, {ltk_reply_complete, ok}),
         hci(Link, {encryption_change, 0, 16#40, 1}),
-        ?assertEqual({security, #{level => authenticated, bonded => true, identity => ?CENTRAL}}, told(erx_gatt_srv)),
+        ?assertEqual({security, #{level => authenticated, bond => maps:get(id, ?BOND)}}, told(erx_gatt_srv)),
         ?assertEqual({subscribed, {svc, n}, notify}, told(erx_gatt_srv)),
         ?assertEqual({reply, ok}, Notify()),
         ?assertMatch([<<_:16, 4:16/little, 16#1B, _:16, "x">>], sent()),
@@ -231,12 +228,14 @@ end_process(Pid) ->
     receive {'DOWN', Monitor, process, Pid, _} -> ok end.
 
 %% The store answers `resolve` with the case's bond, the registry `join` with the table;
-%% with `hold`, each hands the call to the case to answer instead.
+%% with `hold`, each hands the call to the case to answer instead. The registry answers
+%% only a join that carries the phone's address alone, so a link that hands it the
+%% resolved bond's id, a name its key has not yet proven, is never answered.
 stand_in(Name, Test, Options) ->
     receive
         {'$gen_call', From, {resolve, _Address}} when Name =:= erx_bt_store ->
             answer(Name, From, maps:get(bond, Options, none), Test, Options);
-        {'$gen_call', From, {join, _Conn, #{address := ?CENTRAL}}} when Name =:= erx_gatt_srv ->
+        {'$gen_call', From, {join, _Conn, Info}} when Name =:= erx_gatt_srv, Info =:= #{address => ?CENTRAL} ->
             answer(Name, From, #{table => table(), values => #{}}, Test, Options);
         {erx_bt_link, Link, Message} ->
             Test ! {owner, Name, Link, Message}

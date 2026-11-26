@@ -78,7 +78,7 @@ with_line(Fun) ->
 
 %% A connection, its open_tty answered Answer; the master it named.
 connect(Conn, Answer) ->
-    erx_bleuart ! {connected, Conn, #{}},
+    erx_bleuart ! {connected, Conn, #{level => open, bond => none}},
     receive
         {line_call, From, {open_tty, Master, shell, <<>>, 0, 0}} ->
             gen_server:reply(From, Answer),
@@ -158,7 +158,7 @@ unavailable_sends_one_line_at_the_subscription_test() ->
     State = start(fun(_Line) -> Test ! root_line_asked, {error, unavailable} end),
     try
         Conn = make_ref(),
-        erx_bleuart ! {connected, Conn, #{}},
+        erx_bleuart ! {connected, Conn, #{level => open, bond => none}},
         ?received(root_line_asked),
         nothing(),
         erx_bleuart ! {subscribed, Conn, tx, notify},

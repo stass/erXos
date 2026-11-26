@@ -23,6 +23,9 @@
 -define(RPA1, {random, <<16#4A, 16#01, 16#02, 16#03, 16#04, 16#05>>}).
 -define(RPA2, {random, <<16#5B, 16#11, 16#12, 16#13, 16#14, 16#15>>}).
 -define(BOND_LTK, <<16#B0:128>>).
+%% Two bond ids: the resolved bond's, and the one the store gives a pairing's bond at `kept`.
+-define(BOND_ID, <<"00000000000000000000000000000001">>).
+-define(KEPT_ID, <<"000000000000000000000000000000a2">>).
 -define(SHARE, 2).
 -define(ACL_TX_MAX, 27).
 -define(QUEUE, 16).                       % bt_notify_queue
@@ -55,7 +58,7 @@ bonded(Level) -> core(#{bond => resolved(Level, #{})}).
 
 %% A bond the store resolved the phone's address to, with its kept subscriptions.
 resolved(Level, Subscriptions) ->
-    #{id => <<"00000000000000000000000000000001">>, ltk => ?BOND_LTK, level => Level, identity => ?IDENTITY,
+    #{id => ?BOND_ID, ltk => ?BOND_LTK, level => Level, identity => ?IDENTITY,
       hash => <<0:256>>, subscriptions => Subscriptions}.
 
 %% A basic frame (Part A, 3.1) in one ACL packet, flagged first_flushable (Vol 4 Part E, 5.4.2).
@@ -206,7 +209,7 @@ write_waits_for_encryption_test() ->
     ?assertEqual([error_rsp(16#12, handle(enc_w), 16#0F)], on(4, Keyed)),
     ?assertEqual([], registry(Keyed)),
     {Encrypted, _} = run([ltk_request(), encryption_on(), Write], bonded(unauthenticated)),
-    ?assertEqual([{security, #{level => encrypted, bonded => true, identity => ?IDENTITY}},
+    ?assertEqual([{security, #{level => encrypted, bond => ?BOND_ID}},
                   {write, 1, {svc, enc_w}, <<"e">>}],
                  registry(Encrypted)).
 
@@ -241,14 +244,14 @@ notification_through_gate_test() ->
     Notify = {notify, caller, notify, {svc, enc_n}, <<"n">>},
     {Refused, _} = run([Notify]),
     ?assertEqual([{reply, caller, {error, insufficient_security}}], [A || {reply, _, _} = A <- Refused]),
-    {Sent, _} = run([ltk_request(), encryption_on(), Subscribe, {kept, {ok, <<"00000000000000000000000000000001">>}}, Notify], bonded(unauthenticated)),
+    {Sent, _} = run([ltk_request(), encryption_on(), Subscribe, {kept, {ok, ?KEPT_ID}}, Notify], bonded(unauthenticated)),
     ?assertEqual([{reply, caller, ok}], [A || {reply, _, _} = A <- Sent]),
     ?assertEqual([write_rsp(), <<16#1B, (handle(enc_n)):16/little, "n">>], on(4, Sent)).
 
 %% With the share used and never completed, the queue fills to bt_notify_queue and the
 %% next notification is `busy`; completions hand the queue over.
 notification_queue_bound_test() ->
-    Inputs = [ltk_request(), encryption_on(), att(write(configuration(enc_n), <<1, 0>>)), {kept, {ok, <<"00000000000000000000000000000001">>}}]
+    Inputs = [ltk_request(), encryption_on(), att(write(configuration(enc_n), <<1, 0>>)), {kept, {ok, ?KEPT_ID}}]
              ++ [{notify, I, notify, {svc, enc_n}, <<"n">>} || I <- lists:seq(1, ?SHARE + ?QUEUE + 1)],
     {Actions, Core} = run(Inputs, bonded(unauthenticated)),
     Replies = [Reply || {reply, _, Reply} <- Actions],
@@ -274,19 +277,19 @@ indication_test() ->
 reconnection_reaches_bond_level_test() ->
     {Actions, Core} = run([ltk_request(), encryption_on()], bonded(authenticated)),
     ?assertEqual([{ltk_reply, ?BOND_LTK}], [A || {ltk_reply, _} = A <- Actions]),
-    ?assertEqual([{security, #{level => authenticated, bonded => true, identity => ?IDENTITY}}], registry(Actions)),
+    ?assertEqual([{security, #{level => authenticated, bond => ?BOND_ID}}], registry(Actions)),
     ?assertMatch(#{encrypted := true, key := authenticated}, facts(Core)).
 
-%% A bonded link tells the registry its bond's identity address, never the address the
-%% phone connected from: two connections of one bond, each from its own resolvable
-%% private address, carry the same identity. (A link not yet bonded tells none:
-%% first_pairing_reaches_level_before_store_test.)
-bonded_link_reports_the_bonds_identity_test() ->
+%% A bonded link tells the registry its bond's id and no address: two connections of one
+%% bond, each from its own resolvable private address, carry the same id. (A link not yet
+%% bonded tells `none`: first_pairing_reaches_level_before_store_test; a resolved link
+%% tells nothing before its encryption: resolved_bond_is_taken_on_at_encryption_test.)
+bonded_link_reports_the_bonds_id_test() ->
     Reported = [registry(element(1, run([ltk_request(), encryption_on()],
                                         core(#{addresses => #{central => Rpa, peripheral => ?PERIPHERAL},
                                                bond => resolved(authenticated, #{})}))))
                 || Rpa <- [?RPA1, ?RPA2]],
-    ?assertEqual(lists:duplicate(2, [{security, #{level => authenticated, bonded => true, identity => ?IDENTITY}}]),
+    ?assertEqual(lists:duplicate(2, [{security, #{level => authenticated, bond => ?BOND_ID}}]),
                  Reported).
 
 %% Secure Connections' request carries zero Rand and EDIV; any other, and every request on
@@ -380,14 +383,14 @@ first_pairing_reaches_level_before_store_test() ->
                               core(#{share => 16})),
     ?assertEqual([], [Code || <<16#05, Code>> <- on(6, Paired)]),
     ?assertEqual([{ltk_reply, Ltk}], [A || {ltk_reply, _} = A <- Paired]),
-    ?assertEqual([{security, #{level => encrypted, bonded => false}}], registry(Paired)),
+    ?assertEqual([{security, #{level => encrypted, bond => none}}], registry(Paired)),
     ?assertEqual([], [A || {store, _} = A <- Paired]),
     {Ended, Core} = core_step(smp(<<16#09, 1, 16#C6, 16#C5, 16#C4, 16#C3, 16#C2, 16#C1>>), 0, Encrypted),
     ?assertMatch([{store, {keep, 1, #{ltk := Ltk, level := unauthenticated}, #{}}}, {window, {keeping, 1}}],
                  [A || {Role, _} = A <- Ended, Role =:= store orelse Role =:= window]),
     ?assertMatch({[], _}, core_step({withdraw, 1}, 0, Core)),
-    {Kept, _} = core_step({kept, {ok, <<"00000000000000000000000000000001">>}}, 0, Core),
-    ?assertEqual([{registry, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}}], Kept),
+    {Kept, _} = core_step({kept, {ok, ?KEPT_ID}}, 0, Core),
+    ?assertEqual([{registry, {security, #{level => encrypted, bond => ?KEPT_ID}}}], Kept),
     {Failed, _} = core_step({kept, {error, unavailable}}, 0, Core),
     ?assertEqual([{close, {store, unavailable}}], Failed).
 
@@ -427,7 +430,7 @@ bonded_write_waits_for_the_kept_bond_test() ->
     {Pairing, _} = core_step(Write, 0, Ended),
     ?assertEqual([error_rsp(16#12, handle(bond_w), 16#05)], on(4, Pairing)),
     ?assertEqual([], registry(Pairing)),
-    {_, Kept} = core_step({kept, {ok, <<"00000000000000000000000000000001">>}}, 0, Ended),
+    {_, Kept} = core_step({kept, {ok, ?KEPT_ID}}, 0, Ended),
     {Handed, _} = core_step(Write, 0, Kept),
     ?assertEqual([{write, 1, {svc, bond_w}, <<"b">>}], registry(Handed)).
 
@@ -443,7 +446,7 @@ roles_test() ->
     ?assertMatch({[{close, forgotten}], _}, erx_bt_link_core:step({store, forgotten}, 0, bonded(authenticated))),
     ?assertError(function_clause, erx_bt_link_core:step(ltk_request(), 0, core())),
     ?assertError(function_clause, erx_bt_link_core:step({window, {set, {svc, open_w}, <<"v">>}}, 0, core())),
-    ?assertError(function_clause, erx_bt_link_core:step({store, {kept, {ok, <<"00000000000000000000000000000001">>}}}, 0, core())).
+    ?assertError(function_clause, erx_bt_link_core:step({store, {kept, {ok, ?KEPT_ID}}}, 0, core())).
 
 %% A resolved bond is a candidate until the link is encrypted with its key: before that the
 %% link has the default configuration and answers a configuration write Insufficient
@@ -457,7 +460,7 @@ resolved_bond_is_taken_on_at_encryption_test() ->
     ?assertEqual([<<16#0B, 0, 0>>, error_rsp(16#12, Config, 16#0F)], on(4, Before)),
     ?assertEqual([], registry(Before)),
     {At, _} = run([ltk_request(), encryption_on(), att(read(Config)), Notify], Core),
-    ?assertEqual([{security, #{level => encrypted, bonded => true, identity => ?IDENTITY}},
+    ?assertEqual([{security, #{level => encrypted, bond => ?BOND_ID}},
                   {subscribed, {svc, enc_n}, notify}],
                  registry(At)),
     ?assertEqual([{reply, caller, ok}], [A || {reply, _, _} = A <- At]),
@@ -490,7 +493,7 @@ done_refusal_not_an_outcome_test() ->
     {[PublicKey, Random, Check], _Ltk} = just_works(),
     Identity = [smp(<<16#08, 7:128>>), smp(<<16#09, 1, 16#C6, 16#C5, 16#C4, 16#C3, 16#C2, 16#C1>>)],
     {_, Bonded} = run([smp(pairing_request()), {admission, 1, {open, nodisplay, fresh()}}, smp(PublicKey),
-                       smp(Random), smp(Check), ltk_request(), encryption_on()] ++ Identity ++ [{kept, {ok, <<"00000000000000000000000000000001">>}}],
+                       smp(Random), smp(Check), ltk_request(), encryption_on()] ++ Identity ++ [{kept, {ok, ?KEPT_ID}}],
                       core(#{share => 16})),
     {Actions, _} = run([smp(pairing_request())], Bonded),
     ?assertEqual([pairing_failed(16#08)], on(6, Actions)),
@@ -562,7 +565,7 @@ bonded_configuration_write_waits_for_the_store_test() ->
     ?assertEqual([{store, {subscriptions, #{{svc, enc_n} => notify}}}], [A || {store, _} = A <- Asked]),
     ?assertEqual([], on(4, Asked)),
     ?assertEqual([], registry(Asked)),
-    {Kept, _} = run([{kept, {ok, <<"00000000000000000000000000000001">>}}], Writing),
+    {Kept, _} = run([{kept, {ok, ?KEPT_ID}}], Writing),
     ?assertEqual([write_rsp()], on(4, Kept)),
     ?assertEqual([{subscribed, {svc, enc_n}, notify}], registry(Kept)),
     {Failed, Unchanged} = run([{kept, {error, unavailable}}, att(read(Config))], Writing),
@@ -584,10 +587,10 @@ configuration_write_while_keeping_waits_for_the_keep_test() ->
                        core(#{share => 16})),
     {Held, Holding} = run([att(write(configuration(ind), <<2, 0>>))], Keeping),
     ?assertEqual([], on(4, Held) ++ [A || {store, _} = A <- Held]),
-    {Bonded, Writing} = run([{kept, {ok, <<"00000000000000000000000000000001">>}}], Holding),
-    ?assertEqual([{registry, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}},
+    {Bonded, Writing} = run([{kept, {ok, ?KEPT_ID}}], Holding),
+    ?assertEqual([{registry, {security, #{level => encrypted, bond => ?KEPT_ID}}},
                   {store, {subscriptions, #{{svc, ind} => indicate}}}], Bonded),
-    {Kept, _} = run([{kept, {ok, <<"00000000000000000000000000000001">>}}], Writing),
+    {Kept, _} = run([{kept, {ok, ?KEPT_ID}}], Writing),
     ?assertEqual([write_rsp()], on(4, Kept)),
     ?assertEqual([{subscribed, {svc, ind}, indicate}], registry(Kept)).
 
@@ -625,8 +628,9 @@ service_changed_at_reconnection_test() ->
 %% the link is encrypted, and every controller message's step answering `taken` first
 %% (core_step/3); at most one `wait` unanswered and one Security Request on a path, never
 %% once the phone has begun encryption; no `subscriptions` or `served` sent and no Service
-%% Changed indicated on a link that is not its bond's; and on a bonded link the
-%% configuration changed only at the store's `ok`.
+%% Changed indicated on a link that is not its bond's; on a bonded link the configuration
+%% changed only at the store's `ok`; and the registry told a bond's id exactly where the
+%% link is bonded, and only the resolved bond's.
 %% The window's and the store's answers are offered only when asked for. A step that ends
 %% the link ends its path.
 explored_core_keeps_its_invariants_test_() ->
@@ -656,7 +660,7 @@ alphabet({Core, Now, Ref, Asked}) ->
      {ltk_reply_complete, ok}, {ltk_reply_complete, {failed, 16#0C}}, {notify, n, notify, {svc, enc_n}, <<"n">>}]
     ++ [{completed, 1} || maps:get(outstanding, facts(Core)) > 0]
     ++ [Wait || is_map_key(wait, Asked), Wait <- [{wait, 0}, {wait, 1000}]]
-    ++ [Kept || is_map_key(store, Asked), Kept <- [{kept, {ok, <<"00000000000000000000000000000001">>}}, {kept, {error, unavailable}}]]
+    ++ [Kept || is_map_key(store, Asked), Kept <- [{kept, {ok, ?KEPT_ID}}, {kept, {error, unavailable}}]]
     ++ [{at, D, expired} || D <- [erx_bt_link_core:next_deadline(Core)], D =/= infinity, D >= Now].
 
 explore_step({at, Now, Input}, {Core, _, Ref, Asked}) -> explore_step(Input, {Core, Now, Ref, Asked});
@@ -690,12 +694,17 @@ explore_step(Input, {Core, Now, Ref, Asked}) ->
             ?assertEqual(maps:get(refused, Before), maps:get(refused, After));
         _ -> ok
     end,
+    %% The registry hears a bond's id exactly where the gate's `bonded` holds, and the id
+    %% is the resolved bond's: the alphabet admits no pairing, so a link is bonded only by
+    %% the resolved bond's key.
+    [?assertEqual(maps:get(bonded, After), Bond =/= none) || {registry, {security, #{bond := Bond}}} <- Actions],
+    [?assert(Bond =:= none orelse Bond =:= ?BOND_ID) || {registry, {security, #{bond := Bond}}} <- Actions],
     ToStore = [Message || {store, Message} <- Actions, element(1, Message) =/= keep],
     [?assert(maps:get(bonded, After) andalso maps:get(encrypted, After) andalso maps:get(key, After) =/= none)
      || _ <- ToStore],
     [?assert(maps:get(encrypted, After))
      || <<16#1D, H:16/little, _/binary>> <- on(4, Actions), H =:= service_changed()],
-    case maps:get(bonded, Before) andalso Input =/= {kept, {ok, <<"00000000000000000000000000000001">>}} of
+    case maps:get(bonded, Before) andalso Input =/= {kept, {ok, ?KEPT_ID}} of
         true -> ?assertEqual([], [S || {registry, {subscribed, _, _}} = S <- Actions]);
         false -> ok
     end,

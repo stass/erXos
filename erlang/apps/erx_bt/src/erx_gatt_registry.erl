@@ -10,7 +10,10 @@ service's handler, the live links with their `Conn`, and the writes handed to ha
 
 - **Links.** A link joins at its start with its `Conn` and its phone's address; the core
   answers the table and the values, asks for a monitor of the link and tells every handler
-  `connected` at level `open`, not bonded. Joins and sets are inputs of one core, so every
+  `connected` at level `open` with no bond, as every link starts, its address resolved or
+  not. The address stays the registry's (docs/design-bluetooth.md keeps it for `/proc/bt`):
+  a `connected` event holds the link's level and bond alone, so no handler hears an
+  address. Joins and sets are inputs of one core, so every
   set after the values a join answered goes to that link. The core keeps each link's MTU
   once it changed and each characteristic configuration the phone wrote, until the
   link's end, its monitor's `down`, when every handler hears `disconnected`, and its
@@ -24,8 +27,7 @@ service's handler, the live links with their `Conn`, and the writes handed to ha
     replays each live link: `connected`, then the link's `mtu` when it changed, when the
     handler handles no other service yet and so has heard neither, then a `subscribed` for
     each of the service's characteristics the phone configured, so a handler that attaches
-    while a phone stays connected hears what one attached before it connected heard. No
-    `connected` carries a bond's identity address.
+    while a phone stays connected hears what one attached before it connected heard.
   - **Advertising.** Of the services the core was told say `advertise`, those with a handler
     are advertised (docs/design-bluetooth.md, "Advertising"): an attach or a handler's end
     that changes that set answers the action `{advertised, Input}`, `Input` what
@@ -50,11 +52,11 @@ service's handler, the live links with their `Conn`, and the writes handed to ha
 -type level() :: erx_gatt_gate:level().
 -type from() :: gen_server:from().
 -doc """
-A link's security as it reports it: the level it reaches and whether it is bonded, with
-the bond's identity address exactly when it is.
+A link's security as it reports it, which is also what a handler's `connected` holds: the
+level it reaches, and the id of the kept bond whose key encrypts it, or `none`
+(docs/design-bluetooth.md, "A bond's name is made with its key").
 """.
--type security() :: #{level := level(), bonded := false}
-                  | #{level := level(), bonded := true, identity := erx_smp_crypto:address()}.
+-type security() :: #{level := level(), bond := none | erx_bt_state:id()}.
 -doc "What a handler learns of a characteristic at `attach`: its maximum and its accesses.".
 -type limits() :: #{max := 0..512, access := #{erx_gatt_db:access() => level()}}.
 
@@ -125,13 +127,13 @@ advertised(#core{gap = Gap, advertise = Advertise, handlers = Handlers}) ->
 -spec step(input(), core()) -> {[action()], core()}.
 step({join, Link, Conn, #{address := Address}, From}, #core{links = Links, conns = Conns} = Core)
   when not is_map_key(Link, Links), not is_map_key(Conn, Conns) ->
-    Security = #{level => open, bonded => false},
+    Security = #{level => open, bond => none},
     Joined = Core#core{links = Links#{Link => #{conn => Conn, address => Address, security => Security,
                                                     mtu => none, subscribed => #{}}},
                        conns = Conns#{Conn => Link}},
     {[{monitor, Link},
       {reply, From, #{table => Core#core.table, values => Core#core.values}}
-      | connected_events(Conn, Address, Security, Core)],
+      | connected_events(Conn, Security, Core)],
      Joined};
 %% A link sends its next write only once it has the last one's answer or gave up waiting,
 %% so a new write drops the link's earlier one: the core holds at most one write a link.
@@ -169,8 +171,8 @@ link(Link, #{conn := Conn, subscribed := Subscribed} = Joined, {subscribed, {Ser
      Core#core{links = (Core#core.links)#{Link := Joined#{subscribed := Kept}}}};
 link(Link, #{conn := Conn} = Joined, {mtu, Mtu}, Core) ->
     {to_handlers({mtu, Conn, Mtu}, Core), Core#core{links = (Core#core.links)#{Link := Joined#{mtu := Mtu}}}};
-link(Link, #{conn := Conn, address := Address} = Joined, {security, Security}, Core) ->
-    {connected_events(Conn, Address, Security, Core),
+link(Link, #{conn := Conn} = Joined, {security, Security}, Core) ->
+    {connected_events(Conn, Security, Core),
      Core#core{links = (Core#core.links)#{Link := Joined#{security := Security}}}}.
 
 %% ---- a facet's operations ----
@@ -246,8 +248,8 @@ down(Pid, #core{links = Links, conns = Conns, writes = Writes} = Core) ->
 %% What an attaching handler of Service hears of one live link: `connected` and the MTU
 %% when it changed, unless it handles another service and so has heard them, then each
 %% configuration of Service's characteristics the phone wrote.
-replay(New, Service, #{conn := Conn, address := Address, security := Security, mtu := Mtu, subscribed := Subscribed}) ->
-    [{connected, Conn, connected(Address, Security)} || New] ++ [{mtu, Conn, Mtu} || New, Mtu =/= none] ++
+replay(New, Service, #{conn := Conn, security := Security, mtu := Mtu, subscribed := Subscribed}) ->
+    [{connected, Conn, Security} || New] ++ [{mtu, Conn, Mtu} || New, Mtu =/= none] ++
         [{subscribed, Conn, Char, Kind} || {S, Char} := Kind <- maps:iterator(Subscribed, ordered), S =:= Service].
 
 %% The advertised set's change from Before to After, as the one action that tells the
@@ -264,17 +266,10 @@ without_link(Link, Writes) ->
 
 %% ---- events ----
 
-%% Every attached handler's `connected` event of link Conn, once each.
-connected_events(Conn, Address, Security, #core{handlers = Handlers}) ->
-    [{event, Handler, {connected, Conn, connected(Address, Security)}} || Handler <- lists:usort(maps:values(Handlers))].
-
-%% A `connected` event's facts: the address the phone connected from and the link's
-%% security as it last reported it, a security() whose shape this match checks whole,
-%% without the bond's identity address, which no handler hears.
-connected(Address, #{level := Level, bonded := false} = Security) when map_size(Security) =:= 2 ->
-    #{address => Address, level => Level, bonded => false};
-connected(Address, #{level := Level, bonded := true, identity := _} = Security) when map_size(Security) =:= 3 ->
-    #{address => Address, level => Level, bonded => true}.
+%% Every attached handler's `connected` event of link Conn, once each: the link's
+%% security as it last reported it, its level and bond and nothing else.
+connected_events(Conn, Security, #core{handlers = Handlers}) ->
+    [{event, Handler, {connected, Conn, Security}} || Handler <- lists:usort(maps:values(Handlers))].
 
 to_handler(Service, Event, #core{handlers = Handlers}) ->
     case Handlers of

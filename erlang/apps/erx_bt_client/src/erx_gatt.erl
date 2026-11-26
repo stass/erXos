@@ -32,10 +32,7 @@ and answer/2 are total over any term and make no atom.
 
 -export([attach/1, set/3, notify/4, indicate/4, reply/2]).
 -export([facet/0, event/2, answer/2]).
--export_type([table/0, event/0, answer/0, address/0]).
-
--doc "A Bluetooth device address: its type and its 48 bits.".
--type address() :: {public | random, <<_:48>>}.
+-export_type([table/0, event/0, answer/0]).
 
 -doc "A service's characteristics as attach answers them: each one's maximum and accesses.".
 -type table() :: #{atom() => #{max := 0..512, access := #{atom() => atom()}}}.
@@ -44,10 +41,13 @@ and answer/2 are total over any term and make no atom.
 -type answer() :: ok | {error, ?ERX_ATT_APPLICATION_ERROR_MIN..?ERX_ATT_APPLICATION_ERROR_MAX | value_not_allowed}.
 
 -doc """
-An event the registry sends a handler, its envelope off. No `connected` carries a bond's
-identity address: `address` is the one the phone connected from.
+An event the registry sends a handler, its envelope off. `connected` holds the link's
+level and its bond: the id of the kept bond whose key encrypts the link, or `none`, so a
+handler knows a bonded phone across its connections by that id, and no event carries an
+address (docs/design-bluetooth.md, "A bond's name is made with its key").
 """.
--type event() :: {connected, Conn :: reference(), #{address := address(), level := atom(), bonded := boolean()}}
+-type event() :: {connected, Conn :: reference(), #{level := open | encrypted | authenticated,
+                                                    bond := none | erx_bt_pair:bond_id()}}
                | {mtu, Conn :: reference(), Mtu :: pos_integer()}
                | {subscribed, Conn :: reference(), Char :: atom(), none | notify | indicate}
                | {write, Req :: reference(), Conn :: reference(), Char :: atom(), Value :: binary()}
@@ -161,9 +161,9 @@ is_characteristic({Char, #{max := Max, access := Access} = Limits}) ->
 is_characteristic(_Characteristic) ->
     false.
 
-is_event({connected, Conn, #{address := Address, bonded := Bonded, level := Level} = Info})
-  when map_size(Info) =:= 3 ->
-    is_reference(Conn) andalso is_address(Address) andalso is_boolean(Bonded) andalso is_atom(Level);
+is_event({connected, Conn, #{level := Level, bond := Bond} = Info}) when map_size(Info) =:= 2 ->
+    is_reference(Conn) andalso lists:member(Level, [open, encrypted, authenticated])
+        andalso (Bond =:= none orelse erx_bt_pair:is_bond_id(Bond));
 is_event({mtu, Conn, Mtu}) ->
     is_reference(Conn) andalso is_integer(Mtu) andalso Mtu >= ?ERX_ATT_MTU_DEFAULT;
 is_event({subscribed, Conn, Char, Kind}) ->
@@ -175,5 +175,3 @@ is_event({disconnected, Conn}) ->
 is_event(_Event) ->
     false.
 
-is_address({Type, <<_:48>>}) -> Type =:= public orelse Type =:= random;
-is_address(_Address) -> false.

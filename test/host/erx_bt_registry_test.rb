@@ -22,10 +22,11 @@ class ErxBtRegistryTest < Minitest::Test
   Seed = Data.define(:fault, :path, :anchor, :replacement, :catching_case)
 
   SEEDS = [
-    Seed.new(fault: "a bonded link's identity address left in the connected event",
-             path: CORE, anchor: '    #{address => Address, level => Level, bonded => true}.',
-             replacement: '    Security#{address => Address}.',
-             catching_case: 'connected_carries_no_identity'),
+    Seed.new(fault: "the join's address copied into the connected event",
+             path: CORE, anchor: '      | connected_events(Conn, Security, Core)],',
+             replacement: '      | [{event, H, {connected, Conn, Security#{address => Address}}} ' \
+                          '|| H <- lists:usort(maps:values(Core#core.handlers))]],',
+             catching_case: 'connected_holds_the_level_and_bond'),
     Seed.new(fault: "the link's MTU dropped from the replay",
              path: CORE, anchor: ' ++ [{mtu, Conn, Mtu} || New, Mtu =/= none] ++',
              replacement: ' ++ [] ++',

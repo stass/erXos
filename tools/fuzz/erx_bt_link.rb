@@ -47,10 +47,10 @@ module ErxBtLinkFuzz
               replacement: "configuration(_Ref, Key, Kind, _Now, #core{bond = none} = Core) ->\n" \
                            '    {[{store, {subscriptions, #{Key => Kind}}}], Core}.',
               verdict: '{store_write_not_bonded,'),
-    Fault.new(fault: "a bonded link's security told to the registry without the bond's identity",
-              anchor: 'bond_security({kept, Identity, _Write}) -> #{bonded => true, identity => Identity};',
-              replacement: 'bond_security({kept, _Identity, _Write}) -> #{bonded => true};',
-              verdict: '{identity_not_bonded,')
+    Fault.new(fault: "a bonded link's security told to the registry without the bond's id",
+              anchor: 'bond_id({kept, Id, _Write}) -> Id;',
+              replacement: 'bond_id({kept, _Id, _Write}) -> none;',
+              verdict: '{bond_not_bonded,')
   ].freeze
 
   module_function

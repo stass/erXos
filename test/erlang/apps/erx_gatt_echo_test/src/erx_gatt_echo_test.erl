@@ -8,7 +8,10 @@ Bumble"). The application's supervisor starts one process, registered under this
 module's name, which starts erx_gatt_serial linked to itself and sends each
 `{serial, Conn, Bytes}` back with erx_gatt_serial:send/2, so a phone reads on `tx`
 every byte it wrote to `rx`, in order. A send that fails, to a phone that left or did
-not subscribe to `tx`, drops those bytes. The domain service installs `ble` only once
+not subscribe to `tx`, drops those bytes. It logs every `connected` it hears whole, the
+link's level and bond as the registry gives them, so a test of the bond's name reads
+which bond each connection carried and that no address came with it
+(docs/design-bluetooth.md, "On QEMU against Bumble"). The domain service installs `ble` only once
 both this domain and the Bluetooth domain are ready, and this domain reports ready only
 once its boot script's applications have started, so the echo answers its start at
 once and then waits, at most FACET_WAIT_MS, for the facet before it attaches; it exits
@@ -56,6 +59,9 @@ echo() ->
     receive
         {serial, Conn, Bytes} ->
             _ = erx_gatt_serial:send(Conn, Bytes),
+            echo();
+        {connected, _Conn, Info} ->
+            logger:notice("erx_gatt_echo_test: connected ~0p", [Info]),
             echo();
         _Other ->
             echo()
