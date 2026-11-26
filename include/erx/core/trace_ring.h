@@ -44,8 +44,8 @@
 
 /*
  * Empties ring by storing to every one of its pages: each record's sequence 0 and the head
- * 0. Its caller is the ring's one writer, before its first write, so the pages are faulted
- * in before any write under the writer's lock or mask.
+ * 0. It runs before the ring's first write, while nothing writes or reads it, so the pages
+ * are faulted in before any write under the writer's lock or mask.
  */
 void	erx_trace_ring_clear(erx_trace_ring_t *ring);
 

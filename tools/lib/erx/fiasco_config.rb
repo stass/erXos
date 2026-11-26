@@ -30,7 +30,7 @@ module Erx
     # count in the information page without it (design-fiasco.md, "Boot handoff").
     # The runtime debug information keeps every object's id, which names
     # threads and spaces in the kernel's trace rings (design-fiasco.md, "The
-    # kernel's trace rings"); without it every id reads 0.
+    # kernel's trace rings"); without it the trace glue does not build.
     REQUIRED = %w[CONFIG_FPU CONFIG_BENCHMARKING CONFIG_PERF_CNT_USER CONFIG_SYNC_CLOCK CONFIG_RT_DBG].freeze
     # The fork switches FP state eagerly and leaves SVE trapped ("Eager FP
     # switching"); the thread region is a constant of the non-hypervisor layout.

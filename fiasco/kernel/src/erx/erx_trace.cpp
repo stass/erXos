@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 // The kernel's trace rings' one writer (docs/design-fiasco.md, "The kernel's
-// trace rings"): each hook is one call of its event's function here, and
-// each of those one call of Erx_trace::record, which fills an entry under
-// the CPU lock and hands it to the C17 core's erx_trace_kernel_put for the
-// current CPU's ring. The hooks' files see no core header: the event
+// trace rings"). A hook calls its event's function here (ipc_receive,
+// switch_to). That function names its objects and calls Erx_trace::record,
+// which fills an entry under the CPU lock and hands it to the C17 core's
+// erx_trace_kernel_put for the current CPU's ring. The hooks' files see no core header: the event
 // numbers stay in this file. The rings themselves are
 // C (kernel/core/trace_rings.c) and reach this file only through the seam,
 // erx/core/trace_kernel.h.

@@ -56,7 +56,8 @@ module Erx
     # trace rings").
     def max_cpus(bytes)
       value = values(bytes)['CONFIG_MP_MAX_CPUS']
-      raise Error, "Fiasco configuration sets CONFIG_MP_MAX_CPUS to #{value.inspect}, not a CPU count" unless CPU_COUNT.match?(value.to_s)
+      raise Error, 'Fiasco configuration does not set CONFIG_MP_MAX_CPUS' if value.nil?
+      raise Error, "Fiasco configuration sets CONFIG_MP_MAX_CPUS to #{value.inspect}, not a CPU count" unless CPU_COUNT.match?(value)
 
       value.to_i
     end
