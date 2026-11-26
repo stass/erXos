@@ -139,6 +139,19 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the backend row alone meanwhile); the "window is read-only" test
   root; the crash record's trace tail; and the before-and-after numbers of `tools/erx bench nullcall`, `wake` and
   `vm` ([todo-performance.md](todo-performance.md)).
+* [Low] 0.2 on Fiasco, `fiasco/kernel/src/erx/erx_trace.cpp` and `kern/task.cpp`: `map_trace`'s hardening.
+  The rings are aligned and padded to `ERX_PAGE_SIZE` while the map uses `Config::PAGE_SHIFT`, and nothing
+  asserts the two equal (a larger granule would show neighbouring kernel data); the glue sees no generated
+  page size to assert against. The claim is taken before the call is decided, so a malformed call racing
+  a valid one makes the valid one fail; decide first and claim only on a map. `-L4_EEXIST` means both
+  "already mapped" and "the window is occupied". `Task::erx_map_trace_rings` is public and safe only for
+  its one caller; make it reachable from `Erx_trace` alone. The decision's `bytes` result is unused, and
+  the rings' size is fetched twice. Only the root's first thread calls today, so none of these is reachable.
+* [Low] 0.2 on Fiasco, `kernel/stack_fiasco.txt`: FD24 says Fiasco's thread block is measured by the conformance
+  suite's watermark, and no such watermark exists in the tree. The kernel trace hooks' deepest path, measured from
+  the objects' prologues (clang, the fork's development build), is 224 bytes: `Erx_trace::ipc_receive` 32,
+  `Erx_trace::record` 112, `erx_trace_kernel_put` 80 and `erx_trace_ring_put` 0 (`switch_to`'s 16 in place of
+  `ipc_receive`'s); build the watermark, or record each hook's frame from `-fstack-usage` of the glue.
 * [Medium] 0.2 on Fiasco, `fiasco/kernel`: Fiasco's map refuses a user mapping writable and executable at
   once, with a test whose seeded failure removes the check; an estimate of tens of lines, unverified
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).

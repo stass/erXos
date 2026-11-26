@@ -3010,8 +3010,9 @@ kernel paths with interrupts enabled (`Factory::kinvoke` around the object's man
 its space and the counter, and hands the entry
 and the CPU's number to `erx_trace_kernel_put`, which writes it on that CPU's ring with `erx_trace_ring_put`. A CPU's ring has one writer, the CPU, and no interrupt can enter its write, so the
 mask stands where the root's ring has its trace lock, and the sequence protocol is the core's ([The trace ring](#the-trace-ring),
-"Writing"). The time is the counter converted by the same core function the root's `erx_clock_ns` calls, so the kernel's
-rings and the root's merge on one clock.
+"Writing"). The time is the counter, read between two ISBs as the root reads it, converted by the same core function the
+root's `erx_clock_ns` calls, so the kernel's rings and the root's merge on one clock and no record takes its time ahead of
+the instructions before it.
 
 **C and C++.** The ring's type holds `_Atomic` fields and the generated layout's alignment, which C++ does not share, so
 no ring is ever a C++ object and no C++ file includes the ring's header. Three files divide the work:
@@ -3043,7 +3044,8 @@ control object (`kern/platform_control_object.cpp`), which only the root holds (
 whose one argument is a flexpage of the root's own space, the window, which the root's layout reserves for `ERX_CPU_LIMIT`
 rings. The kernel maps the rings' pages at the window's base with read rights alone, through the function Fiasco maps
 kernel-user memory with (`Task::map_ku_mem_chunk`, `kern/task.cpp:160`), and answers the number of rings it mapped. It refuses
-a window smaller than the rings or outside user space with `-L4_EINVAL`, and every call after one that succeeded with
+a call of another word count, a flexpage that is not of memory, a window misaligned to its order, smaller than the rings
+or outside user space, and rings that are not whole kernel pages, with `-L4_EINVAL`, and every call after one that succeeded with
 `-L4_EEXIST`, so the operation makes the kernel write the page-table entries of the root's window once in a boot and nothing
 else. The decision is a pure core function, `erx_fiasco_trace_window` (`kernel/core/trace_window.c`), over the
 call's words, the window and the rings' size, so host tests (`trace_window_test`) drive each refusal and a fuzz target

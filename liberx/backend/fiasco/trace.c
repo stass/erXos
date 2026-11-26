@@ -95,10 +95,10 @@ erx_fiasco_trace_window_map(void)
 {
 	l4_msg_regs_t *const mr = l4_utcb_mr();
 	l4_msgtag_t tag;
+	long rings;
 
 	mr->mr[0] = ERX_FIASCO_PFC_MAP_TRACE;
 	mr->mr[1] = l4_fpage(ERX_FIASCO_TRACE_WINDOW, ERX_FIASCO_TRACE_WINDOW_ORDER, L4_FPAGE_RO).raw;
-	long rings;
 
 	tag = l4_ipc_call(L4_BASE_ICU_CAP, l4_utcb(),
 	    l4_msgtag(L4_PROTO_PLATFORM_CTL, ERX_FIASCO_PFC_MAP_TRACE_WORDS, 0, 0), L4_IPC_NEVER);

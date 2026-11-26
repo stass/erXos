@@ -31,6 +31,7 @@ IMPLEMENTATION:
 #include "generic_timer.h"
 #include "globals.h"
 #include "lock_guard.h"
+#include "mem.h"
 #include "mem_space.h"
 #include "platform_control_object.h"
 #include "task.h"
@@ -71,8 +72,14 @@ Erx_trace::record(Unsigned32 event, Unsigned64 arg0, Unsigned64 arg1,
   Context const *running = current();
   erx_trace_entry_t entry{};
 
-  entry.time_ns = erx_clock_ticks_ns(Generic_timer::Gtimer::counter(),
-                                     Generic_timer::Gtimer::frequency());
+  // The counter is read as the root reads it (erx_fiasco_counter), between
+  // two ISBs, so the read is neither taken before the instructions ahead of
+  // it nor after those behind it, and a record's time keeps its place among
+  // the root's records on the one clock.
+  Mem::isb();
+  Unsigned64 const ticks = Generic_timer::Gtimer::counter();
+  Mem::isb();
+  entry.time_ns = erx_clock_ticks_ns(ticks, Generic_timer::Gtimer::frequency());
   entry.event = event;
   entry.thread = trace_thread_id(running);
   entry.space = trace_space_id(running);
@@ -104,7 +111,7 @@ Erx_trace::switch_to(Context const *next)
 // map_trace on the platform control object (docs/design-fiasco.md, "The
 // kernel's trace rings", "The root's window"): maps the rings' pages read-only
 // at the window's base in caller's own space, once in a boot. The platform
-// control object decodes the message (Platform_control_object::kinvoke):
+// control object decodes the message (Platform_control_object::sys_erx_map_trace):
 // words is its word count, and mempage, base and order its flexpage. Holding
 // that object is the authority, and only the root holds it.
 // erx_fiasco_trace_window decides; this maps. Answers the number of rings
