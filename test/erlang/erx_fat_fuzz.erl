@@ -29,7 +29,7 @@ run([Seed, Directory]) ->
     Volumes =/= [] orelse error(no_seed_volumes),
     {ok, Hello} = file:read_file(filename:join([Directory, "tree", "hello.txt"])),
     %% Loaded before the first round counts atoms, since loading a module makes its atoms.
-    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_fat, erx_fat_read, binary, lists, maps,
+    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_fat, erx_fat_read, erx_fat_alloc, binary, lists, maps,
                                                              unicode, calendar]],
     Mounted = lists:sum([round_of(lists:nth(rand:uniform(length(Volumes)), Volumes), Hello)
                          || _ <- lists:seq(1, ?ROUNDS)]),

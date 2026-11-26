@@ -54,6 +54,10 @@ put16(Image, Offset, Value) ->
     <<Before:Offset/binary, _:16, After/binary>> = Image,
     <<Before/binary, Value:16/little, After/binary>>.
 
+put32(Image, Offset, Value) ->
+    <<Before:Offset/binary, _:32, After/binary>> = Image,
+    <<Before/binary, Value:32/little, After/binary>>.
+
 %% FAT16's first FAT and its entries, from the image's own boot sector.
 fat16_start(<<_:14/binary, Reserved:16/little, _/binary>>) -> Reserved * ?SECTOR.
 
@@ -81,6 +85,47 @@ a_volume_mounts_with_its_type_label_and_clean_flag_test() ->
                  erx_fat:info(mounted(image("fat16.img")))),
     ?assertMatch(#{type := 32, label := <<"STICK32">>, clean := true, cluster_bytes := 512},
                  erx_fat:info(mounted(image("fat32.img")))).
+
+a_cleared_hard_error_bit_and_fat32_unmirrored_are_reported_test() ->
+    Image = image("fat16.img"),
+    Start = fat16_start(Image),
+    <<_:(Start + 2)/binary, Second:16/little, _/binary>> = Image,
+    ?assertMatch(#{clean := true, hard_error := true, mirrored := true},
+                 erx_fat:info(mounted(put16(Image, Start + 2, Second band 16#bfff)))),
+    %% FAT32's ExtFlags, at byte 40, with mirroring off and the first FAT active.
+    Info = erx_fat:info(mounted(put16(image("fat32.img"), 40, 16#80))),
+    ?assertMatch(#{mirrored := false, hard_error := false}, Info),
+    ?assertEqual({read_only, mirror}, erx_fat_alloc:writable(Info)).
+
+%% FAT32's version, at byte 42, must be 0.0, and its count of clusters at most
+%% 16#0ffffff5: a boot sector stating one more over a placement that large, whose
+%% sectors past the image read as zeroes, is refused, and one stating exactly that
+%% many mounts.
+fat32s_version_and_largest_count_of_clusters_are_checked_test() ->
+    Image = image("fat32.img"),
+    ?assertEqual({error, not_its_volume}, erx_fat:mount(reader(put16(Image, 42, 1)), byte_size(Image) div ?SECTOR)),
+    <<_:14/binary, Reserved:16/little, _/binary>> = Image,
+    FatSectors = ((16#0ffffff7 + 2) * 4 + ?SECTOR - 1) div ?SECTOR,
+    Huge = fun(Clusters) ->
+                   Total = Reserved + 2 * FatSectors + Clusters,
+                   Boot = put32(put32(Image, 36, FatSectors), 32, Total),
+                   Read = fun(S) when (S + 1) * ?SECTOR =< byte_size(Boot) -> {ok, binary:part(Boot, S * ?SECTOR, ?SECTOR)};
+                             (_S) -> {ok, <<0:(?SECTOR * 8)>>}
+                          end,
+                   erx_fat:mount(Read, Total)
+           end,
+    ?assertEqual({error, not_its_volume}, Huge(16#0ffffff6)),
+    ?assertMatch({ok, _}, Huge(16#0ffffff5)).
+
+%% FAT32's FSInfo sector, named at byte 48, is written only inside the reserved
+%% area past the boot sector: 0, the first FAT and a data sector are none, so no
+%% crafted boot sector aims the FSInfo writes at itself, a FAT or a file.
+an_fsinfo_sector_outside_the_reserved_area_is_none_test() ->
+    Image = image("fat32.img"),
+    <<_:14/binary, Reserved:16/little, _:32/binary, FsInfo:16/little, _/binary>> = Image,
+    ?assertMatch(#{fsinfo := FsInfo}, erx_fat:layout(mounted(Image))),
+    [?assertMatch(#{fsinfo := none}, erx_fat:layout(mounted(put16(Image, 48, Sector))))
+     || Sector <- [0, Reserved, Reserved + 1, 16#ffff]].
 
 a_cleared_clean_bit_is_the_dirty_flag_test() ->
     Image = image("fat16.img"),

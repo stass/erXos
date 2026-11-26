@@ -41,7 +41,7 @@ throw, `{erx_fat, Finding}`, caught at each exported entry; anything else the re
 function raises propagates.
 """.
 
--export([mount/2, info/1, root/1, walk/3, attr/1, list/2, read/4, key/1]).
+-export([mount/2, info/1, layout/1, root/1, walk/3, attr/1, list/2, read/4, key/1]).
 -export_type([fat/0, fat_node/0, finding/0, read_sector/0]).
 
 -define(SECTOR, 512).
@@ -71,17 +71,31 @@ function raises propagates.
 %% The least entry that ends a chain (section 4.1).
 -define(END_MARK_16, 16#fff8).
 -define(END_MARK_32, 16#0ffffff8).
+%% FAT32's largest count of clusters, whose numbers end below the bad mark,
+%% 16#0ffffff7, and the one file-system version FAT32 defines, 0.0, as fsimg, the
+%% server's oracle, admits them (lib/formats/fat/codec.c:191-201 and :221-223 at
+%% fsimg b6c1ea2).
+-define(CLUSTERS_MAX_32, 16#0ffffff5).
+-define(VERSION_32, 0).
 
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
 -type finding() :: not_its_volume | does_not_read | read_failed.
 
 %% The volume as its boot sector lays it out, in sectors from the placement's start.
 %% root is FAT16's fixed root region, {fixed, FirstSector, Entries}, or FAT32's root
-%% cluster.
+%% cluster. fat_start is the FAT the server reads, first_fat the first of the fats
+%% copies of fat_sectors each; fsinfo is FAT32's FSInfo sector when the boot sector
+%% names one in the reserved area.
 -record(fat, {read :: read_sector(),
               type :: 16 | 32,
               per_cluster :: pos_integer(),
               fat_start :: pos_integer(),
+              first_fat :: pos_integer(),
+              fats :: pos_integer(),
+              fat_sectors :: pos_integer(),
+              fsinfo :: pos_integer() | none,
+              mirrored :: boolean(),
+              hard_error :: boolean(),
               data_start :: pos_integer(),
               clusters :: pos_integer(),
               root :: {fixed, pos_integer(), pos_integer()} | pos_integer(),
@@ -116,13 +130,29 @@ from the boot sector and its FAT's second entry.
 mount(Read, Sectors) ->
     guarded(fun() -> admit(Read, Sectors, sector(Read, 0)) end).
 
--doc "What the volume's status shows of it: its type, label, serial and dirty flag.".
+-doc """
+What the volume's status shows of it: its type, label, serial, its dirty and
+hard-error flags and whether its FATs are mirrored, the last three what
+erx_fat_alloc:writable/1 reads as the writable rule's fourth condition.
+""".
 -spec info(fat()) -> #{type := 16 | 32, label := binary() | none, serial := non_neg_integer() | none,
-                       clean := boolean(), cluster_bytes := pos_integer(), clusters := pos_integer()}.
-info(#fat{type = Type, label = Label, serial = Serial, clean = Clean, per_cluster = PerCluster,
-          clusters = Clusters}) ->
-    #{type => Type, label => Label, serial => Serial, clean => Clean,
-      cluster_bytes => PerCluster * ?SECTOR, clusters => Clusters}.
+                       clean := boolean(), hard_error := boolean(), mirrored := boolean(),
+                       cluster_bytes := pos_integer(), clusters := pos_integer()}.
+info(#fat{type = Type, label = Label, serial = Serial, clean = Clean, hard_error = HardError,
+          mirrored = Mirrored, per_cluster = PerCluster, clusters = Clusters}) ->
+    #{type => Type, label => Label, serial => Serial, clean => Clean, hard_error => HardError,
+      mirrored => Mirrored, cluster_bytes => PerCluster * ?SECTOR, clusters => Clusters}.
+
+-doc """
+Where the volume keeps what erx_fat_alloc writes: its FATs, the first first, its
+count of clusters and FAT32's FSInfo sector; with the function that reads the
+volume's sectors.
+""".
+-spec layout(fat()) -> erx_fat_alloc:layout().
+layout(#fat{read = Read, type = Type, first_fat = First, fats = Fats, fat_sectors = FatSectors,
+            clusters = Clusters, fsinfo = FsInfo}) ->
+    #{read => Read, type => Type, fat_start => First, fats => Fats, fat_sectors => FatSectors,
+      clusters => Clusters, fsinfo => FsInfo}.
 
 -doc "The volume's root directory.".
 -spec root(fat()) -> fat_node().
@@ -209,24 +239,28 @@ admit(Read, Sectors, <<_:11/binary, ?SECTOR:16/little, PerCluster, Reserved:16/l
                {fat, 32} when FatSize16 =:= 0, Total16 =:= 0 -> 32;
                _ -> fail(not_its_volume)
            end,
-    #{fat_size := FatSectors, active := Active, root := RootCluster, serial := Serial, label := Label} =
-        tail(Type, FatSize16, Tail),
+    #{fat_size := FatSectors, active := Active, root := RootCluster, serial := Serial, label := Label,
+      version := Version, fsinfo := FsInfo, mirrored := Mirrored} = tail(Type, FatSize16, Tail),
     RootSector = Reserved + Fats * FatSectors,
     DataStart = RootSector + (RootEntries * ?ENTRY + ?SECTOR - 1) div ?SECTOR,
     Clusters = (Total - DataStart) div max(PerCluster, 1),
     admitted(lists:member(PerCluster, [1, 2, 4, 8, 16, 32, 64, 128])
              andalso Reserved >= 1 andalso Fats >= 1 andalso Active < Fats
              andalso Total =< Sectors andalso DataStart < Total andalso Clusters >= 1
-             andalso FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)),
+             andalso FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)
+             andalso (Type =:= 16 orelse (Version =:= ?VERSION_32 andalso Clusters =< ?CLUSTERS_MAX_32))),
     Fat = #fat{read = Read, type = Type, per_cluster = PerCluster, fat_start = Reserved + Active * FatSectors,
+               first_fat = Reserved, fats = Fats, fat_sectors = FatSectors, mirrored = Mirrored,
+               fsinfo = case FsInfo of N when N >= 1, N < Reserved -> N; _ -> none end,
                data_start = DataStart, clusters = Clusters, root = {fixed, RootSector, RootEntries},
-               label = Label, serial = Serial, clean = true},
+               label = Label, serial = Serial, clean = true, hard_error = false},
     Root = case {Type, RootCluster} of
                {16, none} when RootEntries >= 1 -> {fixed, RootSector, RootEntries};
                {32, Cluster} when RootEntries =:= 0 -> data_cluster(Fat, Cluster);
                _ -> fail(not_its_volume)
            end,
-    Fat#fat{root = Root, clean = clean(Fat)};
+    #{clean := Clean, hard_error := HardError} = erx_fat_alloc:volume_flags(Type, raw_entry(Fat, 1)),
+    Fat#fat{root = Root, clean = Clean, hard_error = HardError};
 admit(_Read, _Sectors, _Boot) ->
     fail(not_its_volume).
 
@@ -237,11 +271,15 @@ admitted(false) -> fail(not_its_volume).
 %% and root cluster before them. A FAT32 volume whose flags turn mirroring off
 %% reads the FAT they name.
 tail(16, FatSize16, <<_Drive, _, Signature, Serial:32/little, Label:11/binary, _/binary>>) ->
-    identity(Signature, Serial, Label, #{fat_size => FatSize16, active => 0, root => none});
-tail(32, _FatSize16, <<FatSize32:32/little, Flags:16/little, _Version:16, Root:32/little, _Info:16, _Backup:16,
-                       _:12/binary, _Drive, _, Signature, Serial:32/little, Label:11/binary, _/binary>>) ->
-    Active = case Flags band 16#80 of 0 -> 0; _ -> Flags band 16#0f end,
-    identity(Signature, Serial, Label, #{fat_size => FatSize32, active => Active, root => Root}).
+    identity(Signature, Serial, Label, #{fat_size => FatSize16, active => 0, root => none, version => 0,
+                                         fsinfo => none, mirrored => true});
+tail(32, _FatSize16, <<FatSize32:32/little, Flags:16/little, Version:16/little, Root:32/little, Info:16/little,
+                       _Backup:16, _:12/binary, _Drive, _, Signature, Serial:32/little, Label:11/binary,
+                       _/binary>>) ->
+    Mirrored = Flags band 16#80 =:= 0,
+    Active = case Mirrored of true -> 0; false -> Flags band 16#0f end,
+    identity(Signature, Serial, Label, #{fat_size => FatSize32, active => Active, root => Root, version => Version,
+                                         fsinfo => Info, mirrored => Mirrored}).
 
 %% The serial and label behind the extended signature. The label is text a status
 %% line shows, so one holding a control character is none, as an empty one is.
@@ -252,11 +290,6 @@ identity(?EXTENDED_BOOT, Serial, Label, Tail) ->
     Tail#{serial => Serial, label => case Shown of true -> Text; false -> none end};
 identity(_Signature, _Serial, _Label, Tail) ->
     Tail#{serial => none, label => none}.
-
-%% The clean bit of the FAT's second entry (section 4.2): set while the volume was
-%% unmounted cleanly.
-clean(Fat = #fat{type = 16}) -> raw_entry(Fat, 1) band 16#8000 =/= 0;
-clean(Fat = #fat{type = 32}) -> raw_entry(Fat, 1) band 16#08000000 =/= 0.
 
 raw_entry(#fat{read = Read, type = Type, fat_start = FatStart}, Cluster) ->
     Offset = Cluster * (Type div 8),

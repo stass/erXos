@@ -20,6 +20,7 @@ module ErxFatFuzz
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_fat/src/erx_fat.erl'
   DECODER = 'erlang/apps/erx_fat/src/erx_fat_read.erl'
+  ALLOC = 'erlang/apps/erx_fat/src/erx_fat_alloc.erl'
   FUZZ = 'test/erlang/erx_fat_fuzz.erl'
   CHECKED = 'when is_integer(Cluster), Cluster >= 2, Cluster < Clusters + 2 ->'
   UNCHECKED = 'when is_integer(Cluster), Clusters > 0 ->'
@@ -50,7 +51,8 @@ module ErxFatFuzz
       File.binwrite(core_path, core_text)
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, core_path,
-                                       File.join(ROOT, DECODER), File.join(ROOT, FUZZ), stdin_data: '')
+                                       File.join(ROOT, DECODER), File.join(ROOT, ALLOC), File.join(ROOT, FUZZ),
+                                       stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
