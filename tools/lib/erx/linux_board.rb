@@ -42,6 +42,8 @@ module Erx
     INITRAMFS_ADDRESS = 0x1000_0000
     # Where the sets are laid out.
     OUTPUT = 'build/linux-board'
+    # The board runs natively; its run deadline is PeerBench's under 'native'.
+    ACCEL = 'native'
     # The mini UART the firmware's enable_uart sets up, which the vendor's tree names
     # ttyS0; quiet, so the kernel's device messages do not land inside the program's BENCH
     # lines, as they did while USB and the card were probed; the performance governor, so
@@ -93,7 +95,7 @@ module Erx
     def lay_out(root:, runner:, platform:, name:, directory:, compiler:, linker:, revision:)
       raise Error, "linux board: Linux's guest runs no counterpart of #{name}" unless runs?(name)
       lock = LinuxGuest.lock(root: root, runner: runner)
-      built = LinuxGuest.build(root: root, runner: runner, accel: 'native', board: true)
+      built = LinuxGuest.build(root: root, runner: runner, accel: ACCEL, board: true)
       pinned = BootPartition::FIRMWARE.map { |id| Dependencies.new(root: root, runner: runner).archive_for(id) }
       plan = plan(platform: platform, name: name, initramfs: built.fetch(:initrd),
                   linux: [KERNEL, TREE, LICENSE].to_h { |id| [id, lock.fetched_file(id)] },
@@ -108,7 +110,7 @@ module Erx
                                'linux' => linux } }
       written = BootPartition.write_set(root: root, directory: directory, plan: plan, record: record)
       BoardRun::Subject.new(set: Netboot.boot_set(File.dirname(written.record), record: BootPartition::SET_RECORD),
-                            record: written.record, identity: nil, deadline_seconds: LinuxGuest.deadline_seconds('native'),
+                            record: written.record, identity: nil, deadline_seconds: LinuxGuest.deadline_seconds(ACCEL),
                             root_flags: nil)
     end
   end

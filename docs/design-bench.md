@@ -1121,24 +1121,25 @@ and never runs while they do.
 **The program's deadline.** `erx_peer_bench`, the program other
 systems and erXos's `posix` boot run, ends its run by `SIGALRM` at a
 deadline compiled into it by flag (`ERX_PEER_RUN_DEADLINE_S`), so a
-stalled side ends the run with no `CLOCK` line, and QEMU's deadline
-for its `done` line is that deadline and `NativeBench`'s margin. The
-deadline is one fact, `PeerBench::RUN_DEADLINE_SECONDS` (300 s), times
-a factor that is a fact of the accelerator the run boots under, kept in
-one table beside it (`PeerBench::DEADLINE_FACTORS`): 1 under HVF and
-on a board (`native`), 3 under TCG, which translates every instruction
-and runs a `posix` run several times slower than HVF does. Every
-build of the program and every checkpoint on its `done` line derives
-its deadline from the two (`PeerBench.run_deadline`), so a build is
-for one accelerator: erXos's `posix` image is built for the
-accelerator of the session's boots, Linux's guest for its own, and
-Genode's image, built once for its machine, for the longest deadline
-of the accelerators its machine boots under. On erXos the program's
-alarm does not fire, since `liberx` does not yet implement `alarm`
+stalled side ends the run with no `CLOCK` line and no `done` line;
+QEMU's deadline for the `done` line is later still, by `NativeBench`'s
+margin (on Linux, after `/init`'s own backstop as well). The deadline
+is one fact, `PeerBench::RUN_DEADLINE_SECONDS` (300 s), times a factor
+that is a fact of the accelerator the run boots under, kept in one
+table beside it (`PeerBench::DEADLINE_FACTORS`): 1 under HVF and on a
+board (`native`), 3 under TCG, which translates every instruction and
+runs a `posix` run several times slower than HVF does. Every build of
+the program and every checkpoint on its `done` line derives its
+deadline from the two (`PeerBench.run_deadline`), so a build is for one
+accelerator: erXos's `posix` image is built for the accelerator of the
+session's boots, Linux's guest for each accelerator it boots under, and
+Genode's image, built once for its machine, for the longest deadline of
+the accelerators its machine boots under, which its checkpoint takes
+too. Until `liberx` implements `alarm`
 ([design-programs.md](design-programs.md#the-posix-lite-personality)
-designs it), so there a stalled run is bounded by QEMU's checkpoint
-alone, and the boot ends without a `done` line rather than with the
-program's deadline.
+designs it), the program's alarm does not fire on erXos, so there a
+stalled run is bounded by QEMU's checkpoint alone: it ends at the run's
+deadline and the margin rather than at the run's deadline.
 
 ### The cycle counter
 

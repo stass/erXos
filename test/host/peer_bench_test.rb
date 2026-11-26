@@ -53,7 +53,7 @@ class PeerBenchTest < Minitest::Test
 
   def test_the_build_flags_carry_the_declared_xdomain_parameters
     parameters = Erx::BenchSuite.benchmark('xdomain').landing.fetch('xdomain').first.parameters
-    assert_includes Erx::PeerBench.flags(accel: "hvf"), "-DERX_PEER_XDOMAIN_ENCODED=#{parameters.fetch('encoded')}u"
+    assert_includes Erx::PeerBench.flags(accel: 'hvf'), "-DERX_PEER_XDOMAIN_ENCODED=#{parameters.fetch('encoded')}u"
     assert_raises(Erx::Error) { Erx::PeerBench.asked('missing', cpus: 16, clock: 'counter') }
   end
 

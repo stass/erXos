@@ -79,8 +79,7 @@ module Erx
 
     # Builds the image under OUTPUT on platform for runs under accel, with Fiasco as last
     # built. Answers the built image, its machine and manifest, and the program's flags,
-    # SHA-256 and compiler
-    # (PeerBench.compiler_version, as Linux's record names it).
+    # SHA-256 and compiler (PeerBench.compiler_version, as Linux's record names it).
     def build(root:, runner:, compiler:, linker:, platform:, accel:, seeded: [])
       named = PeerBench.compiler_version(runner, compiler)
       on = machine(platform)

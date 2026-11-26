@@ -194,13 +194,15 @@ module Erx
       end
 
       def call(benchmark, cells:, cpus:, accel:)
-        @built ||= LinuxGuest.build(root: @root, runner: @runner, accel: accel)
+        # Each build is a directory of its own, so a boot under any accelerator runs the
+        # guest built for it.
+        built = (@built ||= {})[accel] ||= LinuxGuest.build(root: @root, runner: @runner, accel: accel)
         directory = File.join(@root, 'build/qemu', "linux-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
-        report = LinuxGuest.boot(root: @root, runner: @runner, built: @built, benchmark: benchmark.name, cpus: cpus,
+        report = LinuxGuest.boot(root: @root, runner: @runner, built: built, benchmark: benchmark.name, cpus: cpus,
                                  platform: @platform, accel: accel, directory: directory)
         # The kernel QEMU booted is the pinned one, as the record says.
-        unless report.fetch('image_sha256') == @built.fetch(:subject).fetch('kernel').fetch('sha256')
-          raise Error, "#{@built.fetch(:kernel)} is not the kernel Linux's lock pins: run `#{SideLock.fetch_command(LABEL)}`"
+        unless report.fetch('image_sha256') == built.fetch(:subject).fetch('kernel').fetch('sha256')
+          raise Error, "#{built.fetch(:kernel)} is not the kernel Linux's lock pins: run `#{SideLock.fetch_command(LABEL)}`"
         end
         serial = report.fetch('serial_log')
         lines = NativeBench.guest_lines(File.binread(serial))
@@ -211,7 +213,7 @@ module Erx
                                                     .fetch(:memory_mib),
                          'machine' => 'virt',
                          'qemu' => report['qemu_version'] }.compact,
-          subject: @built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from'],
+          subject: built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from'],
           pinned: PeerBench.pins?(benchmark.name)
         )
       end

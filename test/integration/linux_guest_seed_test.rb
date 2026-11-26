@@ -20,14 +20,17 @@ require_relative '../../tools/lib/erx/runner'
 class LinuxGuestSeedTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
 
+  # The accelerator the seeded guests are built for and boot under.
+  ACCEL = 'hvf'
+
   # The cells of a one-CPU boot of benchmark, and how long the boot took.
   def peer_boot(benchmark, seeded)
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-    built = Erx::LinuxGuest.build(root: ROOT, runner: runner, accel: 'hvf', seeded: seeded)
+    built = Erx::LinuxGuest.build(root: ROOT, runner: runner, accel: ACCEL, seeded: seeded)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     report = Dir.mktmpdir('linux-guest-seed-', File.join(ROOT, 'build')) do |directory|
       Erx::LinuxGuest.boot(root: ROOT, runner: runner, built: built, benchmark: benchmark, cpus: 1,
-                           platform: Erx::Platform.development(ROOT), directory: directory)
+                           platform: Erx::Platform.development(ROOT), accel: ACCEL, directory: directory)
                 .then { |booted| File.binread(booted.fetch('serial_log')) }
     end
     lines = Erx::NativeBench.guest_lines(report)
@@ -46,7 +49,7 @@ class LinuxGuestSeedTest < Minitest::Test
     refute_nil answer.fetch(:clock)
     assert_equal 'measured', cell(answer, 'wake-same-cpu').status
     # /init woke on the program's end and powered off, long before its deadline.
-    assert_operator seconds, :<, Erx::LinuxGuest::DEADLINE_SECONDS / 2
+    assert_operator seconds, :<, Erx::LinuxGuest.deadline_seconds(ACCEL) / 2
   end
 
   def test_the_seeded_lost_wake_fails_the_same_cpu_wake
