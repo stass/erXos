@@ -40,6 +40,15 @@ whose ownership check (erx_fat:check/1) passed.
   with long-name entries too, whose last part ends any such run. FAT16's root does
   not grow, and a name that finds no run in it is `enospc`. A directory is never
   compacted.
+* **A file's contents.** write/5 writes a file's bytes in preparation, in the
+  clusters it keeps and in a run the allocator grows its chain by, zeroes first
+  from its old size when the write starts past it, so every byte within a size is
+  one written to the file; truncate/4 cuts its chain through the allocator, the
+  cut clusters waiting for their release, or grows it as a write of nothing at the
+  new size does; setattr/3 changes its time and read-only attribute. Each
+  publishes the file's entry, its first cluster, size, time and attributes, in
+  publication. A write or cut past the end of a chain shorter than its file's size
+  is `does_not_read`, and one past 4 GiB less one byte `efbig`.
 * **Removal.** remove/3 and rmdir/3 take the name away and answer its node; its
   chain is the caller's to free with free/2 once no fid names it.
 * **Renaming** onto an existing name removes it, a directory onto a file is
@@ -57,6 +66,7 @@ as it was.
 """.
 
 -export([new/1, view/1, create/4, mkdir/4, remove/3, rmdir/3, rename/5, free/2, held/1, commit/1, finish/1]).
+-export([write/5, truncate/4, setattr/3, refreshed/2]).
 -export_type([batch/0, error/0]).
 
 -include("erx_fat_entry.hrl").
@@ -65,6 +75,8 @@ as it was.
 -define(ENTRIES_PER_SECTOR, (?SECTOR div ?ENTRY)).
 %% The steps that write directory sectors, in the batch's order.
 -define(STEPS, [preparation, linking, publication]).
+%% The largest file FAT holds: 4 GiB less one byte.
+-define(FILE_MAX, 16#ffffffff).
 %% The whole plan's steps, the allocator's among them.
 -define(PLAN_STEPS, [preparation, linking, publication, cutting, release]).
 %% The numeric tails a placement records: the least free one is at most one past a
@@ -72,7 +84,7 @@ as it was.
 -define(TAILS_RECORDED, (?DIR_ENTRIES_MAX + 1)).
 
 -type step() :: preparation | linking | publication.
--type error() :: einval | enametoolong | eexist | enoent | enospc | enotempty | enotdir | eisdir
+-type error() :: einval | enametoolong | eexist | enoent | enospc | enotempty | enotdir | eisdir | efbig
                | erx_fat:finding() | erx_fat_alloc:finding().
 %% An entry's place on the medium: its sector and its byte offset in it.
 -type slot() :: {non_neg_integer(), non_neg_integer()}.
@@ -240,6 +252,125 @@ rename(B, FromDir, From, ToDir, To) ->
                             moved(B, Node, FromDir, Slots, ToDir, To, Units, none)
                     end
             end).
+
+-doc """
+Count bytes Bytes of file File written from Offset at Time: the file as the batch
+then leaves it. A write past the file's size zeroes from the size to Offset first.
+""".
+-spec write(batch(), erx_fat:fat_node(), non_neg_integer(), binary(), integer()) ->
+          {ok, erx_fat:fat_node(), batch()} | {error, error()}.
+write(B, File, Offset, Bytes, Time) ->
+    guarded(fun() ->
+                    Fresh = fresh(B, File),
+                    #{size := Size} = erx_fat:attr(Fresh),
+                    End = Offset + byte_size(Bytes),
+                    End =< ?FILE_MAX orelse fail(efbig),
+                    Start = min(Offset, Size),
+                    contents(B, Fresh, Start, <<0:((Offset - Start) * 8), Bytes/binary>>, max(Size, End), Time)
+            end).
+
+-doc """
+File File cut or grown to Size bytes at Time: the file as the batch then leaves it.
+What a cut takes off waits for its release; a growth reads as zeroes.
+""".
+-spec truncate(batch(), erx_fat:fat_node(), non_neg_integer(), integer()) ->
+          {ok, erx_fat:fat_node(), batch()} | {error, error()}.
+truncate(B = #batch{alloc = Alloc}, File, Size, Time) ->
+    guarded(fun() ->
+                    Fresh = fresh(B, File),
+                    #{size := Old} = erx_fat:attr(Fresh),
+                    Size =< ?FILE_MAX orelse fail(efbig),
+                    case {Size >= Old, erx_fat:first(Fresh)} of
+                        {true, _} ->
+                            contents(B, Fresh, Old, <<0:((Size - Old) * 8)>>, Size, Time);
+                        {false, 0} ->
+                            published(B, Fresh, 0, Size, Time);
+                        {false, First} ->
+                            Keep = (Size + cluster_bytes(B) - 1) div cluster_bytes(B),
+                            Alloc1 = ok(erx_fat_alloc:shrink(Alloc, First, Keep)),
+                            published(B#batch{alloc = Alloc1}, Fresh, case Keep of 0 -> 0; _ -> First end, Size, Time)
+                    end
+            end).
+
+-doc """
+File File's attributes changed: `mtime` (UNIX seconds) and `read_only`, each when
+Changes holds it; the file as the batch then leaves it.
+""".
+-spec setattr(batch(), erx_fat:fat_node(), #{mtime => integer(), read_only => boolean()}) ->
+          {ok, erx_fat:fat_node(), batch()} | {error, error()}.
+setattr(B, File, Changes) ->
+    guarded(fun() ->
+                    Fresh = fresh(B, File),
+                    entry_changed(B, Fresh, fun(Short) ->
+                                                    S1 = case Changes of #{mtime := T} -> erx_fat_entry:with_mtime(Short, T); #{} -> Short end,
+                                                    case Changes of #{read_only := R} -> erx_fat_entry:with_read_only(S1, R); #{} -> S1 end
+                                            end)
+            end).
+
+-doc "File File as the batch leaves it (erx_fat:refreshed/2).".
+-spec refreshed(batch(), erx_fat:fat_node()) -> {ok, erx_fat:fat_node()} | {error, error()}.
+refreshed(B, File) ->
+    try {ok, fresh(B, File)} catch throw:{?MODULE, Error} -> {error, Error} end.
+
+fresh(B, File) ->
+    kind(File) =:= file orelse fail(eisdir),
+    ok(erx_fat:refreshed(File, view(B))).
+
+cluster_bytes(#batch{fat = Fat}) -> maps:get(cluster_bytes, erx_fat:info(Fat)).
+
+%% Data, the file's bytes from Start, written in preparation in the file's chain,
+%% grown first to hold them, and the file published with size Size.
+contents(B, File, _Start, <<>>, Size, Time) ->
+    published(B, File, erx_fat:first(File), Size, Time);
+contents(B = #batch{alloc = Alloc}, File, Start, Data, Size, Time) ->
+    #{size := Old} = erx_fat:attr(File),
+    PerCluster = cluster_bytes(B),
+    Need = (Start + byte_size(Data) + PerCluster - 1) div PerCluster,
+    Chain = case erx_fat:first(File) of 0 -> []; First -> ok(erx_fat_alloc:chain(Alloc, First)) end,
+    {Whole, B1} = case Need - length(Chain) of
+                      More when More > 0 ->
+                          %% A chain shorter than its size has no clusters of its own past its end.
+                          length(Chain) * PerCluster >= Old orelse fail(does_not_read),
+                          Last = case Chain of [] -> none; _ -> lists:last(Chain) end,
+                          {Run, Alloc1} = ok(erx_fat_alloc:grow(Alloc, Last, More)),
+                          {Chain ++ Run, B#batch{alloc = Alloc1}};
+                      _ ->
+                          {Chain, B}
+                  end,
+    B2 = data_written(B1, lists:nthtail(Start div PerCluster, Whole), Start rem PerCluster, Data),
+    published(B2, File, hd(Whole), Size, Time).
+
+%% Data written from byte Offset of the first of Clusters on, a sector at a time:
+%% a whole sector as it is, a part patched into the sector as the batch leaves it.
+data_written(B, _Clusters, _Offset, <<>>) ->
+    B;
+data_written(B, [Cluster | Rest], Offset, Data) ->
+    Sectors = ok(erx_fat:cluster_sectors(view(B), Cluster)),
+    Room = length(Sectors) * ?SECTOR - Offset,
+    Here = min(Room, byte_size(Data)),
+    <<Mine:Here/binary, Later/binary>> = Data,
+    data_written(sectors_written(B, lists:nthtail(Offset div ?SECTOR, Sectors), Offset rem ?SECTOR, Mine),
+                 Rest, 0, Later).
+
+sectors_written(B, _Sectors, _Offset, <<>>) ->
+    B;
+sectors_written(B, [Sector | Rest], Offset, Data) ->
+    Here = min(?SECTOR - Offset, byte_size(Data)),
+    <<Mine:Here/binary, Later/binary>> = Data,
+    sectors_written(set_entry(B, preparation, {Sector, Offset}, Mine), Rest, 0, Later).
+
+%% File's entry published with first cluster First, size Size and time Time.
+published(B, File, First, Size, Time) ->
+    entry_changed(B, File, fun(Short) ->
+                                   erx_fat_entry:with_mtime(erx_fat_entry:with_size(erx_fat_entry:with_first(Short, First), Size), Time)
+                           end).
+
+%% File's short entry changed by Change in publication: the file as it then reads.
+entry_changed(B, File, Change) ->
+    Slot = ok(erx_fat:entry_slot(File, view(B))),
+    {short, Short} = erx_fat_entry:decode(entry_at(B, Slot)),
+    B1 = set_entry(B, publication, Slot, erx_fat_entry:encode(Change(Short))),
+    {fresh(B1, File), B1}.
 
 %% Node's entries, at Slots of FromDir, taken away and published again as To in
 %% ToDir, its short entry's fields kept; its `..` named again in linking when a
@@ -447,7 +578,7 @@ entry_at(B, {Sector, Offset}) -> binary:part(sector(B, Sector), Offset, ?ENTRY).
 %% Sector images
 %% ---------------------------------------------------------------------------
 
-%% Bytes at Slot from Step on: Step's image takes them, made from the latest image
+%% Bytes, an entry or a file's data, at Slot from Step on: Step's image takes them, made from the latest image
 %% of Step or a step before it, else from the medium, and so does every later image
 %% the sector has.
 set_entry(B = #batch{images = Images}, Step, {Sector, Offset}, Bytes) ->
@@ -461,7 +592,8 @@ set_entry(B = #batch{images = Images}, Step, {Sector, Offset}, Bytes) ->
     B#batch{images = Images#{Sector => maps:merge(Steps, Later#{Step => patched(Base, Offset, Bytes)})}}.
 
 patched(Image, Offset, Bytes) ->
-    <<Head:Offset/binary, _:?ENTRY/binary, Tail/binary>> = Image,
+    Length = byte_size(Bytes),
+    <<Head:Offset/binary, _:Length/binary, Tail/binary>> = Image,
     <<Head/binary, Bytes/binary, Tail/binary>>.
 
 %% Cluster, which the batch allocated, zeroed in preparation, its first bytes Head.

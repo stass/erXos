@@ -399,3 +399,79 @@ big_directory_changes(Flat) ->
     {ok, _, B2} = erx_fat_dir:rename(B1, Big, big_name(10900), Big, <<"renamed in the middle">>),
     {ok, _, _} = erx_fat_dir:commit(B2),
     walked(B2, Big, <<"renamed in the middle">>).
+
+%% ---------------------------------------------------------------------------
+%% A file's contents: writes, appends, holes, cuts and growth
+%% ---------------------------------------------------------------------------
+
+contents_test_() ->
+    {timeout, 600, [{Name, fun() -> contents_ops(Name) end} || Name <- ["fat16.img", "fat32.img"]]}.
+
+contents_ops(Image) ->
+    Fat = mounted(Image),
+    Root = erx_fat:root(Fat),
+    Pattern = fun(N, Seed) -> << <<((I * 7 + Seed) rem 251)>> || I <- lists:seq(1, N) >> end,
+    A = Pattern(9000, 1),
+    B1 = batch(Fat, fun mount_cuts/2, fun(B) ->
+                   {Ba, F} = node_of(erx_fat_dir:create(B, Root, <<"copied file.bin">>, ?TIME)),
+                   {ok, F1, Bb} = erx_fat_dir:write(Ba, F, 0, binary:part(A, 0, 5000), ?TIME),
+                   {ok, F2, Bc} = erx_fat_dir:write(Bb, F1, 5000, binary:part(A, 5000, 4000), ?TIME),
+                   ?assertMatch(#{size := 9000}, erx_fat:attr(F2)),
+                   ?assertEqual({ok, A}, erx_fat:read(F2, 0, 9000, erx_fat_dir:view(Bc))),
+                   ?assertEqual({error, efbig}, erx_fat_dir:write(Bc, F2, 16#ffffffff, <<"x">>, ?TIME)),
+                   Bd = Bc, H = walked(Bd, Root, <<"hello.txt">>),
+                   ?assertEqual({error, eisdir}, erx_fat_dir:write(Bd, Root, 0, <<"x">>, ?TIME)),
+                   {ok, _, Be} = erx_fat_dir:write(Bd, H, 0, <<"rewritten">>, ?TIME),
+                   Be
+               end, dirty(Fat)),
+    B2 = batch(Fat, fun mount_cuts/2, fun(B) ->
+                   F = walked(B, Root, <<"copied file.bin">>),
+                   %% A write past the size zeroes from the size to its offset.
+                   {ok, F1, Ba} = erx_fat_dir:write(B, F, 12000, <<"tail">>, ?TIME),
+                   %% A cut to the middle of a cluster, then growth: the cut-off bytes read zero.
+                   {ok, F2, Bb} = erx_fat_dir:truncate(Ba, F1, 1000, ?TIME),
+                   {ok, F3, Bc} = erx_fat_dir:truncate(Bb, F2, 3000, ?TIME),
+                   ?assertEqual({ok, <<(binary:part(A, 0, 1000))/binary, 0:(2000 * 8)>>},
+                                erx_fat:read(F3, 0, 5000, erx_fat_dir:view(Bc))),
+                   {ok, _, Bd} = erx_fat_dir:setattr(Bc, F3, #{mtime => ?TIME + 60, read_only => true}),
+                   G = walked(Bd, Root, <<"hello.txt">>),
+                   {ok, G1, Be} = erx_fat_dir:truncate(Bd, G, 0, ?TIME),
+                   ?assertEqual(0, erx_fat:first(G1)),
+                   Be
+               end, B1),
+    B3 = batch(Fat, fun mount_cuts/2, fun(B) ->
+                   G = walked(B, Root, <<"hello.txt">>),
+                   {ok, _, Ba} = erx_fat_dir:write(B, G, 0, <<"again\n">>, ?TIME),
+                   Ba
+               end, B2),
+    finished(Fat, fun mount_cuts/2, B3),
+    F = walked(erx_fat_dir:new(Fat), Root, <<"copied file.bin">>),
+    ?assertMatch(#{read_only := true, mtime := M} when M =:= ?TIME + 60, erx_fat:attr(F)),
+    ?assertMatch({0, _}, erx_fat_alloc_tests:verify(erx_fat_alloc_tests:flat())),
+    Tree = extracted(erx_fat_alloc_tests:flat()),
+    ?assertEqual(<<(binary:part(A, 0, 1000))/binary, 0:(2000 * 8)>>, proplists:get_value(<<"copied file.bin">>, Tree)),
+    ?assertEqual(<<"again\n">>, proplists:get_value(<<"hello.txt">>, Tree)).
+
+%% Plan applied as cuts/2 applies it, every cut checked by what a mount then does:
+%% a cut inside a step whose FAT sectors split a new run may leave the run's first
+%% sector linking into a sector not yet written, which the ownership check finds,
+%% but every such cut leaves the volume dirty, so it mounts read-only as `dirty`
+%% before the check runs, and never answers wrongly.
+mount_cuts(Fat, Plan) ->
+    lists:foreach(fun({Step, Writes}) ->
+                          [mount_cut(Fat, Step, Some) || W <- Writes, Some <- [[W], Writes -- [W]]],
+                          erx_fat_alloc_tests:apply_plan([{Step, Writes}]),
+                          ?assertEqual({Step, ok}, {Step, erx_fat:check(Fat)})
+                  end, Plan).
+
+mount_cut(Fat, Step, Writes) ->
+    Saved = get(image),
+    erx_fat_alloc_tests:apply_plan([{Step, Writes}]),
+    case erx_fat:check(Fat) of
+        ok -> ok;
+        Refused ->
+            {ok, Cut} = erx_fat:mount(erx_fat_alloc_tests:reader(), byte_size(element(1, Saved)) div ?SECTOR),
+            ?assertMatch({cut_in, Step, {read_only, tree}, #{clean := false}},
+                         {cut_in, Step, Refused, erx_fat:info(Cut)})
+    end,
+    put(image, Saved).

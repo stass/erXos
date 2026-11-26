@@ -58,7 +58,7 @@ function raises propagates.
 """.
 
 -export([mount/2, info/1, layout/1, check/1, root/1, walk/3, attr/1, list/2, read/4, key/1]).
--export([with_read/2, first/1, fold/4, cluster_sectors/2]).
+-export([with_read/2, first/1, fold/4, cluster_sectors/2, entry_slot/2, refreshed/2]).
 -export_type([fat/0, fat_node/0, finding/0, read_sector/0, dir/0, event/0]).
 
 -include("generated/erx_abi.hrl").
@@ -241,6 +241,43 @@ with_read(Fat, Read) -> Fat#fat{read = Read}.
 -doc "A node's first cluster: 0 for an empty file, root for the root directory.".
 -spec first(fat_node()) -> non_neg_integer() | root.
 first(#fat_node{first = First}) -> First.
+
+-doc """
+Where file File's short entry lies, `{Sector, Offset}`: entry Index of the directory
+its key names, whose sectors are followed afresh, so the slot is the one the volume
+read through Fat holds.
+""".
+-spec entry_slot(fat_node(), fat()) -> {ok, {pos_integer(), non_neg_integer()}} | {error, finding()}.
+entry_slot(#fat_node{key = {file, Parent, Index}}, Fat) ->
+    guarded(fun() -> slot_of(Parent, Index, Fat) end).
+
+-doc """
+File File as the volume read through Fat holds its entry now: the same key, with its
+entry's first cluster, size, time and read-only attribute. An entry that no longer
+names a file is `does_not_read`.
+""".
+-spec refreshed(fat_node(), fat()) -> {ok, fat_node()} | {error, finding()}.
+refreshed(#fat_node{key = {file, Parent, Index}} = File, Fat) ->
+    guarded(fun() ->
+                    {Sector, Offset} = slot_of(Parent, Index, Fat),
+                    <<_:Offset/binary, Bytes:?ENTRY/binary, _/binary>> = sector(Fat#fat.read, Sector),
+                    case erx_fat_entry:decode(Bytes) of
+                        {short, Short} ->
+                            erx_fat_entry:kind(Short) =:= file orelse fail(does_not_read),
+                            File#fat_node{first = erx_fat_entry:first(Short, Fat#fat.type),
+                                          size = maps:get(size, Short), mtime = erx_fat_entry:mtime(Short),
+                                          read_only = erx_fat_entry:read_only(Short)};
+                        _ -> fail(does_not_read)
+                    end
+            end).
+
+%% Entry Index of the directory key Parent names: its sector and byte offset.
+slot_of(Parent, Index, Fat) ->
+    Dir = #fat_node{key = Parent, kind = dir, first = case Parent of root -> root; {dir, C} -> C end,
+                    size = 0, mtime = ?FAT_EPOCH, read_only = false},
+    {Sectors, Total} = dir_sectors(Dir, Fat),
+    Index < Total orelse fail(does_not_read),
+    {lists:nth(Index div ?ENTRIES_PER_SECTOR + 1, Sectors), Index rem ?ENTRIES_PER_SECTOR * ?ENTRY}.
 
 -doc "The sectors of data cluster Cluster, in order.".
 -spec cluster_sectors(fat(), pos_integer()) -> {ok, [pos_integer()]} | {error, does_not_read}.

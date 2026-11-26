@@ -54,7 +54,10 @@ class ErxFatDirTest < Minitest::Test
               to: "folded(B, Dir, Fun, Acc) ->\n" \
                   "    {Events, Read} = ok(erx_fat:fold(Dir, view(B), fun(I, E, Got) -> [{I, E} | Got] end, [])),\n" \
                   "    {lists:foldl(fun({I, E}, A) -> Fun(I, E, A) end, Acc, lists:reverse(Events)), Read}.",
-              caught_by: 'a_directory_near_the_entries_bound_changes_within_the_memory_bound_test_')
+              caught_by: 'a_directory_near_the_entries_bound_changes_within_the_memory_bound_test_'),
+    Fault.new(name: 'a file grown by a truncate not zeroed', file: DIR,
+              from: 'contents(B, Fresh, Old, <<0:((Size - Old) * 8)>>, Size, Time);',
+              to: 'published(B, Fresh, erx_fat:first(Fresh), Size, Time);', caught_by: 'contents_test_')
   ].freeze
 
   def self.images

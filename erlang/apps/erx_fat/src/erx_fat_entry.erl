@@ -20,7 +20,8 @@ names (erx_fat_name) and the directory changes (erx_fat_dir) share.
   outside FAT's range is written clamped to it.
 """.
 
--export([decode/1, encode/1, long/4, deleted/1, new/5, first/2, with_first/2, kind/1, read_only/1, mtime/1]).
+-export([decode/1, encode/1, long/4, deleted/1, new/5, first/2, with_first/2, with_size/2, with_mtime/2, with_read_only/2, kind/1,
+         read_only/1, mtime/1]).
 -export_type([entry/0, short/0]).
 
 -include("erx_fat_entry.hrl").
@@ -107,6 +108,21 @@ first(#{low := Low}, 16) -> Low.
 -doc "Short entry Short naming first cluster Cluster.".
 -spec with_first(short(), non_neg_integer()) -> short().
 with_first(Short, Cluster) -> Short#{high := Cluster bsr 16, low := Cluster band 16#ffff}.
+
+-doc "Short entry Short holding Size bytes.".
+-spec with_size(short(), 0..16#ffffffff) -> short().
+with_size(Short, Size) -> Short#{size := Size}.
+
+-doc "Short entry Short modified, and accessed, at Time (UNIX seconds).".
+-spec with_mtime(short(), integer()) -> short().
+with_mtime(Short, Time) ->
+    {Date, Clock} = fat_time(Time),
+    Short#{time := Clock, date := Date, accessed := Date}.
+
+-doc "Short entry Short with the read-only attribute set exactly when ReadOnly.".
+-spec with_read_only(short(), boolean()) -> short().
+with_read_only(Short = #{attributes := A}, true) -> Short#{attributes := A bor ?READ_ONLY};
+with_read_only(Short = #{attributes := A}, false) -> Short#{attributes := A band bnot ?READ_ONLY}.
 
 -doc "What a short entry names: a volume label, a directory or a file.".
 -spec kind(short()) -> label | dir | file.
