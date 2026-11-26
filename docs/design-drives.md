@@ -998,17 +998,25 @@ alone:
 4. its format's own state allows it. A FAT volume's state allows it
    when its dirty flag is clear (`dirty`: "the FAT's dirty flag is
    set"), its FAT records no hard error (`hard error`: "the FAT's
-   hard-error flag is set"), and, on FAT32, its `ExtFlags` leave its
-   FATs mirrored (`mirror`: "the volume's FATs are not mirrored"),
+   hard-error flag is set"), on FAT32 its `ExtFlags` leave its FATs
+   mirrored (`mirror`: "the volume's FATs are not mirrored"), it has at
+   most 4,194,304 clusters (`too large`: "the volume has more clusters
+   than the ownership check holds"), and its names and chains pass the
+   ownership check (`tree`: "a cluster is reached twice, a chain reaches
+   a free cluster, or a directory's `..` does not name its parent"),
    checked in that order. Each is a state the server cannot write
    safely: a dirty volume may hold a change half made, which a repair
    on another machine settles and no guess on erXos does; a hard error
    is the mark another system leaves after a disk error (its meaning as
    the specification gives it is unverified here), so the volume's
-   structures are suspect in the same way; and the batches write each
-   FAT entry to every copy, which a volume of one live FAT does not
-   expect, so serving it would take a second write rule for a layout
-   no consumer asks for
+   structures are suspect in the same way; the batches write each FAT
+   entry to every copy, which a volume of one live FAT does not expect,
+   so serving it would take a second write rule for a layout no
+   consumer asks for; and the batches keep every cluster in one chain
+   under one name only on a volume that starts so, which the check,
+   reading the FAT twice and every directory once, proves before the
+   first write, since on a crafted volume that fails it a write to one
+   file could land in another's clusters
    ([design-storage.md](design-storage.md#removable-media-fat)).
 
 A flush that answers anything else, `eio` or the window's end, **refuses**
@@ -1252,10 +1260,16 @@ Two things finish volumes:
   `kill` and `include_shared_binaries` set, so a volume whose heap,
   stack and the binaries it holds pass that at a garbage collection is
   ended alone (`erlang.erl:8120-8165`, `process_flag(max_heap_size,
-  ...)`). The FAT server holds a write's bytes until its batch commits,
-  and commits early once a batch's data passes a quarter of the bound
-  ([design-storage.md](design-storage.md#removable-media-fat)), so
-  writes that never sync stay well inside it. A littlefs port's budget is a wall of `media_volume_bytes`
+  ...)`). The FAT server holds a batch's changes until it commits,
+  measured as the sectors the batch will write, file data, directories
+  and FAT alike, and commits early once they pass a quarter of the
+  bound; its release step frees a long chain over as many batches as
+  its FAT sectors need, each within the same quarter; and the two bit
+  sets of its ownership check, which together stay within half of the
+  bound, are dropped before its first batch
+  ([design-storage.md](design-storage.md#removable-media-fat)). So
+  neither writes that never sync, nor many small writes and names, nor
+  the removal of a large file pass the bound. A littlefs port's budget is a wall of `media_volume_bytes`
   carved from the media domain's, so the port draws on nothing the
   runtime was promised, and a carve the domain cannot promise fails that
   mount with `enomem`. Neither bounds all a volume makes the runtime
@@ -1268,7 +1282,9 @@ Two things finish volumes:
   own mount, and it fails with a restart, never with a write.
 * **Time.** Every operation of an Erlang format does bounded work: each
   loop is bounded by the size of the structure it walks, as the FAT
-  server's and the EROFS reader's designs state, and each of its sector
+  server's and the EROFS reader's designs state, the FAT server's
+  ownership check by two reads of the FAT and one of every directory at
+  a writable mount, and each of its sector
   requests by the window's deadline, 35 s
   ([design-storage.md](design-storage.md#data-model)). littlefs's port
   is C and may spin without asking for a sector, so its owner keeps the
@@ -1337,7 +1353,7 @@ parser reads both:
 | `table` | `mbr`, `gpt`, `none` or `refused FINDING` |
 | `sN` | volume N's format, a name of the probe's table or `unknown`; `extended` for an MBR's extended entry |
 | `sN_mount` | one of three outcomes: `rw`; `ro`, with the reason on `sN_ro_reason`; or `none REASON`, no files: `format` for a format not served, FAT12 among them, `unknown`, `extended`, `flush` with the flush's answer, or `failed` with why the volume ended |
-| `sN_ro_reason` | a read-only volume's alone: the writable rule's first condition that does not hold, as one plain line: `erXos does not write NAME` (`format`), `a NAME signature is also on the volume` (`also`), `the medium cannot flush` (`flush`), `the FAT's dirty flag is set` (`dirty`), `the FAT's hard-error flag is set` (`hard error`) or `the volume's FATs are not mirrored` (`mirror`); the volume's mount logs the same line |
+| `sN_ro_reason` | a read-only volume's alone: the writable rule's first condition that does not hold, as one plain line: `erXos does not write NAME` (`format`), `a NAME signature is also on the volume` (`also`), `the medium cannot flush` (`flush`), `the FAT's dirty flag is set` (`dirty`), `the FAT's hard-error flag is set` (`hard error`), `the volume's FATs are not mirrored` (`mirror`), `the volume has more clusters than the ownership check holds` (`too large`) or `a cluster is reached twice, a chain reaches a free cluster, or a directory's .. does not name its parent` (`tree`); the volume's mount logs the same line |
 | `sN_sectors` | its length |
 | `sN_fat` | FAT's type, `12`, `16` or `32` |
 | `sN_label`, `sN_serial` | the volume's label and serial number, or a GPT entry's name and unique GUID, as the medium gives them |
@@ -1681,7 +1697,7 @@ A stick can carry names, labels and links chosen to mislead. Names
 reach a session as file names, which every sink escapes; labels reach
 `status` through the field escape; links are not followed, so a write
 through `/media` lands on the stick or fails. A volume on which the probe
-finds a second format the build writes is never written. Who reads which drives is the manifest's: on
+finds a second format the build writes is never written, nor is a FAT volume whose chains or directories fail the ownership check, so a crafted volume cannot make a write to one file land in another's clusters. Who reads which drives is the manifest's: on
 a machine whose sessions all hold `media`, every logged-in user reads
 every stick, as on a desktop.
 
@@ -1700,7 +1716,7 @@ so a pass shows the code under test ran.
 | the table as a property test: for every MBR and GPT the generator writes, the served volumes lie inside the medium, pairwise apart and apart from every metadata sector, and `place/3` never answers a sector outside its volume | the end check written `<` for `=<` |
 | `erx_media_probe` on a seed of each table row; on a FAT32 volume holding EROFS's magic at 1,024 bytes, which selects `erofs`; on a FAT32 volume that kept a littlefs superblock in block 1, which selects `littlefs` with `msdosfs` also found, mounting `ro` for `msdosfs` also found in a development build and `none format` in a release, which serves no littlefs; and on a FAT12 volume fsimg writes, refused `none format` | the order reversed, so the first volume selects `msdosfs`; the written-formats check dropped, so the littlefs volume is found alone; the FAT type left to the mount, so the FAT12 volume is selected and mounted |
 | littlefs's signature over volumes the tree's littlefs writes with `erx_lfs_config`: freshly formatted, after many commits, after compactions of the root pair that leave its current superblock in block 1, and cut mid-commit and mounted again, each found by the probe and mounted | the signature read in block 0 alone, so the compacted volume is `unknown` |
-| the writable rule over every combination of format, written formats also found, flush answer, dirty flag, hard-error flag and FAT32's mirroring | the `also` condition removed, so the doubly formatted volume mounts writable; every flush answer but `ok` taken as `enotsup`; the hard-error and mirroring conditions each removed, so a volume that sets one mounts writable |
+| the writable rule over every combination of format, written formats also found, flush answer, dirty flag, hard-error flag, FAT32's mirroring, cluster count and ownership check (its own cases are the storage design's) | the `also` condition removed, so the doubly formatted volume mounts writable; every flush answer but `ok` taken as `enotsup`; the hard-error, mirroring, cluster-count and ownership conditions each removed, so a volume that fails one mounts writable |
 | a selected format whose mount fails: the FAT32 volume holding EROFS's magic is `none failed` and nothing is written | a fall-through to the next format found, which mounts it as FAT |
 | the drive process and the media tree, under `erx_media_sup` against a fake drive grant and window: a medium's mount, a listing, a read; the window's end, after which an open fid answers `eio` and `diskN` lists `status` and `ctl`; a new window, mounted at the next walk; a volume process killed, the others still served; a volume past its memory bound; the drive process killed with a write outstanding, after which the next walk mounts the medium afresh and the outstanding write is answered before the new mount's first read | the drive process not monitoring the window, so the open fid reads after the end; a volume process started as a permanent child, so the kill restarts it; `max_heap_size` given `media_volume_bytes` as words unconverted, so a volume eight times its allowance is not ended; the grant answering the old window again without its restart, so the old write reaches the window after the new mount's read |
 | the drive grant's occupant, over `erx_blk_drive:step/2` by name: a place with no occupant drops a serve; a function that occupied a place and ended before its serve leaves it free, its late serve dropped and the next function's `occupy/2` answered `ok`; a block grant occupied by its device process takes that process's serve of a second window, under a fresh reference, after its first window ended, and takes it before that end is seen, its held asks answered from the second window | the clause that lets a grant with no occupant take any serve restored, so the late serve lands and the next `occupy/2` answers `taken`; a block grant's occupation freed at its window's end, so the second serve is dropped and the disk is never mounted again |
@@ -1968,8 +1984,19 @@ the chain can be added as the table's next rule.
 
 A release serves FAT16, FAT32 and EROFS volumes from drives; littlefs
 volumes are served only by development builds and test images, and
-littlefs stays a stopgap; FAT12 is refused by name. One decision is
+littlefs stays a stopgap; FAT12 is refused by name. Two decisions are
 open:
+
+* **Writing large FAT32 volumes.** The ownership check holds one bit
+  per cluster in each of two sets within half of `media_volume_bytes`,
+  so a FAT32 volume of more than 4,194,304 clusters, past 128 GiB at
+  32 KiB clusters or 64 GiB at 16 KiB, mounts read-only (`too large`).
+  Such volumes are rare: cards and sticks past 32 GiB come formatted as
+  exFAT, which is not designed, and Windows formats no FAT32 volume past
+  32 GiB (both unverified here). Recommendation: keep the limit, and if a user brings such a
+  volume, check it in passes over ranges of clusters, each pass reading
+  the FAT and the directories again, rather than raise the volume's
+  memory bound.
 
 * **Read-only drives.** Whether a manifest may name a drive the media
   domain itself may not write, a stick that no session can change

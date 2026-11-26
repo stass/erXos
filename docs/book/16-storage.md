@@ -474,7 +474,13 @@ The design adds the **FAT server**, `erx_fat`, which serves one FAT
 volume of a drive as files ([design-storage.md, Removable media:
 FAT](../design-storage.md#removable-media-fat)). It reads and writes
 FAT16 and FAT32 with long names, refuses FAT12 by name, matches names without regard to case as Windows does, and
-reports files as mode `0644`, since FAT has no owners. The FAT server
+reports files as mode `0644`, since FAT has no owners. FAT keeps no
+journal, so the server commits changes in batches whose steps it orders
+with flushes, each reference written after what it refers to, and a
+power cut loses at most the batch it interrupts; and since the batches
+keep every cluster in one file only on a volume that starts so, it
+mounts a volume writable only after checking that no two names share a
+cluster and that every directory's `..` names its parent. The FAT server
 is designed and not built.
 
 ### 16.5.2 Drives
