@@ -156,13 +156,24 @@ A held board also answers you directly, in any serial terminal and with
 nothing of erXos on the host. It prints `hold> ` and takes a part of the
 tool's commands: `help`, `show panic`, `cpus`, `regs [CPU]`,
 `bt [CPU | thread ID]`, `threads`, `thread ID`, `trace [N]`, `log [N]`,
-`x[/bhlg] ADDRESS[,COUNT]` and `reset`. Where FreeBSD's `ddb` has the
+`x[/bhlg] ADDRESS[,COUNT]` and `reset TOKEN`. Where FreeBSD's `ddb` has the
 same command its name works too (`show registers`, `where`,
 `show threads`); `trace` is the kernel's trace rings, not a stack trace.
-The commands only read. A backtrace is addresses, which
-`llvm-symbolizer` or `tools/erx debug` turns into names. The board stays
-held until you type `reset`, and `tools/erx debug --tty DEVICE --held`
-reads the same held board in between.
+The commands only read. A backtrace, `regs` and `x` name the kernel's
+functions as `function+0xoffset`, from the symbol table a development
+image carries; `tools/erx debug` gives the full names and source lines.
+A thread's ID in `threads` is the one `trace` prints. The board stays
+held until you end it: type `reset` and it answers with the token the
+hold printed on its `--erx-held` line, then type `reset TOKEN`, so a
+`reset` your terminal sent before the crash cannot end the hold.
+`tools/erx debug --tty DEVICE --held` reads the same held board in
+between.
+
+A release build prints a brief record when its kernel panics: the
+message, the failing CPU's registers and backtrace as addresses, the
+fault address and each CPU's state, as FreeBSD's release kernel does.
+`tools/erx debug` names the backtrace's functions from the release's
+published image.
 
 ## What is not built
 

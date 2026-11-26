@@ -2531,12 +2531,17 @@ fixed fields and the rest for the log's tail). It has two
 **forms**, and the boot image's `ERX_PACK_DEVELOPMENT` flag
 ([Configuration](#configuration)) chooses which one a build writes:
 
-* the **brief** form, a release build's, ends at `fault`: the cause, the
-  program counter and fault address in the fault record, the build
-  identifier, the boot value and its slot, so a crashed trial names the slot
-  that failed, the uptime and the time since the last pet, and no register
-  but the program counter, no stack and no text, so nothing the root task
-  held, a passphrase it was checking included, survives a reset in it;
+* the **brief** form, a release build's, prints what FreeBSD's release
+  kernel prints and no more
+  ([design-debugger.md](design-debugger.md#the-records-cpu-entries)):
+  the cause, the program counter and fault address in the fault record,
+  the build identifier, the boot value and its slot, so a crashed trial
+  names the slot that failed, the uptime and the time since the last
+  pet, each CPU's number and stop state, and for a kernel `PANIC` also
+  the message, the panicking CPU's registers and its kernel backtrace as
+  code addresses. For the root task's ends it holds no register, no
+  stack and no text, so nothing the root task held, a passphrase it was
+  checking included, survives a reset in it;
 * the **full** form, a development build's, adds the registers, the
   backtrace, each CPU's stop state and location, and the text, among it
   the slogan and the start of the
@@ -2546,10 +2551,12 @@ fixed fields and the rest for the log's tail). It has two
   may carry what the root task held, a passphrase among it, which is why
   the system domain shows a record only to the system shell (below).
 
-Its layouts are `erx_crash_brief` and `erx_crash_record` in
-`abi/kernel.txt`: a 120-byte brief form, and a full form whose
-1,800-byte fixed prefix adds registers, a backtrace and 16 CPU entries of
-56 bytes (`erx_crash_cpu`) before its text. The header
+Its layouts are `erx_crash_header` and `erx_crash_record` in
+`abi/kernel.txt`: a 120-byte header, and a 1,800-byte fixed prefix that
+adds registers, a backtrace and 16 CPU entries of 56 bytes
+(`erx_crash_cpu`) before the text. Both forms are that prefix; the brief
+form fills fewer of its fields and carries no text but a kernel panic's
+message, at most `crash_message_max` bytes. The header
 carries a magic, the version, the bytes used (`length`), a CRC-32C of
 the bytes after the CRC field up to `length`, the form, the cause
 (`FAULT`, `HALT`, `WATCHDOG` or `PANIC`), the CPU that wrote it, the
@@ -2605,9 +2612,9 @@ marker only as a whole line, passes over it:
 ```
 
 * `<form>` is `brief` or `full`, the record's form, and `<length>` the
-  record's `length` in decimal: exactly `ERX_CRASH_BRIEF_SIZE` for
-  `brief`, and from `ERX_CRASH_RECORD_SIZE`, the full form's fixed
-  prefix, to `ERX_CRASH_SIZE` for `full`, so the header line alone bounds
+  record's `length` in decimal: from `ERX_CRASH_RECORD_SIZE`, the fixed
+  prefix, to that plus `crash_message_max` for `brief`, and to
+  `ERX_CRASH_SIZE` for `full`, so the header line alone bounds
   what follows.
 * The payload is the record's first `length` bytes in base64 (RFC 4648,
   with padding), 57 bytes a line, so exactly `ceil(length / 57)` lines
@@ -2629,8 +2636,10 @@ marker only as a whole line, passes over it:
   if `magic`, `version`, `form` and `length` equal the frame's, the CRC
   matches, `cause` is one of the four, `cpu` is below `ERX_CPU_LIMIT`,
   `boot_value` and `boot_slot` are one of the machine page's pairs,
-  `nframes` is at most 64 and zero unless the form is full and the cause
-  `PANIC`, `ncpus` is at most `ERX_CPU_LIMIT` and zero in the brief form,
+  `nframes` is at most 64 and zero unless the cause is `PANIC`, `ncpus`
+  is at most `ERX_CPU_LIMIT`, in the brief form `regs`, the backtrace and
+  the text are zero unless the cause is `PANIC`, every CPU entry holds no
+  register word and the text is the message alone,
   the fault record's `kind` is a declared kind for `FAULT` and is
   `exit` for `HALT`, the fault record is zero for `WATCHDOG`, and in the
   full form `regs` is zero unless the cause is `FAULT` or `PANIC`, `frames`
@@ -2664,8 +2673,9 @@ the reader's checks: an input that contradicts itself, a cause outside the
 four, a CPU past the limit or a fault record the cause does not allow, is a
 kernel bug and is written as `PANIC` rather than blamed on the root task; a
 boot pair outside the machine page's is written as unknown; a form outside
-the two is written as brief, and the brief form never reads the registers,
-the backtrace, the message or the log. The message passes `erx_log_escape`;
+the two is written as brief, and the brief form never reads the log, nor
+the registers, the backtrace or the message of a cause other than
+`PANIC`, nor any CPU's registers but the panicking CPU's. The message passes `erx_log_escape`;
 the log's newest whole lines that fit follow it, each read through the
 log's own check of a record, since a panic may have stopped a CPU halfway
 through an append; a log whose counters could not be the ring's, since a wild
@@ -8066,7 +8076,7 @@ decides when.
 | An asynchronous error the platform's error records attribute to a device | `erx_async_error_classify`, from the records | the device's window quarantined | the device service resets the device or its PCIe segment | a log line naming the source; the quarantine in the window's inspection |
 | A corrected or latent asynchronous error | `erx_async_error_classify` | nothing | none needed | a log line |
 | An uncontainable asynchronous error | the asynchronous error's handler, from what the architecture reports | the machine | none | a panic report |
-| A kernel invariant violated | assertions, the exception entries | the machine | none | a panic report on the console with the cause, the program counter and the fault address; the registers, the backtrace and every CPU's stop state only in the crash record's full form, which a development build keeps; a development boot that asked for it then holds, and `tools/erx debug` reads the stopped machine's memory ([design-debugger.md](design-debugger.md)) |
+| A kernel invariant violated | assertions, the exception entries | the machine | none | a panic report on the console with the cause, the message, the program counter, the fault address, the panicking CPU's registers and backtrace, and every CPU's stop state, in either form; where the other CPUs were and the log's tail only in the crash record's full form, which a development build keeps; a development boot that asked for it then holds, and `tools/erx debug` reads the stopped machine's memory ([design-debugger.md](design-debugger.md)) |
 | A device-tree or boot-image error | the validators | no boot | none | the failing check and offset on the console |
 
 **Inspection.** `erx_object_info` answers topics for every object (its type,
@@ -8288,8 +8298,13 @@ sealing page unmapped in the system domain, and only the vault's domain
 maps the sealing page ([design-system.md](design-system.md#the-vault));
 the vault's runtime is inside the speculative residual
 ([design.md](design.md#residual-risks)). The crash record's brief form,
-a release build's, carries no secret: the cause, the program counter and
-the fault address, and no register, stack or text. The full form, a
+a release build's, carries nothing the root task held: for the root
+task's ends the cause, the program counter and the fault address, and
+no register, stack or text. For a kernel panic it carries the panicking
+CPU's kernel registers and backtrace, as FreeBSD's release kernel
+prints them, and those registers may hold a value the kernel was
+handling for a domain at the fault
+([design-debugger.md](design-debugger.md#security)). The full form, a
 development build's, carries the registers and the log's tail and so may
 carry what the root task held, a passphrase it was checking among it,
 and the system domain shows it to the system shell alone

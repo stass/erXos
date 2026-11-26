@@ -121,12 +121,15 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   3. the hold and `erx.hold=1`, in the kernel, with the anchor's remaining fields and its crc, its readable-RAM map, the
      classification of Fiasco's memory descriptors and the `Modules.generic` line that keeps the UART's polling members for it, the root's watchdog
      arming and the card writer; and the hold's prompt, with its frames or after them: the line reader, the
-     commands' core, the command table and the kernel image's walker table that the generator writes, and the
-     friend lines of the Fiasco classes the walker file names (P12, P13);
+     commands' core, the command table, the kernel image's walker table that the generator writes through
+     Fiasco's offset list with the `MEMBER_OFFSET()` lines of `Kobject` and `Kobject_dbg`, the slots' thread
+     field, the token, the root's record handed to the stop, and the kernel symbol table with the image packer's
+     rule for it (P12, P13);
   4. stubs, recorded runs and a probe, each after the probe of design-debugger.md that it rests on (P1 to P5).
 
-  The design's decisions are made ([design-debugger.md](design-debugger.md#decisions)) but the three its
-  [open decisions](design-debugger.md#open-decisions) list. What waits is its unverified
+  The design's decisions are made ([design-debugger.md](design-debugger.md#decisions)). The prompt's `trace`
+  needs the fork's kernel trace rings ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)), and the
+  brief form's new fields change `abi/kernel.txt` as design-debugger.md says. What waits is its unverified
   facts, each with the probe that settles it, P10 and P11 with parts 1 and 3.
 * [Medium] 0.2 on Fiasco, `fiasco/kernel`: Fiasco's map refuses a user mapping writable and executable at
   once, with a test whose seeded failure removes the check; an estimate of tens of lines, unverified

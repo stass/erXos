@@ -297,8 +297,8 @@ gives the same answers after the board has gone.
 | **Kernel mode reads input in one state of one build kind**: the hold, of a development kernel, in a boot that carries `erx.hold=1`, and there only as a line of at most `hold_line_max` bytes that its first byte makes a frame or a command | a release kernel is built without the hold and its prompt, which one option builds; the hold is entered from the stop path alone, after the record is printed; nothing else in either kernel reads a line, and one reader gathers every line | the configuration check; the cell that sends requests and commands to a running machine and to a held one without the word; the line reader's exhaustive test |
 | **The hold reads readable RAM and writes nothing a request or a command names.** Every read, a request's or a command's, each step of a translation and each row of a walk among them, names a physical range and is refused unless the whole range lies in one range of the anchor's map, which holds only pages the boot map gives as RAM and none it excludes | the core computes the map at boot and refuses one it cannot state whole; one checked read against that map is the frames' and the commands' only way to memory; the request layout has no operation that writes and the command table no command that does; in the commands' core an address of the stopped machine is a type that converts to no pointer | the core's tests of the map, over virtual entries, exclusions inside a range and maps past the anchor's capacity, and of every range against every map; the line's fuzz target; the build that must fail when the commands' core dereferences a machine address |
 | **The prompt runs none of the stopped kernel's code.** A command calls no accessor, takes no lock and allocates nothing: it reads the stop's own records, which the kernel hands it by address, and memory through the checked read | the commands are a core that links against the checked read and the polled write and nothing else of either kernel | the core's host build, which links with those two seams alone; the commands' fuzz target over arbitrary memory |
-| **Every byte the prompt prints is printable ASCII or a line's end, and every command's output is bounded** | one printer: numbers it formats itself, words of the generated tables, and text read from the machine only through the kernel console's escaping function, `erx_log_escape`; every command has a bound on what it reads and prints | the commands' fuzz target; each command's host test at its bound |
-| **A held machine's two readers agree.** Whatever the prompt answers for a command, `tools/erx debug -n` answers in the same lines from any target of the same stopped machine; what the prompt cannot answer it refuses by name, never with other lines | one command table, one set of ABI layouts and one walker file generate both | the comparison in `native_hold_prompt`, and on the host over a stop image the test builds |
+| **Every byte the prompt prints is printable ASCII, a line's end, or the line reader's erase sequence, and every command's output is bounded** | one printer: numbers it formats itself, words of the generated tables, and text read from the machine only through the kernel console's escaping function, `erx_log_escape`; the erase sequence is written by the line reader alone, for an erase alone; every command has a bound on what it reads and prints | the commands' fuzz target; the line reader's exhaustive test; each command's host test at its bound |
+| **Nothing sent before a stop ends its hold.** Only `reset` with the hold's token ends it, and the token is derived from the record the stop writes | the token is a pure function of the record's `uptime_ns`; a `reset` without it is answered and runs nothing, a frame with another is dropped | the line reader's exhaustive test; the cell that queues `reset` across the drain |\n| **A held machine's two readers agree.** Whatever the prompt answers for a command, `tools/erx debug -n` answers in the same lines from any target of the same stopped machine; what the prompt cannot answer it refuses by name, never with other lines | one command table, one set of ABI layouts and one walker file generate both | the comparison in `native_hold_prompt`, and on the host over a stop image the test builds |
 | **After a stop whose census is complete, the console line has one user, the stop, until the machine ends.** After an incomplete census the stop's output is best effort, and its first line says so | every admitted CPU is parked before the first byte, and nothing resumes; a CPU that did not answer may still write the line, and no lock the leader takes can promise that it will not | the stop cells' transcripts; the cell with a silent CPU that prints; the kernel-lines case of [design-fiasco.md](design-fiasco.md#the-backends-cases) |
 | **A hold and a running hardware watchdog never meet** | `erx.hold=1` is honoured only in a boot that is not a trial and whose board watchdog nothing has started; in such a boot nothing starts it | the hold decision's host test over every flag, boot value and watchdog state |
 | **The host's debugger writes nothing to its target** | its request builders have a constructor for each request it sends and no other, and none writes memory or registers | a test that no public method builds a write |
@@ -366,7 +366,10 @@ interrupts nor waits for a lock cannot be reached from inside the machine
 
 Each CPU has a **stop slot**, `erx_machine_stop_slot` in `abi/kernel.txt`:
 its state, one auxiliary word (the lock's address for `waiting`, zero
-otherwise) and its registers, in the layout the architecture's ABI file
+otherwise), the kernel address of the thread it was running, read from
+the kernel's own current-thread pointer by the CPU itself as it
+publishes (on Fiasco `current()`, the context of the stack it is on),
+and its registers, in the layout the architecture's ABI file
 gives a stopped CPU: the general registers, the stack pointer, the program
 counter and the processor state, the translation root of the space the
 CPU was in, by which a reader translates that space's addresses, and for
@@ -475,21 +478,65 @@ brought online or admitted, the leader included, so a machine with more CPUs tha
 how many its record leaves out. An entry holds the CPU's number, its
 stop state and, for a state that has registers, the program counter, the
 stack pointer, the frame pointer, the return address, the processor
-state word and the slot's auxiliary word; every other byte is zero. The
-brief form carries none, since registers may hold what the interrupted
-code held ([design-kernel.md](design-kernel.md#the-root-task)), and a
+state word and the slot's auxiliary word; every other byte is zero. A
 record written before any census, as the root's are on Fiasco, carries
 none and an `ncpus` of zero.
+
+**The brief form** is the same fixed prefix, with fewer of its fields
+filled, and no text but a kernel panic's message. It prints what FreeBSD's release kernel prints
+when its kernel faults or panics, and no more. FreeBSD 14.3's arm64
+trap handler, on a fatal kernel data abort, prints every general
+register of the trap frame, the stack pointer, the link register, the
+exception's return address and saved state, the fault address and the
+syndrome (`print_registers`, `print_gp_register`, `sys/arm64/arm64/trap.c`
+lines 386 to 389 and 411 to 449), under no option: only the symbol
+beside each value needs `DDB`, which `GENERIC` lacks. Its `panic` then
+prints the message, the CPU and the time, and with `KDB_TRACE`, which
+`GENERIC` sets (`sys/arm64/conf/std.arm64` line 73), a backtrace of the
+panicking CPU (`sys/kern/kern_shutdown.c` lines 936 to 952,
+`sys/kern/subr_kdb.c` lines 439 to 455). So the brief form carries:
+
+* the header and `fault`, as the full form does, for every cause;
+* for `panic`, the message, escaped as the full form's text is, and
+  no log line; the leader's registers, all of them, as the slot holds
+  them, and its kernel backtrace, as code addresses: what FreeBSD
+  prints of the CPU that failed. The fault address is written as the
+  exception gave it, a user address too, as FreeBSD's `far` line is;
+* one CPU entry for each CPU the census covered, with its number and
+  stop state alone, every register word zero.
+
+For `fault`, `halt` and `watchdog` it carries no registers and no
+backtrace: those are the root task's, in user mode, and FreeBSD prints
+nothing of a process's registers when it ends one. FreeBSD names each
+frame's function from the kernel's own symbols; erXos's release image
+carries no symbol table ([Symbols](#symbols)), and the host's tool names
+the frames from the release's published image. What this exposes is the
+security section's ([Security](#security)).
+
+In `abi/kernel.txt` this changes names and sizes, not fields: the
+120-byte layout `erx_crash_brief` becomes `erx_crash_header`, the header
+of both forms, which `erx_crash_record`'s first field names; the brief
+form has no layout of its own, since it is `erx_crash_record` with the
+brief form's fields filled, so `ERX_CRASH_BRIEF_SIZE`, the old layout's
+generated size, no longer gives its length; and a new limit,
+`crash_message_max`, bounds the brief form's text, so a brief record's
+`length` runs from `ERX_CRASH_RECORD_SIZE` to that plus the bound. The
+frame's header line and the crash core's check take their bounds for
+`brief` from those two
+([design-kernel.md](design-kernel.md#the-root-task)).
 
 The crash core writes the entries from what the stop hands it. Its
 writer cannot refuse, since nothing can report a refusal at the
 machine's end, so it settles an entry as it settles every other field: a
 state outside the enum is written as `unanswered`, and a state without
-registers gets none; it writes each entry's number itself. Its check
-refuses an entry whose number is not its index, a state outside the
-enum, a nonzero byte where the state has no registers, a nonzero entry
-past `ncpus`, and an `ncpus` past `cpu_limit` or in the brief form, as
-it refuses any other malformed field (`kernel/core/crash.c`,
+registers gets none; in the brief form it writes no register word of
+an entry, and no registers or backtrace unless the cause is `panic`; it
+writes each entry's number itself. Its check refuses an entry whose
+number is not its index, a state outside the enum, a nonzero byte where
+the state has no registers, a nonzero entry past `ncpus`, an `ncpus`
+past `cpu_limit`, and in the brief form a nonzero register word of an
+entry, registers, a backtrace or text for a cause other than `panic`,
+and text past the message, as it refuses any other malformed field (`kernel/core/crash.c`,
 `erx_crash_check`). `kernel/core/crash_read.c` and
 `tools/lib/erx/crash_frame.rb` read the entries and are held to the same
 answer on mutated frames, as they are for the rest of the record.
@@ -586,8 +633,9 @@ terminal may be showing:
 * **A request**, `erx_hold_request`: a magic, an operation of the closed
   enum `hold_op` (`read`, `anchor` or `reset`), a sequence number the
   reply repeats, a physical address, a length of at most `hold_read_max`
-  (4,096) bytes, and a CRC-32C of the rest. It travels as one frame
-  line: the mark, the layout in base64, then a newline.
+  (4,096) bytes, and a CRC-32C of the rest; a `reset` carries the hold's
+  token in its address field ([The hold](#the-hold)). It travels as one
+  frame line: the mark, the layout in base64, then a newline.
 * **A reply**, `erx_hold_reply`: the request's sequence number, a status
   of the closed enum `hold_status` (`ok`, `range` or `length`), the
   address, the length, a CRC-32C, and then `length` bytes of memory, none
@@ -597,9 +645,11 @@ terminal may be showing:
   frame writer and one frame reader serve the record and the hold
   ([design-kernel.md](design-kernel.md#the-root-task)).
 
-The hold announces itself with one line, `--erx-held <anchor>`, the
-anchor's physical address in hexadecimal, which the reply to `anchor`
-repeats for a tool that attaches to a machine already held. The marker
+The hold announces itself with one line, `--erx-held <anchor> <token>`,
+the anchor's physical address and the hold's token in hexadecimal, which
+the reply to `anchor` repeats, the address in its address field and the
+token as its two bytes, for a tool that attaches to a machine already
+held. The marker
 strings, the mark, the limits and both layouts are declarations of the
 ABI file, and the C and Ruby readers and writers are generated from them;
 the generator refuses a `hold_line_max` that a request's line does not
@@ -742,9 +792,10 @@ return:
    tries, and keeps it until the machine ends; a leader that failed while
    it held that lock holds it already. Then it writes the report's first
    part, which is the record's own fields as text for the person at the
-   console (the message, in a development build the leader's registers
-   and backtrace, and one line for each CPU with its state and where it
-   was), and the crash frame, through the console's polled write alone.
+   console (the message; for a `panic`, the leader's registers and
+   backtrace in either build; and one line for
+   each CPU with its state, and in a development build where it was),
+   and the crash frame, through the console's polled write alone.
    * After a **complete** census every admitted CPU is parked, so nothing
      else writes the line, with the lock or without it.
    * After an **incomplete** census the output is **best effort**. A CPU
@@ -883,7 +934,25 @@ may still write memory, so what is read may change while it is read
 console UART has already received, at most `hold_line_max` bytes: that
 was typed at the machine that stopped, not at the hold. From then on it
 polls the UART's receive register and hands each byte to the core's line
-reader, whose state is the line so far and its kind.
+reader, whose state is the line so far and its kind. The drain makes the
+first prompt tidy and promises nothing more: bytes still on their way
+when it ran, from a terminal's buffer, a USB adapter's or a host tool
+that was talking to the running machine, arrive after it and are read as
+lines like any other. Such input can run a command that only reads. It
+cannot end the hold, because ending it takes the hold's token.
+
+**The token.** One pure function of the core derives a 16-bit number
+from the crash record the stop has just written: bits 10 to 25 of its
+`uptime_ns`, the monotonic time at the end, which no byte sent before
+the stop could know. `--erx-held` prints it, the reply to `anchor`
+carries it, and the host's tool computes it from the record it reads, by
+the generated Ruby twin of that function. A `reset` request carries it in
+its address field, and a typed reset is `reset TOKEN`. A bare `reset`,
+or one with another number, ends nothing and is answered
+`reset: type reset TOKEN to end the hold`, with the token, so a person
+who types `reset` is told the one word more, and a stale `reset` that
+was queued before the stop runs nothing. A `reset` frame with the wrong
+token is dropped like any frame that fails its checks.
 
 * The first byte a line keeps chooses its kind
   ([The hold's frames](#the-holds-frames)), and a carriage return or a
@@ -896,8 +965,10 @@ reader, whose state is the line so far and its kind.
   tool's session carries its replies and nothing else, and noise that
   begins with the mark draws no answer.
 * A **command line** is echoed as it is typed. It takes printable ASCII
-  alone; a backspace or a delete erases its last byte, if it has one; any
-  other byte is dropped unechoed. At its end the core parses it, runs the
+  alone; a backspace or a delete erases its last byte, if it has one, and
+  the reader writes the erase sequence, backspace, space, backspace
+  (0x08 0x20 0x08), which only the reader writes and only for an erase;
+  any other byte is dropped unechoed. At its end the core parses it, runs the
   command and prints the prompt again. A line that grew past the bound is
   refused whole at its end, never run as its first bytes.
 
@@ -920,9 +991,10 @@ end clears the reader's state.
   stop: a nested stop, which ends the machine
   ([Failure handling](#failure-handling)).
 * `anchor` is answered `ok` with the anchor's physical address in the
-  reply's address field and no bytes, so a tool that attaches to a
-  machine already held learns what `--erx-held` said.
-* `reset` ends the hold at once.
+  reply's address field and two bytes, the token, little-endian, so
+  a tool that attaches to a machine already held learns what
+  `--erx-held` said.
+* `reset` with the token ends the hold at once.
 
 That check and copy are the **checked read**, the hold's one way to
 memory: the frames' `read` and every command of the prompt go through
@@ -930,16 +1002,16 @@ it. A reply begins on a line of its own: where the prompt or an echo has
 left the console's line open, the reply's writer ends it first. No
 prompt follows a reply.
 
-**The end.** The hold ends in one way, `reset`, sent as a request or
-typed as a command, and the machine then resets: on Fiasco as at every
-end, and on erXos's kernel by the `reset` end of `erx.panic`
+**The end.** The hold ends in one way, `reset` with the token, sent as a
+request or typed as a command, and the machine then resets: on Fiasco as
+at every end, and on erXos's kernel by the `reset` end of `erx.panic`
 ([design-kernel.md](design-kernel.md#configuration)) whatever the boot's
 word says, since someone at the machine asked for it by name. Nothing
 bounds how long a machine holds. A boot that holds is attended, and a
 stop in it waits for its developer as a hang in it does: the failure
 stays readable for the person who comes back to the board an hour later,
 and a tool that died or a cable that came out costs time and nothing
-else ([Open decisions](#open-decisions)). The hold keeps no state from
+else ([Decisions](#decisions), 10). The hold keeps no state from
 one line to the next. It has no request and no command that writes,
 resumes or changes a register, and no state a line could corrupt. What
 it writes is its own: the line it gathers, the leader's stack, the UART
@@ -963,9 +1035,9 @@ does, it answers to that command's name as well as its own.
 
 **The construction.** A command is a pure function of three things: the
 stop's own records, which the kernel hands the commands' core by address
-(the anchor, the stop slots, the crash buffer, the kernel's trace rings
-and its log); the checked read of [The hold](#the-hold); and tables the
-build generates. Its one effect is text through the stop's polled write.
+(the anchor, the stop slots, the crash buffer, the kernel's trace rings,
+its log and its symbol table); the checked read of
+[The hold](#the-hold); and tables the build generates. Its one effect is text through the stop's polled write.
 The core, `kernel/core/hold_commands.c`, is C17, builds for the host as
 every core does, and links against those two effects and nothing else of
 either kernel. Four properties follow from that, and none needs a rule
@@ -1001,30 +1073,42 @@ and every other number is decimal unless it begins with `0x`.
 | --- | --- | --- | --- |
 | `help` | `help` | the commands, a line each | the generated table |
 | `show panic` | `show panic` | why the machine stopped: the cause, the message, the build and the leader's CPU | the crash buffer, through the crash core's reader |
-| `cpus` | none | each CPU's number, stop state, program counter and stack pointer, and for `waiting` the lock's address | the stop slots |
-| `regs [CPU]` | `show registers` | one CPU's registers, the leader's when none is named | that CPU's stop slot |
-| `bt [CPU \| thread ID]` | `bt`, `where` | a backtrace by frame pointers, 64 frames at most, each an address | the frame pointer in the slot, or in the thread's saved context; then two words a frame, translated in the space that CPU was in or in the kernel's |
-| `threads` | `show threads` | every thread the kernel holds, a line each: its ID, its address, its state and wait, its saved program counter | the walk of kind `thread` in the kernel's own image |
-| `thread ID` | `show thread ID` | one thread: the same, and its saved registers | the same walk |
+| `cpus` | none | each CPU's number, stop state, program counter and stack pointer, the thread it was running, and for `waiting` the lock's address | the stop slots |
+| `regs [CPU]` | `show registers` | one CPU's registers, the leader's when none is named, each that falls in the kernel's code with its function and offset | that CPU's stop slot |
+| `bt [CPU \| thread ID]` | `bt`, `where` | a backtrace by frame pointers, 64 frames at most, each an address and, in the kernel's code, its function and offset | the registers of [A thread's registers](#a-threads-registers); then two words a frame, each frame inside the stack it claims, translated in the space that CPU was in or in the kernel's |
+| `threads` | `show threads` | every thread the kernel holds, a line each: its ID, its address, its state, where it is (running on a CPU, switched out, or never run) and its saved program counter | the walk of kind `thread` in the kernel's own image |
+| `thread ID` | `show thread ID` | one thread: the same, and its registers where it has them | the same walk |
 | `trace [N]` | none: `ddb`'s `trace` is its `bt` | the newest N records of the kernel's trace rings ([design-kernel.md](design-kernel.md#trace-ring)), 32 when no number is given and `hold_trace_max` (256) at most, merged by time, oldest first, each with its CPU, thread, event and named arguments, and a count wherever a ring's own reader rule says records were overwritten or half written | the rings, through the ring core's reader |
 | `log [N]` | `show msgbuf` | the last N lines of the kernel's log | the log, through the log core's reader |
-| `x[/bhlg] ADDRESS[,COUNT]` | `x` | COUNT units of memory in hexadecimal, of 1, 2, 4 or 8 bytes each, 8 when no size is given and one unit when no count is, `hold_read_max` bytes at most; for bytes, printable ASCII beside them and a dot for every other byte | the checked read, after a translation for a virtual address |
-| `reset` | `reset` | nothing: it ends the hold, and the machine resets | nothing |
+| `x[/bhlg] ADDRESS[,COUNT]` | `x` | COUNT units of memory in hexadecimal, of 1, 2, 4 or 8 bytes each, 8 when no size is given and one unit when no count is, `hold_read_max` bytes at most; for bytes, printable ASCII beside them and a dot for every other byte; for 8-byte units, a value in the kernel's code with its function and offset | the checked read, after a translation for a virtual address |
+| `reset TOKEN` | `reset` | nothing: it ends the hold, and the machine resets; without the token, or with another, the line that names it | nothing |
 
 An `ADDRESS` is a kernel virtual address; or `p:` and a physical one; or
 a space, a colon and a virtual address in it, the space written `root`
 for the root task's, whose translation root the anchor holds, or `cpuN`
 for the one CPU N was in when it stopped, whose root is in its slot. A
-thread's ID is the kernel's own number for the thread, the one its trace
-records carry, so a record of `trace` leads to a line of `threads` and
-from there to a backtrace.
+thread's ID is the number the kernel's trace records carry for it, so a
+record of `trace` leads to a line of `threads` and from there to a
+backtrace. One rule gives it on both kernels: it is the value a trace
+record's `thread` field holds, which on erXos's kernel is the thread's
+object number and on Fiasco the object id plus one (`Kobject_dbg::_dbg_id`,
+`kern/kobject_dbg.cpp`, as
+[design-fiasco.md](design-fiasco.md#the-kernels-trace-rings) gives the
+fork's rings), and the walker's `id` line names that field and that
+offset of one, so the prompt and the rings cannot disagree about a
+number.
 
 `x` takes `ddb`'s sizes and its `ADDRESS,COUNT` form and prints
 hexadecimal alone. Unlike `ddb` it keeps no current address and no last
 format from one command to the next, and it has no radix variable.
 `trace` is the kernel's trace rings, as it is in the tool and in
 `erx:trace`; `ddb`'s `trace` is its stack trace, which here is `bt` and
-`where` ([Open decisions](#open-decisions)).
+`where` ([Decisions](#decisions), 11). On Fiasco the rings are the
+fork's, one static array of the kernel's image, `erx_trace_rings`, always
+written ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings));
+the glue hands the commands' core its address and count, and the prompt
+reads it through the checked read with the ring core's reader, as the
+root reads the same pages through its read-only window.
 
 **Translation.** A virtual address is translated by the architecture's
 table walk: one pure function of a translation root, the anchor's
@@ -1052,8 +1136,8 @@ in one line that says who can:
   `NAME: unknown command; help lists the commands`.
 
 The rest of the tool's set stays the tool's, which reads the same held
-machine through the frames: symbols, since the kernel carries no symbol
-table and a backtrace is a list of addresses; the inspection paths,
+machine through the frames: names beyond the kernel's functions, such as
+a data symbol's, a source line and a frame's arguments; the inspection paths,
 whose records the root's tables identify and mostly hold on Fiasco;
 `print`, `list`, `whatis` and `audit`, which need the build's type data;
 and everything that controls a machine or moves it in time. A walk that
@@ -1069,7 +1153,8 @@ log lines, only through the kernel console's escaping function,
 text attributed to a source. A value outside its enumeration is printed
 as its number and the word `invalid`. So every line the prompt prints is
 printable ASCII, whatever the memory held, and the echo is of bytes the
-line accepted, which the reader's rule makes printable ASCII. Every
+line accepted, which the reader's rule makes printable ASCII; the one
+other sequence on the line is the reader's erase. Every
 command reads and prints within a bound (64 frames, `hold_trace_max`
 records, `hold_read_max` bytes, a walker's rows), a few seconds of the
 line at 115,200 baud at most, so the prompt has no pager and no key that
@@ -1084,10 +1169,84 @@ and not entered without running it, and then asks for the anchor
 ([The host's debugger](#the-hosts-debugger)); the prompts and echoes
 before its first reply are lines its frame reader passes over, as it
 passes over every line that is not a frame's. The tool leaves a held
-machine held unless it is told `reset`, so commands typed at a terminal
+machine held unless it is told `reset`, which it sends with the token,
+so commands typed at a terminal
 and runs of the tool alternate over one stopped machine, and the lines
 they print for one command are the same
 ([Verification](#verification-and-testing)).
+
+#### A thread's registers
+
+A thread is in one of three places when the machine stops, and the
+prompt gives registers for each from the one source that is true for
+it:
+
+* **Running on a CPU.** Each stop slot names the thread its CPU was
+  running, a field the CPU writes from the kernel's own current-thread
+  pointer as it publishes ([Stop slots](#stop-slots)). Such a thread's
+  registers are its CPU's slot, whatever its saved context says: a
+  running thread's saved stack pointer is the one it left at its last
+  switch, and its stack has been used since. `thread ID` says
+  `running on cpuN`, and `bt ID` is `bt N`. A CPU that is `unanswered`
+  or `offline` names no thread, and a thread it was running is shown as
+  switched out, with the mark `cpu did not answer` beside its context.
+* **Switched out.** Its saved context is what the kernel's switch left:
+  on erXos's kernel the thread's saved registers, which the walker's
+  `context` line names; on Fiasco the stack pointer saved in
+  `Context::_kernel_sp`, at which the switch stored a continuation
+  address and, eight bytes above it, the frame pointer
+  (`Context::arm_switch_gp_regs`, `kern/arm/64/context-arm-64.cpp`). The
+  backtrace starts at that continuation and frame pointer.
+* **Never run.** A thread made and not yet switched to has a saved stack
+  pointer that its creation set, with no frame saved at it (on Fiasco,
+  `Context::Context` sets `_kernel_sp` to the thread's register frame,
+  `kern/context.cpp`, and `prepare_switch_to` stores the continuation
+  alone). The walk's bound settles it with no case of its own: every
+  frame pointer must lie above the last and inside the thread's own
+  stack, which on Fiasco is the thread's block (`context_of`,
+  `kern/context.cpp`), and a word that does not is the end of the
+  backtrace, marked `cut`.
+
+#### Symbols
+
+A development image that may hold carries a **kernel symbol table**, so
+`bt`, `regs` and `x` name the function an address of the kernel's code
+falls in, with the offset into it, on a terminal and nothing else.
+
+* **One source.** The image build makes it from the linked kernel's own
+  symbol table, with LLVM's `llvm-nm` and `llvm-cxxfilt` as subprocesses:
+  every function symbol of the kernel's text with its address and size,
+  sorted by address, each name demangled and cut to
+  `hold_symbol_name_max` (64) bytes. The generator writes one entry per
+  function, its start as an offset from the image's text and its size,
+  each 32 bits, and one pool of names, and refuses a table past
+  `hold_symbols_max` (1 MiB), a name with a byte outside printable ASCII,
+  and two functions that overlap. Nobody lists a symbol by hand.
+* **Where it lies.** The table is an item of the boot image, beside the
+  kernel and not inside it, since a table put back into the image it
+  describes would move the addresses it gives. The boot stage loads it
+  into memory the boot map gives as used, as it loads every boot module,
+  so it lies inside the readable-RAM map, and the anchor records its
+  physical address, its length and the build identifier it was made for,
+  as `symbols`; a boot without the table writes zero there. The prompt
+  reads it through the checked read, a binary search of the entries and
+  then one name, about twenty reads of a few bytes for each address.
+* **When it is trusted.** The table is used only when its header names
+  the anchor's build identifier and its counts fit its length; otherwise
+  every address prints bare and the first command that would have named
+  one prints `symbols: none` or `symbols: wrong build` once. An address
+  inside no entry, or past its entry's size, prints bare.
+* **Never in a release image.** The image packer adds the table only to
+  an image with the development flag, and refuses a release image that
+  would carry it, as it refuses `erx.hold`, and the release build check
+  proves its absence from a release image; a release kernel has no
+  prompt to read it.
+* **The tool agrees.** The host's tool has the build's full debug
+  information, and names a frame by it, in full. For the lines it shares
+  with the prompt (`-n`), it applies the same projection to the same
+  image's symbols, the same Ruby function the generator uses, so the
+  two print the same function and offset; the comparison in
+  `native_hold_prompt` and on the host over a stop image is its oracle.
 
 ## The host's debugger
 
@@ -1135,10 +1294,14 @@ command's name, the name FreeBSD's `ddb` has for the same command where
 that differs, its arguments, what it needs of a target, its line of
 `help`, and whether a held machine's prompt has it. The generator writes
 the tool's table from every row and the kernel's from the prompt's rows
-([The prompt](#the-prompt)), so the two answer to the same names and
-print the same help. A row can be the prompt's only if it needs CPUs and
-memory alone and none of the build's symbols or type data, which the
-generator checks.
+([The prompt](#the-prompt)), so the two answer to the same names, and
+for every row the prompt has, the two print the same line of help; the
+tool's `help` lists its other rows as well. What a row needs is one of a
+closed set: nothing, CPUs, memory, control, time, or a held board, the
+one need of `reset`, which ends a hold and does nothing else. A row can
+be the prompt's only if it needs nothing, CPUs, memory or a held board,
+and nothing of the build beyond the kernel's symbol table: no type data,
+no source lines, no other image. The generator checks it.
 
 | Command | Shows | Needs |
 | --- | --- | --- |
@@ -1160,7 +1323,7 @@ generator checks.
 | `stop`, `continue`, `detach` | stop or resume the whole machine; leave the stub | control |
 | `break ADDRESS`, `watch ADDRESS LENGTH read\|write\|access`, `watch PATH ATTRIBUTE`, `delete N` | hardware breakpoints and watchpoints; the second form of `watch` is on the place a view read an attribute from | control |
 | `now`, `at COUNT`, `back`, `when PATH ATTRIBUTE`, `when ADDRESS LENGTH` | the instruction count of this moment; move to a count; run backwards to the last break or watch; run backwards to the last write of an attribute or a range | time |
-| `reset` | end a held machine, which resets | a held board |
+| `reset` | end a held machine, which resets; the tool sends the hold's token, which a person types after the word | a held board |
 
 The prompt's rows are `help`, `show panic`, `cpus`, `regs`, `bt`,
 `threads`, `thread`, `trace`, `log`, `x` and `reset`. Whatever the
@@ -1200,11 +1363,11 @@ every row and writes the bundle:
 | --- | --- |
 | `walk KIND [in SPACE]` | the rows of an inspection kind; SPACE is `kernel`, `root`, or a field of the enclosing row that names a space |
 | `from symbol NAME`, `from WALK FIELD`, `from slot FIELD` | where the walk starts: a symbol of the image, a field of another walk's row, or the object a capability slot of the row's space names, resolved through that space's capability table |
-| `step array COUNT`, `step list LINK`, `step table FIRST LAST`, `step once` | how it goes from row to row |
-| `only TYPE` | for an image in C++, keep the rows whose dynamic type is TYPE, read from the object's virtual table pointer against the image's symbols |
+| `step array COUNT`, `step list LINK`, `step table FIRST LAST`, `step once` | how it goes from row to row; a list whose head is a sentinel inside the list object ends when a link returns to it, and a link names the link member inside the next row, from which the row lies at the generated adjustment |
+| `only TYPE` | for an image in C++, keep the rows whose most derived class is TYPE, by the word at the start of the row's polymorphic base compared with the one recorded from a live object of TYPE ([On Fiasco](#on-fiasco)) |
 | `bound N` | the most rows it reads |
 | `id FIELD` | the row's identifier in its path |
-| `attr KEY REPORTER FIELD [as MAP]` | the field that holds an attribute, the reporter whose state it is, and for an enumeration the map from the image's values to the schema's atoms |
+| `attr KEY REPORTER FIELD [as MAP \| flags ENUM]` | the field that holds an attribute, the reporter whose state it is, and for an enumeration the map from the image's values to the schema's atoms; for a word of combinable flags, the enumeration of the image's debug information that names its bits, shown as the word and its set bits' names, and `unsupported` to `inspect` |
 | `context FIELD LAYOUT` | for a thread, where its saved registers lie, so `bt` can start there |
 | `map NAME VALUE ATOM...` | such a map |
 
@@ -1247,15 +1410,16 @@ view needs is a walker's line.
 **A kernel's own image carries its walkers.** For the walker file of a
 kernel's image the generator also writes the table that the prompt's
 commands interpret ([The prompt](#the-prompt)): the same rows, with each
-field's offset and size written as the compiler's own `offsetof` and
-`sizeof` over the kernel's types, in a translation unit the kernel
-compiles, C++ in the Fiasco fork's glue and C in erXos's kernel. A
-renamed field then fails the kernel's compile at the generated line, as
-it fails the bundle's build at the walker's. The prompt interprets the
-steps a kernel's own objects need (a start at a symbol, a list or an
-array, the dynamic-type filter, the bound, the identifier, attributes
-with their maps, and a thread's saved context) and no step that leaves
-the image: `from slot`, and a walk in a space other than the kernel's,
+field's offset and size, and each base-class adjustment between a link
+and its row, made by the compiler over the kernel's types in the pass
+that compiles the kernel: in erXos's kernel, C, by `offsetof` and
+`sizeof`; in the Fiasco fork, C++, through Fiasco's own offset list
+([On Fiasco](#on-fiasco)). A renamed field then fails the kernel's
+compile at the generated line, as it fails the bundle's build at the
+walker's. The prompt interprets the steps a kernel's own objects need (a
+start at a symbol, a list or an array, the dynamic-type filter, the
+bound, the identifier, attributes with their maps or flags, and a
+thread's saved context) and no step that leaves the image: `from slot`, and a walk in a space other than the kernel's,
 are the tool's. On Fiasco that gives the prompt the kernel's threads
 ([On Fiasco](#on-fiasco)). The root's tables, where erXos's domains and
 budgets live there, are another image's, whose layouts and symbols the
@@ -1555,7 +1719,7 @@ The routes into the stop:
 | a spinlock's wait (`kern/arm/64/spin_lock-arm-64.cpp`, and the cores' ticket lock) | waits | the check of the stop word after each wake; `waiting` |
 | a secondary CPU's start, `App_cpu_thread::bootstrap` (`kern/app_cpu_thread.cpp`) | marks the CPU online near its beginning, sets up its timer and scheduler state, unmasks interrupts, prints and enters its idle loop | the admission, as the last step before interrupts are unmasked: the CPU sets its bit and, if the stop word is set, parks as `starting`. The boot CPU is admitted where the glue sets the stop up |
 | the console path's lock, Fiasco's printf lock (`kern/libc_backend_lock.cc`) | a take that loops without bound | a bounded take beside it, which the leader calls once and never undoes |
-| the root's request for a reset after its own crash record, an argument of the platform control object's shutdown that names the cause (`kern/platform_control_object.cpp`) | resets | the stop from its census on, with no record of the kernel's: the root wrote one |
+| the root's request for a reset after its own crash record, arguments of the platform control object's shutdown that name the cause and the record's address in the root's space (`kern/platform_control_object.cpp`) | resets | the stop from its census on; the kernel writes no record of its own; in a boot that holds it copies the root's into its crash buffer, checked, after its census |
 
 `Thread::system_abort` and the exit question go, since nothing reaches
 them. The interrupted registers of a CPU that takes the stop request are
@@ -1639,27 +1803,97 @@ stage gives the device tree's reservations, the firmware's own memory on
 the Raspberry Pi 4 among them, was not read for this design and is P11.
 
 **The prompt on Fiasco.** The glue hands the commands' core the anchor,
-the slots, the crash buffer and the kernel's trace rings by address, and
-supplies its two effects: the checked read, through the window the
-frames' `read` uses, and the polled write. Fiasco keeps no log of
-erXos's kind, so `log` is refused there. The one walk is of Fiasco's
-threads. It starts at the list that links every kernel object
-(`Kobject_dbg::_kobjects`, `kern/kobject_dbg.cpp`), which `CONFIG_RT_DBG`
-keeps; its rows are the objects whose dynamic type is a thread's; a
-row's number comes from its object id (`_dbg_id`); and its fields are the
-thread's state word and the saved stack pointer of its context
-(`Context::_kernel_sp`, `kern/context.cpp`), from which the walker's
-context line finds the saved frame pointer and return address (P13).
-These are private members of Fiasco's classes, so each class the walker
-file names declares the generated unit a friend, one line a class, and
-the unit takes each offset with `offsetof`; whether that compiles for
-Fiasco's thread class, which is not a standard-layout type, is
-unverified (P12). A CPU that was parked inside an update of the object
-list leaves it half linked: the walk reads it through the checked read,
-with its bound and its test for a row already read, and marks where it
-ended. Fiasco's tasks have no listing of their own: without the root's
-records a task is a number and a translation root
-([Alternatives considered](#alternatives-considered)).
+the slots, the crash buffer, the fork's trace rings (`erx_trace_rings`,
+[design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)) and the
+symbol table by address, and supplies its two effects: the checked read,
+through the window the frames' `read` uses, and the polled write. Fiasco
+keeps no log of erXos's kind, so `log` is refused there.
+
+**The root's record on Fiasco.** The root writes the records of its own
+ends into its own buffer (`end_record`, `liberx/backend/fiasco/end.c`)
+and prints them; the kernel never sees them. Its shutdown request
+therefore names that buffer's address in the root's space beside the
+cause, and in a boot that holds the glue, after its census, translates the address from the
+anchor's root-task root, copies `crash_size` bytes through the checked
+read into the kernel's crash buffer and runs the crash core's check over
+them. So the stop has one record in one place whatever ended the
+machine: `show panic` reads it, and so does the tool through the
+anchor's `record`. A record that fails the copy or the check leaves the
+buffer zero, and `show panic` answers `record: unknown: the root's
+record could not be read` with the reason.
+
+**Fiasco's threads.** The one walk is of Fiasco's threads, over the list
+that links every kernel object (`Kobject_dbg::_kobjects`,
+`kern/kobject_dbg.cpp`), which `CONFIG_RT_DBG` keeps. The list is a
+`cxx::D_list` (`lib/libk/cxx/dlist`): its head is a sentinel link inside
+the list object itself, each link points at the `D_list_item` inside the
+next object rather than at the object, and the walk is over when a link
+comes back to the sentinel. `Kobject_dbg` derives from `D_list_item`, and
+is a private base of `Kobject`, which `Thread` reaches through its third
+base (`kern/kobject.cpp`, `kern/thread.cpp`). So from a link to a thread's
+fields is a chain of base-class adjustments, not one offset, and the
+walk needs four kinds of fact, each made by the compiler from the
+kernel's own types in the pass that compiles the kernel:
+
+* **Adjustments and offsets.** Fiasco already computes the offsets its
+  assembly needs in this way: `kern/tcboffset.cc` evaluates
+  `DUMP_CAST_OFFSET(type, subtype)`, a `static_cast` at a fixed address,
+  and `DUMP_MEMBER1`, a member's offset, inside `offsets_func`, which
+  `MEMBER_OFFSET()` (`kern/member_offs.h`) makes a friend of `Thread`
+  and `Context`; the build extracts the numbers from the object's
+  `.offsets` section (`Makerules.TCBOFFSET`). The walker generator
+  writes its lines into a file of the build tree that the list
+  includes, and the fork adds `MEMBER_OFFSET()`
+  to `Kobject` and `Kobject_dbg`, one line each, so the friend reaches
+  the private base and `_dbg_id`. The lines give: the `D_list_item`
+  inside a `Kobject_dbg`; for each concrete thread class, the
+  `Kobject_dbg` inside it and the `Context` inside it; and inside
+  `Context`, `_state` and `_kernel_sp`. The kernel's walker table is
+  then generated from `tcboffset.h` as Fiasco's assembly takes its
+  offsets from it, and a renamed member fails that build at the line
+  that names it. No `offsetof` over a class that is not standard-layout
+  is needed.
+* **The sentinel.** The glue records the address of the list object's
+  sentinel in the table at boot, while the kernel is whole: it is the
+  address of a static object and never moves.
+* **Which objects are threads.** The rows are objects whose most derived
+  class is one of the walker file's `only` classes, `Thread_object`,
+  `Kernel_thread` and `App_cpu_thread` (`kern/thread_object.cpp`,
+  `kern/kernel_thread.cpp`, `kern/app_cpu_thread.cpp`). The first word
+  of an object's `Kobject_dbg` is the same for every object of one most
+  derived class and differs between such classes, since `Kobject_dbg`
+  has virtual members and no polymorphic base, so that word is the
+  pointer to the class's virtual table (P12). The glue records that word
+  from a live object of each class at a point it already runs: the boot
+  CPU's own thread, a `Kernel_thread`, when it sets the stop up; each
+  secondary CPU's, an `App_cpu_thread`, at its admission; and the root's
+  first thread, a `Thread_object`, when it completes the anchor. The
+  walk keeps an object whose word is among those recorded and steps
+  past any other. Calling the object's own type function
+  (`_cxx_dyn_type`) would run the stopped kernel's code, which the
+  prompt never does. The walker generator refuses an image whose debug
+  information has a concrete class derived from `Thread` that the
+  `only` lines do not name, so a new thread class fails the build until
+  someone says where its word is recorded.
+* **A row's number and state.** A row's ID is `_dbg_id` plus one, the
+  value the fork's trace records carry. Its state is `Context::_state`,
+  a word of combinable `Thread_state` flags (`kern/thread_state.cpp`),
+  not an enumeration. The prompt prints the word in hexadecimal and the
+  names of its set bits, which the generator reads from the enumeration's
+  members in the kernel image's debug information; a set bit without a
+  name prints as its value. The inspection view has no rule that turns a
+  combination of flags into the schema's thread state, so `inspect`
+  shows that attribute `unsupported` on Fiasco, while `threads` shows
+  the raw word.
+
+Where each thread's registers come from is
+[A thread's registers](#a-threads-registers). A CPU that was parked
+inside an update of the object list leaves it half linked: the walk
+reads it through the checked read, with its bound and its test for a row
+already read, and marks where it ended. An empty list is a sentinel
+whose link is itself, and the walk prints no row. Fiasco's tasks have no
+listing of their own: without the root's records a task is a number and
+a translation root ([Alternatives considered](#alternatives-considered)).
 
 **What changes for the backend.** Capability slot 10 is empty in every
 build, as the release kernel's already is; an invocation of it fails as
@@ -1815,9 +2049,25 @@ boot that did not ask, and neither has the code or enters it.
 **Images and full records hold secrets.** A memory image holds everything
 the machine held, and a full record may hold what the interrupted code
 held in its registers. Images and saved moments stay in the run's log
-directory on the host and never enter the repository; a release build
-writes the brief record, which holds no register but the program counter
-and no CPU entry.
+directory on the host and never enter the repository.
+
+**What a release record shows.** A release build writes the brief
+record, and for a kernel `panic` it holds the failing CPU's registers
+and kernel backtrace, as FreeBSD's release kernel prints them
+([The record's CPU entries](#the-records-cpu-entries)); this follows
+FreeBSD by decision. The backtrace and the program counter say where in
+the kernel's code it failed, which is public, since the kernel image
+ships with the release. The registers are the interrupted kernel code's,
+and they may hold data: kernel addresses, which tell a reader where the
+kernel's objects lie; a value the kernel was handling for a domain, such
+as a word of a message in transit or an argument of a call; and the
+fault address, which may be a domain's user address and so says
+something of its address layout. Whoever sees the record sees those
+words: the console at the moment of the stop, and whoever the record is
+sent to afterwards. Nothing of user mode is in it beyond what the kernel
+held in its registers at the fault: no user register set, no stack, no
+log and no text but the kernel's own panic message, and for the root
+task's ends no registers at all.
 
 **The tool's input is untrusted.** Every byte from a stub, a console, an
 image file or a log may come from a machine whose memory a domain wrote
@@ -1834,17 +2084,17 @@ Each test is paired with the seeded fault that proves it ran.
 | --- | --- | --- |
 | the stop core, exhaustive, on the host | for up to 4 CPUs, every interleaving of entries into the stop, request deliveries, CPUs in a lock's wait, CPUs that never unmask, CPUs at each step of their admission before, during and after the census, and the bound: exactly one leader; every CPU in exactly one state; every CPU that passes its admission is in the leader's set or parked `starting`; registers only where a slot was published; a nested stop never waits; a CPU that parked or followed and faults again, after its slot's store or just before it, publishes nothing more; the census ends by the bound | the claim treating its own CPU's word as another's, so a nested stop waits on itself; the claim following at every depth, so a CPU that faults again publishes a second time; the census marking an asked CPU `stopped` without its slot; the admission loading the stop word before it sets its bit, so one interleaving lets a CPU run on unasked |
 | the admission's ordering, a litmus test at the milestone gate | under the architecture's memory model, never both at once: the leader's load missing a CPU's bit, and that CPU's load missing the stop word | the barrier removed from either side |
-| the hold's line reader and step, exhaustive, on the host | over every state and byte: the first byte alone chooses a line's kind; a frame line echoes nothing and draws a reply only when it passed every check; a command line echoes exactly the printable bytes it kept, a backspace at an empty line changes nothing, and a line past the bound is refused whole; a newline after a carriage return ends no second line; `range` for every range that leaves the map, over maps of one to 16 ranges and ranges that straddle, touch and wrap; the hold ends at `reset`, a frame's or a typed one, and at no other time | the range check comparing the range's start alone; a backspace at an empty line moving the line's start; a frame line echoed; a line past the bound run as its first bytes |
-| the commands' parser, on the host | each command's accepted forms and each refusal: an unknown name, a missing or extra argument, a number that overflows, a count past its bound, a size letter outside `bhlg`; each `ddb` name reaches its command's row; the kernel's table and the tool's print the same `help` | the count's bound check removed: `x` reads past `hold_read_max`; a prompt row left out of the kernel's table: the two `help` texts differ |
-| each command over a stop image the test builds, on the host: an anchor, slots for four CPUs in four states, a crash record, trace rings filled by the ring core's writer, translation tables of every descriptor kind, a stack with seeded frames in a second space, and a linked list of objects under a walker table of the test's own | `show panic`, `cpus`, `regs`, `bt`, `threads`, `thread`, `trace` and `x` print the seeded values, and `tools/erx debug -n` prints the same lines from the same image; the C walk and the tool's translate every address alike; an address in a hole, one mapped to a page outside the map and one not mapped are each refused by name; a list linked into a cycle, one that leaves readable memory and one longer than its bound are marked cyclic, cut and truncated | the translation's last step skipping the map check: the page outside the map is read; a walker's field mapped to its neighbour: the prompt's line and the tool's differ; the test for a row already read removed: the cyclic list is marked truncated |
+| the hold's line reader and step, exhaustive, on the host | over every state and byte: the first byte alone chooses a line's kind; a frame line echoes nothing and draws a reply only when it passed every check; a command line echoes exactly the printable bytes it kept, a backspace at an empty line changes nothing, and a line past the bound is refused whole; a newline after a carriage return ends no second line; `range` for every range that leaves the map, over maps of one to 16 ranges and ranges that straddle, touch and wrap; the hold ends at `reset` with the token, a frame's or a typed one, and at no other time, and a bare `reset` or one with another token prints the line that names the token; an erase writes backspace, space, backspace, and no other byte outside printable ASCII is written | the range check comparing the range's start alone; a backspace at an empty line moving the line's start; a frame line echoed; a line past the bound run as its first bytes; the token check removed: a bare `reset` ends the hold |
+| the commands' parser, on the host | each command's accepted forms and each refusal: an unknown name, a missing or extra argument, a number that overflows, a count past its bound, a size letter outside `bhlg`; each `ddb` name reaches its command's row; for every row the prompt has, the kernel's table and the tool's print the same line of `help`, and the generator refuses a prompt row that needs control, time or type data | the count's bound check removed: `x` reads past `hold_read_max`; a prompt row left out of the kernel's table: its line is missing from the kernel's `help`; a row needing `control` marked the prompt's: the generator accepts it |
+| each command over a stop image the test builds, on the host: an anchor, slots for four CPUs in four states, a crash record, trace rings filled by the ring core's writer, translation tables of every descriptor kind, a stack with seeded frames in a second space, a symbol table, and a sentinel-headed list of objects of three classes and one that is no thread, linked through a member that is not at the object's start, under a walker table of the test's own; the same with the list empty | `show panic`, `cpus`, `regs`, `bt`, `threads`, `thread`, `trace` and `x` print the seeded values, with the seeded functions' names and offsets, and `tools/erx debug -n` prints the same lines from the same image; `threads` lists the three threads and not the other object, ends at the sentinel, and prints nothing for the empty list; a thread named by a slot is `running on cpuN` with that slot's registers, a switched-out one starts at its saved continuation, and a never-run one's backtrace ends `cut` after one frame; an address one byte past a function's size prints bare; the C walk and the tool's translate every address alike; an address in a hole, one mapped to a page outside the map and one not mapped are each refused by name; a list linked into a cycle, one that leaves readable memory and one longer than its bound are marked cyclic, cut and truncated | the translation's last step skipping the map check: the page outside the map is read; a walker's field mapped to its neighbour: the prompt's line and the tool's differ; the test for a row already read removed: the cyclic list is marked truncated; the link-to-row adjustment dropped: no thread is found; the sentinel test removed: the walk reads the list object as a row; the symbol search comparing with `<=` at a function's end: the byte past it is named; a running thread given its saved context: its backtrace differs from its CPU's |
 | the commands' core cannot follow a machine address | a source that dereferences an address of the stopped machine, or passes one where a pointer is expected, does not compile | the address type made a plain integer: the source compiles, and the test fails |
-| `native_hold_prompt`, the cell with `erx.hold=1` on a development test kernel with a seeded panic on CPU 2 of 4 and a seeded thread blocked in a seeded wait: the harness types at the held machine through the console's socket, runs the tool with `--held` on the same machine, and takes QEMU's own image of it | the echo is what was typed; `show panic` gives the seeded message; `cpus` gives CPU 2 `leader` and three `stopped`; `bt` holds the seeded function's address; `threads` lists the seeded thread in its wait, and `bt thread` reaches its seeded frame; `trace` ends in the seeded event; `x` of a seeded word gives it, and `x` of the UART's register page is refused; every line equals the line `tools/erx debug -n` prints from the image; the tool finds the anchor by `anchor`, and its `report` equals its `report` from the image; a typed `reset` resets the machine | the glue's window mapping the page before the one asked: `x` and the image differ; the map check removed from the commands' read: the register page is printed; a prompt printed after a reply: the tool's transcript holds a line the cell does not expect |
+| `native_hold_prompt`, the cell with `erx.hold=1` on a development test kernel with a seeded panic on CPU 2 of 4 and a seeded thread blocked in a seeded wait: the harness types at the held machine through the console's socket, runs the tool with `--held` on the same machine, and takes QEMU's own image of it | the echo is what was typed; `show panic` gives the seeded message; `cpus` gives CPU 2 `leader` and three `stopped`; `bt` holds the seeded function's address; `threads` lists the seeded thread in its wait, and `bt thread` reaches its seeded frame, named; the leader's thread and CPU 3's running thread are `running on cpu2` and `running on cpu3`, and `bt` of each equals `bt` of its CPU; `bt` names the seeded function; `trace` ends in the seeded event, whose thread ID `thread` accepts; `x` of a seeded word gives it, and `x` of the UART's register page is refused; every line equals the line `tools/erx debug -n` prints from the image; the tool finds the anchor by `anchor`, and its `report` equals its `report` from the image; a typed `reset` is answered with the token and a typed `reset TOKEN` resets the machine | the glue's window mapping the page before the one asked: `x` and the image differ; the map check removed from the commands' read: the register page is printed; a prompt printed after a reply: the tool's transcript holds a line the cell does not expect |
 | the readable-RAM map, on the host | over boot maps the test builds: a virtual entry that spans every `ram` range changes nothing; an `excluded` entry inside a `ram` range splits it, rounded outward; overlapping and touching `ram` ranges join; a map of 17 ranges, an entry whose end overflows and a `used` entry that leaves the result are each refused, never cut; and over random maps, every page of the result lies in a `ram` entry and in no `excluded` one, and the result is sorted, disjoint and whole pages | the subtraction skipped: the interior exclusion is readable; a 17th range dropped without a refusal |
 | Fiasco's classification, on the host | every descriptor type and sub-type of the kernel information page, physical and virtual, gets the class of [On Fiasco](#on-fiasco)'s table, and a value the table does not list is `excluded` | a virtual `Conventional` descriptor classed `ram`; the default changed to `ignored` |
 | the hold decision | over every development flag, word, boot value, lease and watchdog state: a hold is allowed only when all five allow it; and over both verdicts on the map: a stop in an allowed boot holds only with a map that was not refused | the trial's refusal removed; the map's verdict ignored |
 | the slot's publication, a litmus test at the milestone gate | a reader never sees a published state with stale registers | the state stored without release ordering |
-| the crash core and its readers | records with CPU entries round-trip through `crash.c`, `crash_read.c` and `crash_frame.rb`, which agree case by case; the brief form carries no entry whatever the stop hands the writer | an entry with a state outside the enum accepted by one reader; entries copied into the brief form |
 | the record's trace tail, on the host, and its readers under the crash records' fuzz targets | over rings of 1, 4, 16 and 17 CPUs that the test fills, each set among more rings that were never written (four written of eight among them), with a ring younger than its share, a record left half written and an exhausted ring: each written ring's share, oldest first, 8 each for four written of eight, without the half-written record; every tail written passes `erx_crash_check`, and `crash_read.c` and `crash_frame.rb` agree on mutated tails | the writer's check of a record's `cpu` against its ring dropped, with one record seeded with another CPU's number: the check refuses the record written; the share computed over all seventeen rings in place of the first sixteen: one slot each in place of two, and the case fails; the share computed over `ntrace` in place of the written rings: 4 each for four written of eight, and the case fails |
+| the crash core and its readers | records with CPU entries round-trip through `crash.c`, `crash_read.c` and `crash_frame.rb`, which agree case by case; the brief form carries, for `panic`, the message, the leader's registers and backtrace, and for every cause each CPU's number and state with every register word zero, and for `fault`, `halt` and `watchdog` no registers, backtrace or text, whatever the stop hands the writer | an entry with a state outside the enum accepted by one reader; an entry's registers copied into the brief form; the root's user registers written into a brief `fault` record; the log's tail written after a brief panic's message |
 | the boot arguments' parser (`boot_args.c`) and the root's arming of the board's watchdog (`test/host/pm_wdt_test.rb`) | a release build refuses a boot whose command line carries `erx.hold=1`; the watchdog is armed in every boot but a deterministic one and one that may hold | the refusal removed; an attended boot armed |
 | `native_machine_stop`, a QEMU cell on a development test kernel with a seeded panic on CPU 2 of 4, under TCG and HVF | one crash frame of cause `panic`, CPU 2 `leader` and the others `stopped`; the image's `report` symbolizes the leader's backtrace to the seeded function; the record's trace tail holds 8 records of each CPU, none newer than the stop, and `tools/erx debug FRAME trace` prints them | the request's send removed: three `unanswered`; the tail's writer skipped: `trace` on the frame finds no records |
 | the same cell with CPU 1 waiting for a spinlock that CPU 3 holds, interrupts masked on both, CPU 3 spinning | CPU 1 `waiting` with the seeded lock's address, CPU 3 `unanswered`; the image shows CPU 3's program counter in the seeded loop, and `whatis` names the lock | the check removed from the wait loop: CPU 1 `unanswered` |
@@ -1853,7 +2103,7 @@ Each test is paired with the seeded fault that proves it ran.
 | the same cell with CPU 3 held between its admission and its unmasking of interrupts while CPU 0 stops the machine | CPU 3 `stopped` | the CPU's bit set after it unmasks interrupts and not at its admission: CPU 3 is not in the leader's set, is not asked, and runs on |
 | the same cell with CPU 3 printing in a loop with interrupts masked | CPU 3 `unanswered`; the report's first line names it and says whether the console's lock was taken; the harness's reader gives the crash frame whole or reports it damaged, never a record with another writer's bytes in it; the tool's report from the image is headed by its warning | the first line's statement removed; the reader's check of the frame skipped, so a damaged frame parses |
 | the same cell with a fault seeded inside the record's writer | `erx: nested stop` and the end within the run's deadline | the depth check removed: the run never ends |
-| the same cell on a release test kernel, whose test image's command line carries the word | the record, no `--erx-held`, no prompt, no reply to the requests and no echo of the commands the harness sends after the frame, and a reset | the release kernel built with the hold, which the configuration check refuses before the cell runs |
+| the same cell on a release test kernel, whose test image's command line carries the word | a brief record whose `panic` holds exactly the message, the leader's registers and backtrace, the fault field, the header, and each CPU's number and state, and no other nonzero byte; the report prints those and nothing else; no `--erx-held`, no prompt, no reply to the requests and no echo of the commands the harness sends after the frame, and a reset | the release kernel built with the hold, which the configuration check refuses before the cell runs |
 | `native_hold`, the cell with `erx.hold=1`: the tool reads the held machine through the console's socket, then the harness takes QEMU's own image of the same stopped machine | every range the tool read is byte for byte the image's; every range of the anchor's map lies inside the RAM the image holds; a `read` of the UART's own register page, and one of an address that only the kernel information page's virtual descriptor covers, are answered `range`; the tool's `report` from the held machine equals its `report` from the image; a second run of the tool, with `--held`, finds the anchor by `anchor` and reads the same bytes; after `reset` the machine resets | the glue's window mapping the page before the one asked: the bytes differ; the range check removed: the register page is read; the virtual descriptor classed `ram`: the second `read` is answered, or faults; `anchor` answered with the stop slots' address: the second run finds no anchor |
 | `native_ram_sweep`, a development test kernel that, once its map is built, reads one word of every page of the map through the hold's window and prints how many it read | the count is the map's number of pages, and the boot goes on to the root's first line | the sweep stepping two pages at a time: the count is half the map's |
 | the same cell without the word | no `--erx-held` and no prompt; requests and commands sent after the frame draw no reply and no echo | the hold decision ignoring the word |
@@ -1869,12 +2119,17 @@ Each test is paired with the seeded fault that proves it ran.
 | the tool's printer | a record whose text holds ESC, a C1 control, a bidirectional override, a newline and invalid UTF-8 prints escaped from `report`, `log`, `inspect` and `print` | the escape left out of one command's path: the source check on the tool's output calls fails, and the raw byte reaches the transcript |
 | the tool's requests | the stub client and the hold client have a constructor for each listed request and no other, checked over their public methods | a constructor for the `M` packet added: the test names it |
 | the configuration check, and the source check of the hold's reader | no kernel's resolved configuration has `CONFIG_INPUT`; a release kernel's has no `CONFIG_ERX_HOLD`, its build defines `UART_WITHOUT_INPUT`, and its link holds no symbol of the line reader or of the commands' core; in the fork's sources only the hold's glue names the UART library's `char_avail` and `get_char` | a resolved file with either option: refused; a second caller of `get_char`: the source check names it; a release link that pulls in the commands' core: its symbol list names it |
+| the kernel symbol table's generator and lookup, on the host | over the test kernel's linked image, the table names every function symbol of its text; the C lookup through a checked read and the Ruby projection give the same function and offset for every address of the text and for addresses past each function's end; a table whose build identifier is not the anchor's is not used | two overlapping functions accepted; a name with a byte above 0x7f accepted; the build identifier check removed: a table of another build names the frames |
+| the image packer and the release build check | a development image that may hold carries the symbol table; a release image never does, and one built to carry it is refused | the packer adding the table to every image: the release check names it |
+| the root's record at a stop on Fiasco, in `native_machine_stop`'s cells with a missed watchdog pet and with a fault of a root thread | `show panic` and the tool's `report` give the root's record, cause `watchdog` and `fault`; a record seeded to fail its check gives `record: unknown` with the reason | the copy skipped: `show panic` gives an empty record as `ok`; the check skipped: the seeded bad record is shown |
+| the cell that sends `reset` across the drain: the harness writes `reset` and a newline to the console's socket while the seeded panic is entered, and again just after `--erx-held` | the machine stays held, answers the bare `reset`s with the token, and resets at `reset TOKEN` | the token check removed: the machine resets at the queued line |
 | the license audit | no kernel build, development or release, links a source under a license that is not permissive | compile records that name a source its import record gives as GPL-2.0-only: a development build is refused as a release build is |
 
 **Fuzz targets**, each landing with its decoder: the hold's line (C, the
 core's, fed a byte at a time: every line ends in a drop, in one reply
 within its bounds, or in one command's output within its bound, and
-every byte written is printable ASCII or a line's end); the prompt's
+every byte written is printable ASCII, a line's end or the erase
+sequence); the prompt's
 commands over arbitrary memory, rings and records (C: every command on a
 random stop image ends within its bounds, reads nothing outside the map
 and prints only printable ASCII); the hold's reply frame and the crash
@@ -1897,7 +2152,7 @@ settles P11 for the board. And an attended boot of a test kernel with a
 seeded panic holds: in a plain terminal program `show panic`, `cpus` and
 `bt` answer; the tool, started with `--held`, reports the seeded
 function; the board is still held a minute after the tool has exited,
-and resets at a typed `reset`.
+and resets at a typed `reset` and the token it answers with.
 
 ## Performance
 
@@ -1952,9 +2207,12 @@ The survey of [References](#references) cites each.
 | `ps` at the prompt | `ps` lists processes, which are the runtimes' and which nothing reads from a stopped machine ("Processes of a stopped runtime as views", below); a list of the kernel's threads under that name would wear it falsely, so the list is `threads` |
 | Spaces, budgets and capabilities at the prompt on Fiasco | a budget, and a space's name and owner, are the root's records there, in an image whose layouts and symbols the kernel does not hold, and a capability table is a walk the tool already has; without the root's records a space is a number and a translation root. The tool reads all three through the same hold |
 | The inspection paths at the prompt | on Fiasco a record's identity, a thread's domain for one, and most of its attributes are the root's; `threads` shows what the kernel itself holds, under the kernel's own numbers |
-| A symbol table in the kernel, so that `bt` prints names | a table of the kernel's symbols is made from the linked kernel and has to be put back into it or loaded beside it, where the stop must check it before it trusts it; the host has the image, and `tools/erx debug` or `llvm-symbolizer` turns an address into a name ([Open decisions](#open-decisions)) |
-| A bound on the hold's silence, after which the machine resets by itself | five seconds, or any bound a person can miss, resets the board while its developer is elsewhere, and what the prompt exists to show is gone; a boot that holds is attended, and a hang in it already waits ([Open decisions](#open-decisions)) |
-| Offsets of the kernel's types for the prompt taken from the debug information, as the bundle's are | the table would be made from the kernel's compiled objects and linked back into the kernel, a second pass through Fiasco's build; the compiler's `offsetof` gives the same numbers in the pass that compiles the kernel (P12) |
+| The symbol table inside the kernel's image, as a second link | a table put into the image it describes moves the addresses it gives, so the image is linked twice and the two links must agree; beside the kernel in the boot image the table needs one link, and the readable-RAM map already reaches it |
+| A backtrace of bare addresses at the prompt, with names left to the host | a board with a terminal and nothing else is what the prompt is for, and a list of addresses sends its reader back to a host with the build ([Decisions](#decisions), 12) |
+| A bound on the hold's silence, after which the machine resets by itself | five seconds, or any bound a person can miss, resets the board while its developer is elsewhere, and what the prompt exists to show is gone; a boot that holds is attended, and a hang in it already waits ([Decisions](#decisions), 10) |
+| A drain long enough to swallow every byte sent before the stop | no length of drain proves freshness: bytes can sit in a terminal's or an adapter's buffer for as long as they like; a token derived from the stop's own record does, at the cost of one word typed after `reset` |
+| The thread walk taking the object's dynamic type from its own type function | `_cxx_dyn_type` is code of the stopped kernel, which the prompt never runs; the word at the start of `Kobject_dbg`, recorded from a live object of each thread class, answers the same question with a load |
+| Offsets of the kernel's types for the prompt taken from the debug information, as the bundle's are | the table would be made from the kernel's compiled objects and linked back into the kernel, a second pass through Fiasco's build; Fiasco's own offset list gives the same numbers, base-class adjustments included, in the pass that compiles the kernel |
 | More of `ddb`'s surface: abbreviations, `$` variables, a current address, the last format, scripts, a pager | each is state or grammar in kernel mode for a convenience; the prompt keeps nothing from one line to the next, and the tool is where a long session belongs |
 | Scripts per stop reason in the kernel, as FreeBSD's `kdb.enter.<reason>` | `report` is the script, run on the host where it can be changed without a new kernel |
 | Stopping a masked CPU by an interrupt the kernel's masking does not mask | each route changes how the kernel masks interrupts everywhere, or rests on firmware support that is unverified ([design-arch-aarch64.md](design-arch-aarch64.md#stopping-every-cpu)); the lock's wait reaches the commonest case with one load |
@@ -2048,35 +2306,36 @@ Each of these was a choice between designs, and is settled as stated.
    ([The prompt](#the-prompt)). It stays inside the hold: a development
    kernel, a boot that asked, after a stop. It does not resume, write,
    set a breakpoint or step, which stay as 6 says.
+10. **A held machine holds until `reset`.** No bound on silence ends a
+    hold: a boot that holds is attended, and a hold ended by itself after
+    a few seconds would lose the stop of every board whose developer was
+    not at the keyboard then. A board that must come back by itself does
+    not carry `erx.hold=1`. The token is what makes waiting safe: input
+    queued before the stop cannot end the hold
+    ([The hold](#the-hold)).
+11. **`trace` is the kernel's trace rings**, at the prompt as in the tool
+    and in `erx:trace`, and the stack trace is `bt` and `where`. In
+    `ddb`, `trace` is the stack trace, so a FreeBSD user who types it gets
+    events; the name is the one the tool, the guide and the trace's own
+    design use, and `help` lists both.
+12. **Development images that may hold carry a kernel symbol table**,
+    so `bt`, `regs` and `x` name kernel functions with no host
+    ([Symbols](#symbols)). It is made from the linked kernel's symbols,
+    lies beside the kernel in the boot image, is bounded, is checked
+    against the anchor's build identifier before use, and is never in a
+    release image.
+13. **The brief form prints what FreeBSD's release kernel prints.** For
+    a kernel `panic`, a release record holds the message, the failing
+    CPU's registers and its backtrace as code addresses, and every
+    CPU's state, as FreeBSD 14.3's `GENERIC` prints its registers,
+    message and backtrace unconditionally
+    ([The record's CPU entries](#the-records-cpu-entries)); the root
+    task's ends keep no registers. What that exposes is stated under
+    [Security](#security).
 
 ## Open decisions
 
-Each of these awaits a decision, and the document states the design
-under the recommendation.
-
-1. **How long a machine holds.** Recommended, and designed above: until
-   `reset`. The alternative ends a hold by itself after five seconds
-   without a request, unless a byte of a command line has arrived by
-   then: it brings an unwatched board back with nobody there, and it
-   loses the stop of every board whose developer was not at the keyboard
-   in those five seconds. The recommendation serves the developer the
-   prompt exists for; a board that must come back by itself should not
-   carry `erx.hold=1`.
-2. **`trace` at the prompt.** Recommended, and designed above: `trace`
-   is the kernel's trace rings, as in the tool and in `erx:trace`, and
-   the stack trace is `bt` and `where`. In `ddb`, `trace` is the stack
-   trace, so a FreeBSD user who types it gets events where a backtrace
-   was expected. The alternative names the rings `show trace`, in the
-   tool and at the prompt, and refuses a bare `trace` with a line that
-   names both commands: it removes the surprise and changes a name that
-   the tool, the guide and the trace's own design use.
-3. **Symbols at the prompt.** Recommended, and designed above: none; a
-   backtrace is addresses. The alternative puts the kernel's function
-   symbols into a development boot image as a module that a holding boot
-   keeps, so that `bt` and `threads` print names with no host at all. It
-   adds a table the stop must check before it trusts it and a step to
-   the image build, for what `llvm-symbolizer` does on any host that has
-   the build.
+None.
 
 ## Unverified facts
 
@@ -2154,18 +2413,24 @@ this design establishes, with the probe that settles it.
   board's manual checklist, which reads every page of the map and so
   finds a hole inside a range as surely as one at its edge; a page that
   faults is a kernel trap whose record names the address.
-* P12. Whether `offsetof` over Fiasco's thread and context classes, which
-  are not standard-layout types, compiles in the fork's build under its
-  warning flags, and whether a friend declaration in each class is all
-  the access the generated unit needs. Probe: the build of the generated
-  unit. If it fails, the table is made from the kernel objects' debug
-  information in a second pass
-  ([Alternatives considered](#alternatives-considered)).
-* P13. Where a Fiasco thread that is not running keeps its frame pointer
-  and return address, so that the walker's context line can name them
-  from the saved stack pointer. The switch code was not read for this
-  design. Probe: `bt thread` of the seeded blocked thread in
-  `native_hold_prompt`.
+* P12. That the first word of a `Kobject_dbg` is its virtual table
+  pointer, equal across the objects of one most derived class and
+  different between classes, as the C++ ABI that Fiasco's compilers
+  follow places a vtable pointer at the start of a polymorphic class
+  without a polymorphic primary base; the ABI's document was not read
+  for this design. Also that the glue's three recording points see a
+  live object of each thread class: the boot CPU's own thread, each
+  secondary CPU's at its admission, and the root's first thread when
+  the anchor is completed. Probe: the host test over a list of mixed
+  objects built by the fork's own classes, and `threads` in
+  `native_hold_prompt`, which must list the root's threads, each CPU's
+  idle thread and the seeded one, and no other object.
+* P13. That every Fiasco thread switched out by
+  `Context::arm_switch_gp_regs` keeps its continuation at `_kernel_sp`
+  and its frame pointer eight bytes above, read from
+  `kern/arm/64/context-arm-64.cpp`; what the continuation's own frame
+  holds was not read. Probe: `bt thread` of the seeded blocked thread in
+  `native_hold_prompt`, which must reach its seeded frame.
 
 ## References
 

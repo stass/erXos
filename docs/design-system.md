@@ -5368,7 +5368,10 @@ domain.
   so a development build's full crash record, with its registers and the
   system domain's slogan and dump, may hold one typed shortly before a
   crash; development builds run trusted code only. A release build's brief
-  record holds no register but the program counter, no stack and no text,
+  record holds no register of the system domain's but the program counter,
+  no stack and no text; for a kernel panic it holds the kernel's
+  registers, which may hold a word the kernel was carrying for a domain
+  ([design-debugger.md](design-debugger.md#security)),
   and the inspector shows either form only to the system shell, never on
   a console line before a login ([The crash record](#the-crash-record)).
 * Tokens and passwords leave the vault whole, to their purpose's grantee,

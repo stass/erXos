@@ -3429,9 +3429,11 @@ The service answers `erx_machine_end` for the root task alone and refuses it fro
    * `ERX_END_OFF`: `l4_platform_ctl_system_shutdown(L4_BASE_ICU_CAP, 0)`. `ERX_END_RESET` and the root's own stop:
      the same with 1 (`platform_control_object.cpp:82-96`).
    * A reset that follows a crash record of step 3, a root fault's, a missed pet's or `ERX_END_PANIC`'s: the same call with
-     the fork's third value, a reset after a record. The kernel then takes its stop from the census on
+     the fork's third value, a reset after a record, and the record's address in the root's space (`end_record`,
+     `end.c`) as a further argument. The kernel then takes its stop from the census on
      ([design-debugger.md](design-debugger.md#on-fiasco)): it parks every CPU that answers and publishes each one's stop
-     slot, writes no record of its own, since the root's is on the console, holds when the boot allows it, so the
+     slot, writes no record of its own, since the root's is on the console, but in a boot that holds copies the root's through the hold's
+     checked read into its crash buffer and checks it, so the stop's readers find it where they find the kernel's, holds when the boot allows it, so the
      host's debugger reads the machine as the root's failure left it, and resets.
    * `ERX_END_PANIC`: the crash record of cause `ERX_CRASH_HALT` at step 3 and a line saying the system domain asked, then
      that reset.

@@ -886,9 +886,12 @@ The record is **Built**.
 
 No memory region survives the reset, so the record lives only in the
 console's output: the harness's log on QEMU, and whatever is wired to
-the Pi's UART. The record's layout also has a **brief form**, with no
-registers, stack or log, for release builds
-([design-system.md, The crash record](../design-system.md#the-crash-record)).
+the Pi's UART. The record's layout also has a **brief form**, for
+release builds, which prints what FreeBSD's release kernel prints and no
+more: the cause, where it failed and each CPU's state, and for a kernel
+panic the message and the failing CPU's registers and backtrace, but
+nothing of what the root task held and no log
+([design-debugger.md, The record's CPU entries](../design-debugger.md#the-records-cpu-entries)).
 The brief form is designed and not built; the root always writes the
 full form.
 
@@ -944,14 +947,21 @@ A held board also answers a person directly. It prints a prompt,
 nothing of erXos on the host, can type a few of the tool's commands at
 it: why the machine stopped, where each CPU was, a CPU's registers and
 backtrace, the kernel's threads, the last records of the kernel's
-trace, the memory at an address, and `reset`. Where FreeBSD's `ddb` has
-the same command, its name works too. The commands only read, through
+trace, the memory at an address, and `reset`. A backtrace names the
+kernel's functions, from a symbol table that development images carry
+beside the kernel. A thread's number is the one the kernel's trace
+records carry, so an event leads to its thread and the thread to its
+backtrace. Where FreeBSD's `ddb` has the same command, its name works
+too, except `trace`, which is the kernel's trace here and not a stack
+trace. The commands only read, through
 the one checked read that also serves the tool, and they run none of
 the stopped kernel's code. They are generated from the declarations the
 tool's commands come from, so the two print the same lines for the same
 command. The prompt exists only where the hold does: in a development
 kernel, in a boot that asked for it, after a stop; and the board then
-waits until it is told `reset`.
+waits, for as long as it takes, until it is told `reset` with the
+number the hold printed when it began, so a stray `reset` typed before
+the crash cannot end it.
 
 What the tool shows are the inspector's records. `tools/erx debug IMAGE
 inspect budgets/7` prints the record that `/proc/budgets/7` gave while
