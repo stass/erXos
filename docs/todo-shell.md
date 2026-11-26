@@ -87,6 +87,15 @@ handles and its `code_objects_max` copies fit its handle table (`BOOT_CAP_LIMIT`
 
 ## Bugs by subsystem
 
+* [Medium] runtime, command shell's group (`otp/lib/kernel/src/group.erl`): the rule of
+  [design-runtime.md](design-runtime.md#the-edits-outside-syserxos) (edit 74), that an input request or
+  `io:setopts` sent to a command shell's group by any process but the shell gets `{error, enotsup}`,
+  is not implemented; the group reads the terminal for such a requester as stock's does. A
+  `{requests, Reqs}` holding one is likewise not refused with `{error, request}`.
+* [Low] shell, `rc -c` and `erx_shell_script:run/2` on a terminal (`erx_shell_script.erl`, `shell/1`):
+  their context carries no `size`, so `erx_cmd:columns/1` and `rows/1` answer `COLUMNS`/`LINES` or
+  `unknown`, and `ls`, `ps` and `top` use FreeBSD's defaults; an interactive shell's size is the
+  console's (`erx_console:terminal/1`). Pass the terminal's size through the options.
 * [Low] shell, `ls -l` (`erlang/apps/erx_shell/src/erx_cmd_ls.erl`, `print/5`): every directory's
   `total` line prints `-`, since the file information it reads carries no block count; FreeBSD's
   `ls` sums each entry's `st_blocks`. Seen on a FAT stick under `/media/disk0/s1`, but the same on
