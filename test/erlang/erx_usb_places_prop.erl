@@ -33,7 +33,7 @@ places() ->
     {ok, Places} = erx_usb_places_sup:start_link(),
     unlink(Places),
     Streams = streams(Places),
-    {ok, {Grant, _}} = erx_fs_grants:own(mint_grants(Places)),
+    {ok, {Grant, _Tree, _Rights}} = erx_fs_grants:own(mint_grants(Places)),
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"user">>, ?ERX_INPUT_TREE_BYTES, 0}),
     {ok, _} = call(Grant, {walk, 1, 2, []}),
     {ok, _, _} = call(Grant, {lopen, 2, ?O_RDONLY}),

@@ -40,7 +40,7 @@ and `erx_ramfs_sup` restarts `/tmp` whole.
          readlink/2, statfs/1, clunk/2, write/4, make/4,
          setattr/3, unlink/4, rename/5, fsync/2]).
 
-%% The tree's name, which a mount's {tree, Name} and attach's Aname name.
+%% The tree's name: its root answers it, its grant's handle carries it, attach's Aname names it.
 -define(TREE, <<"tmp">>).
 %% What getattr answers: every basic field, and the data version.
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK

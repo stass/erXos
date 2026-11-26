@@ -240,14 +240,18 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [Medium] files, a mount's tree (`erlang/apps/erx/src/erx_ns.erl`, `place/1`, `packages_place/0`,
-  `home_place/1` and the `{tree, Name}` mount option; `erx_fs:start_mounted/4`): a mount still names
-  its tree in an option, and `erx_ns`'s `app_tree/1` and `erx_facets:file_grant/2` (the facet's name)
-  name it again, copies of the tree the grant's root answers, which must match it for every operation
-  beneath the entry; `erx_fs_grants:own/1,2` drops the handle that carries it, and a mint's reply
-  (`erx_facets:files/2`) carries only `{Pid, Rights}`. Carry the tree in the mint's reply and the facet
-  registry, take a domain's own grants' tree from their handle (design-files.md, "The tree beneath an
-  entry"), and drop the option and the copies.
+* [Medium] files, a facet's tree (`erlang/apps/erx/src/erx_ns.erl`, `place/1`, `packages_place/0`,
+  `home_place/1` and the `{tree, Name}` option of a facet's mount): a facet's mount still names its
+  tree in an option, and `erx_ns`'s `app_tree/1`, `erx_facets:file_grant/2` (the facet's name) and
+  `file_grant/3`'s callers name it again, copies of the tree the grant's root answers, which must
+  match it for every operation beneath the entry; a mint's reply (`erx_facet:minted/2`,
+  `erx_fs_grants:grant/3,4`'s answer) and the registry (`erx_facets:files/2`) carry only
+  `{Pid, Rights}`. Carry the tree in the mint's reply, `{ok, Pid, Tree}` for a service served as a
+  tree, which the domain service admits as a plain name and installs as `{Pid, Tree, Rights}`
+  (design-system.md, "the mint's reply"; design-files.md, "The tree beneath an entry"); resolve a
+  facet's entry, `{facet, Name}`, on the registry's tree; and drop the option, `app_tree/1` and the
+  copies. A grant pid's mount already takes its tree from the handle its starter received.
+
 * [Medium] storage and images, the development boot image is 68 MB (`kernel8.img` on the Pi 4 boot
   partition, 68,202,496 bytes) and stays in RAM for the whole boot; it also weighs on the Pi 4 secure-boot
   check item below. Three shrinks are open: 12.2 MB are byte-identical OTP files in both `system/lib` and

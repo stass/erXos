@@ -106,12 +106,14 @@ grant(Grants, Limits, #{client := Client, ends_with := _, exports := _} = Bindin
 -doc """
 One grant under Grants, a supervisor start_link/2 started, for the server's own
 domain, with erx_fs's own bounds: the grant a system domain's files service
-mounts in that domain's own namespace (erx_ns:mount_own/2), returned as
-`{Pid, rw}`, facet/2's value. It is exported to no one, ends with
-Grants and, a temporary child as every grant is, is not restarted when it ends
-alone (TODO.md).
+mounts in that domain's own namespace (erx_ns:mount_own/2), returned as the
+handle its start answered, which carries the tree the grant's server names and
+the rights it serves (docs/design-files.md, "The tree beneath an entry"). It is
+exported to no one, ends with Grants and, a temporary child as every grant is,
+is not restarted when it ends alone (TODO.md).
+
 """.
--spec own(pid()) -> {ok, {pid(), rw}}.
+-spec own(pid()) -> {ok, erx_fs:grant_handle()}.
 own(Grants) ->
     owned(supervisor:start_child(Grants, [?OWN])).
 
@@ -119,15 +121,15 @@ own(Grants) ->
 As own/1, for a supervisor start_link/1 started, whose grant's tree starts
 from Args.
 """.
--spec own(pid(), term()) -> {ok, {pid(), rw}}.
+-spec own(pid(), term()) -> {ok, erx_fs:grant_handle()}.
 own(Grants, Args) ->
     owned(supervisor:start_child(Grants, [Args, ?OWN])).
 
-owned({ok, Pid, _Handle}) -> {ok, facet(Pid, ?OWN)}.
+owned({ok, _Pid, Handle}) -> {ok, Handle}.
 
 %% A grant started for another domain is answered by its pid: the domain that holds
 %% it names the tree in its mount, not from the starter's handle (docs/todo-storage.md,
-%% "a mount's tree").
+%% "a facet's tree").
 started({ok, Pid, _Handle}) -> {ok, Pid};
 started({error, _} = Refused) -> Refused.
 

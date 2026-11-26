@@ -68,47 +68,51 @@ boot_table_until_a_change() ->
 
 mount_adds_a_grant_entry() ->
     Grant = grant(),
-    ?assertEqual(ok, erx_ns:mount({Grant, rw}, <<"/tmp/">>, [{tree, <<"tmp">>}, rw])),
+    ?assertEqual(ok, erx_ns:mount({Grant, <<"tmp">>, rw}, <<"/tmp/">>, [rw])),
     ?assertEqual([?RELEASE, #{point => [<<"tmp">>], provider => {grant, Grant, <<"tmp">>}, root => [],
                               rights => rw}], persistent_term:get(erx_ns)),
-    ?assertEqual(ok, erx_ns:mount({Grant, rw}, "/a//b", [{tree, <<"t">>}])),
+    ?assertEqual(ok, erx_ns:mount({Grant, <<"t">>, rw}, "/a//b", [])),
     ?assertMatch([_, _, #{point := [<<"a">>, <<"b">>], rights := ro}], table()).
 
 mount_refusals() ->
     Grant = grant(),
-    ok = erx_ns:mount({Grant, rw}, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    ok = erx_ns:mount({Grant, <<"tmp">>, rw}, <<"/tmp">>, [rw]),
     Before = table(),
     Long = binary:copy(<<"n">>, 256),
     [?assertEqual({error, Reason}, erx_ns:mount(Source, Point, Options))
      || {Reason, Source, Point, Options} <-
-            [{eexist, {Grant, rw}, <<"/tmp/">>, [{tree, <<"tmp">>}]},
-             {einval, {Grant, rw}, <<"/x">>, [{tree, <<"a/b">>}]},
-             {einval, {Grant, rw}, <<"/x">>, [{tree, <<"..">>}]},
-             {einval, {Grant, rw}, <<"/x">>, [{tree, <<>>}]},
+            [{eexist, {Grant, <<"tmp">>, rw}, <<"/tmp/">>, []},
+             {einval, {Grant, <<"a/b">>, rw}, <<"/x">>, []},
+             {einval, {Grant, <<"..">>, rw}, <<"/x">>, []},
+             {einval, {Grant, <<>>, rw}, <<"/x">>, []},
              {einval, {Grant, rw}, <<"/x">>, []},
-             {einval, {Grant, rw}, <<"/x">>, [{tree, <<"t">>}, rw, ro]},
-             {einval, {Grant, rw}, <<"x">>, [{tree, <<"t">>}]},
-             {einval, {Grant, rw}, <<"/a/../b">>, [{tree, <<"t">>}]},
-             {einval, {Grant, rw}, <<"/a/./b">>, [{tree, <<"t">>}]},
-             {einval, {Grant, rw}, <<"/a", 0, "b">>, [{tree, <<"t">>}]},
-             {einval, {Grant, rw}, <<"/", 16#ff>>, [{tree, <<"t">>}]},
+             {einval, {Grant, <<"t">>, rw}, <<"/x">>, [rw, ro]},
+             {einval, {Grant, <<"t">>, rw}, <<"/x">>, [{tree, <<"t">>}]},
+             {einval, {Grant, t, rw}, <<"/x">>, []},
+             {einval, {Grant, "t", rw}, <<"/x">>, []},
+             {einval, {Grant, <<"t">>, rw}, <<"/x">>, [{tree, <<"t">>}, rw]},
+             {einval, {Grant, <<"t">>, rw}, <<"x">>, []},
+             {einval, {Grant, <<"t">>, rw}, <<"/a/../b">>, []},
+             {einval, {Grant, <<"t">>, rw}, <<"/a/./b">>, []},
+             {einval, {Grant, <<"t">>, rw}, <<"/a", 0, "b">>, []},
+             {einval, {Grant, <<"t">>, rw}, <<"/", 16#ff>>, []},
              {einval, not_a_pid, <<"/x">>, [{tree, <<"t">>}]},
-             {einval, {not_a_pid, rw}, <<"/x">>, [{tree, <<"t">>}]},
+             {einval, {not_a_pid, <<"t">>, rw}, <<"/x">>, []},
              {einval, Grant, <<"/x">>, [{tree, <<"t">>}]},
-             {einval, {Grant, bogus}, <<"/x">>, [{tree, <<"t">>}]},
-             {einval, {remote_pid(), rw}, <<"/x">>, [{tree, <<"t">>}]},
-             {enametoolong, {Grant, rw}, <<"/", Long/binary>>, [{tree, <<"t">>}]},
-             {enametoolong, {Grant, rw}, iolist_to_binary(lists:duplicate(257, <<"/n">>)), [{tree, <<"t">>}]}]],
+             {einval, {Grant, <<"t">>, bogus}, <<"/x">>, []},
+             {einval, {remote_pid(), <<"t">>, rw}, <<"/x">>, []},
+             {enametoolong, {Grant, <<"t">>, rw}, <<"/", Long/binary>>, []},
+             {enametoolong, {Grant, <<"t">>, rw}, iolist_to_binary(lists:duplicate(257, <<"/n">>)), []}]],
     ?assertEqual(Before, table()).
 
-%% A grant pid's mount names the grant as {Pid, Rights}, the rights it was started with,
+%% A grant pid's mount names the grant as {Pid, Tree, Rights}, the rights it was started with,
 %% and its entry takes the lesser of those and the rights its options ask, as a facet's
 %% entry does (docs/design-files.md, "Rights beneath an entry"): an rx mount of an rw
 %% grant is ro, so a file written through the grant never runs through the entry (F6),
 %% and only an rx grant gives an rx entry. A bind of the entry keeps the lowered rights.
 a_grant_entry_takes_the_lesser_of_its_rights_and_its_grants() ->
     Grant = grant(),
-    [ok = erx_ns:mount({Grant, Granted}, Point, [{tree, <<"t">>}, Asked])
+    [ok = erx_ns:mount({Grant, <<"t">>, Granted}, Point, [Asked])
      || {Point, Granted, Asked} <- [{<<"/x">>, rw, rx}, {<<"/w">>, rw, rw}, {<<"/r">>, ro, rw},
                                     {<<"/e">>, rx, rx}, {<<"/o">>, rx, ro}]],
     ok = erx_ns:bind(<<"/x">>, <<"/b">>),
@@ -119,7 +123,7 @@ a_grant_entry_takes_the_lesser_of_its_rights_and_its_grants() ->
 
 bind_roots_at_the_place_from_reaches() ->
     Grant = grant(),
-    ok = erx_ns:mount({Grant, rw}, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    ok = erx_ns:mount({Grant, <<"tmp">>, rw}, <<"/tmp">>, [rw]),
     ?assertEqual(ok, erx_ns:bind(<<"/tmp/a/./c/../d">>, <<"/b">>, [ro])),
     ?assertEqual(ok, erx_ns:bind(<<"/lib/x">>, <<"/y">>)),
     ?assertEqual(ok, erx_ns:bind(<<"/b/e">>, <<"/z">>)),
@@ -150,7 +154,7 @@ bind_refusals() ->
 
 unmount_removes_exactly_one_entry() ->
     Grant = grant(),
-    ok = erx_ns:mount({Grant, rw}, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    ok = erx_ns:mount({Grant, <<"tmp">>, rw}, <<"/tmp">>, [rw]),
     ok = erx_ns:bind(<<"/tmp">>, <<"/t">>),
     ?assertEqual({error, ebusy}, erx_ns:unmount(<<"/">>)),
     ?assertEqual({error, ebusy}, erx_ns:unmount(<<"//">>)),
@@ -167,9 +171,9 @@ the_table_holds_at_most_64_entries() ->
 an_ended_grant_marks_every_entry_of_it_ended() ->
     Grant = grant(),
     Other = grant(),
-    ok = erx_ns:mount({Grant, rw}, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    ok = erx_ns:mount({Grant, <<"tmp">>, rw}, <<"/tmp">>, [rw]),
     ok = erx_ns:bind(<<"/tmp/a">>, <<"/b">>, [ro]),
-    ok = erx_ns:mount({Other, rw}, <<"/o">>, [{tree, <<"o">>}]),
+    ok = erx_ns:mount({Other, <<"o">>, rw}, <<"/o">>, []),
     Grant ! stop,
     wait_down(Grant),
     ?assertMatch([#{point := [], provider := release}, #{point := [<<"tmp">>], provider := ended, rights := rw},
@@ -177,14 +181,14 @@ an_ended_grant_marks_every_entry_of_it_ended() ->
                   #{point := [<<"o">>], provider := {grant, Other, <<"o">>}}], settled()),
     %% The ended entry stays until it is unmounted, and a later mount at its point
     %% after that holds the new grant.
-    ?assertEqual({error, eexist}, erx_ns:mount({Other, rw}, <<"/tmp">>, [{tree, <<"tmp">>}])),
+    ?assertEqual({error, eexist}, erx_ns:mount({Other, <<"tmp">>, rw}, <<"/tmp">>, [])),
     ok = erx_ns:unmount(<<"/tmp">>),
-    ok = erx_ns:mount({Other, rw}, <<"/tmp">>, [{tree, <<"tmp">>}]),
+    ok = erx_ns:mount({Other, <<"tmp">>, rw}, <<"/tmp">>, []),
     ?assertMatch(#{provider := {grant, Other, <<"tmp">>}}, lists:last(table())).
 
 a_grant_ended_while_the_process_was_down_ends_on_restart() ->
     Grant = grant(),
-    ok = erx_ns:mount({Grant, rw}, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    ok = erx_ns:mount({Grant, <<"tmp">>, rw}, <<"/tmp">>, [rw]),
     Ns = whereis(erx_ns),
     exit(Ns, kill),
     wait_down(Ns),
@@ -197,8 +201,8 @@ a_grant_ended_while_the_process_was_down_ends_on_restart() ->
 
 a_malformed_request_answers_einval_and_changes_nothing() ->
     [?assertEqual({error, einval}, gen_server:call(erx_ns, Request))
-     || Request <- [nonsense, {mount, <<"/x">>, {self(), rw}, bad}, {bind, 1, 2, []}, {unmount, {}},
-                    {mount, <<"/x">>, {self(), rw}, [{tree, <<"t">>} | tail]}]],
+     || Request <- [nonsense, {mount, <<"/x">>, {self(), <<"t">>, rw}, bad}, {bind, 1, 2, []}, {unmount, {}},
+                    {mount, <<"/x">>, {self(), <<"t">>, rw}, [rw | tail]}]],
     ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)),
     ?assert(is_process_alive(whereis(erx_ns))).
 
@@ -416,18 +420,19 @@ the_system_domain_trees_mount_at_their_places() ->
 
 %% A tree the domain serves itself mounts its own grant at the place of the facet of its
 %% name, and a second mount, an instance restarted after the first one's grant ended,
-%% replaces the entry the first left there. A name with no place is refused.
+%% replaces the entry the first left there; each entry is on the tree its grant's handle
+%% carries, not on one the place names. A name with no place is refused.
 an_own_tree_mounts_its_grant_at_its_place() ->
     First = grant(),
-    ?assertEqual(ok, erx_ns:mount_own(machine, {First, rw})),
+    ?assertEqual(ok, erx_ns:mount_own(machine, {First, <<"machine">>, rw})),
     ?assertEqual([?RELEASE, #{point => [<<"machine">>], provider => {grant, First, <<"machine">>}, root => [],
                               rights => rw}], settled()),
     First ! stop,
     Second = grant(),
-    ?assertEqual(ok, erx_ns:mount_own(machine, {Second, rw})),
-    ?assertEqual([?RELEASE, #{point => [<<"machine">>], provider => {grant, Second, <<"machine">>}, root => [],
+    ?assertEqual(ok, erx_ns:mount_own(machine, {Second, <<"volume">>, rw})),
+    ?assertEqual([?RELEASE, #{point => [<<"machine">>], provider => {grant, Second, <<"volume">>}, root => [],
                               rights => rw}], settled()),
-    ?assertError({badmatch, none}, erx_ns:mount_own(echo, {Second, rw})).
+    ?assertError({badmatch, none}, erx_ns:mount_own(echo, {Second, <<"echo">>, rw})).
 
 %% The packages tree has a place only in the system domain (packages_place/0), at
 %% /packages, where the system domain alone mounts its grant (erx_domain_srv): a session
@@ -458,7 +463,7 @@ facet_mount_refusals() ->
              {einval, {facet, data}, <<"/data">>, []},
              {einval, {facet, data}, <<"/data">>, [{tree, <<"data">>}, rw, ro]},
              {einval, {facet, data}, <<"data">>, [{tree, <<"data">>}]},
-             {einval, {remote_pid(), rw}, <<"/data">>, [{tree, <<"data">>}, rw]}]],
+             {einval, {remote_pid(), <<"data">>, rw}, <<"/data">>, [rw]}]],
     ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)).
 
 %% An entry on a facet the registry holds as one of the media interface carries the
@@ -480,7 +485,7 @@ a_media_facet_entry_follows_no_link() ->
     ok = erx_ns:mount({facet, usb}, <<"/usb">>, [{tree, <<"media">>}, rw]),
     ok = erx_ns:mount({facet, data}, <<"/data">>, [{tree, <<"data">>}, rw]),
     ok = erx_ns:bind(<<"/data">>, <<"/d">>),
-    ok = erx_ns:mount({grant(), rw}, <<"/own">>, [{tree, <<"media">>}, rw]),
+    ok = erx_ns:mount({grant(), <<"media">>, rw}, <<"/own">>, [rw]),
     {ok, Program} = erx_ns:change({bind, <<"/media/disk0">>, <<"/p">>, [ro]}, table()),
     Marked = fun(Table) -> [Point || #{point := Point, nofollow := true} <- Table] end,
     ?assertEqual({[], [], []}, {Marked(table()), Marked(Program), Marked(at_use())}),

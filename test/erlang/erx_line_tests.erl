@@ -541,7 +541,7 @@ grants(#{line := Line, driver := Driver}) ->
 %% the line.
 the_line_starts_its_trees_grants_test() ->
     #{driver := Driver} = Fixture = line(),
-    {ok, {Grant, rw}} = erx_fs_grants:own(grants(Fixture)),
+    {ok, {Grant, _Tree, rw}} = erx_fs_grants:own(grants(Fixture)),
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"user">>, ?ERX_LINE_TREE_BYTES, 0}),
     {ok, _} = call(Grant, {walk, 1, 2, [<<"data">>]}),
     {ok, _, _} = call(Grant, {lopen, 2, ?O_RDWR}),

@@ -206,11 +206,11 @@ namespace("release") ->
     %% The domain's own /tmp leaves the point to these mounts.
     ok = erx_ns:unmount(<<"/tmp">>),
     Show("before", prim_file:read_file_info(<<"/tmp/a">>)),
-    Show("mount", erx_ns:mount({test_grant(), rw}, <<"/tmp">>, [{tree, <<"test">>}, rw])),
+    Show("mount", erx_ns:mount(test_handle([]), <<"/tmp">>, [rw])),
     Show("info", info(prim_file:read_file_info(<<"/tmp/a">>))),
     Show("read", prim_file:read_file(<<"/tmp/a">>)),
-    Show("again", erx_ns:mount({self(), rw}, <<"/tmp/">>, [{tree, <<"tmp">>}])),
-    Show("bad tree", erx_ns:mount({self(), rw}, <<"/x">>, [{tree, <<"a/b">>}])),
+    Show("again", erx_ns:mount({self(), <<"tmp">>, rw}, <<"/tmp/">>, [])),
+    Show("bad tree", erx_ns:mount({self(), <<"a/b">>, rw}, <<"/x">>, [])),
     Show("bind", erx_ns:bind(<<"/tmp/a">>, <<"/b">>, [ro])),
     Show("bound", info(prim_file:read_file_info(<<"/b/f">>))),
     %% A listing holds each mount point directly below its directory once, a point
@@ -231,7 +231,7 @@ namespace("release") ->
     Show("after", prim_file:read_file_info(<<"/tmp/a">>)),
     Show("root", erx_ns:unmount(<<"/">>)),
     {Gone, Ref} = spawn_monitor(fun() -> receive stop -> ok end end),
-    Show("mount gone", erx_ns:mount({Gone, rw}, <<"/gone">>, [{tree, <<"t">>}])),
+    Show("mount gone", erx_ns:mount({Gone, <<"t">>, rw}, <<"/gone">>, [])),
     Gone ! stop,
     receive {'DOWN', Ref, process, Gone, _} -> ok after ?HELPER_WAIT -> helper_silent(gone_exit) end,
     Show("gone", ended(<<"/gone/x">>, 100)),
@@ -248,8 +248,8 @@ namespace("release") ->
 %% first call that reached it, the source's walk for a rename or a link, or none.
 two_paths(Show) ->
     Reached = fun(Call) -> reached(Call) end,
-    ok = erx_ns:mount({test_grant(), rw}, <<"/tmp">>, [{tree, <<"test">>}, rw]),
-    ok = erx_ns:mount({test_grant(), rw}, <<"/u">>, [{tree, <<"u">>}, rw]),
+    ok = erx_ns:mount(test_handle([]), <<"/tmp">>, [rw]),
+    ok = erx_ns:mount(test_handle([{name, <<"u">>}]), <<"/u">>, [rw]),
     ok = erx_ns:bind(<<"/tmp/a">>, <<"/ro">>, [ro]),
     {module, erx_file_remote} = code:ensure_loaded(erx_file_remote),
     _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, true, []),
@@ -376,6 +376,14 @@ test_grant() ->
     unlink(Grant),
     Grant.
 
+%% The handle of a grant of erx_fs_test_tree with Args, as its start answered it, which
+%% carries the tree the tree's root names: test, or the name Args give it.
+test_handle(Args) ->
+    {ok, Grant, Handle} = erx_fs:start_link(erx_fs_test_tree, Args, rw),
+    unlink(Grant),
+    Handle.
+
+
 %% erx_file_remote's path operations through prim_file, on a grant mounted at /t and
 %% bound read-only at /r (design-files.md, Erlang clients): each operation's success, the
 %% error steps, the #file_info{} mapping, the refusals of a read-only entry and replies a
@@ -383,7 +391,7 @@ test_grant() ->
 remote("stock") -> ok;
 remote("release") ->
     Grant = test_grant(),
-    ok = erx_ns:mount({Grant, rw}, <<"/t">>, [{tree, <<"test">>}, rw]),
+    ok = erx_ns:mount({Grant, <<"test">>, rw}, <<"/t">>, [rw]),
     ok = erx_ns:bind(<<"/t">>, <<"/r">>, [ro]),
     Show = fun(Case, Result) -> io:format("remote ~s\t~0tp~n", [Case, Result]) end,
     Info = fun(Path) -> info(prim_file:read_file_info(Path)) end,
@@ -475,7 +483,7 @@ remote("release") ->
 %% they do without it.
 slashes(Show) ->
     Grant = test_grant(),
-    ok = erx_ns:mount({Grant, rw}, <<"/s">>, [{tree, <<"test">>}, rw]),
+    ok = erx_ns:mount({Grant, <<"test">>, rw}, <<"/s">>, [rw]),
     Info = fun(Path) -> info(prim_file:read_file_info(Path)) end,
     Show("slash info file", Info(<<"/s/f/">>)),
     Show("slash info dir", Info(<<"/s/a/">>)),
@@ -515,7 +523,7 @@ slashes(Show) ->
 %% that do not follow a last link act on the link.
 links(Show) ->
     Grant = test_grant(),
-    ok = erx_ns:mount({Grant, rw}, <<"/s">>, [{tree, <<"test">>}, rw]),
+    ok = erx_ns:mount({Grant, <<"test">>, rw}, <<"/s">>, [rw]),
     ok = erx_ns:bind(<<"/s/a">>, <<"/ba">>, []),
     ok = erx_ns:bind(<<"/s">>, <<"/sr">>, [ro]),
     Info = fun(Path) -> info(prim_file:read_file_info(Path)) end,
@@ -646,7 +654,7 @@ hostile(Show) ->
                              ({readlink, _}) -> {ok, <<"a", 0, "b">>};
                              (_) -> ok end}],
     [begin
-         ok = erx_ns:mount({Server(Reply), rw}, <<"/h">>, [{tree, <<"h">>}, rw]),
+         ok = erx_ns:mount({Server(Reply), <<"h">>, rw}, <<"/h">>, [rw]),
          Show("hostile " ++ Name, prim_file:read_file_info(<<"/h/x">>)),
          ok = erx_ns:unmount(<<"/h">>)
      end || {Name, Reply} <- Cases],
@@ -659,14 +667,14 @@ hostile(Show) ->
                          ({walk, _, _, Names}) -> {ok, [{0, 0, 2} || _ <- Names]};
                          ({getattr, _, _}) -> {ok, link_attr()};
                          (_) -> ok end),
-    ok = erx_ns:mount({LinkAttr, rw}, <<"/h">>, [{tree, <<"h">>}, rw]),
+    ok = erx_ns:mount({LinkAttr, <<"h">>, rw}, <<"/h">>, [rw]),
     Show("hostile link attr info", info(prim_file:read_link_info(<<"/h/x">>))),
     ok = erx_ns:unmount(<<"/h">>),
-    ok = erx_ns:mount({Escaping, rw}, <<"/h">>, [{tree, <<"h">>}, rw]),
+    ok = erx_ns:mount({Escaping, <<"h">>, rw}, <<"/h">>, [rw]),
     Show("hostile listing", prim_file:list_dir(<<"/h/d">>)),
     ok = erx_ns:unmount(<<"/h">>),
     Dying = spawn(fun() -> receive {erx_9p, _, _, _} -> exit(gone) end end),
-    ok = erx_ns:mount({Dying, rw}, <<"/h">>, [{tree, <<"h">>}, rw]),
+    ok = erx_ns:mount({Dying, <<"h">>, rw}, <<"/h">>, [rw]),
     Show("hostile dies", prim_file:make_dir(<<"/h/x">>)),
     ok = erx_ns:unmount(<<"/h">>).
 
@@ -770,9 +778,9 @@ io_server(Path) ->
 
 %% A grant of erx_fs_test_tree with Args, mounted at Point.
 mounted(Point, Args) ->
-    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, Args, rw),
+    {ok, Grant, Handle} = erx_fs:start_link(erx_fs_test_tree, Args, rw),
     unlink(Grant),
-    ok = erx_ns:mount({Grant, rw}, Point, [{tree, <<"test">>}, rw]),
+    ok = erx_ns:mount(Handle, Point, [rw]),
     Grant.
 
 %% Two processes append one distinct byte each, many times, and after each write read the
@@ -848,7 +856,7 @@ unknown_at(Show) ->
                                    Loop()
                            end
                    end),
-    ok = erx_ns:mount({Server, rw}, <<"/u">>, [{tree, <<"u">>}, rw]),
+    ok = erx_ns:mount({Server, <<"u">>, rw}, <<"/u">>, [rw]),
     {ok, Plain} = file:open(<<"/u/x">>, [raw, binary, write]),
     PlainAt = {file:write(Plain, <<"abc">>), file:write(Plain, <<"de">>), file:position(Plain, cur)},
     {ok, Append} = file:open(<<"/u/x">>, [raw, binary, append]),
@@ -886,7 +894,7 @@ seeded(Seed) ->
     Show = fun(Case, Result) -> io:format("seeded ~s\t~0tp~n", [Case, Result]) end,
     case Seed of
         "walk" ->
-            ok = erx_ns:mount({test_grant(), rw}, <<"/t">>, [{tree, <<"test">>}, rw]),
+            ok = erx_ns:mount(test_handle([]), <<"/t">>, [rw]),
             ok = prim_file:make_symlink(<<"f">>, <<"/t/victim">>),
             Show("delete", prim_file:delete(<<"/t/missing/victim">>)),
             Show("victim", prim_file:read_link(<<"/t/victim">>));

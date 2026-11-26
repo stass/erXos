@@ -64,7 +64,8 @@ client as `eio`.
 -type wait() :: {wait, Keeper :: pid(), Request :: term()}.
 %% A grant of the domain's own, as its starter received it from start_link/3,4: the
 %% pid, the tree its callback module's root names and the rights it was started with
-%% (docs/design-files.md, "A grant handle is built by its starter").
+%% (docs/design-files.md, "A grant handle is built by its starter"), the source
+%% erx_ns:mount/3 mounts, whose entry takes the tree from it.
 -opaque grant_handle() :: {pid(), Tree :: binary(), erx_fs_grant:rights()}.
 
 -callback init(Args :: term()) -> {ok, Fs :: term()}.
@@ -149,7 +150,7 @@ start_link(Module, Args, Rights) ->
 -doc """
 Serves one grant of `Module`'s tree to the server's own domain, as
 start_link/3 does, and mounts it at `Point` with the tree and the rights
-its handle carries, `{Pid, Rights}` (erx_ns:mount/3), after removing any
+its handle carries, `{Pid, Tree, Rights}` (erx_ns:mount/3), after removing any
 entry an earlier instance left there. So the entry's tree and rights are
 the grant's, named once (docs/design-files.md, "Rights beneath an
 entry"). A mount that fails ends the grant, which the caller's supervisor
@@ -159,9 +160,9 @@ does not know of, and answers its `{error, Reason}`.
           {ok, pid()} | {error, term()}.
 start_mounted(Module, Args, Requested, Point) ->
     case start_link(Module, Args, Requested) of
-        {ok, Grant, {Grant, Tree, Rights}} ->
+        {ok, Grant, {Grant, _Tree, Rights} = Handle} ->
             _ = erx_ns:unmount(Point),
-            mounted(Grant, erx_ns:mount({Grant, Rights}, Point, [{tree, Tree}, Rights]));
+            mounted(Grant, erx_ns:mount(Handle, Point, [Rights]));
         {error, _} = Refused ->
             Refused
     end.

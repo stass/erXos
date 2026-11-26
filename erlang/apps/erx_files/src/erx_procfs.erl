@@ -42,7 +42,7 @@ go through that domain's inspect facet.
 -export([start_link/0, inspector/1]).
 -export([init/1, root/1, walk/3, getattr/2, open/3, read/4, readdir/4, statfs/1, clunk/2]).
 
-%% The tree's name, which a mount's {tree, Name} and attach's Aname name.
+%% The tree's name: its root answers it, its grant's handle carries it, attach's Aname names it.
 -define(TREE, <<"proc">>).
 -define(POINT, <<"/proc">>).
 %% The most open snapshots of one grant (design-live.md, Snapshots).

@@ -90,7 +90,7 @@ other_interfaces_use_the_parsed_layout_or_end_test() ->
 places() ->
     {ok, Places} = erx_usb_places_sup:start_link(),
     unlink(Places),
-    {ok, {Grant, _}} = erx_fs_grants:own(erx_usb_places_prop:mint_grants(Places)),
+    {ok, {Grant, _Tree, _Rights}} = erx_fs_grants:own(erx_usb_places_prop:mint_grants(Places)),
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"user">>, ?ERX_INPUT_TREE_BYTES, 0}),
     [begin
          {ok, _} = call(Grant, {walk, 1, ?FID0 + N, [<<"hid", (integer_to_binary(N))/binary>>]}),
