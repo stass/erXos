@@ -121,6 +121,19 @@ uint32_t	erx_machine_stop_word(uint32_t cpu);
 erx_stop_claim_t	erx_machine_stop_claim(uint32_t observed, uint32_t cpu, uint32_t depth);
 
 /*
+ * A stopping CPU's kernel number, for which the stop trusts no per-CPU pointer: found
+ * is the entry of the hardware identifier table that holds this CPU's identifier, or
+ * ncpus for none; boot_set says whether the boot CPU's own entry is written, as the
+ * glue's setup writes it before any other CPU starts; boot is the boot CPU's number.
+ * A CPU in an entry is that entry's. A CPU in none is the boot CPU before the setup,
+ * when no other CPU runs and no stack is known to name its CPU; after it, it is a CPU
+ * not yet admitted, on its own thread's stack or on its panic stack, whose header the
+ * setup wrote, and the result is ncpus: the glue then takes the number the kernel
+ * keeps for the CPU on that stack.
+ */
+uint32_t	erx_machine_stop_self(uint32_t found, uint32_t ncpus, bool boot_set, uint32_t boot);
+
+/*
  * What a CPU that loaded the stop word at `point` does: zero to run on, or the state it
  * publishes before it parks. The leader's own word never parks the leader, so its
  * stop path may wait for a lock.

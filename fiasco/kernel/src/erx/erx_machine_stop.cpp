@@ -30,6 +30,7 @@ INTERFACE:
 #include "types.h"
 
 class Return_frame;
+class Trap_state;
 
 class Erx_machine_stop
 {
@@ -39,6 +40,10 @@ public:
   [[noreturn]] static void panic(char const *format, va_list args);
   [[noreturn]] static void stop(char const *format, ...)
     __attribute__((format(printf, 1, 2)));
+  // A kernel trap: the trap's frame as the leader's registers, the
+  // exception in the record's fault field, and what as the message's
+  // start, with the exception's class.
+  [[noreturn]] static void trap(Trap_state const *ts, char const *what);
 };
 
 IMPLEMENTATION:
@@ -58,6 +63,7 @@ IMPLEMENTATION:
 #include "platform_control.h"
 #include "processor.h"
 #include "timer.h"
+#include "trap_state.h"
 
 // The registers a stop records for the CPU that runs it, and the routine,
 // in kern/arm/64/ivt.S, that saves them at its call site, moves to stack_top
@@ -65,6 +71,13 @@ IMPLEMENTATION:
 extern "C" [[noreturn]] void
 erx_machine_stop_switch(erx_stop_regs_t *regs, void *stack_top,
                         void (*body)(void *), void *arg);
+// The offsets kern/arm/64/ivt.S names STOP_* and stores at, which assembly
+// cannot take from the generated layout, held to it here.
+static_assert(offsetof(erx_stop_regs_t, regs) == 0 && ERX_REGS_OFF_GPR == 0
+              && ERX_REGS_OFF_SP == 248 && ERX_REGS_OFF_PC == 256 && ERX_REGS_OFF_STATE == 264
+              && ERX_STOP_REGS_OFF_SPACE_ROOT == 272 && ERX_STOP_REGS_OFF_CAUSE == 280
+              && ERX_STOP_REGS_OFF_ADDR == 288,
+              "ivt.S stores a stopped CPU's registers at the ABI's offsets");
 
 // The two system registers a stop request reads live: the space's translation
 // root, as erx_machine_stop_switch records it, and the user's stack pointer,
@@ -104,13 +117,18 @@ static constexpr uint64_t Ask_again_ns = 1000000;
 
 struct alignas(Panic_stack_bytes) Panic_stack { unsigned char bytes[Panic_stack_bytes]; };
 
-// What a stop's entry hands the leader on its panic stack.
+// What a stop's entry hands the leader on its panic stack: the registers the
+// stop records, which are the call site's for a panic and the trap's frame
+// for a trap, whose call site's registers go to site, and the record's fault
+// field, zero but for a trap.
 struct Entry
 {
   unsigned cpu;
   char const *format;
   va_list *args;
+  erx_fault_t fault;
   erx_stop_regs_t regs;
+  erx_stop_regs_t site;
 };
 
 }
@@ -145,16 +163,22 @@ alignas(ERX_CRASH_BUFFER_ALIGN) static unsigned char erx_crash_scratch[ERX_CRASH
 static uint32_t erx_stop_form = ERX_CRASH_FORM_BRIEF;
 static uint8_t erx_stop_build_id[ERX_BUILD_ID_SIZE];
 
-// This CPU's kernel number: its hardware identifier's entry in the table,
-// or, for a CPU not yet admitted, the number Fiasco keeps for it.
+// This CPU's kernel number (erx_machine_stop_self): its hardware identifier's
+// entry in the table; before the glue's setup the boot CPU; and for a CPU
+// not yet admitted the number Fiasco keeps for it, through the stack pointer,
+// which is read only then.
 static unsigned
 erx_stop_cpu()
 {
   uint64_t const id = Cpu::mpidr() + 1;
-  for (unsigned cpu = 0; cpu < Config::Max_num_cpus; ++cpu)
+  unsigned found = Config::Max_num_cpus;
+  for (unsigned cpu = 0; cpu < Config::Max_num_cpus && found == Config::Max_num_cpus; ++cpu)
     if (__atomic_load_n(&erx_stop_hwid[cpu], __ATOMIC_RELAXED) == id)
-      return cpu;
-  return cxx::int_value<Cpu_number>(current_cpu());
+      found = cpu;
+  unsigned const boot = cxx::int_value<Cpu_number>(Cpu_number::boot_cpu());
+  bool const boot_set = __atomic_load_n(&erx_stop_hwid[boot], __ATOMIC_RELAXED) != 0;
+  unsigned const cpu = erx_machine_stop_self(found, Config::Max_num_cpus, boot_set, boot);
+  return cpu < Config::Max_num_cpus ? cpu : cxx::int_value<Cpu_number>(current_cpu());
 }
 
 // Every claim and every park goes through here first, so a CPU that faults
@@ -291,9 +315,13 @@ erx_stop_ncpus(unsigned leader)
   return n;
 }
 
+// A CPU's entry from its final state and its registers. The registers and
+// aux are references and read only for a state that carries registers: a
+// CPU that published such a state wrote them before its state, which the
+// leader loaded with acquire, and one that did not may be writing them yet.
 static void
 erx_stop_entry(erx_crash_cpu_t *entry, erx_stop_cpu_state_t state,
-               erx_stop_regs_t const &regs, uint64_t aux)
+               erx_stop_regs_t const &regs, uint64_t const &aux)
 {
   entry->state = state;
   if (!erx_stop_cpu_state_registers(state))
@@ -443,7 +471,7 @@ erx_stop_lead(void *arg)
       erx_stop_cpu_state_t const published = __atomic_load_n(&slot->state, __ATOMIC_ACQUIRE);
       erx_stop_cpu_state_t const state = erx_machine_stop_final(&leader, other, published);
       if (other == cpu)
-        erx_stop_entry(&cpus[other], state, regs, 0);
+        erx_stop_entry(&cpus[other], state, regs, uint64_t{0});
       else
         erx_stop_entry(&cpus[other], state, slot->regs, slot->aux);
     }
@@ -452,6 +480,7 @@ erx_stop_lead(void *arg)
   erx_crash_input_t input = {};
   input.form = erx_stop_form;
   input.cause = ERX_CRASH_CAUSE_PANIC;
+  input.fault = entry->fault;
   input.cpu = cpu;
   input.nframes = erx_stop_walk(regs, frames);
   input.ncpus = ncpus;
@@ -469,15 +498,6 @@ erx_stop_lead(void *arg)
   erx_stop_end(cpu);
 }
 
-IMPLEMENT
-void
-Erx_machine_stop::stop(char const *format, ...)
-{
-  va_list args;
-  va_start(args, format);
-  panic(format, args);
-}
-
 static void
 erx_stop_nested_line()
 {
@@ -485,9 +505,14 @@ erx_stop_nested_line()
   Erx_console_ring::write_uart(line, sizeof(line) - 1);
 }
 
-IMPLEMENT
-void
-Erx_machine_stop::panic(char const *format, va_list args)
+// Every stop's entry: the claim, then the leader's or a follower's move to
+// its panic stack, or a nested stop's end. trapped is the trap's registers
+// and fault the record's fault field, for a trap; null and zero for a
+// panic, whose registers are the call site's. Nothing is written before
+// the claim decides, so a nested entry leaves the leader's entry whole.
+[[noreturn]] static void
+erx_stop_enter(erx_stop_regs_t const *trapped, erx_fault_t const &fault,
+               char const *format, va_list args)
 {
   Proc::cli();
   static Entry entries[Config::Max_num_cpus];
@@ -499,35 +524,93 @@ Erx_machine_stop::panic(char const *format, va_list args)
   (void)__atomic_compare_exchange_n(&erx_debug_anchor.stop, &observed,
                                     erx_machine_stop_word(cpu), false,
                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+  erx_stop_claim_t const claim = erx_machine_stop_claim(observed, cpu, depth);
+  if (claim == ERX_STOP_NESTED)
+    {
+      erx_stop_nested_line();
+      erx_stop_end(cpu);
+    }
+  if (claim == ERX_STOP_NESTED_SILENT)
+    erx_stop_end(cpu, false);
+  if (claim != ERX_STOP_LEAD && claim != ERX_STOP_FOLLOW)
+    erx_stop_park();
+
   va_list copy;
   va_copy(copy, args);
   Entry *const entry = &entries[cpu];
   entry->cpu = cpu;
   entry->format = format;
   entry->args = &copy;
-  switch (erx_machine_stop_claim(observed, cpu, depth))
-    {
-    case ERX_STOP_LEAD:
-      erx_machine_stop_switch(&entry->regs, erx_panic_stacks[cpu].bytes + Panic_stack_bytes,
-                              erx_stop_lead, entry);
-    case ERX_STOP_FOLLOW:
-      erx_machine_stop_switch(&entry->regs, erx_panic_stacks[cpu].bytes + Panic_stack_bytes,
-                              [](void *arg)
-                                {
-                                  Entry *const e = static_cast<Entry *>(arg);
-                                  erx_stop_publish(e->cpu, ERX_STOP_CPU_STATE_CONCURRENT,
-                                                   e->regs, 0);
-                                  erx_stop_park();
-                                }, entry);
-    case ERX_STOP_NESTED:
-      erx_stop_nested_line();
-      erx_stop_end(cpu);
-    case ERX_STOP_NESTED_SILENT:
-      erx_stop_end(cpu, false);
-    case ERX_STOP_FOLLOW_SILENT:
-    default:
-      erx_stop_park();
-    }
+  entry->fault = fault;
+  if (trapped)
+    entry->regs = *trapped;
+  void (*const body)(void *) = claim == ERX_STOP_LEAD
+    ? erx_stop_lead
+    : +[](void *arg)
+        {
+          Entry *const e = static_cast<Entry *>(arg);
+          erx_stop_publish(e->cpu, ERX_STOP_CPU_STATE_CONCURRENT, e->regs, 0);
+          erx_stop_park();
+        };
+  erx_machine_stop_switch(trapped ? &entry->site : &entry->regs,
+                          erx_panic_stacks[cpu].bytes + Panic_stack_bytes, body, entry);
+}
+
+IMPLEMENT
+void
+Erx_machine_stop::panic(char const *format, va_list args)
+{
+  erx_stop_enter(nullptr, erx_fault_t{}, format, args);
+}
+
+IMPLEMENT
+void
+Erx_machine_stop::stop(char const *format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  erx_stop_enter(nullptr, erx_fault_t{}, format, args);
+}
+
+[[noreturn]] __attribute__((format(printf, 3, 4))) static void
+erx_stop_trapped(erx_stop_regs_t const &regs, erx_fault_t const &fault,
+                 char const *format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  erx_stop_enter(&regs, fault, format, args);
+}
+
+// A kernel-mode trap's frame (kern/arm/64/ivt.S) lies on the stack the
+// trap found, just below the stack pointer it interrupted.
+static_assert(sizeof(Trap_state) == sizeof(Return_frame),
+              "a trap's frame is the entry's Return_frame and nothing more");
+
+// The trap's frame is the leader's registers, the exception's syndrome and
+// fault address are their cause and address and, with its program counter,
+// the record's fault field; nothing is printed before the stop's report.
+IMPLEMENT
+void
+Erx_machine_stop::trap(Trap_state const *ts, char const *what)
+{
+  Proc::cli();
+  erx_stop_regs_t regs = {};
+  for (unsigned r = 0; r < 31; ++r)
+    regs.regs.gpr[r] = ts->r[r];
+  regs.regs.sp = reinterpret_cast<Mword>(static_cast<Return_frame const *>(ts) + 1);
+  regs.regs.pc = ts->pc;
+  regs.regs.state = ts->pstate;
+  Erx_stop_live live;
+  erx_machine_stop_live(&live);
+  regs.space_root = live.space_root;
+  regs.cause = ts->esr.raw();
+  regs.addr = ts->pf_address;
+  erx_fault_t fault = {};
+  fault.cause = uint32_t(ts->esr.raw());
+  fault.addr = ts->pf_address;
+  fault.pc = ts->pc;
+  erx_stop_trapped(regs, fault, "%s: exception class 0x%02x", what,
+                   unsigned(ts->esr.ec().get()));
 }
 
 // The glue's setup, from the boot handoff: the record's form and the build's

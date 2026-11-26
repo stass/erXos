@@ -49,11 +49,9 @@ module Erx
     # The close's own loss line, raw: anchored, so a record of the take's loss does not
     # stand in for it.
     LOST = /\Afiasco: [1-9][0-9]* kernel lines lost\r?\n\z/n
-    # Trap_state::dump's first line and the panic's, both raw: the dump's only when its
-    # own close lets the ring out first. The panic's starts with the console's bold
-    # escape (kernel_panic.cc), so its pattern is not anchored.
-    DUMP = /\AEXCEPTION: \(/n
-    PANIC = /Panic: kernel trap/n
+    # The machine stop's message for the trap, raw, which it prints only after its
+    # close lets the ring out (docs/design-debugger.md, "Causes").
+    STOP = /\Aerx: kernel stop: kernel trap: exception class 0x/n
     # How long the root's take may take to log the warning, and the stop to come.
     RECORD_SECONDS = 60
     STOP_SECONDS = 60
@@ -67,8 +65,7 @@ module Erx
        { name: 'console-ring-settled', pattern: SessionDomain.line(SETTLED), type: "#{PROGRAM}\r", seconds: RECORD_SECONDS,
          verify: ->(_line) { check_settled(File.binread(serial)) } }.freeze,
        { name: 'console-ring-lost', pattern: LOST, seconds: STOP_SECONDS }.freeze,
-       { name: 'console-ring-dump', pattern: DUMP, seconds: STOP_SECONDS }.freeze,
-       { name: 'console-ring-panic', pattern: PANIC, seconds: STOP_SECONDS }.freeze].freeze
+       { name: 'console-ring-stop', pattern: STOP, seconds: STOP_SECONDS }.freeze].freeze
     end
 
     # Refuses a transcript, up to the shell's run of the line typed after the record,

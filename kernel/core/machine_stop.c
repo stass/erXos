@@ -42,6 +42,14 @@ erx_machine_stop_word(uint32_t cpu)
 	return (cpu + 1);
 }
 
+uint32_t
+erx_machine_stop_self(uint32_t found, uint32_t ncpus, bool boot_set, uint32_t boot)
+{
+	if (found < ncpus)
+		return (found);
+	return (boot_set ? ncpus : boot);
+}
+
 erx_stop_claim_t
 erx_machine_stop_claim(uint32_t observed, uint32_t cpu, uint32_t depth)
 {

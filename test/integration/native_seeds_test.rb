@@ -123,21 +123,22 @@ class NativeSeedsTest < Minitest::Test
   end
 
   # A seed of the kernel's own: a release-configuration kernel that loads from an
-  # unmapped address in kernel mode must panic once and end the machine through PSCI,
-  # which a kernel that kills the faulting thread and returns never does.
+  # unmapped address in kernel mode must enter the machine stop, record the trap
+  # in a brief record's fault field and end the machine through PSCI, which a
+  # kernel that kills the faulting thread and returns never does.
   def test_a_kernel_trap_ends_a_release_kernel
     serial = File.binread(Erx::NativeKernelTrap::Run.new(root: ROOT).call(accel: 'hvf', build: true))
-    assert_equal({ trap_dumps: 1, panics: 1 },
-                 { trap_dumps: serial.scan('EXCEPTION:').size, panics: serial.scan('Panic: kernel trap').size })
+    Erx::NativeKernelTrap.judge(serial)
   end
 
   # A seed of the kernel's own: a release test kernel whose marked receive warns once,
   # which the root must log as a kernel record and nothing else may show, and then
-  # overflows the ring and traps, whose stop must write the loss, the dump and the panic.
+  # overflows the ring and traps, whose stop must write the loss and its report once,
+  # and no trap dump.
   def test_the_kernels_lines_reach_the_log
     serial = File.binread(Erx::NativeConsoleRing::Run.new(root: ROOT).call(build: true))
-    assert_equal({ trap_dumps: 1, panics: 1 },
-                 { trap_dumps: serial.scan('EXCEPTION:').size, panics: serial.scan('Panic: kernel trap').size })
+    assert_equal({ trap_dumps: 0, stops: 1 },
+                 { trap_dumps: serial.scan('EXCEPTION:').size, stops: serial.scan('erx: kernel stop: kernel trap').size })
   end
 
   SEEDS.each do |name, seed|

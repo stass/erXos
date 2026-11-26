@@ -281,6 +281,16 @@ resume_trigger_exception_after_pf_trampoline:
 	b	.Lret_from_exception
 #endif
 
+// The offsets of erx_stop_regs (abi/arch/aarch64.txt) that the stop's switch
+// stores at; erx_machine_stop.cpp asserts each against the generated layout.
+#define STOP_GPR(n) ((n) * 8)
+#define STOP_SP 248
+#define STOP_PC 256
+#define STOP_STATE 264
+#define STOP_SPACE_ROOT 272
+#define STOP_CAUSE 280
+#define STOP_ADDR 288
+
 // erx_machine_stop_switch(regs, stack_top, body, arg): saves the call site's
 // registers into regs (an erx_stop_regs_t: x0 to x30, sp, the return address
 // as the pc, the processor state, the translation root of the space and zero
@@ -288,23 +298,24 @@ resume_trigger_exception_after_pf_trampoline:
 // body(arg), which never returns.
 .global erx_machine_stop_switch
 erx_machine_stop_switch:
-	stp	x0, x1,   [x0]
-	stp	x2, x3,   [x0, #16]
-	stp	x4, x5,   [x0, #32]
-	stp	x6, x7,   [x0, #48]
-	stp	x8, x9,   [x0, #64]
-	stp	x10, x11, [x0, #80]
-	stp	x12, x13, [x0, #96]
-	stp	x14, x15, [x0, #112]
-	stp	x16, x17, [x0, #128]
-	stp	x18, x19, [x0, #144]
-	stp	x20, x21, [x0, #160]
-	stp	x22, x23, [x0, #176]
-	stp	x24, x25, [x0, #192]
-	stp	x26, x27, [x0, #208]
-	stp	x28, x29, [x0, #224]
+	stp	x0, x1, [x0, #STOP_GPR(0)]
+	stp	x2, x3, [x0, #STOP_GPR(2)]
+	stp	x4, x5, [x0, #STOP_GPR(4)]
+	stp	x6, x7, [x0, #STOP_GPR(6)]
+	stp	x8, x9, [x0, #STOP_GPR(8)]
+	stp	x10, x11, [x0, #STOP_GPR(10)]
+	stp	x12, x13, [x0, #STOP_GPR(12)]
+	stp	x14, x15, [x0, #STOP_GPR(14)]
+	stp	x16, x17, [x0, #STOP_GPR(16)]
+	stp	x18, x19, [x0, #STOP_GPR(18)]
+	stp	x20, x21, [x0, #STOP_GPR(20)]
+	stp	x22, x23, [x0, #STOP_GPR(22)]
+	stp	x24, x25, [x0, #STOP_GPR(24)]
+	stp	x26, x27, [x0, #STOP_GPR(26)]
+	stp	x28, x29, [x0, #STOP_GPR(28)]
+	str	x30, [x0, #STOP_GPR(30)]
 	mov	x9, sp
-	stp	x30, x9,  [x0, #240]
+	str	x9, [x0, #STOP_SP]
 	mrs	x9, nzcv
 	mrs	x10, daif
 	orr	x9, x9, x10
@@ -312,10 +323,12 @@ erx_machine_stop_switch:
 	orr	x9, x9, x10
 	mrs	x10, spsel
 	orr	x9, x9, x10
-	stp	x30, x9,  [x0, #256]
+	str	x30, [x0, #STOP_PC]
+	str	x9, [x0, #STOP_STATE]
 	mrs	x9, EL(TTBR0)
-	str	x9,       [x0, #272]
-	stp	xzr, xzr, [x0, #280]
+	str	x9, [x0, #STOP_SPACE_ROOT]
+	str	xzr, [x0, #STOP_CAUSE]
+	str	xzr, [x0, #STOP_ADDR]
 	mov	sp, x1
 	mov	x29, #0
 	mov	x0, x3

@@ -551,6 +551,21 @@ check_claim(void)
 	printf("claim: %s%s\n", why == NULL ? "ok" : "FAIL ", why == NULL ? "" : why);
 }
 
+/* Which CPU a stop runs on: the table's entry, the boot CPU before the setup, else the stack's (ncpus). */
+static void
+check_self(void)
+{
+	const char *why = NULL;
+
+	if (erx_machine_stop_self(2, 4, true, 0) != 2 || erx_machine_stop_self(2, 4, false, 1) != 2)
+		why = "a CPU in the table is not its entry's";
+	if (erx_machine_stop_self(4, 4, false, 0) != 0 || erx_machine_stop_self(4, 4, false, 1) != 1)
+		why = "a stop before the setup trusts its stack's number";
+	if (erx_machine_stop_self(4, 4, true, 0) != 4)
+		why = "a CPU not yet admitted is not the number its stack names";
+	printf("self: %s%s\n", why == NULL ? "ok" : "FAIL ", why == NULL ? "" : why);
+}
+
 /* The census over the clock alone: the bound, a clock that goes back, and RECORD staying. */
 static void
 check_census_clock(void)
@@ -887,6 +902,7 @@ main(void)
 	if (visited_key == NULL || visited_gen == NULL || stack == NULL)
 		return (2);
 	check_claim();
+	check_self();
 	check_census_clock();
 	for (unsigned n = 1; n <= MAX_CPUS; n++)
 		check_stop(n);

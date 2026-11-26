@@ -30,6 +30,8 @@ class MachineStopTest < Minitest::Test
     'the admission loads the stop word before it sets its bit' =>
       [STOP, "\tERX_STOP_STEP_SET_BIT,\n\tERX_STOP_STEP_FENCE,\n\tERX_STOP_STEP_LOAD_WORD,\n",
        "\tERX_STOP_STEP_LOAD_WORD,\n\tERX_STOP_STEP_SET_BIT,\n\tERX_STOP_STEP_FENCE,\n", 'stop 2 cpus'],
+    'a stop before the setup takes its stack\'s number' =>
+      [STOP, 'return (boot_set ? ncpus : boot);', 'return (ncpus);', 'self'],
     'the claim follows at every depth' =>
       [STOP, 'return (depth >= 2 ? ERX_STOP_FOLLOW_SILENT : ERX_STOP_FOLLOW);', 'return (ERX_STOP_FOLLOW);', 'stop 2 cpus'],
     'the leader parks at its own lock wait' =>

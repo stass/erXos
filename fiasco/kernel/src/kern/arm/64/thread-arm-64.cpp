@@ -1,7 +1,9 @@
 // Modified by erXos: lazy FP switching is deleted; FP state is switched
-// eagerly (docs/design-fiasco.md, "Eager FP switching").
+// eagerly (docs/design-fiasco.md, "Eager FP switching"). A kernel trap enters
+// the machine stop without printing (docs/design-debugger.md, "Causes").
 IMPLEMENTATION [arm && 64bit]:
 
+#include "erx_machine_stop.h"
 #include "fpu.h"
 
 /**
@@ -86,12 +88,9 @@ Thread::arm_kernel_sync_entry(Trap_state *ts)
   switch (esr.ec())
     {
     case 0x21: // instruction abort from kernel mode
-      if (is_permission_fault(esr.raw()))
-        {
-          ts->dump();
-          panic("kernel data execution\n");
-        }
       ts->pf_address = get_fault_pfa(esr, true, false);
+      if (is_permission_fault(esr.raw()))
+        Erx_machine_stop::trap(ts, "kernel data execution");
       call_nested_trap_handler(ts);
       break;
     case 0x25: // data abort from kernel mode
@@ -100,10 +99,7 @@ Thread::arm_kernel_sync_entry(Trap_state *ts)
         return;
 
       if (!PF::is_read_error(esr.raw()) && is_permission_fault(esr.raw()))
-        {
-          ts->dump();
-          panic("kernel code modification\n");
-        }
+        Erx_machine_stop::trap(ts, "kernel code modification");
       call_nested_trap_handler(ts);
       break;
 
