@@ -17,6 +17,7 @@ class UsbBootTest < Minitest::Test
   SERVED = "1.2 notice domain 7 principal 1 usb: erx_usb_bot: medium LUN 0 ready: " \
            "#{Erx::UsbBoot::Stick::SECTORS} blocks of 512 bytes\r\n"
   ENDED = "1.9 notice domain 7 principal 1 usb: erx_usb_bot: medium LUN 0 ended: device\r\n"
+  UNCHECKED = { verified: false, tree: nil }.freeze
 
   def setup
     @directory = Dir.mktmpdir('erx-usb-')
@@ -115,25 +116,78 @@ class UsbBootTest < Minitest::Test
   end
 
   # Seeded: the image after the boot passes persisted only with the written pattern in
-  # place, volume_unchanged only with the volume's bytes as the harness wrote them, and a
-  # console passes each logged stage only with its own line, the served one at the
-  # image's capacity.
+  # place, and a console passes each logged stage only with its own line, the served
+  # one at the image's capacity.
   def test_host_stages_need_the_pattern_on_the_image_and_each_line_on_the_console
     written = STICK.image(volume_bytes)
     written[STICK::WRITE_SECTOR * 512, STICK.written.bytesize] = STICK.written
-    assert_equal %w[persisted volume_unchanged logged_served logged_ended],
-                 Erx::UsbBoot.host_passed(image: written, volume: volume_bytes, console: SERVED + ENDED)
-    dirtied = written.dup
-    dirtied[(STICK::VOLUME_START * 512) + 0x25] = "\x01"
-    assert_equal %w[persisted], Erx::UsbBoot.host_passed(image: dirtied, volume: volume_bytes, console: '')
+    assert_equal %w[persisted logged_served logged_ended],
+                 Erx::UsbBoot.host_passed(image: written, console: SERVED + ENDED, checked: UNCHECKED)
     off_by_one = written.dup
     off_by_one[(STICK::WRITE_SECTOR * 512) + 7] = 'X'
-    assert_equal [], Erx::UsbBoot.host_passed(image: off_by_one, volume: '', console: '')
-    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), volume: '', console: ENDED)
+    assert_equal [], Erx::UsbBoot.host_passed(image: off_by_one, console: '', checked: UNCHECKED)
+    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: ENDED, checked: UNCHECKED)
     short = SERVED.sub("#{STICK::SECTORS} blocks", "#{STICK::SECTORS - 1} blocks")
-    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), volume: '', console: short)
-    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), volume: '', console: SERVED)
-    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), volume: '', console: ENDED + SERVED)
+    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: short, checked: UNCHECKED)
+    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: SERVED, checked: UNCHECKED)
+    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: ENDED + SERVED, checked: UNCHECKED)
+  end
+
+  # A FAT16 volume as Stick.write makes it, holding files, each path with its bytes.
+  def fat_volume(files)
+    tree = File.join(@directory, 'tree')
+    files.each do |name, bytes|
+      FileUtils.mkdir_p(File.dirname(File.join(tree, name)))
+      File.binwrite(File.join(tree, name), bytes)
+    end
+    volume = File.join(@directory, 'volume.img')
+    runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
+    runner.run([Erx::Fsimg.checked(root: ROOT, runner: runner), 'cW', '-f', volume, '-F', 'fat16',
+                '-s', (STICK::VOLUME_SECTORS * 512).to_s, '-o', 'cluster=1024', '-C', tree, '.'],
+               name: 'usb-test-volume', deadline: 60)
+    File.binread(volume)
+  end
+
+  # image with the clean bit of the volume's FAT copy cleared.
+  def dirtied(image, copy:)
+    start = STICK::VOLUME_START * 512
+    reserved, fat_sectors = image.unpack("@#{start + 14}v @#{start + 22}v")
+    entry = start + ((reserved + (copy * fat_sectors)) * 512) + 3
+    image.dup.tap { |bytes| bytes.setbyte(entry, bytes.getbyte(entry) & 0x7f) }
+  end
+
+  # Seeded: clean passes only when every FAT copy holds the clean bit, verified only on
+  # fsimg's word, and extracted only for TREE_AFTER exactly.
+  def test_the_finish_stages_need_every_clean_bit_fsimg_s_word_and_the_tree_after
+    image = STICK.image(fat_volume('hello.txt' => "hello\n"))
+    after = { verified: true, tree: Erx::UsbBoot::TREE_AFTER }
+    assert_equal %w[clean verified extracted], Erx::UsbBoot.host_passed(image: image, console: '', checked: after)
+    second_copy = dirtied(image, copy: 1)
+    assert_equal %w[verified extracted], Erx::UsbBoot.host_passed(image: second_copy, console: '', checked: after)
+    moved_back = after.merge(tree: Erx::UsbBoot::TREE_AFTER.merge('hello.txt' => "hello\nagain\n"))
+    assert_equal %w[clean verified], Erx::UsbBoot.host_passed(image: image, console: '', checked: moved_back)
+    assert_equal %w[clean], Erx::UsbBoot.host_passed(image: image, console: '', checked: UNCHECKED)
+  end
+
+  # Stick.check runs fsimg over the volume inside the image: a volume holding TREE_AFTER
+  # verifies and extracts as it; one whose FAT copies disagree does not verify.
+  def test_check_verifies_and_extracts_the_volume_inside_the_image
+    runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
+    stick = File.join(@directory, 'stick.img')
+    File.binwrite(stick, STICK.image(fat_volume('docs/hello.txt' => "hello\nagain\n")))
+    assert_equal({ verified: true, tree: Erx::UsbBoot::TREE_AFTER }, STICK.check(stick, root: ROOT, runner: runner))
+    File.binwrite(stick, dirtied(File.binread(stick), copy: 0))
+    refute STICK.check(stick, root: ROOT, runner: runner).fetch(:verified)
+  end
+
+  # The fourth line's rc steps write each line as its bytes, so the shell's line needs no
+  # quoting, and the line stays inside the terminal's input bound.
+  def test_the_rc_steps_are_written_as_bytes_inside_the_input_bound
+    body = Erx::UsbBoot.rc_body(volume: 'a"b')
+    refute_includes body, 'a"b'
+    assert_includes body, "<<#{'echo hello > a"b/hello.txt && cat a"b/hello.txt'.bytes.join(',')}>>"
+    assert_operator Erx::UsbBoot.written_line.bytesize, :<, 4096
+    assert_operator Erx::UsbBoot.stick_line.bytesize, :<, 4096
   end
 
   # The stick's answer, the USB domain's text and then the media domain's, names its stages
