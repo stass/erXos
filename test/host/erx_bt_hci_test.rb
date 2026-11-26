@@ -253,21 +253,8 @@ class ErxBtHciTest < Minitest::Test
     Dir.mktmpdir('erx-bt-hci-test') do |work|
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
-                      '-eval', "halt(case eunit:test(#{eunit_spec(only)}, [verbose]) of ok -> 0; _ -> 1 end)",
+                      '-eval', ErlangBuild.eunit_eval(ErlangBuild.eunit_spec(TESTS, only)),
                       chdir: work, stdin_data: '')
     end
-  end
-
-  # What eunit runs: both test modules, or the one case, from the module that defines it.
-  def eunit_spec(only)
-    return '[erx_bt_hci_tests, erx_bt_patch_tests]' if only.nil?
-
-    source = TESTS.find { |path| File.read(File.join(ErlangBuild::ROOT, path)).match?(/^#{Regexp.escape(only)}\(/) }
-    raise ArgumentError, "no test module defines #{only}" if source.nil?
-
-    owner = File.basename(source, '.erl')
-    # eunit runs {Module, Name} as a plain test, which would take a generator's
-    # returned tests for the result, so a generator (a name ending in _) is named as one.
-    only.end_with?('_') ? "{generator, fun #{owner}:#{only}/0}" : "{#{owner}, #{only}}"
   end
 end

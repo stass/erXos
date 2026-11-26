@@ -80,6 +80,33 @@ module ErlangBuild
     work
   end
 
+  # What eunit:test/2 is given for tests, root-relative paths of test modules: every
+  # module named *_tests, or with only the one case of that name, from the one module
+  # that defines it. A case is a function ending in _test, or a generator ending in
+  # _test_, and a seeded fault runs the one case that guards it, not every module
+  # (the exploring cases take minutes). Raises Error unless the named case is defined
+  # exactly once across the *_tests modules.
+  def self.eunit_spec(tests, only = nil)
+    suites = tests.select { |path| path.end_with?('_tests.erl') }
+    return "[#{suites.map { |path| File.basename(path, '.erl') }.join(', ')}]" if only.nil?
+
+    pattern = /^#{Regexp.escape(only)}\(/
+    owners = suites.flat_map { |path| File.read(File.join(ROOT, path)).scan(pattern).map { path } }
+    raise Error, "#{only} is defined #{owners.size} times in the test modules, not once" unless owners.size == 1
+
+    owner = File.basename(owners.first, '.erl')
+    # eunit runs {Module, Name} as a plain test, which would take a generator's
+    # returned tests for the result, so a generator (a name ending in _) is named as one.
+    only.end_with?('_') ? "{generator, fun #{owner}:#{only}/0}" : "{#{owner}, #{only}}"
+  end
+
+  # The -eval argument that runs spec (eunit_spec's text) verbosely and halts 0 when it all
+  # passed. The default log handler is silenced, so a case's report line, which eunit
+  # prints on the line of its name, is not split by a notice the case logs.
+  def self.eunit_eval(spec)
+    "logger:set_handler_config(default, level, none), halt(case eunit:test(#{spec}, [verbose]) of ok -> 0; _ -> 1 end)."
+  end
+
   # An application's modules, root-relative, as the build compiles them.
   def self.modules(application) = Erx::ErlangApps.read_sources(root: ROOT, application: application).paths
 
