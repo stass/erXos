@@ -158,14 +158,14 @@ module Erx
     # the image, the tool chain's compiler, the kernel and board, the program's arguments,
     # and the SHA-256 of the run script, which holds init's configuration the boot image
     # carries, and of the boot image; cpus is the boot's CPU count the script was written for.
-    def record(sources:, image:, out:, arguments:, cpus:)
+    def record(sources:, image:, out:, arguments:, cpus:, script:)
       {
         'sources' => sources.to_h { |source| [source.fetch('id'), source.fetch('kind') == 'git' ? source.fetch('commit') : source.fetch('sha256')] },
         'image' => image, 'platform' => PLATFORM, 'kernel' => KERNEL, 'board' => BOARD,
         'compiler' => GuestBuild.text(out, 'compiler', label: LABEL).lines.first.to_s.strip,
         'compiler_flags' => "Genode's own for this board, and erx_peer_bench's (bench/genode/target.mk)",
         'arguments' => arguments, 'cpus' => cpus,
-        'run_script_sha256' => Digest::SHA256.hexdigest(run_script(arguments: arguments, cpus: cpus)),
+        'run_script_sha256' => Digest::SHA256.hexdigest(script),
         'image_sha256' => Digest::SHA256.file(File.join(out, 'image.elf')).hexdigest
       }
     end
@@ -176,14 +176,15 @@ module Erx
     def build(root:, runner:, context:, jobs:, cpus: 1)
       raise Error, 'Genode build jobs must be 1 to 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
 
+      arguments = PeerBench.arguments('posix', cpus: cpus)
+      script = run_script(arguments: arguments, cpus: cpus)
       dependencies = Dependencies.new(root: root, runner: runner, docker_context: context)
       endpoint = dependencies.local_docker_connection.fetch('endpoint')
       fetched = GenodeFetch.lock(root: root, runner: runner)
       image = dependencies.image_for(IMAGE_ID).fetch('reference')
       work = OutputDirectory.prepare(root: root, path: File.join(root, 'build/genode-work'))
       directory = Dir.mktmpdir('build-', work)
-      arguments = PeerBench.arguments('posix', cpus: cpus)
-      inputs = stage_inputs(root: root, fetched: fetched, directory: directory, arguments: arguments, cpus: cpus)
+      inputs = stage_inputs(root: root, fetched: fetched, directory: directory, script: script)
       writable = File.join(directory, 'writable')
       %w[contrib depot].each do |name|
         FileUtils.mkdir_p(File.join(writable, name))
@@ -202,7 +203,7 @@ module Erx
       out = File.join(directory, 'out')
       GuestBuild.unpack(archive: archive, out: out, outputs: OUTPUTS, label: LABEL)
       publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, arguments: arguments,
-                                                         cpus: cpus))
+                                                         cpus: cpus, script: script))
     ensure
       FileUtils.rm_rf(directory) if directory
     end
@@ -211,7 +212,7 @@ module Erx
     # with the name Genode's port tool asks for, and erXos's Genode repository: the
     # component's target description, its flags from their one source (PeerBench.flags),
     # the C files at their tree paths under its root/, and the run script.
-    def stage_inputs(root:, fetched:, directory:, arguments:, cpus:)
+    def stage_inputs(root:, fetched:, directory:, script:)
       inputs = File.join(directory, 'inputs')
       app = File.join(inputs, 'repo/src/app', PROGRAM)
       FileUtils.mkdir_p([app, File.join(inputs, 'repo/run')])
@@ -222,7 +223,7 @@ module Erx
         FileUtils.mkdir_p(File.join(app, 'root', File.dirname(path)))
         FileUtils.cp_r(File.join(root, path), File.join(app, 'root', path))
       end
-      File.write(File.join(inputs, 'repo/run', "#{PROGRAM}.run"), run_script(arguments: arguments, cpus: cpus))
+      File.write(File.join(inputs, 'repo/run', "#{PROGRAM}.run"), script)
       fetched.sources.select { |source| GenodeFetch::PORT.match?(source.fetch('id')) }.each do |source|
         port = File.join(inputs, 'ports', source.fetch('id').delete_prefix('genode-port-'))
         FileUtils.mkdir_p(port)
@@ -234,15 +235,16 @@ module Erx
 
     # The tool archives the engine extracts at the container's root: the tool chain's
     # archive and each tool package's data archive, each decompressed by xz on the host,
-    # read and written afresh under its prefix (CheckedTar), and its decompressed
-    # original removed. Returns the checked archives' paths. Nothing of them runs on the
-    # host.
+    # read and written afresh under its prefix as one root's archives (CheckedTar), in
+    # the order the engine extracts them, and its decompressed original removed.
+    # Returns the checked archives' paths. Nothing of them runs on the host.
     def stage_archives(runner:, fetched:, directory:)
       packages = fetched.sources.select { |source| source.fetch('id').start_with?(GenodeFetch::TOOL) }.map do |source|
         path = File.join(directory, "#{source.fetch('id')}.tar.xz")
         File.binwrite(path, data_archive(File.binread(fetched.fetched_file(source.fetch('id')))))
         [path, PACKAGE_PREFIX]
       end
+      reading = CheckedTar::Root.new
       [[fetched.fetched_file('genode-toolchain'), TOOLCHAIN_PREFIX], *packages].map do |path, prefix|
         unpacked = File.join(directory, 'unpacked.tar')
         checked = File.join(directory, "#{File.basename(path, '.tar.xz')}.checked.tar")
@@ -250,7 +252,7 @@ module Erx
                                                              output_limit: UNPACKED_BYTES, stdout: unpacked)
         File.open(unpacked, 'rb') do |input|
           File.open(checked, 'wb') do |output|
-            CheckedTar.rewrite(input, output, prefix: prefix, label: "#{LABEL}'s #{File.basename(path)}")
+            reading.rewrite(input, output, prefix: prefix, label: "#{LABEL}'s #{File.basename(path)}")
           end
         end
         FileUtils.rm_f(unpacked)

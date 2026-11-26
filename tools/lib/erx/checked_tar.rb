@@ -5,7 +5,7 @@
 require_relative 'error'
 
 module Erx
-  # A tar archive from an untrusted source, read once on the host and written afresh as
+  # Tar archives from an untrusted source, read once on the host and written afresh as
   # plain ustar (docs/design-bench.md, "Genode's guest"). Two tar readers need not agree
   # on one archive: a V7 header's prefix field, bytes after a NUL in a name, extended
   # headers and a missing end block are each read differently by different readers. So
@@ -14,13 +14,25 @@ module Erx
   # writes from its own reading, in which every name, link target and size is the one
   # the check accepted, in the one header form every reader reads alike.
   #
+  # The engine extracts several archives at one root over an image that has links of
+  # its own, so the archives bound for one root are one reading (Root), and every
+  # directory above an entry is written as a directory entry before it: the engine
+  # follows a link of the image when it extracts a file beneath it, but refuses a
+  # directory entry over anything that is not a directory (docker cp's
+  # noOverwriteDirNonDir; moby v27.5.1 pkg/archive/archive.go, Unpack).
+  #
   # Accepted: POSIX ustar and GNU headers with a valid checksum; regular files,
   # directories, symbolic links and hard links, and GNU long name and long link entries
-  # of at most LONG_BYTES; every path under prefix, each named once and none beneath a
-  # link or file of the archive; a symbolic link whose target is relative, climbs only
-  # with leading "..", and stays under prefix; a hard link to an earlier file; and the
-  # zero block that ends the archive. Written: each entry with owner 0:0, its permission
-  # bits without set-id or sticky bits, its modification time, and the end blocks.
+  # of at most LONG_BYTES; every path under prefix, each but a directory named once by
+  # the root's archives and none beneath a link or file of them; a symbolic link whose target is
+  # relative, climbs only with leading "..", and stays under prefix; a hard link to an
+  # earlier file; and the zero block that ends the archive. Written: first a "./"
+  # directory entry, which the engine skips and which makes the archive's first bytes a
+  # tar header's and no compressed stream's (the engine decompresses a stream that
+  # starts with a compression magic, moby's DecompressStream); then each directory above
+  # an entry, those above prefix too, once per root and with modification time 0, then
+  # the entry; each with owner 0:0, directories 0755 and other entries their permission
+  # bits within 0755, and the end blocks.
   module CheckedTar
     BLOCK = 512
     ZERO = ("\0" * BLOCK).b.freeze
@@ -40,36 +52,54 @@ module Erx
     LEADING = %r{\A\.?/}
 
     Entry = Data.define(:path, :type, :mode, :mtime, :size, :target)
+    # The entry every written archive starts with.
+    START = Entry.new(path: '.', type: :directory, mode: 0o755, mtime: 0, size: 0, target: '')
 
-    module_function
+    # The archives the engine extracts at one root, in the order it extracts them: the
+    # paths they have named, with their types. An archive's paths join the root's only
+    # when the whole archive is accepted.
+    class Root
+      def initialize
+        @seen = {}
+      end
 
-    # Reads the tar on input, refuses it (Erx::Error naming label) unless it is as the
-    # module states, and writes its entries to output as a fresh ustar archive. Returns
-    # the number of entries written. output holds a partial archive after a refusal.
-    def rewrite(input, output, prefix:, label:)
-      Rewrite.new(input: input, output: output, prefix: prefix, label: label).call
+      # Reads the tar on input, refuses it (Erx::Error naming label) unless it is as the
+      # module states against this root's earlier archives, and writes its entries to
+      # output as a fresh ustar archive. Returns the number of entries written. output
+      # holds a partial archive after a refusal.
+      def rewrite(input, output, prefix:, label:)
+        rewrite = Rewrite.new(input: input, output: output, prefix: prefix, label: label, seen: @seen.dup)
+        count = rewrite.call
+        @seen = rewrite.seen
+        count
+      end
     end
 
-    # One pass over one archive: the paths it has named, with their types, and the long
-    # name and long link target that the next header takes.
+    # One pass over one archive: the root's paths with the archive's added (seen), and
+    # the long name and long link target that the next header takes.
     class Rewrite
-      def initialize(input:, output:, prefix:, label:)
+      attr_reader :seen
+
+      def initialize(input:, output:, prefix:, label:, seen:)
         @input = input
         @output = output
         @prefix = prefix
         @label = label
-        @seen = {}
+        @seen = seen
         @long = {}
       end
 
+      # The number of entries written, the leading "./" not counted.
       def call
+        write(START)
         count = 0
         while (header = read(BLOCK, 'a header')) != ZERO
           entry = entry(header)
           next unless entry
 
-          write(entry)
-          count += 1
+          written = check(entry)
+          written.each { |item| write(item) }
+          count += written.size
         end
         refuse('a long name or link entry that no entry takes') unless @long.empty?
         @output.write(ZERO, ZERO)
@@ -89,13 +119,10 @@ module Erx
         refuse("an entry of type #{flag.inspect}") unless TYPES.key?(flag)
 
         type = TYPES.fetch(flag)
-        full = @long.delete(:name) || [(text(prefix) if [magic, version] == POSIX), text(name)].compact.reject(&:empty?).join('/')
-        entry = Entry.new(path: full.sub(LEADING, '').delete_suffix('/'), type: type, mode: number(mode) & 0o777,
+        full = @long.delete(:name) || [([magic, version] == POSIX ? text(prefix) : ''), text(name)].reject(&:empty?).join('/')
+        entry = Entry.new(path: full.sub(LEADING, '').delete_suffix('/'), type: type, mode: number(mode),
                           mtime: number(mtime), size: number(size), target: @long.delete(:target) || text(target))
-        return nil if type == :directory && ['', '.'].include?(entry.path)
-
-        check(entry)
-        entry
+        type == :directory && ['', '.'].include?(entry.path) ? nil : entry
       end
 
       def long(key, size)
@@ -106,6 +133,9 @@ module Erx
         nil
       end
 
+      # Checks entry against the root's paths and records it; returns what to write for
+      # it: each directory above it the root has not yet written, then the entry itself
+      # unless it is a directory already written.
       def check(entry)
         path = entry.path
         inside = entry.type == :directory ? "#{path}/".start_with?(@prefix) : path.start_with?(@prefix)
@@ -113,26 +143,33 @@ module Erx
         refuse("#{path.inspect} twice") if @seen.key?(path) && [entry.type, @seen[path]] != %i[directory directory]
         refuse("#{path.inspect} with data") unless entry.size.zero? || entry.type == :file
 
-        ancestors(path).each do |ancestor|
-          refuse("#{path.inspect} beneath the archive's #{@seen[ancestor]} #{ancestor.inspect}") unless
+        directories = ancestors(path)
+        directories.each do |ancestor|
+          refuse("#{path.inspect} beneath the #{@seen[ancestor]} #{ancestor.inspect}") unless
             [nil, :directory].include?(@seen[ancestor])
-          @seen[ancestor] = :directory
         end
         check_target(entry)
+        above = directories.reject { |ancestor| @seen.key?(ancestor) }
+        written = entry.type == :directory && @seen.key?(path) ? [] : [entry]
+        above.each { |ancestor| @seen[ancestor] = :directory }
         @seen[path] = entry.type
+        above.map { |ancestor| Entry.new(path: ancestor, type: :directory, mode: 0o755, mtime: 0, size: 0, target: '') } +
+          written
       end
 
-      # A symbolic link resolves against its own directory, which no link of the archive
-      # replaces, so climbing with leading ".." alone reaches what its text says; a hard
-      # link names a file the archive already holds.
+      # A symbolic link resolves against its own directory, which is a directory and no
+      # link, so climbing with leading ".." alone reaches what its text says; a hard link
+      # names a file the root's archives already hold.
       def check_target(entry)
         case entry.type
         when :symbolic
           parts = entry.target.split('/', -1)
           climbed = parts.drop_while { |part| part == '..' }
-          resolved = File.expand_path(entry.target, "/#{File.dirname(entry.path)}")
+          directory = entry.path.split('/')[0...-1]
+          kept = directory.size - (parts.size - climbed.size)
+          resolved = (directory.first(kept) + climbed).join('/') unless kept.negative?
           refuse("the link #{entry.path.inspect} to #{entry.target.inspect}") unless
-            !entry.target.empty? && plain?(climbed) && "#{resolved}/".start_with?("/#{@prefix}")
+            !entry.target.empty? && plain?(climbed) && resolved && "#{resolved}/".start_with?(@prefix)
         when :hard
           refuse("the hard link #{entry.path.inspect} to #{entry.target.inspect}, not an earlier file") unless
             %i[file hard].include?(@seen[entry.target.sub(LEADING, '')])
@@ -148,7 +185,8 @@ module Erx
                  end
         refuse("the link target #{target.inspect}, longer than ustar holds") unless target.bytesize <= 100
 
-        fields = [name, octal(entry.mode, 7), octal(0, 7), octal(0, 7), octal(entry.size, 11), octal(entry.mtime, 11),
+        mode = entry.type == :directory ? 0o755 : entry.mode & 0o755
+        fields = [name, octal(mode, 7), octal(0, 7), octal(0, 7), octal(entry.size, 11), octal(entry.mtime, 11),
                   ' ' * 8, FLAGS.fetch(entry.type), target, *POSIX, '', '', octal(0, 7), octal(0, 7), prefix]
         header = fields.pack(LAYOUT).ljust(BLOCK, "\0")
         header[148, 8] = "#{octal(header.sum(0), 6)}\0 "
@@ -164,12 +202,14 @@ module Erx
       end
 
       # ustar's prefix and name of path: the whole path as the name when it fits, else
-      # split at the last "/" that leaves each part within its field.
+      # split at the first "/" that leaves a name of 1 to 100 bytes and a prefix of at
+      # most 155, so the name is as long as its field allows.
       def split(path)
         return ['', path] if path.bytesize <= 100
 
-        cut = (1...path.bytesize).select { |index| path[index] == '/' }
-                                 .find { |index| index <= 155 && path.bytesize - index - 1 <= 100 }
+        cut = (1...path.bytesize).find do |index|
+          path[index] == '/' && index <= 155 && (path.bytesize - index - 1).between?(1, 100)
+        end
         refuse("#{path.inspect}, longer than ustar holds") unless cut
         [path[0, cut], path[(cut + 1)..]]
       end

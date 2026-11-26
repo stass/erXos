@@ -71,34 +71,90 @@ class GenodeBuildTest < Minitest::Test
     writer_io.write(header.to_s)
   end
 
-  def rewrite(io, prefix:, output: StringIO.new(+''.b))
-    Erx::CheckedTar.rewrite(io, output, prefix: prefix, label: 'a package')
+  def rewrite(io, prefix:, output: StringIO.new(+''.b), root: Erx::CheckedTar::Root.new)
+    root.rewrite(io, output, prefix: prefix, label: 'a package')
+  end
+
+  # The written archive's entries as a reader sees them: full name, type, link, mode,
+  # owner, magic and data; the leading "./" every written archive starts with left out.
+  def entries(output)
+    output.rewind
+    first, *rest = Gem::Package::TarReader.new(output).map do |entry|
+      header = entry.header
+      [entry.full_name, header.typeflag, header.linkname, header.mode, header.uid, header.magic, entry.read.to_s]
+    end
+    assert_equal ['./', '5', '', 0o755, 0, 'ustar', ''], first
+    rest
   end
 
   def check(prefix: 'usr/', &block) = rewrite(tar(&block), prefix: prefix)
 
   # A Debian package's tree under ./usr/, with links that stay inside it, is accepted and
-  # written afresh as ustar: names without "./", the root directory left out, owner 0:0.
+  # written afresh as ustar: names without "./", the root directory left out, owner 0:0,
+  # every directory 0755 and no file writable but by its owner, and each directory an
+  # entry before anything beneath it, whether the archive named it or not.
   def test_a_tree_under_its_prefix_with_inner_links_is_written_afresh
     output = StringIO.new(+''.b)
     count = rewrite(tar do |writer, io|
       writer.mkdir('./', 0o755)
-      writer.mkdir('./usr/bin', 0o755)
-      writer.add_file_simple('./usr/bin/tclsh8.6', 0o755, 2) { |file| file.write('#!') }
+      writer.mkdir('./usr/bin', 0o777)
+      writer.add_file_simple('./usr/bin/tclsh8.6', 0o4777, 2) { |file| file.write('#!') }
       writer.add_symlink('./usr/bin/tclsh', 'tclsh8.6', 0o777)
       writer.add_symlink('./usr/lib/x/libtcl.so', '../../lib/libtcl8.6.so', 0o777)
       raw(io, './usr/bin/tclsh-hard', '1', linkname: './usr/bin/tclsh8.6')
+      writer.mkdir('./usr/lib', 0o700)
+      writer.add_symlink('./usr/lib/home', '~nobody/x', 0o777)
     end, prefix: 'usr/', output: output)
-    assert_equal 5, count
-    output.rewind
-    entries = Gem::Package::TarReader.new(output).map do |entry|
-      header = entry.header
-      [header.name, header.typeflag, header.linkname, header.uid, header.magic, entry.read.to_s]
+    assert_equal 9, count
+    assert_equal [['usr/', '5', '', 0o755, 0, 'ustar', ''], ['usr/bin/', '5', '', 0o755, 0, 'ustar', ''],
+                  ['usr/bin/tclsh8.6', '0', '', 0o755, 0, 'ustar', '#!'],
+                  ['usr/bin/tclsh', '2', 'tclsh8.6', 0o755, 0, 'ustar', ''],
+                  ['usr/lib/', '5', '', 0o755, 0, 'ustar', ''], ['usr/lib/x/', '5', '', 0o755, 0, 'ustar', ''],
+                  ['usr/lib/x/libtcl.so', '2', '../../lib/libtcl8.6.so', 0o755, 0, 'ustar', ''],
+                  ['usr/bin/tclsh-hard', '1', 'usr/bin/tclsh8.6', 0o644, 0, 'ustar', ''],
+                  ['usr/lib/home', '2', '~nobody/x', 0o755, 0, 'ustar', '']], entries(output)
+  end
+
+  # The engine follows a link of the image (usr/lib/ssl/certs -> /etc/ssl/certs) when it
+  # extracts a file beneath it, but refuses a directory entry over it, so every directory
+  # above a file is an entry of its own first.
+  def test_a_file_beneath_an_image_link_comes_after_its_directories
+    output = StringIO.new(+''.b)
+    rewrite(StringIO.new(block('usr/lib/ssl/certs/x', size: 1) + 'y'.ljust(512, "\0") + ("\0" * 1024)),
+            prefix: 'usr/', output: output)
+    assert_equal ['usr/', 'usr/lib/', 'usr/lib/ssl/', 'usr/lib/ssl/certs/', 'usr/lib/ssl/certs/x'],
+                 entries(output).map(&:first)
+  end
+
+  # The engine decompresses an archive that starts with a compression magic, so a name
+  # the archive chooses ("BZh9...", once usr/ needs no entry) never starts the output.
+  def test_a_written_archive_starts_with_a_tar_header
+    root = Erx::CheckedTar::Root.new
+    rewrite(StringIO.new(block('usr/a') + ("\0" * 1024)), prefix: 'usr/', root: root)
+    name = "usr/BZh9#{'b' * 93}"
+    long = block('././@LongLink', typeflag: 'L', size: name.bytesize) + name.ljust(512, "\0")
+    output = StringIO.new(+''.b)
+    rewrite(StringIO.new(long + block('ignored') + ("\0" * 1024)), prefix: 'usr/', output: output, root: root)
+    assert output.string.start_with?("./\0")
+    assert_equal [name], entries(output).map(&:first)
+  end
+
+  # The archives bound for one root are one reading: what one archive's link makes of a
+  # path, the next archive can neither write beneath nor name again.
+  def test_archives_for_one_root_are_read_as_one
+    cases = {
+      'beneath' => [[['usr/a/b/c', '2', '../../../usr']], [['usr/a/b/c/q', '2', '../../..'], ['usr/q/etc/x', '0']]],
+      'twice' => [[['usr/a', '2', 'b']], [['usr/a', '0']]]
+    }
+    cases.each do |label, archives|
+      root = Erx::CheckedTar::Root.new
+      first, second = archives.map do |list|
+        StringIO.new(list.map { |name, flag, link| block(name, typeflag: flag, linkname: link.to_s) }.join + ("\0" * 1024))
+      end
+      rewrite(first, prefix: 'usr/', root: root)
+      error = assert_raises(Erx::Error, label) { rewrite(second, prefix: 'usr/', root: root) }
+      assert_match label, error.message
     end
-    assert_equal [['usr/bin/', '5', '', 0, 'ustar', ''], ['usr/bin/tclsh8.6', '0', '', 0, 'ustar', '#!'],
-                  ['usr/bin/tclsh', '2', 'tclsh8.6', 0, 'ustar', ''],
-                  ['usr/lib/x/libtcl.so', '2', '../../lib/libtcl8.6.so', 0, 'ustar', ''],
-                  ['usr/bin/tclsh-hard', '1', 'usr/bin/tclsh8.6', 0, 'ustar', '']], entries
   end
 
   # What the engine would extract beyond the tools' directory, or what could rename an
@@ -137,21 +193,36 @@ class GenodeBuildTest < Minitest::Test
     header
   end
 
-  # Archives the host reader and the engine's could read differently, each alone: a V7
-  # header whose prefix field the host would join to its name, a name hiding bytes after
-  # a NUL, a link that climbs out through another link, and an archive cut before its end.
+  # Archives the host reader and the engine's could read differently, each alone, with
+  # the refusal each meets: a V7 header whose prefix field the host would join to its
+  # name, a name hiding bytes after a NUL, a link that climbs after descending (so through
+  # whatever it descended into), a file the engine would write through a link of the
+  # archive, a directory too long for ustar's name field, and an archive cut before its end.
   def test_archives_read_two_ways_are_refused
     end_blocks = "\0".b * 1024
     cases = {
-      'a V7 prefix' => block('evil', magic: '', version: '', prefix: 'usr/bin') + end_blocks,
-      'a NUL in a name' => block("usr/bin/x\0y") + end_blocks,
-      'a link out through a link' => block('usr/a/x', typeflag: '2', linkname: '.') +
-                                     block('usr/a/y', typeflag: '2', linkname: 'x/x/x/x/../../../..') + end_blocks,
-      'no end block' => block('usr/bin/x')
+      'neither POSIX' => block('evil', magic: '', version: '', prefix: 'usr/bin') + end_blocks,
+      'after a NUL' => block("usr/bin/x\0y") + end_blocks,
+      'the link "usr/a/y"' => block('usr/a/x', typeflag: '2', linkname: 'b') +
+                              block('usr/a/y', typeflag: '2', linkname: 'x/../..') + end_blocks,
+      'beneath the symbolic' => block('usr/a/x', typeflag: '2', linkname: 'b') + block('usr/a/x/y') + end_blocks,
+      'longer than ustar' => block('d' * 100, typeflag: '5', prefix: 'usr/bin') + end_blocks,
+      'cut before' => block('usr/bin/x')
     }
     cases.each do |label, bytes|
-      assert_raises(Erx::Error, label) { rewrite(StringIO.new(bytes), prefix: 'usr/') }
+      error = assert_raises(Erx::Error, label) { rewrite(StringIO.new(bytes), prefix: 'usr/') }
+      assert_match label, error.message
     end
+  end
+
+  # A path over 100 bytes is split into ustar's prefix and name, each within its field
+  # and the name never empty, and read back whole.
+  def test_a_long_path_is_split_with_a_name
+    path = "usr/#{'p' * 80}/#{'q' * 60}/#{'n' * 50}"
+    long = block('././@LongLink', typeflag: 'L', size: path.bytesize) + path.ljust(512, "\0")
+    output = StringIO.new(+''.b)
+    rewrite(StringIO.new(long + block('ignored') + ("\0" * 1024)), prefix: 'usr/', output: output)
+    assert_equal ['usr/', "usr/#{'p' * 80}/", "usr/#{'p' * 80}/#{'q' * 60}/", path], entries(output).map(&:first)
   end
 
   # The container is created confined, as the non-root user, under env -i with the tool
@@ -183,13 +254,14 @@ class GenodeBuildTest < Minitest::Test
       File.write(File.join(out, 'image.elf'), 'ELF')
       File.write(File.join(out, 'compiler'), "genode-aarch64-gcc (GCC) 14.2.0\n")
       record = Erx::GenodeBuild.record(sources: [{ 'id' => 'genode', 'kind' => 'git', 'commit' => 'c' * 40 }],
-                                       image: IMAGE, out: out, arguments: %w[posix 1], cpus: 1)
+                                       image: IMAGE, out: out, arguments: %w[posix 1], cpus: 1,
+                                       script: Erx::GenodeBuild.run_script(arguments: %w[posix 1], cpus: 1))
       assert_equal Digest::SHA256.hexdigest('ELF'), record.fetch('image_sha256')
       assert_equal Digest::SHA256.hexdigest(Erx::GenodeBuild.run_script(arguments: %w[posix 1], cpus: 1)), record.fetch('run_script_sha256')
       assert_equal 'genode-aarch64-gcc (GCC) 14.2.0', record.fetch('compiler')
       assert_equal({ 'genode' => 'c' * 40 }, record.fetch('sources'))
       File.write(File.join(out, 'compiler'), "gcc\e[31m\n")
-      assert_raises(Erx::Error) { Erx::GenodeBuild.record(sources: [], image: IMAGE, out: out, arguments: [], cpus: 1) }
+      assert_raises(Erx::Error) { Erx::GenodeBuild.record(sources: [], image: IMAGE, out: out, arguments: [], cpus: 1, script: '') }
     end
   end
 end

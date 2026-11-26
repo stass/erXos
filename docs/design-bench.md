@@ -2629,11 +2629,23 @@ archive alike (a V7 header's prefix field, bytes after a NUL in a name,
 a missing end block), so the engine never gets the archive the host
 read: the host writes each accepted archive afresh as plain ustar from
 its own reading (`CheckedTar`), every entry owned by uid 0 as the tree
-is, without set-id bits, and the engine extracts that one into the
-container's file system (`docker cp -`) before the container starts.
-A symbolic link climbs only with leading `..` from a directory no link
-of the archive replaces, and no entry lies beneath a link or file of
-the archive, so a link's text alone says where it points.
+is, every directory 0755 and no other entry set-id or writable but by
+its owner, and the engine extracts that one into the container's file
+system (`docker cp -`) before the container starts. The archives bound
+for the container's root are read as one: each path but a directory is
+named once across them, no entry lies beneath a link or file of any of them, and
+a symbolic link climbs only with leading `..`, so among them a link's
+text alone says where it points. The image has links of its own
+(`/usr/lib/ssl/certs`), which the engine would follow to extract a file
+beneath one, so every directory above an entry is written as an entry
+of its own before it, and the engine refuses a directory entry over
+anything that is not a directory (`docker cp` asks for
+`noOverwriteDirNonDir`; moby v27.5.1, `pkg/archive/archive.go`,
+`Unpack`): nothing is extracted through a link the host did not read.
+The engine also decompresses a stream that starts with a compression
+magic (`DecompressStream`), so every written archive starts with a
+`./` directory entry, which the engine skips, and never with a name
+the archive chose.
 
 `erx_peer_bench` is built as a Genode component from a target
 description of erXos's (`bench/genode/`) that links Genode's `posix`,

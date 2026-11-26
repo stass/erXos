@@ -490,14 +490,11 @@ design does not have, to be deleted so no side-by-side table can show it under s
   init's start node the boot's CPUs as its affinity, and show by a cross-CPU handshake that
   `pthread_setaffinity_np` moves the thread before any row is published as pinned; the image takes the posix
   run's CPU count when built (`GenodeBuild.build`'s `cpus:`, 1 from the command line).
-* [High] Genode's build, `CheckedTar` (`tools/lib/erx/checked_tar.rb`): its link rules hold only against the links
-  of the one archive it reads, while the engine extracts every tool archive at one root over an image that has
-  links in `/usr` (`/usr/lib/ssl/certs -> /etc/ssl/certs`), so an accepted package wrote `/etc/ssl/certs/x` and
-  two accepted archives wrote `/etc/x` through links that each archive alone resolved inside `usr/` (shown by a
-  review probe with `docker cp -`). Emit a directory entry for every ancestor before its entries (mode 0755,
-  owner 0), which the engine refuses over an existing non-directory, keep one reading across the archives bound
-  for one root, cite the engine's source for that refusal, and write directories 0755 and files `mode & 0o755`.
-  Until then the design's "a link's text alone says where it points" holds only within one archive.
+* [Medium] Genode's build, `CheckedTar` and the engine (`tools/lib/erx/genode_build.rb`): that no tool archive
+  writes through a link of the image rests on the engine refusing a directory entry over a non-directory, as
+  moby v27.5.1 does for `docker cp` (docs/design-bench.md, "Genode's guest"); nothing checks that the context's
+  engine does. Send a canary archive first (a directory entry `usr/lib/ssl/certs/` over the image's link) and
+  refuse the build unless the engine refuses it.
 * [Medium] Genode's guest in the bench session (`GenodeBench::Guest`): the posix benchmark's operations declare
   no `genode-hw` counterpart, so `tools/erx bench posix --systems genode-hw` plans no boot. Declare Genode's
   counterparts (the program's FreeBSD branch) and boot `build/genode/1cpu` and a 4-CPU image.

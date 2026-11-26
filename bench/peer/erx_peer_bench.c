@@ -273,8 +273,8 @@ clock_choose(void)
 	clock_read = counter_ticks;
 	if (clock_hz == 0)
 		peer_fail("the counter's frequency reads 0");
-	return;
-#elif defined(__aarch64__)
+#else
+#if defined(__aarch64__)
 	uint64_t frequency = 0;
 
 	if (counter_readable(&frequency)) {
@@ -287,6 +287,7 @@ clock_choose(void)
 	clock_name = "monotonic";
 	clock_hz = NS_PER_SECOND;
 	clock_read = monotonic_ns;
+#endif
 }
 #endif
 
