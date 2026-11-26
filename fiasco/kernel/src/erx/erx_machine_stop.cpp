@@ -170,7 +170,9 @@ erx_stop_end(unsigned cpu, bool say = true)
     erx_effect_console_write(line, sizeof(line) - 1);
   // Fiasco finds the current CPU through the stack pointer, which on a panic
   // stack names no thread, so the reset is told the stop's own number.
-  Platform_control::system_reboot_from(Cpu_number(cpu));
+  // A CPU whose number is out of range resets as the boot CPU, so the reset
+  // never indexes past its per-CPU tables.
+  Platform_control::system_reboot_from(Cpu_number(cpu < Config::Max_num_cpus ? cpu : 0));
 }
 
 static uint64_t
@@ -380,10 +382,11 @@ erx_stop_lead(void *arg)
   Entry *const entry = static_cast<Entry *>(arg);
   unsigned const cpu = entry->cpu;
   erx_stop_regs_t const &regs = entry->regs;
+  erx_stop_leader_t const leader = erx_stop_census(cpu);
+  // The message is formatted once every CPU is asked, so an argument that
+  // faults is a nested stop after the census, not before it.
   int const length = vsnprintf(erx_stop_message, sizeof(erx_stop_message),
                                entry->format, *entry->args);
-
-  erx_stop_leader_t const leader = erx_stop_census(cpu);
   Erx_console_ring::close();
 
   static erx_crash_cpu_t cpus[ERX_CRASH_CPUS];

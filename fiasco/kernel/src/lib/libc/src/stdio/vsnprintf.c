@@ -1,3 +1,6 @@
+/* Modified by erXos: vsnprintf formats into a buffer of its own, so vfprintf
+ * takes the printf lock only for the console, and formatting a string never
+ * waits on another CPU (docs/design-debugger.md, "On Fiasco"). */
 #include "stdio_impl.h"
 #include <limits.h>
 #include <string.h>
@@ -31,15 +34,20 @@ static void sn_write(FILE *f, const char *s, size_t l)
 
 int vsnprintf(char *restrict s, size_t n, const char *restrict fmt, va_list ap)
 {
-	char buf[1];
+	char buf[80];
 	char dummy[1];
 	struct cookie c = { .s = n ? s : dummy, .n = n ? n-1 : 0 };
 	FILE f = {
 		.write = sn_write,
 		.buf = buf,
+		.buf_size = sizeof buf,
+		.wpos = buf,
 		.cookie = &c,
 	};
+	int ret;
 
 	*c.s = 0;
-	return vfprintf(&f, fmt, ap);
+	ret = vfprintf(&f, fmt, ap);
+	sn_write(&f, 0, 0);
+	return ret;
 }
