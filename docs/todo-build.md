@@ -223,6 +223,12 @@ design does not have, to be deleted so no side-by-side table can show it under s
   the guest's refusal does not name `ERX_CLANG`, `ERX_LLD` or the compiler-rt pin its build needs; the QEMU
   environment map, the per-boot directory name and the compiler's version line are each written by more than
   one guest (`linux_guest.rb`, `l4re_bench.rb`, `bench_landing.rb`, `bench_g3.rb`, `bench_g5.rb`).
+* [Medium] benchmarks, the common OS benchmarks' operations ([design-bench.md](design-bench.md#the-common-os-benchmarks-operations)):
+  the `rate` profile, its `WINDOW` lines and score, the C rows' operations and copy mode in
+  `bench/peer/erx_peer_bench.c`, the `erl` module (`bench/erx_erl_bench.erl`, not yet written) with its
+  Erlang rows, the shell script and input from the generator, toybox's `sort`, `sed` and `sh` in Linux's
+  initramfs, the posix image's 64 MiB `/tmp`, and the index in `Erx::BenchSideBySide` are designed and not
+  built.
 * [Medium] benchmarks, the `posix` program table's cell parameters (`tools/lib/erx/benches/posix.rb`,
   `bench/peer/erx_peer_bench.c` `posix_cells`): each cell's operation, placement and parameters (the byte
   counts, the 16 MiB files, the pipe and poll peers) are written in both, and a change to one shows only as a

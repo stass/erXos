@@ -824,6 +824,23 @@ is timed, and one that answers that it is not implemented makes its row
 unsupported, so the table shows by itself which calls erXos's programs
 do not have yet.
 
+The same program also counts. A reader who knows the public operating
+system benchmarks, UnixBench first, finds their operations among its
+rows (**designed**): a 512-byte write and read through a pipe, two
+processes passing a number back and forth, starting a program and
+waiting for it, `exec` over and over, a file copy at three buffer
+sizes, and a shell running a small pipeline of text commands, each run
+for a fixed time as one copy and as one copy per processor, and reported
+as a rate. The suites themselves never run: each measures its own acts
+and needs what erXos does not offer, so the operations are erXos's own
+acts, run as the same code on every system compared, and an Erlang
+module runs the ones that make sense to an Erlang program (spawning a
+process, a message back and forth, copying a file through `file`) on
+erXos and on stock OTP. One summary number per group, a geometric mean
+of each row's rate against Linux's on the same machine, follows
+UnixBench's own way of keeping one row from dominating; it is not a
+UnixBench score and is never set beside one.
+
 The same Raspberry Pi 4 also boots stock L4Re and Linux, with
 the same firmware settings, and each runs the counterpart of an
 operation where one exists; the side-by-side table says where none does.

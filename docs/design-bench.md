@@ -451,6 +451,7 @@ runs.
 | **expensive** | 10 warm-up operations, or none for a cold start, then each timed | 10 and 100, one run | 10 and 1,000, three runs | median and maximum, the raw samples, percentiles the count allows |
 | **periodic** | absolute deadlines on a fixed schedule of period P and a phase sweep (below); each period's lateness is its return less its deadline | P = 1 ms for 2 s | P = 1 ms for 60 s, three runs; 300 s at the gates that name it | the lateness histogram per phase; early returns, missed periods and lost wakes counted |
 | **sustained** | after a 2 s warm-up, windows of fixed length, in each of which every thread of the cell counts its passes and its gaps ([A sustained cell](#a-sustained-cell)) | three 1 s windows | five 10 s windows, three runs | per window and thread its share of the CPU, longest gap and lost turns; the longest gap over all windows |
+| **rate** | after a 1 s warm-up, windows of fixed length, in each of which every copy of the cell counts the acts it completed ([A rate cell](#the-construction-a-rate-cell)) | three windows of the cell's `window-ms`, 1 s by default | ten windows, 2 s by default, three runs | the score: every copy's acts over the windows' span, as a rate; each window's summed rate, the lowest and the highest |
 
 Two rules hold in every profile, so no benchmark declares them:
 
@@ -527,7 +528,10 @@ cell, names it:
    last window, it writes one `WINDOW` line per window and thread, window
    by window and thread by thread, each `WINDOW` followed by one JSON
    object:
-   `WINDOW {"window":0,"thread":2,"iterations":81234567,"longest":98765,"lost":250,"waited":18000000}`.
+   `WINDOW {"window":0,"worker":2,"iterations":81234567,"longest":98765,"lost":250,"waited":18000000}`,
+   its `worker` the thread. A rate cell writes the same line, its worker
+   a copy and without `lost` and `waited`
+   ([A rate cell](#the-construction-a-rate-cell)).
    A line is at most 160 bytes, well inside one task write
    (`utcb_bytes_max`, 504 bytes), which the root's one service thread
    writes to the console whole, so no other task's write lands inside it.
@@ -546,7 +550,8 @@ cell, names it:
    for each of the cell's windows and threads (the `threads` parameter),
    in the order written; otherwise the cell is `rejected`, naming the
    first missing or misplaced line. `WINDOW` lines followed by a `BENCH`
-   line of another profile, or by none, are refused.
+   line of another profile than `sustained` or `rate`, or by none, are
+   refused.
 4. A `measured` cell in which a thread made no pass in some window is
    `failed`: its correct result is that every thread runs in each
    window, and the reason names the thread and the window.
@@ -718,7 +723,9 @@ ran other cells, and is refused.
   threshold; `faster` the mirror; `inconclusive` otherwise. A sustained
   cell is judged on its longest gap over all windows, an exact number
   whose band is not widened, against the 99th percentile's threshold,
-  since it is the cell's tail. Deterministic mode's band has no width,
+  since it is the cell's tail. A rate cell is judged on its score, also
+  exact and not widened, against the median's threshold, with the
+  verdicts mirrored, since a higher rate is faster. Deterministic mode's band has no width,
   so any difference there is a real change of the measured virtual time,
   though not necessarily of instructions executed.
 * **Inconclusive is not a pass.** A comparison is inconclusive when the
@@ -2556,6 +2563,294 @@ table already holds; `erl` does not time it again. Stock OTP's
 counterpart of each is the same call on Linux, where `read-file` and
 `tcp-rtt` reach Linux's kernel through ERTS's drivers.
 
+### The common OS benchmarks' operations
+
+Operating systems are usually compared with a handful of public
+benchmark suites, and a reader who knows one asks first whether erXos
+has been through it. UnixBench is the oldest and the most quoted, so
+its system index is the first set this section covers; further suites'
+operations are further rows of the same tables. erXos does not run any
+of these suites. They are GPL programs that measure their own acts and
+need what erXos does not offer (UnixBench needs Perl, `fork` and a
+Bourne shell), and running one only on Linux tells nothing about erXos.
+What this section adds is the suites' **operations**, written as acts of
+`erx_peer_bench posix` and of the Erlang benchmark `erl`, and run as the
+same C or Erlang on every system the program table compares, in QEMU
+under HVF and on the Raspberry Pi 4 where those systems run there. The
+comparison is the side-by-side program table and the Erlang table, as
+for every other row.
+
+The rows are UnixBench-shaped, not UnixBench: each is a counted
+operation of the kind UnixBench counts, at its sizes where those are
+known, and never claims to equal a UnixBench test. No number they give
+is comparable with a published UnixBench score, and the tables never set
+one beside such a score.
+
+#### What UnixBench measures
+
+From its documentation only, through the clean-room facts record
+([References](#references)), of UnixBench 6.0.1; its source is GPL-2.0
+and is never read for this design. Its system index is twelve tests: Dhrystone, Whetstone,
+`getpid` repeated (system call overhead), one process writing 512 bytes
+to a pipe and reading them back (pipe throughput), a parent and a
+forked child passing an increasing integer over two pipes (context
+switching), `fork` of a child that exits at once and its reaping
+(process creation), `execl` repeated, a file copy at three buffer and
+file sizes (256 bytes and 500 blocks, 1,024 and 2,000, 4,096 and 8,000),
+and a shell script of `grep`, `sed` and `sort`-shaped transformations
+over a file of about 8 KB, run as one copy and as eight concurrent
+copies. Every test is fixed time and variable work: it counts how many
+acts complete in a fixed time and reports a rate, per second or per
+minute. The whole set runs once with one copy and once with N copies at
+once, N the number of CPUs, the copies' counts summed. The index of a
+test is its rate set against a 1995 SPARCstation's, and the overall
+index is the geometric mean of the tests' indices, so that no one test
+dominates.
+
+Where the record leaves a parameter unverified (the meaning of
+"maxblocks", the test durations, the script's exact commands, how the
+iterations are averaged), this design chooses its own value and says so
+below; nothing here depends on what UnixBench does beyond what the
+record verifies.
+
+#### What the code does today
+
+`posix` times single acts into histograms (`posix_cells`,
+`bench/peer/erx_peer_bench.c:2471`), with its pipe peers as threads of
+the program; no cell starts a peer process, and none counts acts in a
+fixed time. The record knows four profiles (`PROFILES`,
+`tools/lib/erx/bench_record.rb:30`), and only a sustained cell reports
+windows, read as `WINDOW` lines whose place is a window and a thread
+(`WINDOW_PLACE`, `tools/lib/erx/bench_measurement.rb:84`). The `erl`
+benchmark of this section's opening is designed and not built: no
+`bench/erx_erl_bench.erl` exists.
+
+#### The construction: a rate cell
+
+One profile carries every row of this section. A **rate cell** runs an
+operation's act over and over for a fixed time, by one or more
+**copies** at once, and counts the acts each copy completes in each of a
+fixed set of windows. Its operation is an ordinary operation of the
+benchmark, with its act and its correct result, so the same operation
+can have `fast` cells that time single acts and `rate` cells that count
+them: `pipe-rtt` is both, and nothing about the act is written twice.
+
+* **The plan.** The cell's plan is fixed before any copy starts: a
+  warm-up of 1 s, then the profile's windows, each of the cell's
+  `window-ms`, on the counter of [the one clock](#the-one-clock). Every
+  copy is handed the plan's start in ticks and keeps it, so window k is
+  the same span of the counter for every copy. Copies on different CPUs
+  read counters whose offset the boot's `CLOCK` line bounds, far below a
+  window.
+* **A pass** is one act and its check. A copy reads the counter after
+  each pass and counts the pass in the window that read falls in, so a
+  pass that crosses a window's end counts once, in the window where it
+  ended; passes ending in the warm-up count nowhere, and the copy stops
+  at the first read past the plan's end. Beside each window's count a
+  copy keeps its longest pass in ticks.
+* **The copies.** `copies` is a workload parameter, 1 or N, N the
+  boot's CPU count, so a rate cell has the two forms UnixBench's single
+  and parallel passes have. Copy 0 is the program itself; copies 1 to
+  N-1 are the program started with `posix_spawn` in its copy mode, each
+  given its index, the cell and the plan's start in its arguments and a
+  pipe on its standard output. Copy i binds itself to CPU i with
+  `sched_setaffinity`, and what a copy starts the system places. The
+  cell's placement is `every-cpu`: one copy per CPU, the first N CPUs.
+  An act that replaces or ends its process (`exec-loop`) runs in every
+  copy as a started process, copy 0 included. The probe of the cell
+  makes its first untimed `posix_spawn`, so on a system where the
+  program cannot start a process its N-copy cells and its `exec-loop`
+  cells are `unsupported` with the call named, and its 1-copy cells of
+  every other operation run.
+* **The report.** No copy writes during the plan. At its end each
+  started copy writes its windows to its pipe and exits 0; copy 0 reads
+  them, waits for every copy, and writes one `WINDOW` line per window
+  and copy, window by window and copy by copy, and then the cell's
+  `BENCH` line, as a sustained cell's lines are written
+  ([A sustained cell](#a-sustained-cell)). A rate cell's `WINDOW` line
+  carries `window`, `worker` (the copy), `iterations` (the passes ended
+  in the window) and `longest`; `lost` and `waited` belong to a
+  sustained cell's accounting of a shared CPU and a rate cell's line
+  carries neither. `BenchMeasurement` holds a rate cell's lines to the
+  cell exactly as it holds a sustained cell's: one line per window and
+  worker, in order, or the cell is `rejected`.
+* **The score.** A rate cell's summary is its **score**: every copy's
+  passes over all windows, divided by the plan's measured span (the
+  windows, not the warm-up), as a rate per second; UnixBench's
+  per-minute rows (the shell rows) print it per minute, and the copy
+  rows print bytes per second, the score times the buffer. Beside it
+  the summary keeps each window's summed rate, the lowest and the
+  highest, and each copy's share of the passes. The score is exact, so
+  no percentile is reported and nothing is trimmed: UnixBench's
+  averaging of its runs is not copied, and the record's runs and boots
+  carry the spread instead.
+* **Its results.** A pass whose check fails makes the cell `failed`,
+  naming the copy and the pass, as every operation's check does. A
+  started copy that ends other than by exiting 0, or whose windows do
+  not reach copy 0, makes the cell `failed` naming the copy and how it
+  ended. A copy that completed no pass in the whole plan makes the cell
+  `partial` (`copy 2 completed no pass`): its act takes longer than the
+  plan resolves, and a score of zero would be a wrong answer.
+
+The profile's sizes:
+
+| Form | Windows | Window | Runs |
+| --- | --- | --- | --- |
+| landing form | three | the cell's `window-ms`, 1,000 by default | one |
+| full form | ten | the cell's `window-ms`, 2,000 by default | three |
+
+The shell rows declare `window-ms` 10,000 in both forms, since one of
+their passes may take a second. UnixBench's durations (10 s per file
+test and 60 s per shell test, ten or three runs) are not copied: what a
+duration buys is enough passes per window to resolve a rate, which the
+windows above give, and the records' boots give the spread UnixBench's
+repeated runs give. A full-form boot of every rate cell below runs for
+about fourteen minutes.
+
+**Which boot.** Rate cells come from the boot of the session's largest
+CPU count, both copy counts from the same boot, as UnixBench's single
+copy runs on the whole machine: a single copy's peers, the commands a
+shell starts and the pipe's other end, may run on any CPU the system
+gives them. The one-CPU form runs none.
+
+#### The C rows
+
+Each row is an operation of `posix` and two rate cells, 1 and N copies.
+**Shaped on** names the UnixBench test whose act the row's act is shaped
+on, as the declaration records it; **Same act?** is between the compared
+systems, as for every row of the program table, never between the row
+and UnixBench.
+
+| Operation | Act of one pass and its check | Shaped on | Rate | erXos's path | erXos runs it | Same act? | L4Re |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `getpid` | `getpid()`; the same positive value every pass | system call overhead | per second | as the `fast` row: a constant in user mode | yes | nearest counterpart, as the `fast` row | kernel rows only; `nullcall.kernel` |
+| `pipe-self` | write 512 bytes to a pipe and read them back, one process; the bytes read equal those written, whose first 8 bytes carry the pass's sequence number | pipe throughput | per second | `liberx`'s ring in the program's own memory, with no doorbell, since no other side sleeps ([design-pipes.md](design-pipes.md#performance)) | yes | same act | kernel rows only; none |
+| `pipe-rtt` | `pipe-rtt`'s `process` form with n = 8: an increasing 8-byte count sent through pipe 1 and returned through pipe 2; each reply is its request | context switching | per second | as `pipe-rtt` | waits on `posix_spawn`'s request | same act | kernel rows only; `nullcall.root-cross-space` |
+| `spawn-wait` | `spawn-wait` of the program itself, exiting 7; `waitpid` returns the child's id and status 7 | process creation | per second | as `spawn-wait` | waits on `posix_spawn`'s request and the child table | same act: each system's own program start; UnixBench's act is `fork` | kernel rows only; none |
+| `exec-loop` | the copy `execve`s the program, whose first statement reads the counter, counts the pass and `execve`s again until the plan ends, the plan and the counts carried in its arguments; the last image writes the windows to the inherited pipe. Every image's `getpid` equals the copy's process id, so an `exec` that started a new process fails | `execl` | per second | the second tier's `exec` ([design-programs.md](design-programs.md#exec)) | waits on `posix_spawn`'s request and the second tier's `exec` | same act | kernel rows only; none |
+| `copy-blocks` | `pread` of `buffer` bytes at offset k times `buffer` from file A and `pwrite` of them at the same offset to file B, k counting 0 to `blocks` - 1 and over again; every count full, and after the cell B equals A. Three cells per copy count: `buffer` 256 and `blocks` 500, 1,024 and 2,000, 4,096 and 8,000. A block is 1 KiB, a choice of this design, so the files are 500 KiB, 2,000 KiB and 8,000 KiB, each copy with its own pair | file copy (the three shapes) | bytes per second | as `read` and `write`: one request each to the server of the path's grant | yes | same act | kernel rows only; none |
+| `read` | `pread` of 4 KiB at offset 0 of the 64 KiB file; the bytes are the pattern | none | per second | as the `fast` row | yes | same act | kernel rows only; none |
+| `create-remove` | `open` of a new file of `/tmp`, named by the copy's index, with `O_CREAT` and `O_EXCL`, `close`, `unlink`; every call 0 | none | per second | creation is `lcreate`; `unlinkat` answers `ENOSYS` (`program_task.c:306`, `:318`) | waits on the program layer's `unlinkat` | same act | kernel rows only; none |
+| `shell-script` | start `scripts` copies of the system's shell at once on the one script below, each with a fresh open of the input file on its standard input and a pipe on its standard output, read every output and `waitpid` every shell; each shell exits 0 and its output is the count the generator computed. Two cells per copy count: `scripts` 1 and 8 | shell scripts (1 and 8 concurrent) | per minute | `posix_spawn` of `/bin/rc`, rc in the program's command domain ([design-shell.md](design-shell.md#rc-as-a-program)), whose `sort`, `grep` and `wc` are Erlang commands and `sed` toybox's | waits on `posix_spawn`'s request | nearest counterpart: each system's own shell and commands; rc and erXos's commands on erXos, toybox's `sh` and applets on Linux | kernel rows only; none |
+
+`read` and `create-remove` are shaped on no UnixBench test. They are the
+C twins of the Erlang rows below, so that both groups hold the same
+file acts.
+
+**The script.** One line, a pipeline from standard input to standard
+output:
+
+```
+sort | grep -v '^#' | sed 's/e/E/g' | sort -r | wc -l
+```
+
+It uses only what rc and a POSIX shell spell alike: simple commands,
+single-quoted words and `|`. So the one file runs unchanged under both,
+needs no variable, no working directory and no file of its own, and the
+same text is each system's act. The input is about 8 KiB of lines of
+words, some starting with `#`, made with the tree and the archive by the
+one Ruby generator from a fixed seed, which also computes the expected
+count. UnixBench's script itself is not known to this design; the work
+is of the kind its documentation names. The shell is a fact of each
+system's build of the program: `/bin/rc` on erXos, `/bin/sh` elsewhere.
+
+**Rows that are not here.** Dhrystone and Whetstone get no row. Built
+from one file by one compiler with one set of flags, they time the CPU
+and the compiler, which are equal on every system of a session by
+construction. What a system takes from a busy program is measured by
+the sustained cells of [`sched`](#2-sched-how-a-cpu-is-shared). UnixBench's
+other tests outside its index (file read and write alone, `dc`, `hanoi`,
+the compiler test, the graphics tests) get none: the `fast` rows cover
+the file calls, and the rest time tools or the CPU, not the system.
+
+#### The Erlang rows
+
+The same rate profile, in `erl`, on erXos's ERTS and on stock OTP
+29.1.2 in [Linux's Erlang guest](#linuxs-erlang-guest), the one Erlang
+module on both. A copy is an Erlang process; copies 1 and N, N the
+boot's scheduler count; placement `runtime`, as for every `erl` cell.
+Copy 0 is the module's own process, which writes the lines through
+`bench/erx_bench_hist.erl`'s writer.
+
+| Operation | Act of one pass and its check | Shaped on | Rate | erXos runs it |
+| --- | --- | --- | --- | --- |
+| `spawn-down` | as the `fast` row: `spawn_monitor` of a process that returns at once, to its `'DOWN'`; reason `normal` | process creation | per second | yes |
+| `pingpong` | two processes pass an increasing integer back and forth, one message each way; each receives the integer it last sent plus one | context switching and pipe throughput | per second | yes |
+| `copy-blocks` | the three shapes of the C row, through `file:pread/3` and `file:pwrite/3` on files opened with `file:open/2` in `[read, binary]` and `[write, binary]`, Erlang's default modes, so the file's own process is in the act on both systems; after the cell B equals A | file copy | bytes per second | where the image's domain holds a writable `/tmp`, unverified for the `xdomain` bench image, as for `read-file` |
+| `create-delete` | `file:write_file/2` of an empty file of `/tmp`, named by the copy, and `file:delete/1`; both `ok` | none | per second | as `copy-blocks` |
+| `read-file` | as the `fast` row at 4 KiB | none | per second | as `copy-blocks` |
+| `ets` | `ets:insert/2` and `ets:lookup/2` of one key in one `set` table all copies share, created with default options, each copy its own keys; the value read is the value written | none | per second | yes |
+| `tcp-rtt` | as the `fast` row: 64 bytes and back over a `gen_tcp` loopback connection, each copy its own connection | none | per second | waits as the `fast` row |
+
+Each is `same act`: the same Erlang code on both systems. What does not
+translate to an Erlang program gets no row:
+
+* **`getpid`, system call overhead.** An Erlang program makes no system
+  call of its own; `os:getpid/0` returns a string the runtime made once.
+* **`pipe-self`.** A pipe is not an Erlang object; a message to oneself
+  is the nearest act, and it crosses no system at all.
+* **`exec-loop` and `fork`.** An Erlang node never replaces its image or
+  copies itself; starting a node is another act, which the
+  [domain benchmarks](design-domains.md#performance) time.
+* **`shell-script`.** An Erlang program does not run shell scripts as
+  its way of working; `os:cmd/1` starts `/bin/sh`, which Linux's Erlang
+  guest does not hold, and on erXos would start the same `rc` the C row
+  times.
+* **Dhrystone and Whetstone.** They would time the emulator and its JIT,
+  which are equal on both systems.
+
+#### The index
+
+UnixBench's one number is a geometric mean of per-test ratios. The
+side-by-side table gives one of its own for each group, the C group
+and the Erlang group, at each copy count, for each system beside a
+baseline: the **index** is the geometric mean, over the group's index
+cells, of the system's score divided by the baseline's score for the
+same cell. A score is a rate, so an index above 1 is faster than the
+baseline.
+
+* **Its cells are derived.** A group's index cells are its rate cells
+  whose operation is shaped on a test of UnixBench's index and whose
+  declaration says `same act`. Both are facts the declarations hold for
+  the program table anyway, so no list of index rows is kept. A
+  `nearest counterpart` row (`getpid`, `shell-script`) is printed and
+  left out: its ratio says how two different acts compare, and one such
+  ratio, `getpid`'s, would dominate the mean. The C index therefore
+  covers `pipe-self`, `pipe-rtt`, `spawn-wait`, `exec-loop` and the
+  three `copy-blocks` cells; the Erlang index `spawn-down`, `pingpong`
+  and the three `copy-blocks` cells.
+* **Its baseline is Linux** in the same session, or on the same board,
+  and stock OTP in Linux's Erlang guest for the Erlang group: the system
+  the session already sets every row beside, on the same machine. It is
+  not UnixBench's SPARCstation: its scores are not known to this design,
+  and a rating against it would claim the comparability with published
+  UnixBench scores that these rows do not have. A geometric mean of
+  ratios orders the systems the same whichever is the baseline, so the
+  choice changes only where 1 falls. A session without Linux prints no
+  index.
+* **It never fabricates.** The index is printed as `measured` only when
+  every index cell is `measured` on both sides. Otherwise it is printed
+  as `partial`, with the number of cells it covers and the cells it
+  lacks named (`partial, 3 of 7 cells; missing: pipe-rtt, spawn-wait,
+  exec-loop, ...`), and its mean over the cells it has. It is a view of
+  the table: it gives no verdict and never enters a comparison.
+
+#### Where they run
+
+Every compared system runs the rows it has, by the probe, in the
+environments where the program table already runs it: erXos and Linux
+in QEMU under HVF and on the Raspberry Pi 4, Genode in its TCG session
+([Genode's guest](#genodes-guest)), whose C library's `posix_spawn`,
+`execve` and shell are unverified and reported by its first probe. L4Re
+has no POSIX layer the program runs on, so its column says `kernel rows
+only` with the nearest kernel row, as the tables above give. Every erXos
+boot of these rows, as every erXos benchmark boot, runs with the
+kernel's trace rings off, `erx.trace=0` on its command line, so no row
+pays for recording.
+
+FreeBSD is not yet a compared system; it is an
+[open decision](#open-decisions-of-the-program-benchmarks).
+
 ### Genode's guest
 
 Genode is the second microkernel operating system in the comparison: its
@@ -2790,20 +3085,26 @@ The `posix` image is the programs suite's test image
 (`Programs.test_image`, `tools/lib/erx/programs.rb:573-599`), with one
 change to its manifest and its memory. The development manifest caps a
 session's `/tmp` at 2 MiB (`config/manifest/development.txt:87`), which
-the two 16 MiB files of `read-seq` and `copy` and `untar`'s extraction
-exceed, so the image's build (`PosixBench.manifest`) raises the
-session's `tmp` limit to 48 MiB. `/tmp` is charged to the session's
-budget as it is used, so the build grows by the same 48 MiB each budget
+the two 16 MiB files of `read-seq` and `copy`, `untar`'s extraction
+and the files of the `copy-blocks` rate cells exceed, so the image's
+build (`PosixBench.manifest`) raises the session's `tmp` limit to
+64 MiB. The largest set of files one cell holds at once is the N-copy
+`copy-blocks` cell's at 4,096 by 8,000: four copies, each with two
+files of 8,000 KiB, 62.5 MiB. That bound holds because every cell
+removes its own files when it ends, the 16 MiB files included, which
+the program today removes only after its last cell
+(`bench/peer/erx_peer_bench.c:2573-2576`). `/tmp` is charged to the session's
+budget as it is used, so the build grows by the same 64 MiB each budget
 that holds it: the session's memory (`limits session`), the system
 principal's memory, which admits the session, and the machine's
 `root_memory`, which holds the principal's
 (`config/manifest/qemu-virt-development.txt:268`, `:303`); QEMU's RAM
-grows by as much (`PosixBench.machine`, 752 MiB on QEMU `virt`). A
+grows by as much (`PosixBench.machine`, 768 MiB on QEMU `virt`). A
 session's runtime limits must lie within its principal's ceiling
 (`dom_limits_within`, `liberx/system/dom_core.c:295-305`, called at
 `:1235`), and the system principal's ceiling is the system domain's own
 `runtime_limits`, so the build raises the system domain's `tmp` limit to
-48 MiB too. That limit is a cap, charged only as the system domain's
+64 MiB too. That limit is a cap, charged only as the system domain's
 own `/tmp` is used, which nothing in the image does. The edits go
 through the harness's manifest edit (`Manifest::Edit`), as the `g5` and
 `web` benchmarks build their images from edited manifests
@@ -2811,8 +3112,11 @@ through the harness's manifest edit (`Manifest::Edit`), as the `g5` and
 Linux guest boots with the same RAM (`LinuxGuest.machine`). It is the
 production image with `erx_peer_bench`, built as a program from
 `NativeRoot::PROGRAM` and the file as the suite builds its programs, and
-toybox's `true`, `find`, `xargs`, `grep`, `wc`, `tar` and `rm`, the
-generated tree and archive in the domain release. At root's session the
+toybox's `true`, `find`, `xargs`, `grep`, `wc`, `tar`, `rm` and `sed`,
+the generated tree, archive, shell script and its input in the domain
+release. Its command line carries `erx.trace=0`, as every erXos
+benchmark boot's does, so the kernel's trace rings record nothing
+while cells run. At root's session the
 console types `erx_peer_bench posix`, by its bare name, at the command
 shell, as the suite types its `rc` cases (`Programs.checkpoints`), with
 the environment's CPU count as its second argument; the program's
@@ -2824,7 +3128,7 @@ and the reader (`NativeBench.guest_lines`) drops a newline with every
 carriage return before it and nothing else. The boot ends at the program's `CLOCK` line and
 QEMU is ended as at a checkpoint. The `erl` cells run in the `xdomain`
 bench image, typed into its shell as `xdomain`'s module is, under that
-boot's one `CLOCK` line.
+boot's one `CLOCK` line, with `erx.trace=0` too.
 
 ### The benchmarks other designs name
 
@@ -2876,6 +3180,30 @@ Each is new and named here; nothing else is added.
   need and which the Erlang guest's `/init` already does.
 * **The generator** of the tree and the archive, a Ruby function of a
   seed, whose consumer is `pipeline` and `untar`.
+* **The rate profile** ([A rate cell](#the-construction-a-rate-cell)):
+  `rate` in the record's profiles, its score as a pure function of a
+  cell's windows in `BenchRecord`, the comparison's mirrored verdict,
+  the placement `every-cpu` in the closed set of placements, and the
+  `WINDOW` line's `thread` renamed `worker`, the line read for both
+  profiles by the one reader. In the C guest library and in
+  `bench/erx_bench_hist.erl`, the pure function that counts a pass in
+  its window, built and tested on the host as the sustained accounting
+  is.
+* **The rows** in `erx_peer_bench.c` and `posix.rb`: the operations
+  `pipe-self`, `exec-loop`, `copy-blocks`, `create-remove` and
+  `shell-script`, the rate cells of those and of `getpid`, `pipe-rtt`,
+  `spawn-wait` and `read`, the program's copy mode and its `exec-loop`
+  mode, each operation's `shape`, and the shell's path as a fact of
+  each system's build. In `erl`, built as its own module, the
+  operations `pingpong`, `copy-blocks`, `create-delete` and `ets`, and
+  the rate cells of those and of `spawn-down`, `read-file` and
+  `tcp-rtt`.
+* **The script and its input**, from the generator above, with the
+  expected count; on Linux's initramfs, toybox's `sort`, `sed` and its
+  `sh` at `/bin/sh` beside the applets it already gains.
+* **The index** in `Erx::BenchSideBySide`: per group, copy count and
+  system, the geometric mean over the derived index cells, printed
+  under the group's table.
 * **Genode's guest**: its lock (`bench/genode/deps.lock`, read only by
   `tools/erx fetch --genode`), its container build on that x86-64 host, its
   target description and its line importer.
@@ -2895,12 +3223,26 @@ Each is new and named here; nothing else is added.
 | Genode's importer | a fixture erXos writes in the labelled form gives `measured` cells | the label left on: every line is `rejected` |
 | the batching rule (C and Erlang, on the host) | at an increment of one tick a median of 3 ticks gives a batch of 64; at an increment of 1,000 ticks a median of 30,000 gives 4, and a median of 0 gives 256, from both libraries alike | the increment ignored in the C library: the 30,000-tick median gets a batch of 1 and a histogram of steps of 1,000 |
 | the CPU count | a four-CPU erXos boot's `posix` run calibrates the pair of CPU 0 and CPU 3 and runs its cross-CPU cells | the count taken from `sysconf` instead: the run sees one CPU, calibrates no pair and reports its cross-CPU cells `unsupported`, and its `CLOCK` line, which does not calibrate the pair the boot asked, makes every cell of the boot `rejected` |
+| a rate cell's windows (C and Erlang, on the host) | pass ends at known ticks across a plan of three windows give each window's count, the pass crossing a window's end counted in the later one | the pass counted in the window where it began: the crossing pass moves and the counts differ |
+| a rate cell's lines | an N-copy cell's `WINDOW` lines, one per window and worker, give a `measured` cell and its score | one copy's lines dropped: the cell is `rejected`, naming the first missing line |
+| `pipe-self` | every read equals its write | a seeded build that skips the read once in a hundred passes: the next read returns the older bytes, its sequence number is wrong and the cell is `failed` |
+| `exec-loop` | every image's `getpid` equals the copy's id | a seeded build whose `exec-loop` mode starts the next image with `posix_spawn` and exits: the id differs and the cell is `failed`, which shows the row timed a real `exec` |
+| `copy-blocks` | B equals A after the cell, in C and in Erlang | a seeded build that writes every block at offset 0: B differs and the cell is `failed` |
+| `shell-script` | each shell's output is the generator's count | the script with one stage of the pipeline left out, which a shell that ignored the script would also miss: the count differs and the cell is `failed` |
+| the script | on the host, `erx_shell_parse` parses it and the host's `/bin/sh` running it on the input prints the generator's count | a script holding `$(...)`, which only a POSIX shell spells so: rc's parser refuses it |
+| the index (on the host) | from fixture records of two systems, the index over the cells the declarations derive, and `partial` with the missing cell named when one is `unsupported` | `getpid`'s cell counted in, its ratio 50 in the fixture: the index moves far off the expected value |
+| the rate verdict | a candidate with a lower score than every baseline boot's band is `slower` | the mirroring dropped: the same records give `faster` |
 
 Sensitivity run, as [Verification](#verification) defines them: a
 100 us busy wait in `erx_prog_handler`'s answer to a file read, which
 reports its executions, must raise `posix.read`'s median by about
 100 us and leave `posix.getpid`'s and `posix.mmap`'s where they were,
 which shows the row went through the session's Erlang handler.
+
+The same busy wait must lower `copy-blocks`'s score at 256 by 500,
+whose every pass makes one read, to below one pass per 100 us per
+copy, and leave `pipe-self`'s where it was, which shows that the copy
+row reached the handler and the pipe row did not.
 
 ### Open decisions of the program benchmarks
 
@@ -2916,6 +3258,27 @@ which shows the row went through the session's Erlang handler.
   its boots allow, then seL4, and Fiasco.OC only where Genode's
   documentation at the pin names 64-bit ARM support. Genode has no
   board row: its release has no Raspberry Pi 4 board.
+* **FreeBSD as a compared system.** erXos follows FreeBSD where UNIX
+  systems differ, so FreeBSD's numbers are the ones its behaviour is
+  meant to be read against. Adding it is more than a guest and a row of
+  the environment table: its kernel boots under QEMU's `virt` through
+  its own loader and UEFI firmware rather than `-kernel` (unverified),
+  its C library is not musl, so the program gains a third C library
+  and a sysroot pinned from its release, its `/init` replaces FreeBSD's
+  `init` and `rc`, and its board support for the Raspberry Pi 4 is
+  unverified. Recommendation: yes, as a design of its own once these
+  rows run on Linux; in QEMU under HVF first, on the board only if its
+  support there holds.
+* **The shell rows' shell and commands.** Each system's own (rc with
+  erXos's Erlang `sort`, `grep` and `wc` on erXos), which is what a
+  user runs and what UnixBench's shell test measures by its own
+  account, or toybox's `sh` and applets on every system, the same act
+  but on erXos only in the second tier and never what its users run.
+  Recommendation: each system's own, outside the index as it is now.
+* **Whether the index is published.** Recommendation: in the
+  side-by-side tables only, and on the website or in the README only
+  once every index cell runs on erXos, so that no published number is
+  a partial one.
 
 ## The first five benchmarks
 
@@ -3777,3 +4140,12 @@ read on 2026-11-24 and not run:
 
 That this configuration is the one flashed into the board's EEPROM is
 taken from `STEPS.txt` and unverified.
+
+UnixBench's documentation, `https://github.com/kdlucas/byte-unixbench`
+at tag `v6.0.1`, commit `e949d4402f76b4bc9b7b114418faace882f0ef12`, was
+read only by the separate agent that wrote its facts record,
+`~/erxos-scratch/proposals/unixbench-facts.md` (SHA-256
+`87740cb7d253e5c7d027b2e631ba0d2eaa3954d1005a75c42e54ecb1031934fc`),
+which lists the SHA-256 of each of the five documentation files it read
+and read no source; [The common OS benchmarks' operations](#the-common-os-benchmarks-operations)
+relies on that record alone.
