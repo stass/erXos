@@ -624,7 +624,7 @@ scripts live in `~/erxos-scratch/tools/`.
     * configuration only narrows: an app holds the services it requests
       in its sealed declaration, within what the board's manifest offers
       it, less what the machine's settings deny; no setting on a data
-      partition has a field that names a service, a grant or a user, so
+      partition can name a service, a grant or a user to add it, so
       tampered storage can withhold, enable, disable and choose among
       packages a trusted key signed, but never gives an app more than
       its declaration requests and the board offers;
