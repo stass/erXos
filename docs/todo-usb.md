@@ -187,7 +187,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   design leaves open the reporter category of a top-level path a configured domain other than the system domain
   reports (the schema's `service` and `runtime` do not fit as declared), the key types of `Controller` and
   `Route`, and the shape of a device's functions, each a kind with an input number or a drive, which the schema's
-  types have no alternative for.
+  types have no alternative for. Without these paths a device that never enumerates leaves no trace: the USB
+  domain logs a medium only once it is ready, and nothing for a controller with no ports up or a port whose
+  device never answers, so on the Raspberry Pi 4 a dead stick showed only as silence after the PCIe lines and
+  `medium none` at `/media/disk0/status`, which a stalled controller, a lost grant or a regression would show
+  the same way. The paths must show each controller's state, each port's connect and link state, and each
+  device's enumeration result and units, so `cat /proc/usb/...` tells those cases apart.
 * [Medium] USB, `docs/design-usb.md` ([The TRB ring form](design-usb.md#the-trb-ring-form)): the design names
   no Erlang call for a queue's state, which `reset_pipe` and `erx_xhci_core` need, nor `complete/2`'s second
   argument or `negotiate/2`'s wanted value and answer for the TRB form. `erx_xhci` assumes
