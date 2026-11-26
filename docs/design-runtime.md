@@ -89,7 +89,7 @@ Functional requirements:
    default in every other ERTS domain, the interpreter image where a
    domain's specification asks for it.
 6. **Connections**: every cross-domain signal of Erlang's semantics (send,
-   alias send, link, monitor, exit, group leader, spawn) over the domain's
+   alias send, link, monitor, exit, spawn) over the domain's
    lanes, through the funnel, against the domain's export table, with stock
    Erlang's behaviour toward a process that does not exist for an
    operation the domain did not authorise
@@ -426,7 +426,7 @@ done, `init:reboot/0` ends with `erx_domain_lib:end_commit(reset)` and
 domain end the machine and elsewhere answer a refusal, after which the node
 halts as stock's does
 ([design-system.md](design-system.md#shutting-down)); a reboot leaves its
-code loaded, as a stop does, so the module is still there to call. 67. The application
+code loaded, as a stop does, so the module is still there to call. 84. The application
 controller keeps `init` as its group leader once `kernel` has started, so
 every application master's group leader is `init`, which finds `user` by
 name for each request, and a restarted console's `user` serves every
@@ -523,6 +523,23 @@ trap exits the exit stock gives it for a dead remote pid.
 67. `erlang:send/3` takes the option `notify` beside `nosuspend`: a sender
 the busy check refuses gets exactly one `{erx_lane_ready, Node}`, where a
 suspended sender would resume ([Connections in ERTS](#connections-in-erts)).
+83\. No group leader crosses a domain. A child spawned by a
+`SPAWN_REQUEST` from another domain of this machine takes this domain's
+`init` as its group leader, whatever the request names, in `dist.c`'s
+spawn-serving code; toward another domain the sender writes its own `From`,
+the calling process, in the request's `GroupLeader` slot, so the caller's
+group leader is never encoded into a frame and never exported. In `bif.c`,
+`group_leader(GL, Pid)` fails with `badarg` in the caller's runtime, and
+writes no frame, when `GL` or `Pid` is a process of another domain of this
+machine, and `erts_set_group_leader`, which every path that changes a group leader reaches (`erts_internal:group_leader/3` and a `GROUP_LEADER` from another machine included), refuses a leader of another domain; a spawn request from another machine that names one also gets `init`. The io protocol has the server apply code its client names
+(`io:format`'s request carries a module, function and arguments that `group`
+applies), so a leader in another domain would let any domain that can
+message a group run its chosen code in the terminal's domain; refusing
+rather than dropping reports no success that did not happen, and the
+refusal depends on the pids' nodes alone. A node of another machine keeps
+stock behaviour. The `system_domain` suite's `group_leader_cross`
+checkpoint tests both sites, and the funnel refuses `GROUP_LEADER`
+([design-domains.md](design-domains.md#frames)).
 
 **Libraries that take the envelope** ([design-domains.md](design-domains.md#the-peer)).
 58\. Every receive of a call's reply in `gen`, `do_call` and the
@@ -535,11 +552,7 @@ start option `{erx_serve, any}` or `{erx_serve, own}`, the default: under
 holds one, and is dropped otherwise, and an enveloped `'$gen_cast'` is a
 cast; every other message, and every one under `own`, reaches `handle_info`
 or the info event as it arrived, `{system, _, _}` in its envelope included.
-60. `io` also takes its reply as `{erx_origin, D, {io_reply, Mref, Reply}}`.
-61. Each io server takes `{erx_origin, D, {io_request, From, ReplyAs, Req}}`
-as the request inside it when `erx_dist:owner(From)` is `D`, and drops it
-otherwise; an application master relays the bare request to its own group
-leader, which answers `From`. 64. The library calls that turn a connection's
+64. The library calls that turn a connection's
 `noconnection` into a node-level result do the same for edit 56's
 `{domain_down, D, Info}`: the spawn calls whose spawn gets it as its error
 reply return a pid that exits with `noconnection`, `gen:call` exits
@@ -568,7 +581,7 @@ scheduler by deciphering its reference.
 [Code in the system domain](#code-in-the-system-domain)). 21. In the system
 domain, `prepare_loading` accepts only bytes in installed storage.
 23\. Executable memory is a JIT object mapped twice. 24. The translator's
-error paths fail a load instead of ignoring an error. 66. A `select_val`
+error paths fail a load instead of ignoring an error. 86. A `select_val`
 whose failure falls through to the next instruction, the small-integer half
 that `split_values` makes of a select that also matches bignums, takes a
 search and never a jump table, whose gaps need a failure label, as in the
@@ -1011,7 +1024,8 @@ alias's local state and the domain's name on the runtime's record of the
 domain, in the layout and with the rights the domains design defines
 ([design-domains.md](design-domains.md#exports)): `send` covers messages,
 alias sends and monitors; `link` covers links; `exit` covers `exit/2`,
-`kill` included, and `group_leader/2`; `spawn` is a right on the domain
+`kill` included; no right covers `group_leader/2`, which never crosses a
+domain (edit 83); `spawn` is a right on the domain
 itself; `introduce`, which only an explicit export writes, means something
 only on a domain pid, where the domain service reads it before it
 introduces that pid's domain. The funnel reaches a target's holders
@@ -1734,8 +1748,8 @@ its other connections have no table.
 the peer does not hold on the target is **unheld**. The driver then does
 what stock ERTS does for the same operation on a process that does not
 exist, through the entry's own queue, so the answer is in order with what
-the target sent before (D9): a message, alias send, exit signal or
-group-leader change is dropped and counted; a link gets an exit of reason
+the target sent before (D9): a message, alias send or exit signal
+is dropped and counted; a link gets an exit of reason
 `noproc` and a monitor a `DOWN` of reason `noproc`, each queued with
 ERTS's own `erts_dsig_send_exit` and `erts_dsig_send_m_exit`; a spawn
 request without the spawn right gets a `SPAWN_REPLY` of `noconnection`.
@@ -1752,7 +1766,7 @@ the outcome nor its timing tells the peer whether the target lives.
    covers messages, alias sends and monitors; the sender of every control
    term is handed out this way, never with more. So a peer can message,
    call and monitor a process whose name it was handed, and cannot link
-   to it, kill it or set its group leader. A name encoded again toward a
+   to it or kill it. A name encoded again toward a
    peer that already holds it changes nothing. The encoder knows the
    entry it encodes for, as it knows it for the atom cache, so the write
    costs one look at the name's holders.
@@ -4405,7 +4419,7 @@ Everything not listed behaves as stock OTP 29.1.2.
 | a message larger than the connection's lane allows | `system_limit` from the send, ERTS's own too-large path |
 | `erlang:send/3` with `[nosuspend, notify]` | added: the option `notify`, valid only with `nosuspend` toward another node; a send refused as busy returns `nosuspend` as stock does, and the sender then receives `{erx_lane_ready, Node}` once, when the queue stops being busy or the connection ends (edit 67, [Connections in ERTS](#connections-in-erts)) |
 | `erx:export/3` | added: `erx:export(Name, Rights, Peer)` sets what a peer holds on one of the calling domain's own names, a pid or alias of the domain or the domain itself, to exactly `Rights`, widening or narrowing; only the owner grants, and an encode gives a peer `send` alone ([Connections in ERTS](#connections-in-erts)) |
-| a message from another domain | arrives as `{erx_origin, D, Msg}`, `D` the lane's peer, in every process (edit 16); `gen` and `io` take call and io replies in their envelopes (edits 58, 60), and `sys` takes nothing apart ([design-domains.md](design-domains.md#the-peer)) |
+| a message from another domain | arrives as `{erx_origin, D, Msg}`, `D` the lane's peer, in every process (edit 16); `gen` takes call replies in their envelopes (edit 58), no io request or reply crosses a domain, since every group leader is of its own domain (edit 83), and `sys` takes nothing apart ([design-domains.md](design-domains.md#the-peer)) |
 | `erx:owner/1` | added: the domain id a pid, reference or port carries, its creation ([design-domains.md](design-domains.md#erlang-interface)) |
 | `erx:limits/0` | added: the `max_frame`, `max_message_heap` and `funnel_depth` the calling domain's runtime enforces, from the limit record it installed at its start, read through the BIF `erx_dist:limits/0` ([design-domains.md](design-domains.md#erlang-interface)) |
 | `erx_dist:supervised/0` | added: `true` when the boot page carries the `supervised` flag, which the domain library sets from the plan's restart, for a configured domain whose row allows a restart or a created domain whose specification's restart is `permanent` or `transient`, and `false` otherwise; the code server reads it to decide whether to wait for its start load ([design-live.md](design-live.md#the-code-server)) |
@@ -4668,9 +4682,12 @@ runs, it is named. The individual cases live with the tests.
   and a release that sets `connect_all` to `true`, which the release build
   refuses.
 * **Connections.** Two domains run OTP's distribution-level tests of send,
-  link, monitor, exit, group leader, spawn and alias reply across a
+  link, monitor, exit, spawn and alias reply across a
   connection and against stock OTP over TCP on the host, case by case. They
-  check the rights an encode and a spawn export (R7), that a frame to an
+  check the rights an encode and a spawn export (R7), that a spawned
+  child's group leader is its own domain's `init` and `group_leader/2`
+  across domains is `badarg` (edit 83, the `system_domain` suite's
+  `group_leader_cross` checkpoint), that a frame to an
   exited process, a deactivated alias and an unexported pid get the same
   dead-process outcome in order (D9), that a peer that stops reading suspends
   exactly its senders, and that `[nosuspend, notify]` senders are told once

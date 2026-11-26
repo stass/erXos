@@ -216,11 +216,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   identity tests are spelled `.raw == ERX_CAP_NULL` and `a.raw == b.raw`, and pipe.c keeps a file-local `cap_null`;
   have `abi_emit_c.rb` emit a typed null and `erx_cap_is_null` and `erx_cap_same` beside `struct erx_cap`, so `.raw`
   appears only where a handle arrives as an integer (registers, Erlang terms, a service request).
-* [Low] `docs/design-runtime.md`, "The edits outside `sys/erxos`": the numbers 66, 67 and 68 each name two edits
-  (`link/1,2` on a connection and the `select_val` fall-through; `erlang:send/3`'s `notify` and the controller keeping
-  `init` as its group leader; init's reboot and the dirty scheduler's elapsed-time charge), so a reference such as
-  "edit 68" is ambiguous. Give the second of each pair a number of its own and update the references in
-  `docs/design-runtime.md`, `docs/design-domains.md`, `docs/design-network-stack.md` and `docs/todo-performance.md`.
 * [Medium] `abi/services/files.txt`: the default of `rights` when a row states none, `rw`, is said in the file's
   comment and applied in `erx_fs_grants:grant_options/1`; a `parameter` line has no way to declare a default, so
   it is not one generated fact. Add `default MEMBER` to member parameters (checked a member, emitted as a macro),

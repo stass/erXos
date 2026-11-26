@@ -237,7 +237,7 @@ call ([design-runtime.md](design-runtime.md#liberx)).
 | **D1.** A pid never names two processes | a pid is (node name, creation, number, serial), and a domain's node has its domain id as creation, which the domain service never reuses within a boot; within a domain, ERTS's process table never hands out a live (number, serial) twice ([Domain ids, pids and references](#domain-ids-pids-and-references)) | a domain id reused; a domain's node started with a creation other than its id; a runtime that reuses its own pids, which confuses only that domain's own correspondents about that domain's own processes | a test that creates and destroys domains in a loop and checks that ids increase and that each domain's `erlang:system_info(creation)` is its id; ERTS's own process-table tests |
 | **D2.** A node name at the machine's host name belongs to one live domain at a time and is reached only through that domain's connection; a runtime treats a pid or reference as its own exactly when it carries the runtime's node name and creation | the domain service gives a name to no domain while a live domain holds it; the connection agent alone serves node names at the machine's host, and makes an entry for one only from the system domain's `connection_up`; the sender rule requires every sending pid on a lane to carry the lane's node name and domain id; the network carrier refuses a remote node that presents a name at the machine's host ([An exposed domain](#domain-ids-pids-and-references)); ERTS's decoder and constructors already compare both name and creation with the local node's | two live domains with one name; an entry for a name at the machine's host made from anything but `connection_up`; a remote node admitted under such a name; a constructor that ignores creation | a property test: for random pids and references of other domains, `list_to_pid(pid_to_list(P)) =:= P` and `list_to_ref(ref_to_list(R)) =:= R` in every domain, and both stay remote; a test that creating a domain under a live domain's name fails, and that a later domain of an ended domain's name gets a new creation, under which the earlier pids behave as dead; the network service's test that a remote node presenting a name at the machine's host is refused |
 | **D3.** Every frame a runtime accepts passed its funnel | a runtime reads the ring of a lane that carries frames, a connection's or a program channel's, only through the funnel's reader, `erx_lane_take`, and a control table only through `erx_lane_ctl_take`, each of which copies a frame out once before anything looks at it, and every path into ERTS's distribution input or a native domain's mailboxes is a return from the funnel's check; a pipe's lanes carry no frames: `erx_ring_check` accepts only the pipe record kinds, so no pipe step sees a frame record ([design-pipes.md](design-pipes.md#the-pipe-core)) | a second reader of a lane's ring; a path that queues a frame the funnel did not return | a build check that a lane's layouts are named only in `erx_lane.c`, so a connection's or a program channel's lane is read only by `erx_lane_take` and `erx_lane_ctl_take`, and in the pipe's files, which name only the ring header and record, with a negative fixture, and one that only the lane driver calls `erts_net_message`, with a seeded violation; for a pipe lane, the row on `erx_ring_check` in [design.md](design.md#chokepoint-checks), with the frame kind admitted by the pipe check as its seeded fault; the fuzz target drives the funnel with every record and term shape |
-| **D4.** A name alone conveys no authority | an operation on a process is authorised by the target domain's own export table, which its runtime alone writes, in three cases, each an act of the owner: encoding its own name into a frame for that peer, which gives `send` alone; a spawn into it, which gives the spawner every right on the child; and an explicit export, the only source of `link` and `exit` otherwise and of `introduce` on a domain pid ([Exports](#exports)); a registered name is never exported, and the sender's runtime keeps every operation on another node's registered name to itself ([Frames](#frames)); nothing a peer does widens what it holds; a missing export gets dead-process semantics; a name a third domain passes on exports nothing; a privileged service's helpers take only handles its facet minted from its own scope ([Authority](#authority)) | an export written by anyone but the owning runtime, or from a name in a received frame; an encoding that gives more than `send`; an operation that takes a raw pid as authority; a helper that acts on a request's name | the three writers of the export table are the only callers of its insert, which a build check enforces; hostile-runtime tests that forward names, forge senders, name unexported pids, and link to, exit and set the group leader of pids they were handed in replies; a build check that service callbacks reach authority-consuming effects only through generated helpers, with a negative fixture |
+| **D4.** A name alone conveys no authority | an operation on a process is authorised by the target domain's own export table, which its runtime alone writes, in three cases, each an act of the owner: encoding its own name into a frame for that peer, which gives `send` alone; a spawn into it, which gives the spawner every right on the child; and an explicit export, the only source of `link` and `exit` otherwise and of `introduce` on a domain pid ([Exports](#exports)); a registered name is never exported, and the sender's runtime keeps every operation on another node's registered name to itself ([Frames](#frames)); nothing a peer does widens what it holds; a missing export gets dead-process semantics; a name a third domain passes on exports nothing; a privileged service's helpers take only handles its facet minted from its own scope ([Authority](#authority)) | an export written by anyone but the owning runtime, or from a name in a received frame; an encoding that gives more than `send`; an operation that takes a raw pid as authority; a helper that acts on a request's name | the three writers of the export table are the only callers of its insert, which a build check enforces; hostile-runtime tests that forward names, forge senders, name unexported pids, and link to and exit pids they were handed in replies; a build check that service callbacks reach authority-consuming effects only through generated helpers, with a negative fixture |
 | **D5.** The system domain's atom table grows only within bounds its own policy sets: no frame creates an atom, and the domain service makes an atom only of a domain's node name, within the creating principal's `names` quota | the grammar for frames to the system domain has no fun or export tag, and the system domain's peer decodes every frame in ERTS's safe mode, which never creates an atom; the domain service binds a name to one principal for the boot, counts it against that principal's `names` before it makes the atom, and reuses the atom for every later domain of that name ([Domain ids, pids and references](#domain-ids-pids-and-references)) | a decode of another domain's bytes in the system domain outside the peer, or without safe mode; a service that turns request data into atoms, a name made into an atom before its quota check included | a test that a frame with a fresh atom leaves the system domain's atom count unchanged; the fuzz target checks the count after every input; a test that a principal past its `names` creates no domain under a fresh name and leaves the count unchanged; a build check that system-domain code calls atom-creating functions only from an allowlist |
 | **D6.** A domain reports deaths only of its own processes | the receiver knows the sender by the lane; the sender rule requires every frame's sending pid to carry the lane's node name and domain id; a receiving runtime acts on a link exit or `DOWN` only for a link or monitor it holds, which ERTS already checks | a frame accepted with another domain's sending pid | hostile-runtime tests that forge exits and `DOWN`s for other domains' processes and for processes they are not linked to |
 | **D7.** Stopping a domain never needs its runtime (on Fiasco: [FD20](design-fiasco.md#downsides-against-erxoss-kernel)) | the kernel's `erx_space_stop` stops every thread of a space at once, and the spaces below it stop with it ([design-kernel.md](design-kernel.md#creating-spaces)); a holder of the exit right on the domain pid stops the domain through the system domain, which needs nothing from the domain | a stop path that waits for the runtime | tests that stop a domain whose runtime never returns, runs a long NIF, or never drains its lanes |
@@ -246,7 +246,7 @@ call ([design-runtime.md](design-runtime.md#liberx)).
 | **D13.** A stale export costs nothing to find | an export's holders live on its name's own record, the process or the active alias, and go with it, at the transition that ends the process or deactivates the alias; a peer's holders end when the connection goes down; a pid names its process by number and serial, so a lookup that finds no live record finds no holder | holders kept anywhere but on their name's own record; an entry keyed in a way a later process can match | a soak test of a million alias exports and deactivations from one live process, with every OTP alias mode, and of pids handed out by processes that then exit; the export table stays at its live names |
 | **D16.** Every page of a connection has one writer, is charged to a child budget of an outer budget, one child per connection, that the system domain destroys only once both parties have let go: the reader's outer budget for a connection between domains, the domain's for its system connection; and only the system domain deletes it (on Fiasco: [FD5, FD25](design-fiasco.md#downsides-against-erxoss-kernel)) | each memory object of a connection is written by one party and mapped read-only by the other: each party's side, and the pixel area of a connection that has one; the system domain carves the connection's children and creates both sides, both bells and the area from them, and gives each party its capabilities without `DESTROY` ([Connections](#connections)); it deletes a connection's objects and destroys its children only once each party has unmapped them or ended, never on a timer while a party lives, and destroys an ended domain's outer budget only once none of its children remains, keeping it meanwhile as the domain's remains, charged to its principal, while the domain itself is released at its end | a page both parties write; a capability with the delete right in a party's table; a lane charged to its writer, to the budget its reader alone maps, to the system domain's own budget, or to an outer budget directly; a deletion while a party that has not answered still maps it | a test that each party's table holds no delete right on a connection's objects; budgets return to their baselines after every test; a hostile peer that rewrites its pages while the other reads them disturbs nothing but its own frames; a survivor that never answers `connection_down` keeps the connection's objects, counted against its own `connections`, never faults on them, and keeps of the ended domain's outer budget only that connection's child, which a test that reads the budget's charge after the end checks, while the ended domain, a configured one, restarts at once; seeded failure: a connection charged to the outer budget directly, under which the survivor keeps the whole outer budget |
 | **D17.** A domain's end reaches each peer behind everything the domain published on their lane (on Fiasco: [FD20](design-fiasco.md#downsides-against-erxoss-kernel)) | the kernel posts a space's exit record only when no thread of it can run, so the dead domain's write position is final; a runtime told that a connection is down first drains that lane to the position it reads then, waiting on nothing the dead domain would have to do, and only then fires its links and monitors with the peer's processes | a runtime that acts on a connection down before draining; a stop reported while a thread can still run | a test that kills a domain mid-burst on every CPU and checks that each peer sees the burst, then the death |
-| **D18.** No process acts on a message from another domain that the owner of its protocol did not admit | the peer delivers every message from another domain, to a pid or to an alias, as `{erx_origin, D, Msg}`, `D` the domain of the lane it arrived on, with no flag and no exception (edit 16 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), so such a message never has the shape of one from the receiver's own domain; only the owner of a protocol that crosses domains takes the envelope off, in its own receive and only for its own shapes: `erts_internal` for a spawn's argument list, which ERTS queues as the child's first message, `gen` for call replies, `io` for io replies, `erx_file_remote` for a file server's replies, the io servers for io requests, `gen_server` and `gen_statem` for calls and casts to a server started with `{erx_serve, any}`, and a command domain's run server for `erx_start` and `erx_job` from its session's domain, the second only at a run's alias; each unwrap of a request admits it only when the names its reply goes to are of `D`, and an unwrap of a reply takes it at the request's own alias whatever `D` ([The peer](#the-peer)); everything else reaches its process as an unknown message that carries its origin, and `sys` takes nothing apart | a delivery path that skips the wrap; an OTP module outside the list that matches the envelope, `sys` or `proc_lib` above all; a served unwrap without the check of `From` | the source check of [design.md](design.md#chokepoint-checks) on OTP's modules, with a seeded extra site; every `sys` call from another domain on a `gen_server`, a `gen_statem`, a `gen_event` and a plain `sys` loop times out, the process runs on and its state is unchanged, with the seeded failure of edit 16 delivering raw ([Verification and testing](#verification-and-testing)) |
+| **D18.** No process acts on a message from another domain that the owner of its protocol did not admit | the peer delivers every message from another domain, to a pid or to an alias, as `{erx_origin, D, Msg}`, `D` the domain of the lane it arrived on, with no flag and no exception (edit 16 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), so such a message never has the shape of one from the receiver's own domain; only the owner of a protocol that crosses domains takes the envelope off, in its own receive and only for its own shapes: `erts_internal` for a spawn's argument list, which ERTS queues as the child's first message, `gen` for call replies, `erx_file_remote` for a file server's replies, `gen_server` and `gen_statem` for calls and casts to a server started with `{erx_serve, any}`, and a command domain's run server for `erx_start` and `erx_job` from its session's domain, the second only at a run's alias; each unwrap of a request admits it only when the names its reply goes to are of `D`, and an unwrap of a reply takes it at the request's own alias whatever `D` ([The peer](#the-peer)); everything else reaches its process as an unknown message that carries its origin, and `sys` takes nothing apart; and a group leader never crosses a domain: a spawn request's child takes its own domain's `init`, `group_leader/2` refuses a leader or member of another domain, and the funnel's grammar has no `GROUP_LEADER`, so every process's group leader is a process of its own domain and no io request or reply crosses a domain ([Spawning](#spawning)) | a delivery path that skips the wrap; a child of a spawn request that keeps the requester's group leader; a `GROUP_LEADER` frame delivered; an OTP module outside the list that matches the envelope, `sys` or `proc_lib` above all; a served unwrap without the check of `From` | the source check of [design.md](design.md#chokepoint-checks) on OTP's modules, with a seeded extra site; every `sys` call from another domain on a `gen_server`, a `gen_statem`, a `gen_event` and a plain `sys` loop times out, the process runs on and its state is unchanged, with the seeded failure of edit 16 delivering raw; the `system_domain` suite's `group_leader_cross` checkpoint and the funnel's refusal of `GROUP_LEADER`, each with a seeded failure ([Verification and testing](#verification-and-testing)) |
 
 ## On Fiasco
 
@@ -812,9 +812,18 @@ must give the sender on the target:
 | `PAYLOAD_MONITOR_P_EXIT` (28), payload reason | `ToPid` | none |
 | `PAYLOAD_EXIT` (24), payload reason | `ToPid` | none |
 | `PAYLOAD_EXIT2` (26), payload reason | `ToPid` | exit |
-| `GROUP_LEADER` (7) | `ToPid` | exit; `FromPid`, the new leader, is a process of the sender's domain |
 | `SPAWN_REQUEST` (29), payload arguments | the receiving domain | spawn, on the domain's name; malformed into the system domain |
 | `SPAWN_REPLY` (31) | `To` | none: must match a pending spawn of `To` |
+
+OTP's `GROUP_LEADER` (7) is outside the grammar, and a frame that carries
+it is malformed. A group leader is the process that serves its members'
+io, and the io protocol has the server apply code its client names
+(`io:format`'s request carries a module, a function and arguments that
+`group` applies), so a leader in another domain would run code chosen by
+that domain. No group leader therefore crosses a domain: the caller's
+runtime refuses `group_leader/2` on a process of another domain, and a
+spawn request's child takes its own domain's `init` as its leader
+([Spawning](#spawning)).
 
 **Registered names stay inside their domain.** A registered name is a
 name anyone can guess, not one its owner handed out, so no export covers
@@ -900,8 +909,7 @@ live on the name's own record in the runtime, a pid's on its process, an
 alias's on the alias's local state, and the domain's name on the runtime's
 record of the domain. The rights are the `right` flags of
 [abi/erx_abi.txt](../abi/erx_abi.txt): `send` (messages, alias sends,
-monitors), `link`, `exit` (`exit/2`, `kill` included, and
-`group_leader/2`), `spawn` (on the domain's name: spawn into the domain)
+monitors), `link`, `exit` (`exit/2`, `kill` included), `spawn` (on the domain's name: spawn into the domain)
 and `introduce` (on a domain pid: introduce its domain). A name's holders
 are a list of (peer domain, rights) in one field of the record that owns
 the name, freed with that record, and marked closed once the name has
@@ -925,8 +933,8 @@ domain that owns the name (D4):
    and monitors. The sender of every control term is a name handed out
    this way, never with more. So a peer can message and monitor a process
    whose name it was handed, which is what answering a call and
-   `gen_server:call/3`'s monitor need, and cannot link to it, kill it or set
-   its group leader. `send` is the right to put a message into the
+   `gen_server:call/3`'s monitor need, and cannot link to it or kill it.
+   `send` is the right to put a message into the
    process's mailbox inside its envelope; what the message then does is
    decided by the owner of the protocol it belongs to ([The
    peer](#the-peer)), so the peer can call the process only when it is a
@@ -1182,13 +1190,15 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    connection. **The sender rule:** every pid of the sender's
    own in a control term carries the lane's node name and domain id:
    `FromPid`, `FromProc`, `From` of a `SPAWN_REQUEST`,
-   the child in a successful `SPAWN_REPLY` and the new leader of
-   `GROUP_LEADER`; so does every reference the sender creates in a
+   and the child in a successful `SPAWN_REPLY`; so does every reference the sender creates in a
    control term: the reference of `MONITOR_P` and `DEMONITOR_P` and the
    request identifier of `SPAWN_REQUEST`. Every pid a control term
    carries is therefore its target, which the target rule checks, the
    sender's own, which the sender rule checks, or the `GroupLeader` of a
-   spawn request, which stays data as a pid in a payload does. The
+   spawn request, which stays data as a pid in a payload does: OTP's wire
+   shape has the slot, the sender writes its own `From` there, so the
+   caller's group leader is never encoded into a frame and so never
+   handed out, and the receiver ignores it. The
    receiver knows the sender by the lane; the frame only has to agree
    (D6).
 5. **Authority.** An operation that needs a right is **authorised** when the
@@ -1255,7 +1265,7 @@ For each record between the lane's `rpos` and the `wpos` it read once:
    | a message or an alias send | dropped and counted, as ERTS drops a message to a dead process | dropped and counted |
    | a link or a monitor | answered with the exit or `DOWN` of reason `noproc` that ERTS sends for a process that does not exist, on this lane's reverse, behind everything sent earlier | not applicable: no payload |
    | an exit signal | dropped: a dead process receives none | delivered with reason `{erx_reason_too_large, Bytes}`, `Bytes` the payload's length, or `{erx_foreign_reason, Bin}` ([Links, monitors and exits](#links-monitors-and-exits)) |
-   | `exit/2` or `group_leader/2` | no effect | an `exit/2` reason over the limit: delivered as `{erx_reason_too_large, Bytes}` |
+   | `exit/2` | no effect | an `exit/2` reason over the limit: delivered as `{erx_reason_too_large, Bytes}` |
    | a spawn request | answered with `SPAWN_REPLY` of `noconnection`, what a spawn into a domain that has died gets | answered with `SPAWN_REPLY` of `system_limit` |
    | a spawn reply | dropped if it matches no pending spawn, as ERTS drops a stale reply (`beam/erl_proc_sig_queue.c:5708-5724`) | not applicable |
 
@@ -1513,19 +1523,14 @@ and drivers](#native-processes-and-drivers)).
     in `send_request`'s `wait_response`, `receive_response` and
     `check_response`; the reply comes to the call's own alias, which only
     the callee's domain was handed;
-  * `io` takes an `io_reply` the same way, and `erx_file_remote`, the
-    preloaded client of the file protocol, a file server's reply at its
-    request's alias
+  * `erx_file_remote`, the preloaded client of the file protocol, takes
+    a file server's reply at its request's alias
     ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote));
     a reply is taken at the alias whatever `D`, since the alias reached
     only the callee, and whoever answers at it answers for the callee;
   * `erts_internal:dist_spawn_init/1` takes a spawn's argument list, which
     ERTS passes to the new process as its first message, so no message of
     a sender's stands in front of it;
-  * the io servers, `group`, `file_io_server` and an application
-    master's relay to its group leader, take an `io_request` whose `From`
-    is of `D` and answer it as stock does, so a process spawned into
-    another domain writes and reads through its spawner's group leader;
   * a `gen_server` or `gen_statem` started with `{erx_serve, any}` takes
     `{'$gen_call', {Pid, Tag}, Req}` as a call when `Pid`, and the alias in
     `Tag` when it holds one, are of `D` by `erx:owner/1`, since its reply
@@ -1732,9 +1737,8 @@ but in its sender or its lane:
   does not decode: at the receiver, a frame over its `max_frame`, a message past
   its `max_message_heap` or the target's request limit, a message to the
   system domain with an atom it lacks, a spawn reply that matches no
-  pending spawn, and a message, a link exit, an `exit/2` or a
-  `group_leader/2` that the sender holds no right for or whose target is
-  dead; at the system domain as a sender, a message past
+  pending spawn, and a message, a link exit or an `exit/2` that the
+  sender holds no right for or whose target is dead; at the system domain as a sender, a message past
   `system_queue`;
 * **refused at its sender**: a frame longer than `ERX_FRAME_MAX`, which no
   lane carries, is never written, and the send fails with `system_limit`;
@@ -1998,10 +2002,12 @@ domain's node: `spawn_opt(Node, M, F, A, Opts)`, `spawn_request/5`, and
    the request fails as toward a node that cannot be reached, with
    `noconnection`, and so does a request toward the system domain's node.
    The peer
-   encodes OTP's `SPAWN_REQUEST`, and encoding the parent and the group
-   leader, pids of the caller's domain, exports them toward the target with
-   `send`, as handing out any name does, so the child can message and
-   monitor its parent and its leader, and nothing more.
+   encodes OTP's `SPAWN_REQUEST`, and encoding the parent, a pid of the
+   caller's domain, exports it toward the target with `send`, as handing
+   out any name does, so the child can message and monitor its parent,
+   and nothing more. The request's `GroupLeader` slot carries the parent
+   again, never the caller's group leader, so that leader is never handed
+   out ([Frames](#frames), the sender rule).
 2. The target's funnel checks that its export table gives the caller's
    domain `spawn` on the domain's name. A domain's runtime exports that
    right to the system domain and to its creator, the `spawner` its boot
@@ -2015,8 +2021,15 @@ domain's node: `spawn_opt(Node, M, F, A, Opts)`, `spawn_request/5`, and
 3. The target runtime spawns the child with ERTS's spawn-serving code, which
    sets up the child's half of the link or monitor before the child runs;
    before the child runs it also writes the child's export toward the
-   caller's domain with every right ([Exports](#exports)). It answers
-   `SPAWN_REPLY` to the parent on the same lane.
+   caller's domain with every right ([Exports](#exports)). The child's
+   group leader is the target domain's own `init`, whatever the request
+   names, so its io goes to its own domain's `user` (edit 84 of
+   [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)) and
+   never to a process of the caller's: a group leader serves io by
+   applying code its client names, which across domains would run one
+   domain's chosen code in another (edit 83 of design-runtime.md). It
+   answers `SPAWN_REPLY`
+   to the parent on the same lane.
 4. The parent's runtime matches the reply to the pending spawn, as ERTS
    does, and completes the request, creating its own half of the link or
    monitor.
@@ -2565,7 +2578,7 @@ domain's runtime has exported to the caller's domain:
 | `link(Pid)` | linked (link) | exit `noproc` to the caller, unless `Pid` already holds a link with it |
 | `unlink(Pid)`, `demonitor(Ref)` | delivered: they need no right | delivered |
 | `exit(Pid, Reason)` | delivered (exit) | no effect |
-| `group_leader(GL, Pid)` | set (exit), `GL` a process of the caller's domain | no effect; `badarg` when `GL` is of a third domain |
+| `group_leader(GL, Pid)`, `GL` or `Pid` of another domain | `badarg` in the caller's runtime, which writes no frame: no group leader crosses a domain | `badarg` |
 | `spawn_opt(Node, ...)`, `spawn_request(Node, ...)`, `erpc:call/4`, `rpc:call/4` | a child, linked or monitored as asked, or the call run in one (spawn, on the domain) | fails with `noconnection`, as a spawn into a domain that has died; `rpc:call/4` returns `{badrpc, nodedown}` |
 | `is_process_alive/1`, `process_info/2`, `suspend_process/1`, `garbage_collect/1`, `register/2`, `erlang:trace/3` | `badarg`, as for a pid of another node | `badarg` |
 | `erx:inspect([processes, Pid])` | what the caller's inspect facet allows | refused |
@@ -2573,8 +2586,13 @@ domain's runtime has exported to the caller's domain:
 A name handed out in a frame carries `send` alone, so a process can
 message and monitor a process of another domain whose pid it was given,
 and call it when it is a server started to serve other domains; it links
-to it, kills it or sets its group leader only when the process's domain
-exported that right explicitly, or when it spawned the process.
+to it or kills it only when the process's domain exported that right
+explicitly, or when it spawned the process. It never sets the process's
+group leader, nor makes the process its own: `group_leader/2` fails with
+`badarg` when either process is of another domain, whatever the caller
+holds. The refusal depends only on the pids' nodes, so it tells the
+caller nothing about whether the process exists, and it is stock's own
+answer when a group leader cannot be set.
 
 The system domain is no exception: its processes hold on another domain's
 processes what that domain exported to it. The inspector reaches a process
@@ -3188,7 +3206,8 @@ domain](#domain-ids-pids-and-references)):
 | A call to a served server whose `From` names a process or alias of a domain other than the caller's | dropped by the server; the call times out |
 | `sys:get_state/1`, `sys:replace_state/2`, `sys:suspend/1`, `sys:change_code/4`, `sys:install/2`, `sys:terminate/2` and every other `sys` call toward a process of another domain, `gen_server:stop/1,3`, `gen_statem:stop/1,3` and `proc_lib:stop/1,3` among them | exits with `{timeout, _}`, or `stop` with `timeout`, after its timeout, and with the `infinity` of `stop/1` waits until the process ends; the target takes the request as an unknown message and runs on, its state unchanged |
 | `gen_event:call/3,4`, `sync_notify/2`, `add_handler/3`, `which_handlers/1` and the manager's other calls toward a manager of another domain | time out as above, or with `infinity`, as `add_handler/3` waits, wait until the manager ends; `notify/2` reaches the handlers' `handle_info` in its envelope |
-| An io request to an io server of another domain | served by `group`, `file_io_server` and an application master's relay, so a process spawned into another domain writes and reads through its spawner's group leader; any other io server, `standard_error` reached by its pid or one an application writes, takes the request as an unknown message, and the caller waits until the server ends |
+| A process spawned into another domain, by `spawn/4`, `spawn_request`, `erpc` or `rpc` | its group leader is that domain's `init`, which relays io to the domain's `user`, never the caller's group leader; so `erpc:call(N, io, format, ...)` and `rpc:call(N, io, format, ...)` print on `N`'s own standard output, not the caller's, and a shell started on another domain's node, `-remsh` style, does not work. stock `rpc` already runs a call under the target node's `user`, or a proxy for it, when a caller with no io server of its own, a hidden C node, asks for that (`otp/lib/kernel/src/rpc.erl:260-270`, `325-335`) |
+| An io request to an io server of another domain, its pid handed across | the server takes the request as an unknown message, and the caller waits until the server ends |
 | `rpc:call/4,5`, `rpc:cast/4`, `rpc:multicall`, `rpc:async_call/4` and `erpc` | work through `spawn_request` wherever the caller's domain may spawn in the target, and fail as such a spawn does elsewhere |
 | `net_adm:ping/1` toward a node of the machine | answers from `nodes()`: `pong` for `node()` and every connected domain, `pang` for any other, with no call to the peer and no disconnect, since a connection exists only by introduction ([design-runtime.md](design-runtime.md#the-edits-outside-syserxos)); `erlang:disconnect_node/1` of the system domain's node keeps its meaning, and the domain's system connection ends and with it the domain |
 | `rpc:block_call/4,5`, `rpc:abcast/2,3`, `rpc:sbcast/2,3`, `rpc:server_call/4` and `rpc:multi_server_call/2,3` toward another domain | each sends to a registered name (`rex` or the caller's), which never crosses: `block_call` returns `{badrpc, {'EXIT', {noproc, _}}}`; `abcast` writes no frame; `sbcast` and `multi_server_call` list the domain among the bad nodes; `server_call` returns `{error, nodedown}` |
@@ -3196,14 +3215,14 @@ domain](#domain-ids-pids-and-references)):
 | A link, monitor or pending spawn toward a process of a domain that dies | fires, or fails the spawn, with `{domain_down, D, Info}` instead of `noconnection` (edit 56 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)) |
 | A link or monitor to a process of a domain the holder has no connection with, or that has died | fires with `noconnection`, as toward a node that cannot be reached |
 | A link or monitor of a process of another domain that was never exported to the holder, or a link to one exported without `link` that holds no link with the holder | an exit or `DOWN` with reason `noproc` from the target's runtime, as for a process that does not exist |
-| `exit/2` or `group_leader/2` on a process of another domain exported to the caller without `exit` | no effect, as on a process that does not exist |
+| `exit/2` on a process of another domain exported to the caller without `exit` | no effect, as on a process that does not exist |
 | An exit reason longer than the receiver's `max_frame` or past its `max_message_heap` | `{erx_reason_too_large, Bytes}` |
 | An exit reason the system domain cannot decode without creating an atom | system-domain processes see `{erx_foreign_reason, Bin}` |
 | A message to a system-domain process carrying an atom it lacks, a fun or an export | dropped and counted, as ERTS drops a distribution message whose term does not decode |
 | A message whose decoding would create atoms, funs or exports beyond the receiving domain's `foreign_atoms` count, in all or for the sender's lane | dropped at `receive` and counted |
-| A message carrying pids of the sender's domain | each the receiver does not yet hold is exported toward it with `send`, which covers messages and monitors; `link`, `exit` and `group_leader/2` on it need an explicit export by its owner, where stock Erlang lets a process link to and exit any pid it knows; pids of other domains in it stay data |
+| A message carrying pids of the sender's domain | each the receiver does not yet hold is exported toward it with `send`, which covers messages and monitors; `link` and `exit` on it need an explicit export by its owner, where stock Erlang lets a process link to and exit any pid it knows; pids of other domains in it stay data |
 | A pid or alias of the sender's domain beyond the sender's `exports` | travels, and behaves at the receiver as a dead process; `erx:export/3` returns `{error, system_limit}` |
-| `group_leader(GL, Pid)` with `Pid` in another domain and `GL` in a third | `badarg`; the leader must be a process of the caller's domain |
+| `group_leader(GL, Pid)` with `GL` or `Pid` of another domain | `badarg` in the caller's runtime, whatever it holds, and no frame is written: no group leader crosses a domain |
 | A spawn, `erpc` call or `rpc` call into a domain that has not exported `spawn` to the caller's domain, the system domain among them, which exports it to none | fails with `noconnection`, as a spawn into a domain that has died; `rpc:call/4` returns `{badrpc, nodedown}`; no child runs |
 | A spawn into a domain whose export table is full | fails with `system_limit`, and no child runs |
 | A spawn request the target leaves unanswered | waits, as at a connected node that does not answer; the caller's timeout is `spawn_request/5`'s monitor or `spawn_request_abandon/1` |
@@ -3338,9 +3357,11 @@ policy. It can:
 
 It cannot: name another domain's process as a sender or a target; reach a
 process the receiver never exported toward it, or learn whether one exists;
-link to, kill or set the group leader of a process whose name it was only
-handed in a frame, a server that answered its call included, unless the
-receiver exported that right or the peer spawned the process;
+link to or kill a process whose name it was only handed in a frame, a
+server that answered its call included, unless the receiver exported that
+right or the peer spawned the process; set the group leader of any process
+of another domain, or make its own process the group leader of one, a
+child it spawned included;
 terminate, suspend, read the state of or replace the state of any process
 through `sys`, or change its code; call a server not started to serve
 other domains, or make a served one reply to a name of another domain;
@@ -3486,7 +3507,7 @@ and records at every part boundary of a lane, and structural acceptance
 alone never counts as success. Native semantic acceptance and refusal are
 compared case by case with the pinned OTP. A scenario suite of sends,
 links, monitors, exits with every reason shape, spawns with link and
-monitor, aliases, group leaders and unlink races runs between two domains
+monitor, aliases and unlink races runs between two domains
 on erXos and between two stock OTP 29.1.2 nodes on the host; every
 difference outside the compatibility table is a bug. The oracle run
 records, case by case, the cases of OTP's `gen_server`, `gen_statem`,
@@ -3529,8 +3550,8 @@ links and monitors until `peer_held` and `peer_held_total` end its own
 connection and no innocent one; oversized and costly facet requests from
 many domains (each facet within its heap limit and the grantee's share,
 and the system domain within [Flow control](#flow-control)'s sum per
-admitted domain); links, exits and group-leader changes on pids handed
-out in replies; `sys` requests and calls to unserved servers;
+admitted domain); links and exits on pids handed out in replies;
+`GROUP_LEADER` frames, which end the writer's own connection; `sys` requests and calls to unserved servers;
 `net_kernel` and `erx_dist` control messages; forged envelopes; and
 spawns into domains that do not export `spawn`, whose table is full, or
 that never answer. Seeded failures:
@@ -3558,10 +3579,20 @@ that never answer. Seeded failures:
   with `{erx_serve, any}` answers calls and `send_request/2`, and one
   without leaves the call unanswered (seeded: a `gen` without its
   wrapped-reply clause, under which every call times out); a process
-  spawned into another domain does io through its spawner's group leader
-  and uses a file handed across (seeded: a `group` without its unwrap,
-  under which `io:format/2` never returns); the source check on OTP's
-  modules fails on a seeded extra module that matches the envelope;
+  spawned into another domain uses a file handed across; the
+  `system_domain` suite's `group_leader_cross` checkpoint spawns
+  `erx_echo_test:group_leader_of/1` into the `erts` domain from the
+  system domain, gets `badarg` from `group_leader(self(), Child)`, and
+  the child reports that its group leader is `erts`'s own `init` at its
+  start and after (seeded: a `dist.c` that keeps the request's group
+  leader, under which the child reports the system domain's node); the
+  funnel check's `test_a_group_leader_change_is_outside_the_grammar`
+  finds `GROUP_LEADER` (7) malformed (seeded: a funnel with
+  `GROUP_LEADER` in its grammar, which delivers it); the source check on
+  OTP's modules fails on a seeded extra module that matches the envelope,
+  and `test_an_io_reply_unwrap_fails` finds an io reply unwrap in
+  `io.erl` an unlisted site (seeded: `io` listed as an unwrap owner,
+  under which it passes);
 * node identity: `node()`, `nodes()`, `monitor_node/2` and
   `net_kernel:monitor_nodes/1` track introductions and ends, and
   `net_kernel:connect_node/1` toward an unconnected domain returns `false`

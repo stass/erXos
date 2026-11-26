@@ -805,7 +805,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   installed autoconf is 2.73, whose output differs throughout. Each edit is also in `configure.ac`.
 * [Medium] runtime, the native boot page: the comparison of the two entries' pages waits for a native release that boots, and so does the range check on `limits`, of which `erx_boot_info_build` and `erx_boot_info_read` check only the reserved word ([design-fiasco.md](design-fiasco.md#boot-information)).
 * [Medium] runtime, the log sink (`erlang/apps/erx/src/erx_log_h.erl`, `erlang/apps/erx/src/erx_syslog.erl`): no overload protection. `logger_std_h`, which `erx_log_h` replaces, runs `logger_olp`'s sync, drop and flush modes; `log/2` sends unconditionally, so a flood of events (a crash loop with large reports) grows `erx_syslog`'s queue in the system domain, ahead of the domains' writes, and the proxy's elsewhere. A queue-length check in `log/2` that drops and counts past a bound, or `logger_olp`, would bound both ([todo-performance.md](todo-performance.md)).
-* [Medium] runtime, the log sink (`otp/lib/kernel/src/logger.erl` `log_remote`, the default `remote_gl` filter): an event of a process whose group leader is in another domain, such as one an rpc from the system shell spawned, is sent to `{logger_proxy, Node}` on the group leader's node, which never leaves the domain (edit 27), and the local default handler's `remote_gl` filter drops it, so it reaches no sink. A domain's events are its own: drop the forward and the filter in erXos, after checking which OTP suites depend on them.
 * [Low] runtime, `otp/lib/kernel/src/logger.erl`: with edit 57 the `default` handler is `erx_log_h`, so OTP's logger suites that expect `logger_std_h` there (`logger_env_var_SUITE` among them) are expected to differ from stock; `make check-oracle` has not run with the edit, and `test/oracle/hosted_known_differences/kernel.txt` wants the cases it finds.
 * [Low] runtime, `erlang/apps/erx/src/erx_console.erl` `system_source/0`: the system domain's principal (1) and name (`system`) are written by hand, as `erx_kernel_records` writes its id; the domain service's table should give all three.
 * [Medium] runtime, a domain's standard I/O (`otp/lib/kernel/src/user_sup.erl`): a domain has no tty yet, and `-noshell` or `-noinput` start `user_drv`, whose `prim_tty` NIF is gone, so a domain started with them fails at `user`; `native_domain`'s ERTS domain starts with `-nouser` and writes with `erlang:display`. A domain with a user will also need `erx_shell` in its release (`erx.app.src`), beyond `ReleaseFiles::DOMAIN_BASE`. A domain's groups and tty ([design-live.md](design-live.md#the-tty)) replace that.
@@ -1192,30 +1191,37 @@ model harness drive `erx_device.c` itself. `erx_device_dma_check` and `erx_devic
   names, but does not parse GPU commands, so a driver can still put any 64-bit address in a payload, as an
   `{out, Binary}` entry address or an overstated `nr_entries`, and the device will read it. On Phase 1's unconfined
   devices that reaches any memory; it closes with confinement, when the device's window bounds what it reads.
-* [High] Runtime, origins (edits 58-61 of design-runtime, design-domains D18): edit 16
-  wraps every message from another domain, and `gen` and `io` take call and io replies
-  in their envelopes, but nothing serves a request from another domain yet. `gen` and
-  `io` take a reply with no check of its domain, since the call's reference, four
-  unguessable words (edit 17), was handed only to the callee. What remains, in order:
-  1. the io servers' request unwraps (edit 61), without which io from a process spawned
-     into another domain waits forever;
-  2. `file`'s `file_request` and `file_reply`, which neither edit 60 nor edit 61 covers:
-     a positioned operation (`file:pread/3`, `pwrite/3`, `position/2`) on a file server
-     of another domain waits forever for its reply, which arrives in its envelope. The
-     design needs an edit for it;
-  3. `{erx_serve, any}` (edit 59), with `erx:owner/1` to check a request's domain,
+* [High] Runtime, origins (edits 58 and 59 of design-runtime, design-domains D18): edit 16
+  wraps every message from another domain, and `gen` takes call replies in their
+  envelopes, but nothing serves a request from another domain yet. `gen` takes a reply
+  with no check of its domain, since the call's reference, four unguessable words
+  (edit 17), was handed only to the callee. What remains, in order:
+  1. `file`'s `file_request` and `file_reply`, which no edit covers: a positioned
+     operation (`file:pread/3`, `pwrite/3`, `position/2`) on a file server of another
+     domain waits forever for its reply, which arrives in its envelope. The design
+     needs an edit for it;
+  2. `{erx_serve, any}` (edit 59), with `erx:owner/1` to check a request's domain,
      without which no `gen_server` or `gen_statem` serves another domain;
-  4. the tests of design-domains' "Origins" and hostile-runtime cases between two ERTS
+  3. the tests of design-domains' "Origins" and hostile-runtime cases between two ERTS
      domains (a message to an alias arrives wrapped, which waits on aliases holding their
      exports; the served calls; `sys` on a `gen_statem`, a `gen_event` and a plain `sys`
      loop), and the oracle's differing cases recorded per case;
-  5. the other stock protocols one ERTS domain speaks to another, which arrive wrapped
+  4. the other stock protocols one ERTS domain speaks to another, which arrive wrapped
      and so go unanswered: net_kernel's `is_auth` call of `net_adm:ping/1` (it lands in
      `handle_info`, and the caller waits forever), `global`'s connect, lock and sync
      messages (`global:sync/0` and `register_name/2` stall on another domain's node),
-     `peer`'s own `io_reply` receive and `proc_lib`'s start acks. Each needs its owner's
-     unwrap, or a design note that it does not cross domains.
-* [Low] Runtime, origins (`gen.erl` and `io.erl`, edits 58 and 60): a reply needs no
+     and `proc_lib`'s start acks. Each needs its owner's unwrap, or a design note that
+     it does not cross domains. (`peer`'s detached io relay, which sends io requests to
+     its origin's group leader, does not: no io request crosses a domain, design-domains'
+     compatibility table.)
+* [Medium] Runtime, group leaders (`dist.c`, edit 83 of design-runtime): toward another
+  domain a spawn request names its sender in its `GroupLeader` slot, so the caller's group
+  leader is never encoded and so never exported with `send` to the peer, but no test
+  catches a sender that encodes its group leader again, since the receiver ignores the
+  slot. Make it a checked rule: the funnel refuses a `SPAWN_REQUEST` whose `GroupLeader`
+  is not its `From`, with a host test and a seeded sender, and the control term's
+  `group_leader` member goes.
+* [Low] Runtime, origins (`gen.erl`, edit 58): a reply needs no
   check of its domain only while the call's reference reaches no third domain. A call
   with timeout `infinity` replies to the caller's pid with a plain monitor reference;
   a callee that logs or prints its `From` in full (a crash report, a log record) shows

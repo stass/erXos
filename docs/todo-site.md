@@ -17,8 +17,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   system domain's budget and keeps it across the holder's restarts (`liberx/system/dom_life.c`
   ~1117-1130, `.budget = ERX_DOM_OBJ_SYSTEM_BUDGET`; `config/manifest/qemu-virt-development.txt`
   ~73-75 agrees with the code). Decide which is the design and change the other.
-* [Low] docs, `docs/design-runtime.md` "The edits outside `sys/erxos`": edits 66, 67 and 68 each
-  name two changes, so a citation of one of them is ambiguous. Renumber the later of each pair.
+* [Low] docs, `docs/design-runtime.md` "The edits outside `sys/erxos`": edit 68 names two
+  changes, init's reboot and the dirty scheduler's elapsed-time charge, so a citation of it is
+  ambiguous. Give one a number of its own and update its citations, which include code comments
+  (`otp/erts/preloaded/src/init.erl`, `otp/erts/emulator/beam/beam_common.c`,
+  `test/host/erl_wakeup_other_test.rb`) as well as the documents.
 * [Medium] docs/design-pipes.md ("Ends and their holders", "The program protocol"): the design
   does not say what a program does with a report for an end it no longer holds, though a
   `{pipe_writer}` can cross the program's `{closed}`. `liberx` closes the capabilities the report

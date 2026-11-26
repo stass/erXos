@@ -3,8 +3,8 @@
 > **Status.** **Built:** domains, each with its own ERTS in its own
 > address space and its own Erlang node; connections of two lanes with
 > doorbells; the funnel; export tables; the `{erx_origin, D, Msg}`
-> envelope; links, monitors, exits and spawns across domains;
-> `{domain_down, D, Info}` at a domain's end; the domain service, the
+> envelope; links, monitors, exits and spawns across domains; group
+> leaders that stay inside their domain; `{domain_down, D, Info}` at a domain's end; the domain service, the
 > domain library and the root service creating and ending domains; a
 > quota of node names per principal.
 > **Designed:** budgets that refuse connection memory past their limit;
@@ -370,12 +370,13 @@ and stops at the first that decides:
 2. **Control term.** The control term is parsed against a grammar that
    admits only the operations a domain may send, each with its exact
    arity and element types: sends to a pid or an alias, links,
-   unlinks, monitors, exits,
-   spawns and changes of group leader. An **alias** is a reference
+   unlinks, monitors, exits and
+   spawns. An **alias** is a reference
    that stands in for a pid as a send target and that its owner can
-   switch off; a **group leader** is the process that serves a
-   process's input and output. A send to a registered name is outside
-   the grammar.
+   switch off. A send to a registered name is outside the grammar, and
+   so is a change of group leader: a **group leader** is the process
+   that serves a process's input and output, and no group leader
+   crosses a domain (section 10.7.3).
 3. **Sender rule.** Every pid and reference of the sender's own in the
    control term must carry the lane's node name and domain id. The
    receiver knows the sender by the lane; the frame only has to agree.
@@ -485,7 +486,7 @@ each is an act of the domain that owns the name:
    on a process it did not spawn, or `spawn` on the domain itself.
 
 The rights are `send` (messages, alias sends and monitors), `link`,
-`exit` (`exit/2`, `kill` included, and changing a group leader) and
+`exit` (`exit/2`, `kill` included) and
 `spawn` (on the domain's own name). A fifth, `introduce`, is held on a
 domain pid, the process that stands for a domain (section 10.8).
 Nothing a peer does widens what it holds. Only the owner's own
@@ -524,7 +525,7 @@ process's record say which peers may act on it.*
 ### 10.4.3 What a peer cannot do
 
 A peer that was handed a pid can message and monitor that process. It
-cannot link to it, kill it or set its group leader. That narrows stock
+cannot link to it or kill it. That narrows stock
 Erlang on purpose. Without it, a server that answered a client's call
 would hand the client its pid, and the client could kill the server.
 
@@ -596,8 +597,9 @@ only when it carries the reference of a call still waiting, and since
 references cannot be guessed (section 10.1.2), a peer cannot forge a
 reply. The facet behaviour, `erx_facet`, unwraps requests from the one
 domain it serves, and admits one only when the reply goes back to that
-domain. A few other owners, such as `io` and the domain pid, do the
-same for their own protocols.
+domain. A few other owners, such as the file protocol's client and the
+domain pid, do the same for their own protocols. `io` is not one: no io
+request or reply crosses a domain (section 10.7.3).
 
 The rule is that only a protocol's owner unwraps, and a build check
 fails on any OTP module outside the listed owners that names the
@@ -745,6 +747,16 @@ the child's half of the link or monitor before the child runs, so
 ([design-domains.md, Spawning](../design-domains.md#spawning)). A pid
 among the arguments is data: it carries no right the child's domain
 did not already have.
+
+The child's group leader is its own domain's `init`, whatever the
+caller's is, and `group_leader/2` fails with `badarg` when either
+process is of another domain. The io protocol has the group leader run
+code its client names: `io:format` sends a module, a function and
+arguments that the terminal's `group` applies. A leader in another
+domain would let a domain that can message it run code of its choosing
+in the terminal's domain. So a group leader never crosses a domain, and
+`erpc:call(N, io, format, ...)` prints on `N`'s own standard output,
+not the caller's.
 
 ### 10.7.4 A domain dies
 
