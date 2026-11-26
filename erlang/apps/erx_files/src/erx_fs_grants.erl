@@ -37,7 +37,7 @@ Of a facet row's limits and parameters a grant applies five (grant_options/1):
 
 -behaviour(supervisor).
 
--export([start_link/1, start_link/2, grant/3, grant/4, own/1, own/2, grant_options/1, facet/2]).
+-export([start_link/1, start_link/2, grant/3, grant/4, own/1, own/2, grant_options/1, facet/3]).
 %% The supervisor's callback and its child's start.
 -export([init/1, start_grant/3]).
 
@@ -79,7 +79,7 @@ server's own domain.
 """.
 -spec grant(pid(), term(), map(), #{client := pos_integer() | own,
                                     ends_with := port() | pid() | none,
-                                    exports := module()}) -> {ok, pid()} | {error, term()}.
+                                    exports := module()}) -> {ok, pid(), binary()} | {error, term()}.
 grant(Grants, Args, Limits, #{client := _, ends_with := _, exports := _} = Binding) ->
     case grant_options(Limits) of
         {ok, Options} -> started(supervisor:start_child(Grants, [Args, maps:merge(Binding, Options)]));
@@ -90,12 +90,14 @@ grant(Grants, Args, Limits, #{client := _, ends_with := _, exports := _} = Bindi
 One grant under Grants with the options a facet row's Limits give it, bound by
 Binding: `client`, the grantee's domain id, `ends_with`, what the grant ends with
 (erx_fs:start_link/4), and `exports`, the export table it exports itself to its
-client through before this returns. A refused export, or Limits a row would
-refuse, is the answer and leaves no grant.
+client through before this returns. The answer is the grant's pid with the tree its
+server names, `{ok, Pid, Tree}`, the reply a mint sends for it
+(docs/design-system.md, "the mint's reply"). A refused export, or Limits a row
+would refuse, is the answer and leaves no grant.
 """.
 -spec grant(pid(), map(), #{client := pos_integer(), ends_with := port() | pid() | none,
                             exports := module(), principal => binary()}) ->
-          {ok, pid()} | {error, term()}.
+          {ok, pid(), binary()} | {error, term()}.
 grant(Grants, Limits, #{client := Client, ends_with := _, exports := _} = Binding)
   when is_integer(Client), Client > 0 ->
     case grant_options(Limits) of
@@ -127,21 +129,21 @@ own(Grants, Args) ->
 
 owned({ok, _Pid, Handle}) -> {ok, Handle}.
 
-%% A grant started for another domain is answered by its pid: the domain that holds
-%% it names the tree in its mount, not from the starter's handle (docs/todo-storage.md,
-%% "a facet's tree").
-started({ok, Pid, _Handle}) -> {ok, Pid};
+%% A grant started for another domain is answered by its pid and the tree its handle
+%% carries, which the domain that holds it installs with the facet
+%% (docs/design-files.md, "The tree beneath an entry").
+started({ok, Pid, Handle}) -> {ok, Pid, erx_fs:handle_tree(Handle)};
 started({error, _} = Refused) -> Refused.
 
 -doc """
-The facet of the grant Pid as the grantee's registry holds it
-(erx_facets:files/2): the pid with the rights of its facet row's Limits, the
-rights the grant serves (grant_options/1), which no reply of the server's
-sets (docs/design-files.md, "Rights beneath an entry").
+The facet of the grant Pid on the tree Tree as the grantee's registry holds it
+(erx_facets:files/3): the pid with the tree its server named and the rights of its
+facet row's Limits, the rights the grant serves (grant_options/1), which no reply
+of the server's sets (docs/design-files.md, "Rights beneath an entry").
 """.
--spec facet(pid(), map()) -> erx_facets:facet().
-facet(Pid, Limits) ->
-    erx_facets:files(Pid, rights(Limits)).
+-spec facet(pid(), binary(), map()) -> erx_facets:facet().
+facet(Pid, Tree, Limits) ->
+    erx_facets:files(Pid, Tree, rights(Limits)).
 
 %% The rights a facet row's Limits give its grant, rw where the row states none
 %% (abi/services/files.txt).

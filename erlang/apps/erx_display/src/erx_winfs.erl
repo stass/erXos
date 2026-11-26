@@ -317,12 +317,12 @@ grant(Grantee, Limits, #winfs{options = Options, grants_sup = Sup, minted = Mint
                     case erx_fs_grants:grant(Sup, #{winfs => self(), client => Client,
                                                     clipboard => HasClipboard},
                                              Limits, Binding) of
-                        {ok, Grant} ->
+                        {ok, Grant, Tree} ->
                             Record = #{client => Client, area => area(Grantee, Options),
                                        windows => Windows, session => Session, front => Front,
                                        minted => Minted + 1,
                                        monitor => erlang:monitor(process, Grant)},
-                            {{ok, Grant}, State#winfs{grants = (State#winfs.grants)#{Grant => Record},
+                            {{ok, Grant, Tree}, State#winfs{grants = (State#winfs.grants)#{Grant => Record},
                                                       minted = Minted + 1}};
                         {error, _} = Refused ->
                             {Refused, State}

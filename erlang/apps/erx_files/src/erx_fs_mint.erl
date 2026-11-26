@@ -90,7 +90,8 @@ Limits give it, rooted for that grantee where Limits state a tree, exported to G
 through Exports (erx_dist, or a host test's stand-in) before this returns; or the
 refusal, which leaves no grant.
 """.
--spec grant(pid(), pos_integer(), pos_integer(), binary(), map(), module()) -> {ok, pid()} | {error, term()}.
+-spec grant(pid(), pos_integer(), pos_integer(), binary(), map(), module()) ->
+          {ok, pid(), binary()} | {error, term()}.
 grant(Grants, System, Grantee, Principal, Limits, Exports) ->
     case connection_to(System, Grantee) of
         {ok, Connection} ->

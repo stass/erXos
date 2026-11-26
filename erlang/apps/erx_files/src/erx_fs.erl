@@ -46,6 +46,7 @@ client as `eio`.
 
 -export([start_link/3, start_link/4, start_mounted/4]).
 -export([init/2, loop/2, drain/1, format_status/1]).
+-export([handle_tree/1]).
 
 -include("erx_fs_waits.hrl").
 
@@ -241,6 +242,15 @@ serve(Parent, Grant, Client, Options) ->
 %% The grant's handle: its pid, the tree it reaches and the rights it serves.
 handle(Grant) ->
     {self(), erx_fs_grant:tree(Grant), erx_fs_grant:rights(Grant)}.
+
+-doc """
+The tree a grant's handle carries, the one its callback module's `root` names: what
+a grant started for another domain answers its mint with beside its pid
+(erx_fs_grants:grant/3,4; docs/design-system.md, "the mint's reply").
+""".
+-spec handle_tree(grant_handle()) -> binary().
+handle_tree({_Pid, Tree, _Rights}) ->
+    Tree.
 
 -doc """
 What proc_lib's crash report shows of a grant that crashes: its reason's name alone. The

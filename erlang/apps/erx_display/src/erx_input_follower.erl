@@ -23,8 +23,8 @@ applications start, so a first read that finds none is normal.
 It keeps, for each name, the facet it last followed. For each name whose
 installed facet is another, it stops the tree's lister or readers if it
 still follows the old facet, then resolves the grant once
-(erx_facets:file_grant/3, read-only, on the tree every input service serves,
-`input_tree`), monitors the grant's process, and lists the tree in a linked
+(erx_facets:file_grant/2, read-only, on the tree the registry holds with the
+facet), monitors the grant's process, and lists the tree in a linked
 lister process (erx_input_reader:files/1), so a tree whose server is slow
 to answer holds up no other tree. With the listing it starts one reader,
 linked to it, for each file, on that same grant, named `Facet/File` to
@@ -88,7 +88,7 @@ start_link() ->
     start_link(#{generation => fun erx_facets:generation/0,
                  granted => fun() -> erx:granted(?ERX_SERVICE_INPUT) end,
                  changed => fun erx_facets:changed/1,
-                 resolve => fun(Name) -> erx_facets:file_grant(Name, ro, ?ERX_INPUT_TREE_BYTES) end,
+                 resolve => fun(Name) -> erx_facets:file_grant(Name, ro) end,
                  list => fun erx_input_reader:files/1,
                  start => fun(Device, Grant, File) ->
                                   erx_input_reader:start_link(Device, erx_input_reader:opener(Grant, File))

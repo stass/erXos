@@ -160,7 +160,8 @@ service the manifest's service rows declare for this domain, and then sends
 it {erx_facet_mint, Tag, Name, Grantee, Principal, Limits} for each configured grant,
 arriving as {erx_origin, 4, Request}: the mint acts only on a request in the
 system domain's envelope, and starts the facet with start/3, bound to Grantee
-and within Limits, and replies minted(Tag, {ok, Facet}), or minted(Tag, Other)
+and within Limits, and replies minted(Tag, {ok, Facet}), for a service served as a
+tree minted(Tag, {ok, Facet, Tree}) with the tree its grant names, or minted(Tag, Other)
 with any other term to refuse. {error, badarg} for a Name that is no atom or a Mint
 that is no process of this domain.
 
@@ -234,6 +235,7 @@ minted(Tag, Reply) when is_integer(Tag), Tag > 0 ->
     end.
 
 crossing_reply({ok, Facet}) when is_pid(Facet) -> {ok, Facet};
+crossing_reply({ok, Facet, Tree}) when is_pid(Facet), is_binary(Tree) -> {ok, Facet, Tree};
 crossing_reply(_Refusal) -> refused.
 
 -doc """

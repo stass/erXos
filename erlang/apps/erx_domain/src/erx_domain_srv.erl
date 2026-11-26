@@ -1345,13 +1345,14 @@ mint(Id, DomainPid, Name, {facet, Callback, Behind, Grant}, Exports) ->
 %% and ends with its domain pid; its supervisor's end ends it too. Grant starts it,
 %% with the grant's own argument where the service computed one at the mint
 %% (system_facet/4); a supervisor that ended while the service minted is a refusal. The
-%% facet goes to the domain with the rights of the row's Limits, those the grant serves
-%% (docs/design-files.md, "Rights beneath an entry").
+%% facet goes to the domain on the tree the grant's server names, with the rights of
+%% the row's Limits, those the grant serves (docs/design-files.md, "The tree beneath an
+%% entry" and "Rights beneath an entry").
 mint_tree(Id, DomainPid, Name, Limits, Grant, Exports) ->
     Binding = #{client => Id, ends_with => DomainPid, exports => Exports},
     case try Grant(Binding) catch exit:Exit -> {error, {exit, Exit}} end of
-        {ok, Pid} ->
-            {true, erx_fs_grants:facet(Pid, Limits)};
+        {ok, Pid, Tree} ->
+            {true, erx_fs_grants:facet(Pid, Tree, Limits)};
         {error, Reason} ->
             logger:error("erx_domain: domain ~b's tree grant ~ts did not start: ~0P", [Id, Name, Reason, 8]),
             false

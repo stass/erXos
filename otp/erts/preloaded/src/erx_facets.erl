@@ -44,7 +44,7 @@ path reads it, the code loader's included.
 """.
 
 -export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_name/1, is_interface/1, is_facet/1,
-         files/2, table/1, program/1, program_table/1, file_grant/2, file_grant/3]).
+         files/3, table/1, program/1, program_table/1, file_grant/2]).
 -export_type([name/0, interface/0, facet/0, program/0]).
 
 -include("generated/erx_abi.hrl").
@@ -64,12 +64,13 @@ program_table/1 alone turns it into the entries a resolution walks.
 -opaque program() :: #program{}.
 
 -doc """
-A facet as the registry holds it: its pid, or for a facet of a files service
-its pid with its grant's rights, as the manifest's facet row states them
-(files/2), the rights table/1 puts beneath each entry of the facet
-(docs/design-files.md, "Rights beneath an entry").
+A facet as the registry holds it: its pid, or for a facet of a service served as
+a tree its pid with its grant's tree, as the grant's server named it in the
+mint's reply, and its grant's rights, as the manifest's facet row states them
+(files/3): the tree and the rights table/1 puts beneath each entry of the facet
+(docs/design-files.md, "The tree beneath an entry" and "Rights beneath an entry").
 """.
--type facet() :: pid() | {pid(), erx_abi_enums:files_rights()}.
+-type facet() :: pid() | {pid(), Tree :: binary(), erx_abi_enums:files_rights()}.
 
 -doc """
 The name a facet is held under: its service's name, or for a drive's grant
@@ -193,34 +194,39 @@ is_interface(Interface) -> is_integer(Interface) andalso Interface > 0.
 
 -doc """
 Whether `Term` is a facet as the system domain sends it: a pid, or a pid with
-a member of `files_rights`. The connection agent installs nothing else.
+a plain name, its tree (the 9P grammar's `is_name/1`), and a member of
+`files_rights`. The connection agent installs nothing else.
 """.
 -spec is_facet(term()) -> boolean().
-is_facet({Pid, Rights}) -> is_pid(Pid) andalso lists:keymember(Rights, 1, ?ERX_FILES_RIGHTS_MEMBERS);
+is_facet({Pid, Tree, Rights}) ->
+    is_pid(Pid) andalso erx_9p_grammar:is_name(Tree) andalso lists:keymember(Rights, 1, ?ERX_FILES_RIGHTS_MEMBERS);
 is_facet(Facet) -> is_pid(Facet).
 
 -doc """
-The facet of the files service grant `Pid` that serves `Rights`, the rights of
-its facet row, which the domain service takes from the manifest and no reply
-of the server's sets.
+The facet of the grant `Pid` of a service served as a tree, on the tree named
+`Tree`, the one the grant's server named in the mint's reply, which serves
+`Rights`, the rights of its facet row, which the domain service takes from the
+manifest and no reply of the server's sets.
 """.
--spec files(pid(), erx_abi_enums:files_rights()) -> facet().
-files(Pid, Rights) ->
-    {Pid, Rights}.
+-spec files(pid(), binary(), erx_abi_enums:files_rights()) -> facet().
+files(Pid, Tree, Rights) ->
+    {Pid, Tree, Rights}.
 
 -doc """
 The namespace table a resolution walks, made from `Mounts` as it starts. For
-each entry whose provider is `{facet, Name, Tree}`, binds of one included:
+each entry whose provider is `{facet, Name}`, binds of one included:
 
-* when the registry holds a files facet for `Name`, the entry is on its
-  grant, provider `{grant, Pid, Tree}`, with the lesser of the rights its
-  mount asked and those the facet carries (erx_path:lesser/2);
+* when the registry holds a facet of a tree for `Name`, the entry is on its
+  grant, provider `{grant, Pid, Tree}`, on the tree the registry holds with
+  the facet, with the lesser of the rights its mount asked and those the
+  facet carries (erx_path:lesser/2);
 * otherwise, or when the two rights have no lesser, the entry is `ended`,
   which answers `eio`.
 
 So a facet entry's rights never exceed its grant's, as an EROFS entry's and a
-grant pid's do. A facet's mount names the facet, never a pid, so a re-grant
-serves the next lookup and nothing has to follow the registry. Every other
+grant pid's do, and its tree is always its grant's. A facet's mount names the
+facet, never a pid or a tree, so a re-grant serves the next lookup and nothing
+has to follow the registry. Every other
 entry is as `Mounts` holds it, except that
 
 * every entry on a facet the registry holds as one of the `media`
@@ -270,7 +276,7 @@ program_table(#program{mounts = Mounts}) ->
 
 %% The interface number of the facet Provider names as the registry holds it, or none
 %% for a provider that names no facet the registry holds.
-interface({facet, Name, _Tree}, Registry) ->
+interface({facet, Name}, Registry) ->
     case Registry of
         #{Name := {Interface, _Facet}} -> Interface;
         #{} -> none
@@ -278,9 +284,9 @@ interface({facet, Name, _Tree}, Registry) ->
 interface(_Provider, _Registry) ->
     none.
 
-resolved(#{provider := {facet, Name, Tree}, rights := Asked} = Entry, Registry) ->
+resolved(#{provider := {facet, Name}, rights := Asked} = Entry, Registry) ->
     case Registry of
-        #{Name := {_Interface, {Pid, Rights}}} when is_pid(Pid) ->
+        #{Name := {_Interface, {Pid, Tree, Rights}}} ->
             on_grant(Entry, Pid, Tree, erx_path:lesser(Asked, Rights));
         _ ->
             Entry#{provider := ended}
@@ -299,30 +305,21 @@ marked(?ERX_SERVICE_MEDIA, Entry) -> Entry#{nofollow => true};
 marked(_Interface, Entry) -> Entry.
 
 -doc """
-A file client's handle on the grant of the files facet `Name`, read-only, on
-the tree of the facet's name, for a mount or a read of rights `Rights`: `ro`
-through a grant of any rights, and `rx`, a program image's, only through an
-`rx` grant, which writes nothing (F5, F6). `{error, eacces}` for an `rx` use
-of any other grant, and `{error, enoent}` when the registry holds no files
-facet of the name. So no handle carries more than its grant's rights.
+A file client's handle on the grant of the facet `Name` of a tree, read-only,
+on the tree the registry holds with the facet, for a mount or a read of rights
+`Rights`: `ro` through a grant of any rights, and `rx`, a program image's, only
+through an `rx` grant, which writes nothing (F5, F6). `{error, eacces}` for an
+`rx` use of any other grant, and `{error, enoent}` when the registry holds no
+facet of a tree of the name. So no handle carries more than its grant's rights,
+nor names a tree other than its grant's.
 """.
 -spec file_grant(atom(), ro | rx) -> {ok, {pid(), binary(), ro}} | {error, eacces | enoent}.
 file_grant(Name, Rights) ->
-    file_grant(Name, Rights, atom_to_binary(Name)).
-
--doc """
-The handle file_grant/2 makes, on the tree named `Tree` instead of the
-facet's name: for a facet of an interface whose tree has one name whatever
-the service is called, as an input tree's is `input_tree`
-(abi/services/input.txt).
-""".
--spec file_grant(atom(), ro | rx, binary()) -> {ok, {pid(), binary(), ro}} | {error, eacces | enoent}.
-file_grant(Name, Rights, Tree) ->
     case registry() of
-        #{Name := {_Interface, {Pid, Granted}}}
-          when is_pid(Pid), (Rights =:= ro orelse (Rights =:= rx andalso Granted =:= rx)) ->
+        #{Name := {_Interface, {Pid, Tree, Granted}}}
+          when Rights =:= ro orelse (Rights =:= rx andalso Granted =:= rx) ->
             {ok, {Pid, Tree, ro}};
-        #{Name := {_Interface, {Pid, _Granted}}} when is_pid(Pid) ->
+        #{Name := {_Interface, {_Pid, _Tree, _Granted}}} ->
             {error, eacces};
         #{} ->
             {error, enoent}
@@ -336,5 +333,5 @@ value() ->
     persistent_term:get(?REGISTRY, {0, #{}}).
 
 -spec pid(facet()) -> pid().
-pid({Pid, _Rights}) -> Pid;
+pid({Pid, _Tree, _Rights}) -> Pid;
 pid(Pid) -> Pid.

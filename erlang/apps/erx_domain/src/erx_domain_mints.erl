@@ -96,7 +96,9 @@ for the operation in minting with its tag; an acknowledgement only from the
 pair's grantee, for the operation in installing with its tag. Anything else
 is dropped, as a dropped action logged and counted. A reply that counts
 settles its step: {ok, Facet}, Facet a pid the server's incarnation owns,
-moves to installing; any other reply fails the operation. Since an operation
+or for a service of an interface abi/services declares served_as tree
+{ok, Facet, Tree}, Tree a plain name, moves to installing; any other reply
+fails the operation (admitted/4). Since an operation
 exists only while its pair is current, a reply after either domain's end
 matches nothing. Refused, dropped and failed actions carry only bounded
 terms: atoms, the service's own numbers, or a reason the core names.
@@ -188,8 +190,8 @@ from one counter, so a tag names one of them at most.
 -type grant() :: idle
                | {introducing, pair(), tag()}
                | {minting, pair(), tag()}
-               | {installing, pair(), tag(), Facet :: pid()}
-               | {installed, pair(), Facet :: pid()}
+               | {installing, pair(), tag(), erx_facets:facet()}
+               | {installed, pair(), erx_facets:facet()}
                | {failed, pair(), reason()}.
 -type config() :: #{services := [{Server :: row(), name()}],
                     grants := [{Grantee :: row() | system | {template, template()}, name(), Server :: row(),
@@ -407,7 +409,7 @@ server_settled(Name, Starting, #{declared := Declared}) ->
 %% The answer to a wait for the system domain's grant of service Name from Id,
 %% an incarnation of the grant's server row: {ok, Facet} once the grant is
 %% installed with Id as its server, Facet as the installation in the system
-%% domain's registry carries it (installed_facet/3), {error, failed} once it failed
+%% domain's registry carries it (admitted/4), {error, failed} once it failed
 %% with Id as its server, {error, ended} once Id has ended or the grant carries
 %% another server, {error, unprovided} once Id is ready and the grant is idle, and
 %% wait while none of these holds. A name the system domain is granted by no row is
@@ -417,7 +419,7 @@ server_settled(Name, Starting, #{declared := Declared}) ->
 system_grant(Name, Id, Starting, #{grants := Grants, rows := Rows} = State) ->
     Key = {system, Name},
     case Grants of
-        #{Key := #{state := {installed, {Id, _}, Pid}}} -> {ok, installed_facet(Pid, Key, State)};
+        #{Key := #{state := {installed, {Id, _}, Facet}}} -> {ok, Facet};
         #{Key := #{state := {failed, {Id, _}, _Reason}}} -> {error, failed};
         #{Key := #{state := idle, server := Server}} ->
             idle_grant(heard(Id, maps:get(Server, Rows, none)), lists:member(Server, Starting));
@@ -526,13 +528,12 @@ on_event({introduced, Tag, Result}, State) ->
 on_event({minted, Origin, Tag, Reply}, State) ->
     case find(Tag, State) of
         {Key, {minting, {Origin, GranteeId} = Pair, Tag}} ->
-            case is_owned_reply(Reply, Origin, State) of
-                true ->
-                    {ok, Facet} = Reply,
+            case admitted(Reply, Origin, Key, State) of
+                {ok, Facet} ->
                     {_, Installed} = Key,
-                    {[{install, Tag, GranteeId, Installed, interface(Key, State), installed_facet(Facet, Key, State)}],
+                    {[{install, Tag, GranteeId, Installed, interface(Key, State), Facet}],
                      set_grant(Key, {installing, Pair, Tag, Facet}, State)};
-                false ->
+                refused ->
                     fail_pending(Key, Pair, Tag, bad_reply, State)
             end;
         {_Key, {minting, _Pair, Tag}} ->
@@ -733,12 +734,31 @@ authenticate(Row, {Id, _} = Incarnation, Provides, #{declared := Declared} = Sta
 is_owned(Pid, {Id, Node}, #{owner := Owner}) ->
     node(Pid) =:= Node andalso Owner(Pid) =:= Id.
 
-%% Whether a mint's reply is {ok, Facet} with Facet owned by the ready server ServerId.
-is_owned_reply({ok, Facet}, ServerId, #{rows := Rows} = State) when is_pid(Facet) ->
+%% The facet a mint's reply for the grant Key installs, or refused (docs/design-system.md,
+%% "the mint's reply"). The reply is untrusted. For a service of an interface
+%% abi/services declares served_as tree it is {ok, Pid, Tree}, Tree a plain name (the 9P
+%% grammar's is_name/1) and installed as {Pid, Tree, Rights} with the rights of the grant's
+%% limits (grant_limits/2), which the manifest states and no reply sets; for any other
+%% service it is {ok, Pid}, installed as the pid. Either way Pid is owned by the ready
+%% server ServerId, and any other reply is refused.
+admitted(Reply, ServerId, Key, State) ->
+    case {lists:member(interface(Key, State), ?ERX_TREE_SERVICES), Reply} of
+        {true, {ok, Pid, Tree}} when is_pid(Pid) ->
+            owned_facet(is_owned_by(Pid, ServerId, State) andalso erx_9p_grammar:is_name(Tree),
+                        fun() -> erx_fs_grants:facet(Pid, Tree, grant_limits(Key, State)) end);
+        {false, {ok, Pid}} when is_pid(Pid) ->
+            owned_facet(is_owned_by(Pid, ServerId, State), fun() -> Pid end);
+        {_Tree, _Reply} ->
+            refused
+    end.
+
+owned_facet(true, Facet) -> {ok, Facet()};
+owned_facet(false, _Facet) -> refused.
+
+%% Whether the ready server ServerId owns Pid.
+is_owned_by(Pid, ServerId, #{rows := Rows} = State) ->
     [Node] = [Node || _Row := {Id, ready, Node, _} <- Rows, Id =:= ServerId],
-    is_owned(Facet, {ServerId, Node}, State);
-is_owned_reply(_Reply, _ServerId, _State) ->
-    false.
+    is_owned(Pid, {ServerId, Node}, State).
 
 %% Each grant brought to its current pair.
 reconcile(#{grants := Grants} = State) ->
@@ -827,7 +847,7 @@ mint_request(Key, {ServerId, GranteeId}, Tag, #{rows := Rows} = State) ->
 %% The limits of the grant Key as its server mints it and its grantee holds it: its facet
 %% row's, and for a grant of an input service, which states no rights
 %% (abi/services/input.txt), rights ro, so its server serves it read-only and its grantee
-%% holds it so (installed_facet/3). Both read the record's service, never the key's
+%% holds it so (admitted/4). Both read the record's service, never the key's
 %% installed name, which for a drive is {drive, N}.
 grant_limits(Key, #{inputs := Inputs} = State) ->
     #{service := Service, limits := Limits} = grant_entry(Key, State),
@@ -841,16 +861,6 @@ grant_limits(Key, #{inputs := Inputs} = State) ->
 session_limits(Limits, true) -> Limits#{session => true};
 session_limits(Limits, false) -> maps:remove(session, Limits).
 
-%% The facet Pid of the grant Key as its installation carries it: for a files or an input
-%% service, the pid with the rights of the grant's limits (grant_limits/2), which the
-%% manifest states and no reply of the server's sets (docs/design-files.md, "Rights
-%% beneath an entry"); for any other service, the pid alone.
-installed_facet(Pid, Key, #{files := Files, inputs := Inputs} = State) ->
-    #{service := Service} = grant_entry(Key, State),
-    case lists:member(Service, Files ++ Inputs) of
-        true -> erx_fs_grants:facet(Pid, grant_limits(Key, State));
-        false -> Pid
-    end.
 
 %% The interface number of the grant Key's service, which its installation carries and
 %% the grantee's registry keeps (erx_facets:program_table/1): the drive interface for a

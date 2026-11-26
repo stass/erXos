@@ -26,12 +26,12 @@ header_hash(Bytes) ->
     crypto:hash(sha256, binary:part(Bytes, 0, Length)).
 
 %% A read-only grant of the stand-in system tree, its root holding dashboard.app, as the
-%% registry holds the facet of a files service: with its grant's rights.
+%% registry holds the facet of a files service: with its grant's tree and rights.
 system_grant(Bytes) ->
-    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{name, <<"system">>},
-                                                      {file, <<"dashboard.app">>, Bytes}], ro),
+    {ok, Grant, Handle} = erx_fs:start_link(erx_fs_test_tree, [{name, <<"system">>},
+                                                           {file, <<"dashboard.app">>, Bytes}], ro),
     unlink(Grant),
-    erx_facets:files(Grant, ro).
+    erx_facets:files(Grant, erx_fs:handle_tree(Handle), ro).
 
 %% The table the registration and publication stubs log into.
 stubs_log() ->

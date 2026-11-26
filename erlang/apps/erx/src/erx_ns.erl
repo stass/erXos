@@ -39,9 +39,10 @@
 %% meanwhile answers 'DOWN' at once.
 %%
 %% A facet's mount, {facet, Name}, holds the facet's name and no pid: its entries, and
-%% each bind of one, have the provider {facet, Name, Tree}, which a resolution reads as
-%% the grant the domain's facet registry (erx_facets) holds for Name at that moment, with
-%% the lesser of the entry's rights and the grant's, or as ended when it holds none
+%% each bind of one, have the provider {facet, Name}, which a resolution reads as the
+%% grant the domain's facet registry (erx_facets) holds for Name at that moment, on the
+%% tree the registry holds with it, with the lesser of the entry's rights and the
+%% grant's, or as ended when it holds none
 %% (erx_facets:table/1, through prim_file:erx_table/0). That resolution also marks every
 %% entry on a facet of the media interface nofollow, from the facet's interface number,
 %% so no link on a drive is followed; no entry of this table holds the mark.
@@ -78,13 +79,13 @@
 -type name() :: binary().
 -type rights() :: erx_abi_enums:files_rights().
 -type provider() :: release | {erofs, erx_erofs:fs()} | {grant, pid(), Tree :: name()}
-                  | {facet, Name :: atom(), Tree :: name()} | ended.
+                  | {facet, Name :: atom()} | ended.
 %% An image's entry also holds the grant and fid the image is read through.
 -type entry() :: #{point := [name()], provider := provider(), root := [name()], rights := rights(),
                    fid => file()}.
 -type file() :: {{pid(), Tree :: binary(), ro}, Fid :: non_neg_integer()}.
 -type table() :: [entry()].
--type option() :: {tree, binary()} | rights().
+-type option() :: rights().
 -type reason() :: einval | enametoolong | enoent | eexist | ebusy | system_limit | file:posix().
 %% A change as the process receives it, from this module's functions or from any other
 %% process, so every field is checked before it changes anything. A bind's source is
@@ -122,8 +123,10 @@ start_link(Prim) ->
 %%
 %% Or mounts at To the facet Name, {facet, Name}: whatever grant the domain's facet
 %% registry holds for Name when a path under To is resolved, a grant of another domain
-%% included, which is the only way such a grant is mounted. Its options name the tree
-%% the grant roots in, {tree, Name}, once, and the rights as a grant's mount does.
+%% included, which is the only way such a grant is mounted. Its options name the rights
+%% as a grant's mount does, and no tree: a resolution takes the tree the registry holds
+%% with the facet, the one the grant's server named in the mint's reply
+%% (docs/design-files.md, "The tree beneath an entry").
 %%
 %% Or mounts at To the session's own package, {erofs, app}, the image of the file the
 %% app's record names, read-only with no option or ro, or read and execute with rx.
@@ -153,8 +156,8 @@ mount_facet({Point, Options}, Name) -> mount({facet, Name}, Point, Options).
 %% Mounts Grant, {Pid, Tree, Rights}, a grant of the service Name that this domain serves
 %% for its own domain (erx_fs_grants:own/1,2), on the tree its handle carries, at Name's
 %% place, where a domain that holds the facet Name mounts it, with the place's rights
-%% lowered to Rights (mount/3); the place's tree is the facet's mount's, never the
-%% grant's. It first removes any entry an earlier instance of the tree left there
+%% lowered to Rights (mount/3). It first removes any entry an earlier instance of the
+%% tree left there
 %% (docs/design-shell.md, "Interfaces"). So the system domain reaches each files service
 %% it serves by the path its sessions do. A Name with no place fails to match: a tree
 %% that serves itself has one.
@@ -162,10 +165,10 @@ mount_facet({Point, Options}, Name) -> mount({facet, Name}, Point, Options).
 mount_own(Name, Grant) ->
     {Point, Options} = place(Name),
     _ = unmount(Point),
-    mount(Grant, Point, [Rights || Rights <- Options, ?ERX_IS_FILES_RIGHTS(Rights)]).
+    mount(Grant, Point, Options).
 
-%% Where the tree of each service Name mounts, on the tree of its own name, with rw as
-%% the entry's own rights, which a resolution lowers to the rights the facet's grant
+%% Where the tree of each service Name mounts, with rw as the entry's own rights, which
+%% a resolution lowers to the rights the facet's grant
 %% carries (erx_facets:table/1), so a domain writes there only through an rw grant:
 %% data, the storage domain's tree, at /data; media, the media domain's tree of every
 %% drive, at /media (docs/design-drives.md, "Mounting it"); the system domain's files
@@ -184,12 +187,12 @@ mount_own(Name, Grant) ->
 %% (docs/design-packaging.md, "An app's session"), and the system domain mounts its
 %% packages grant at its own place (packages_place/0).
 -spec place(atom()) -> {binary(), [option()]} | none.
-place(data) -> {<<"/data">>, [{tree, <<"data">>}, rw]};
-place(media) -> {<<"/media">>, [{tree, <<"media">>}, rw]};
-place(apps) -> {<<"/apps">>, [{tree, <<"apps">>}, rw]};
-place(start) -> {<<"/etc/start">>, [{tree, <<"start">>}, rw]};
-place(machine) -> {<<"/machine">>, [{tree, <<"machine">>}, rw]};
-place(line) -> {<<"/line">>, [{tree, ?ERX_LINE_TREE_BYTES}, rw]};
+place(data) -> {<<"/data">>, [rw]};
+place(media) -> {<<"/media">>, [rw]};
+place(apps) -> {<<"/apps">>, [rw]};
+place(start) -> {<<"/etc/start">>, [rw]};
+place(machine) -> {<<"/machine">>, [rw]};
+place(line) -> {<<"/line">>, [rw]};
 place(_Name) -> none.
 
 %% Where the storage domain's packages tree lies in the system domain alone, with the
@@ -198,7 +201,7 @@ place(_Name) -> none.
 %% "Where a package lies"). place/1 gives packages no place, so mount_facets/1 never
 %% mounts it, whatever facets a session holds.
 -spec packages_place() -> {binary(), [option()]}.
-packages_place() -> {<<"/packages">>, [{tree, <<"data">>}, rw]}.
+packages_place() -> {<<"/packages">>, [rw]}.
 
 %% Where the home of the user named User lies, with the same options as place/1
 %% (docs/design-files.md, "A user's home"): /root for root and /home/User for any
@@ -210,10 +213,10 @@ packages_place() -> {<<"/packages">>, [{tree, <<"data">>}, rw]}.
 home_place(User) when User =:= <<>>; User =:= <<".">>; User =:= <<"..">> ->
     {error, einval};
 home_place(<<"root">>) ->
-    {ok, {<<"/root">>, [{tree, <<"data">>}, rw]}};
+    {ok, {<<"/root">>, [rw]}};
 home_place(User) when is_binary(User) ->
     case binary:match(User, [<<"/">>, <<0>>]) of
-        nomatch -> {ok, {<<"/home/", User/binary>>, [{tree, <<"data">>}, rw]}};
+        nomatch -> {ok, {<<"/home/", User/binary>>, [rw]}};
         _ -> {error, einval}
     end.
 
@@ -309,13 +312,13 @@ watched(Table, Monitors) ->
 
 %% The checks ----------------------------------------------------------------------
 
-%% A change checked against the table: a mount's options before its point and its tree
-%% after it, a bind's source before its point.
+%% A change checked against the table: a mount's options before its point and a grant's
+%% tree after it, a bind's source before its point.
 -spec checked(term(), table()) -> {ok, checked()} | {error, reason()}.
 checked({mount, To, {Pid, Tree, Granted}, Options}, Table)
   when is_pid(Pid), node(Pid) =:= node(), is_binary(Tree) ->
     maybe
-        {ok, Asked} ?= grant_options(Options),
+        {ok, Asked} ?= asked(Options),
         {ok, Rights} ?= lowered(Asked, Granted),
         {ok, Point} ?= new_point(To, Table),
         ok ?= tree(Tree),
@@ -323,10 +326,9 @@ checked({mount, To, {Pid, Tree, Granted}, Options}, Table)
     end;
 checked({mount, To, {facet, Name}, Options}, Table) when is_atom(Name) ->
     maybe
-        {ok, Tree, Rights} ?= mount_options(Options, undefined, undefined),
+        {ok, Rights} ?= asked(Options),
         {ok, Point} ?= new_point(To, Table),
-        ok ?= tree(Tree),
-        {ok, {mount, Point, {facet, Name, Tree}, Rights}}
+        {ok, {mount, Point, {facet, Name}, Rights}}
     end;
 checked({mount, To, {erofs, app}, Options}, Table) ->
     maybe
@@ -357,22 +359,11 @@ checked({unmount, To}, Table) ->
 checked(_Request, _Table) ->
     {error, einval}.
 
-%% A grant handle's mount options: at most one rights, ro when none is given, and no
-%% tree, which the handle carries.
-grant_options([]) -> {ok, ro};
-grant_options([Rights]) when ?ERX_IS_FILES_RIGHTS(Rights) -> {ok, Rights};
-grant_options(_Options) -> {error, einval}.
-
-%% A facet mount's options: the tree the grant roots in, {tree, Name}, once, and at most
-%% one rights, ro when none is given.
-mount_options([], Tree, Rights) when is_binary(Tree) ->
-    {ok, Tree, case Rights of undefined -> ro; _ -> Rights end};
-mount_options([{tree, Tree} | Rest], undefined, Rights) when is_binary(Tree) ->
-    mount_options(Rest, Tree, Rights);
-mount_options([Rights | Rest], Tree, undefined) when ?ERX_IS_FILES_RIGHTS(Rights) ->
-    mount_options(Rest, Tree, Rights);
-mount_options(_Options, _Tree, _Rights) ->
-    {error, einval}.
+%% The rights a grant's or a facet's mount asks: at most one rights, ro when none is
+%% given, and no tree, which a grant's handle carries and a facet's registry holds.
+asked([]) -> {ok, ro};
+asked([Rights]) when ?ERX_IS_FILES_RIGHTS(Rights) -> {ok, Rights};
+asked(_Options) -> {error, einval}.
 
 %% A grant pid's entry: the lesser of the rights its mount asked and those its grant was
 %% started with; einval for a grant of rights erx_path:lesser/2 does not order.
@@ -482,7 +473,7 @@ ended(Pid, Table) ->
 mounted({mount_app, Point, Rights}) ->
     maybe
         {ok, #{place := {Facet, Names}, layout := Layout}} ?= app_record(),
-        {ok, Grant} ?= erx_facets:file_grant(Facet, Rights, app_tree(Facet)),
+        {ok, Grant} ?= erx_facets:file_grant(Facet, Rights),
         {ok, Fid} ?= erx_file_remote:open_fid(Grant, Names),
         {ok, Fs} ?= image(Grant, Fid, Layout),
         {ok, {mount, Point, {erofs, Fs}, Rights, {Grant, Fid}}}
@@ -491,15 +482,6 @@ mounted(Checked) ->
     {ok, Checked}.
 
 %% The app's record as the session's agent holds it, its place a facet and plain names.
-%% The tree the grant behind an app record's facet answers, which the image's reads
-%% attach to: the storage volume's one tree for an installed app, the one /packages
-%% names (packages_place/0), and the system tree for a built-in one.
-app_tree(packages) ->
-    {_, [{tree, Tree} | _]} = packages_place(),
-    Tree;
-app_tree(system) ->
-    <<"system">>.
-
 app_record() ->
     case erx_connections:app_held() of
         {ok, #{place := {Facet, Names}, layout := Layout} = Record}
