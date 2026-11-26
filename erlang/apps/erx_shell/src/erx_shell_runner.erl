@@ -97,7 +97,7 @@ new(Terminal = #{write := Write}) ->
                      #{job_control := Shell} -> {Shell, line};
                      _ -> none
                  end,
-    WithShell = maps:merge(S, maps:with([run_shell], Terminal)),
+    WithShell = maps:merge(S, maps:with([run_shell, size], Terminal)),
     {runner(), WithShell#{job_control => JobControl}}.
 
 -doc """
@@ -245,7 +245,7 @@ command(#{name := Name, module := Module, usage := Usage, needs := Needs},
     Ctx0 = #{name => Name, cwd => Cwd, env => Vars,
             stdin => stream(0, S), stdout => stream(1, S), stderr => stream(2, S),
             facets => Facets},
-    Ctx = maps:merge(Ctx0, maps:merge(maps:with([run_shell], S), job_control(S))),
+    Ctx = maps:merge(Ctx0, maps:merge(maps:with([run_shell, size], S), job_control(S))),
     case [Need || Need <- Needs, not is_map_key(Need, Facets)] of
         [] ->
             outcome(isolated(fun() -> invoke(Module, Args, Ctx) end), Usage, Ctx);

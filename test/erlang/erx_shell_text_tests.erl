@@ -332,6 +332,48 @@ ls_asks_no_width_unless_it_writes_columns_test_() ->
                         end)
      end}.
 
+%% An interactive shell's commands see the size its terminal holds: the runner copies the
+%% terminal's `size` into each command's context, so ls lays names out for it.
+ls_takes_the_size_the_terminal_holds_test() ->
+    with_files([{"a", <<>>}, {"b", <<>>}, {"c", <<>>}],
+               fun(Dir) ->
+                       Test = self(),
+                       Terminal = fun(Size) -> #{write => fun(Bytes) -> Test ! {out, iolist_to_binary(Bytes)}, ok end,
+                                                 size => Size, cwd => Dir} end,
+                       Ran = fun(Size) ->
+                                     {Runner, State} = erx_shell_runner:new(Terminal(Size)),
+                                     {Table, []} = erx_shell_namespace:build(
+                                                     [{erx_cmd_ls, erx_cmd_ls:module_info(attributes),
+                                                       erx_cmd_ls:module_info(exports)}]),
+                                     Shell = erx_shell_eval:new(#{}, Runner, State#{table := Table}),
+                                     {ok, _} = erx_shell_eval:run_source(<<"ls">>, Shell),
+                                     shown(out)
+                             end,
+                       ?assertEqual(<<"a\nb\nc\n">>, Ran(fun() -> {24, 4} end)),
+                       ?assertEqual(<<"a\tb\tc\n">>, Ran(fun() -> {24, 80} end)),
+                       ?assertEqual(<<"a\tb\tc\n">>, Ran(fun() -> unknown end))
+               end).
+
+%% The terminal's size is the one the session's terminal holds, from the context, and
+%% never one asked of the group leader: at a terminal that holds none, a test terminal,
+%% the size is unknown whatever the group leader answers, and the answer comes at once,
+%% where a size asked of a leader that answers nothing waits for ever.
+erx_cmd_size_comes_from_the_terminal_test_() ->
+    {timeout, 20,
+     fun() ->
+             Tty = {tty, fun(_) -> ok end},
+             Ctx = #{stdin => null, stdout => Tty, stderr => Tty, env => #{}},
+             with_silent_leader(
+               fun() ->
+                       ?assertEqual({unknown, unknown}, {erx_cmd:columns(Ctx), erx_cmd:rows(Ctx)}),
+                       Held = Ctx#{size => fun() -> {24, 100} end},
+                       ?assertEqual({100, 24}, {erx_cmd:columns(Held), erx_cmd:rows(Held)}),
+                       ?assertEqual(33, erx_cmd:columns(Held#{env := #{<<"COLUMNS">> => [<<"33">>]}})),
+                       Piped = Held#{stdin := null, stdout := null, stderr := null},
+                       ?assertEqual(unknown, erx_cmd:columns(Piped))
+               end)
+     end}.
+
 %% Runs Fun with a group leader that reads every request and answers none.
 with_silent_leader(Fun) ->
     Silent = spawn(fun Loop() -> receive _ -> Loop() end end),

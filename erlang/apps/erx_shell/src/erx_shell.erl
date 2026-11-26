@@ -93,6 +93,7 @@ changes come, and each delivery sends a process one message.
 %% The terminal a runner writes a unit's output to.
 -type terminal() :: #{write := fun((iodata()) -> ok),
                       run_shell => fun((erx_console:shell()) -> ok | {error, term()}),
+                      size => fun(() -> {Rows :: pos_integer(), Columns :: pos_integer()} | unknown),
                       job_control => job_control(),
                       foreground => foreground(),
                       vars => erx_shell_script:vars(),

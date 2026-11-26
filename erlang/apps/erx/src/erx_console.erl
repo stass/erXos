@@ -145,9 +145,10 @@
 -type shell_end() :: restart | {halt, 0 | 1} | {drain, erx_prog:status()} | ignore.
 %% A shell's start function, as group:start/3 takes it.
 -type shell() :: {module(), atom(), [term()]}.
-%% A terminal as a shell holds it: its write/1 and its run_shell/1.
+%% A terminal as a shell holds it: its write/1, its run_shell/1 and its size/0.
 -type terminal() :: #{write := fun((iodata()) -> ok),
-                      run_shell := fun((shell()) -> ok | {error, term()})}.
+                      run_shell := fun((shell()) -> ok | {error, term()}),
+                      size := fun(() -> {Rows :: pos_integer(), Columns :: pos_integer()} | unknown)}.
 %% What a console is started as (start_link/1). `system` is the system domain's console:
 %% it starts `user`, writes the kernel log and the system domain's log records, shows the
 %% slogan and ends the runtime when its line or its input ends. `session` is a session's
@@ -380,7 +381,8 @@ terminal() ->
 -spec terminal(atom() | pid()) -> terminal().
 terminal(Console) ->
     #{write => fun(Bytes) -> write(Console, Bytes) end,
-      run_shell => fun(Shell) -> run_shell(Console, Shell) end}.
+      run_shell => fun(Shell) -> run_shell(Console, Shell) end,
+      size => fun() -> try gen_server:call(Console, size, 1000) catch exit:_ -> unknown end end}.
 
 -doc """
 What a session's create spec names as its console facet, `console => facet()`: this
@@ -679,6 +681,8 @@ handle_call({run_shell, Shell = {shell, start, _}}, From, State = #state{shells 
 handle_call({run_shell, Shell}, From, State = #state{shells = Shells, terminal = Terminal}) ->
     New = start_shell(Shell, Terminal),
     {noreply, gets_input(State#state{shells = [{New, From, Shell} | Shells]})};
+handle_call(size, _From, State = #state{size = Size}) ->
+    {reply, Size, State};
 handle_call(first_group, _From, State = #state{base = Base}) ->
     {reply, Base, State};
 handle_call({write, Bytes}, From, State) ->

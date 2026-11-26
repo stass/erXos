@@ -429,9 +429,9 @@ MEDIA_BODY = [
       steps = RC_STEPS.each_with_index.map { |step, index| [step, "RtS#{index}"] }
       [
         # RtRc(Line): how Line ended and what it wrote to descriptors 1 and 2, a terminal
-        # COLUMNS wide, so ls never asks the remote group leader for its width.
+        # that holds no size, so ls writes the width FreeBSD's default gives.
         'RtRc=fun(RtLine)->RtSelf=self(),RtTty={tty,fun(RtB)->RtSelf!{rt_out,RtB},ok end},' \
-        'RtEnd=try erx_shell_script:run(RtLine,#{fds=>#{0=>null,1=>RtTty,2=>RtTty},vars=>#{<<"COLUMNS">>=>[<<"80">>]}}) catch RtC:RtR->{RtC,RtR} end,' \
+        'RtEnd=try erx_shell_script:run(RtLine,#{fds=>#{0=>null,1=>RtTty,2=>RtTty}}) catch RtC:RtR->{RtC,RtR} end,' \
         'RtOut=fun RtO(RtA)->receive {rt_out,RtB2}->RtO([RtA,RtB2]) after 0->iolist_to_binary(RtA) end end,' \
         '{RtEnd,RtOut([])} end',
         # RtHolds(Out, Exact, Has, Lacks): Out is Exact, unless that is any, and holds each

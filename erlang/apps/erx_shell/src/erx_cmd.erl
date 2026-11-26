@@ -78,7 +78,11 @@ as a program that reads `Ctrl-Z` as a key raises `SIGTSTP`.
 %% The interactive shell's job table, which stop/1 asks.
 job_control => erx_shell:job_control(),
                  %% The terminal's run_shell, at an interactive shell only.
-                 run_shell => fun((erx_console:shell()) -> ok | {error, term()})}.
+                 run_shell => fun((erx_console:shell()) -> ok | {error, term()}),
+                 %% The size the session's terminal holds, {Rows, Columns}, at an
+                 %% interactive shell only: no stream is asked for it, and the terminal's
+                 %% answer is bounded, so a command does not wait on a terminal.
+                 size => fun(() -> {pos_integer(), pos_integer()} | unknown)}.
 
 %% An event a process may ask for: `Ctrl-T`'s info request, or a change of
 %% the terminal's size.
@@ -148,20 +152,20 @@ isatty(Ctx, Stream) when Stream =:= stdin; Stream =:= stdout; Stream =:= stderr 
 -doc """
 The terminal's width in columns: `COLUMNS` when it is a positive number,
 as FreeBSD's `ls` and `ps` take it first, else the width the terminal
-reports, else `unknown`, for which each command keeps FreeBSD's default.
+holds, else `unknown`, for which each command keeps FreeBSD's default.
 """.
 -spec columns(ctx()) -> pos_integer() | unknown.
 columns(Ctx) ->
-    terminal_size(Ctx, <<"COLUMNS">>, fun io:columns/0).
+    terminal_size(Ctx, <<"COLUMNS">>, columns).
 
 -doc """
 The terminal's height in lines: `LINES` when it is a positive number, as
-FreeBSD's termcap takes it first, else the height the terminal reports,
+FreeBSD's termcap takes it first, else the height the terminal holds,
 else `unknown`.
 """.
 -spec rows(ctx()) -> pos_integer() | unknown.
 rows(Ctx) ->
-    terminal_size(Ctx, <<"LINES">>, fun io:rows/0).
+    terminal_size(Ctx, <<"LINES">>, rows).
 
 terminal_size(Ctx, Variable, Reported) ->
     case env(Ctx, Variable) of
@@ -174,18 +178,21 @@ terminal_size(Ctx, Variable, Reported) ->
             reported(Ctx, Reported)
     end.
 
-%% The size the terminal holds, asked through the group leader, which is the
-%% terminal's, only when a standard stream is the terminal.
-reported(Ctx, Reported) ->
-    case lists:any(fun(Stream) -> isatty(Ctx, Stream) end, [stdin, stdout, stderr]) of
-        true -> reported(Reported);
-        false -> unknown
-    end.
-
-reported(Reported) ->
-    case Reported() of
-        {ok, Size} when is_integer(Size), Size > 0 -> Size;
-        _ -> unknown
+%% The size the session's terminal holds (the context's size, which the terminal gives
+%% an interactive shell), when a standard stream is the terminal: neither a stream nor
+%% the group leader is asked, so a leader that never answers holds nothing up. A context
+%% without it, a test terminal's or a command domain's, has none.
+reported(Ctx, Side) ->
+    Tty = lists:any(fun(Stream) -> isatty(Ctx, Stream) end, [stdin, stdout, stderr]),
+    case Ctx of
+        #{size := Size} when Tty ->
+            case {Size(), Side} of
+                {{Rows, _Columns}, rows} -> Rows;
+                {{_Rows, Columns}, columns} -> Columns;
+                {unknown, _} -> unknown
+            end;
+        _ ->
+            unknown
     end.
 
 -doc """
