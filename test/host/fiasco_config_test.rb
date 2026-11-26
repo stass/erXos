@@ -35,6 +35,7 @@ class FiascoConfigTest < Minitest::Test
     CONFIG_PERF_CNT=y
     CONFIG_PERF_CNT_USER=y
     CONFIG_MP_MAX_CPUS=8
+    CONFIG_RT_DBG=y
     CONFIG_ABI_VF=y
     CONFIG_LABEL="erx"
   CONFIG

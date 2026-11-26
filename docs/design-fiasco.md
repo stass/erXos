@@ -2963,11 +2963,11 @@ written at one place:
 | `ipc_send` | `Thread::do_ipc` (`kern/thread-ipc.cpp:621`), as its send phase starts (`kern/thread-ipc.cpp:643`), before its first blocking point, for a send to anything but the caller's reply capability (`L4_obj_ref::Ipc_reply`, `kern/thread-ipc.cpp:676`) | `partner` (the thread the send goes to, for an IPC gate its bound thread), `label` (what the receiver will be given as the label, `_from_spec`, `kern/thread-ipc.cpp:651`), `tag` (the message tag word) |
 | `ipc_reply` | the same, for a send to the caller's reply capability | `partner` (the thread replied to), `tag` |
 | `ipc_send_fail` | the same function, when its send phase fails (`kern/thread-ipc.cpp:725-731`) | `error` (Fiasco's IPC error code, as the failing step committed it) |
-| `ipc_receive` | `Thread::transfer_msg` (`kern/thread-ipc.cpp:924`), once the message is copied, whichever path called it: `do_ipc`'s send phase (`kern/thread-ipc.cpp:711`), a queued sender taken by its receiver (`Thread::ipc_send_msg`, `kern/thread-ipc.cpp:188`) or a send to a thread of another CPU (`Thread::remote_ipc_send`, `kern/thread-ipc.cpp:1490`) | `sender`, `receiver`, `tag` (as the receiver is given it, with its error bit set when the copy failed) |
+| `ipc_receive` | `Thread::transfer_msg` (`kern/thread-ipc.cpp:904`), once the message is copied and the receiver's registers are written (`kern/thread-ipc.cpp:913`), whichever path called it: `do_ipc`'s send phase (`kern/thread-ipc.cpp:691`), a queued sender taken by its receiver (`Thread::ipc_send_msg`, `kern/thread-ipc.cpp:168`) or a send to a thread of another CPU (`Thread::remote_ipc_send`, `kern/thread-ipc.cpp:1468`) | `sender`, `receiver`, `tag` (as the receiver is given it, with its error bit set when the copy failed) |
 | `ipc_receive_fail` | `Thread::do_ipc_receive` (`kern/thread-ipc.cpp:765`), when the receive ends by a timeout or a cancel (`kern/thread-ipc.cpp:899-912`) | `error` (Fiasco's IPC error code) |
 | `fault` | `Thread::handle_page_fault_pager` (`kern/thread-ipc.cpp:247`) for a page fault, and `Thread::send_exception` (`kern/thread-ipc.cpp:1044`) for any other exception from user mode, before the message to the pager or the handler | `address`, `pc`, `cause` (the architecture's syndrome word) |
 | `fault_end` | the same two functions, when the reply has come back or the message has failed | `address`, `error` (0 when the thread resumes) |
-| `switch` | `Context::_switch_exec_common` (`kern/context.cpp:1293`), which both `switch_exec_locked` and `switch_exec_helping` reach (`kern/context.cpp:1261`, `1280`), after its check that the target is ready (`kern/context.cpp:1298-1302`) and before `switch_cpu` (`kern/context.cpp:1314`), that function's one call | `next` (the thread switched to), `next_space` |
+| `switch` | `Context::_switch_exec_common` (`kern/context.cpp:1237`), which both `switch_exec_locked` and `switch_exec_helping` reach (`kern/context.cpp:1205`, `1224`), after its check that the target is ready (`kern/context.cpp:1242-1246`) and just before `switch_cpu` (`kern/context.cpp:1259`), that function's one call | `next` (the thread switched to), `next_space` |
 | `preempt` | `Timeslice_timeout::expired` (`kern/timeslice_timeout.cpp:36`), when the running thread's quantum ends | `quantum` (its length, in microseconds) |
 | `sched_set` | `Scheduler::sys_run` (`kern/scheduler.cpp:63`), when the root sets a thread's priority and CPU set as [Bands](#bands) places it | `target`, `priority`, `cpus` (the CPU mask) |
 | `irq` | `Irq_chip::handle_irq` (`kern/irq_chip.cpp:409`), for every interrupt the controller dispatches, before its handler runs | `pin`, `object` (the IRQ object, 0 for a line whose handler is the kernel's own) |
@@ -2977,7 +2977,7 @@ written at one place:
 **Where a thread is named.** A hook reads an object's id only where Fiasco itself still uses that object, so no record
 dereferences a pointer that may dangle. `ipc_send` and `ipc_reply` read their partner as the send phase starts, before
 anything blocks. A message has one place where both its threads are certain to exist, the copy into the receiver:
-`transfer_msg` writes the receiver's registers after copying (`kern/thread-ipc.cpp:929-932`), and its sender is the thread
+`transfer_msg` writes the receiver's registers after copying (`kern/thread-ipc.cpp:910-912`), and its sender is the thread
 running it, so `ipc_receive` is written there and names both ends. The record's `thread` is whichever thread the CPU was
 running, as in every record: the sender on `do_ipc`'s path, the receiver when it takes a queued sender, and on a send to
 another CPU whatever ran when that CPU took the request; the arguments, not `thread`, say who sent and who received. The
@@ -3002,9 +3002,12 @@ answer no consumer that needs it. No record holds a kernel address: ids are coun
 is a user address.
 
 **Writing.** One glue function, `Erx_trace::record(event, arg0, arg1, arg2)` in `fiasco/kernel/src/erx/erx_trace.cpp`, is the
-only writer, and each hook is one call of it. It masks interrupts for the write itself (`cpu_lock`), since Fiasco runs some
+only writer. Each hook is one call of its event's function in that file (`Erx_trace::ipc_receive`, `Erx_trace::switch_to`),
+which names its objects and calls `record`, so the event numbers and the core's headers stay in the glue and no hooked
+file of Fiasco's includes them. It masks interrupts for the write itself (`cpu_lock`), since Fiasco runs some
 kernel paths with interrupts enabled (`Factory::kinvoke` around the object's manufacture, `kern/factory.cpp:182`;
-`Kobject::destroy`); under the mask it reads the CPU, the current thread and its space and the counter, and hands the entry
+`Kobject::destroy`); under the mask it value-initialises the entry, so every argument an event does not use is 0, reads the current thread and
+its space and the counter, and hands the entry
 and the CPU's number to `erx_trace_kernel_put`, which writes it on that CPU's ring with `erx_trace_ring_put`. A CPU's ring has one writer, the CPU, and no interrupt can enter its write, so the
 mask stands where the root's ring has its trace lock, and the sequence protocol is the core's ([The trace ring](#the-trace-ring),
 "Writing"). The time is the counter converted by the same core function the root's `erx_clock_ns` calls, so the kernel's
@@ -3030,7 +3033,9 @@ no ring is ever a C++ object and no C++ file includes the ring's header. Three f
 
 The glue holds `static_assert(Config::Max_num_cpus <= ERX_TRACE_KERNEL_RINGS)` (`kern/config.cpp:74`), so a CPU number
 the glue passes always names a ring, and a configuration with more CPUs fails to build. The glue's references into
-Fiasco (`cpu_lock`, `current()`, the object id, the counter) are lines of `fiasco/erx_glue_imports.txt`.
+Fiasco (`cpu_lock`, `current()`, `current_cpu()`, the object id, the counter) are inline functions of Fiasco's headers, so
+the glue's object refers to no Fiasco symbol and `fiasco/erx_glue_imports.txt` gains no line; the object ids exist because
+the fork's configuration requires `CONFIG_RT_DBG`.
 
 **The root's window.** As its service starts, the root asks for the mapping with one operation the fork adds to the platform
 control object (`kern/platform_control_object.cpp`), which only the root holds ([The end path](#the-end-path)): `map_trace`,

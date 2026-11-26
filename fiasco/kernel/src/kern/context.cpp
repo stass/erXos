@@ -562,6 +562,7 @@ IMPLEMENTATION:
 #include "cpu.h"
 #include "cpu_lock.h"
 #include "entry_frame.h"
+#include "erx_trace.h"
 #include "fpu.h"
 #include "globals.h"		// current()
 #include "lock_guard.h"
@@ -1254,6 +1255,7 @@ Context::_switch_exec_common(Context *t, Helping_mode mode)
   t->set_current_cpu(get_current_cpu());
   switch_fpu(t);
   update_consumed_time();
+  Erx_trace::switch_to(t);
   switch_cpu(t);
   return switch_handle_drq();
 }

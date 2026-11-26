@@ -115,6 +115,7 @@ IMPLEMENTATION:
 #include "config.h"
 #include "cpu_lock.h"
 #include "erx_machine_stop.h"
+#include "erx_trace.h"
 #include "ipc_remote_timeout.h"
 #include "ipc_timeout.h"
 #include "lock_guard.h"
@@ -898,7 +899,7 @@ Thread::do_ipc_receive(bool have_receive, Thread *partner, Sender *sender,
  * \post This function is a potential preemption point, if the transferred
  *       message contains typed items.
  */
-PRIVATE inline NEEDS [Thread::copy_utcb_to]
+PRIVATE inline NEEDS [Thread::copy_utcb_to, "erx_trace.h"]
 bool
 Thread::transfer_msg(L4_msg_tag tag, Thread *receiver,
                      L4_fpage::Rights rights, bool open_wait)
@@ -909,6 +910,7 @@ Thread::transfer_msg(L4_msg_tag tag, Thread *receiver,
   tag.set_error(!success);
   dst_regs->tag(tag);
   dst_regs->from(_from_spec);
+  Erx_trace::ipc_receive(this, receiver, tag.raw());
 
   // setup the reply capability in case of a call
   if (success && open_wait && is_partner(receiver))

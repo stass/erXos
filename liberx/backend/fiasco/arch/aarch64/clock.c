@@ -5,8 +5,8 @@
 
 /*
  * The generic timer's virtual counter, which Fiasco leaves readable in user
- * mode. A frequency of zero, which no conforming hardware reports, reads as
- * time zero rather than as a division by zero.
+ * mode, converted to nanoseconds by the core the kernel's trace rings share
+ * (erx/core/clock_ns.h).
  *
  * erx_fiasco_counter is the one read of the counter in an erXos program, and
  * the read sits between two ISBs. A read of the counter is not ordered by
@@ -24,9 +24,8 @@
 #include <stdint.h>
 
 #include "erx/arch/aarch64/sysreg.h"
+#include "erx/core/clock_ns.h"
 #include "liberx/backend/fiasco/log.h"
-
-#define ERX_NS_PER_SECOND	UINT64_C(1000000000)
 
 uint64_t
 erx_fiasco_counter_hz(void)
@@ -62,10 +61,6 @@ uint64_t
 erx_fiasco_clock_ns(void)
 {
 	const uint64_t frequency = erx_fiasco_counter_hz();
-	const uint64_t ticks = erx_fiasco_counter();
 
-	if (frequency == 0)
-		return (0);
-	return (ticks / frequency * ERX_NS_PER_SECOND +
-	    ticks % frequency * ERX_NS_PER_SECOND / frequency);
+	return (erx_clock_ticks_ns(erx_fiasco_counter(), frequency));
 }

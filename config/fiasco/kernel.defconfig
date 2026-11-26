@@ -19,6 +19,9 @@ CONFIG_ONE_SHOT=y
 CONFIG_BENCHMARKING=y
 CONFIG_PERF_CNT=y
 CONFIG_PERF_CNT_USER=y
+# Every kernel object keeps its id, which names threads and spaces in the
+# kernel's trace rings (docs/design-fiasco.md, "The kernel's trace rings").
+CONFIG_RT_DBG=y
 CONFIG_EXPERT=y
 CONFIG_NO_VERSION=y
 # CONFIG_CPU_VIRT is not set
