@@ -1669,10 +1669,15 @@ tree beneath an entry"). The path depends on what the format offers:
   found by a walk again, as FreeBSD's `msdosfs` keeps an unlinked but
   open file out of its lookup by entry place
   (`sys/fs/msdosfs/msdosfs_denode.c:129-134` at `release/14.3.0`).
-  The table holds at most 65,536 entries, a removed file's among them,
-  and never evicts one: when it
-  is full, a walk or a create that would add an entry fails with
-  `enfile`. A file that no fid names leaves the table, so a file closed
+  The table holds a removed file's entry too, and never evicts one. Its
+  bound is derived, not chosen: as many entries as fit an eighth of the
+  volume's memory bound (`media_volume_bytes`,
+  [design-drives.md](design-drives.md#time-and-memory)) at the words one
+  entry costs at most, its entry, node and key and its slots in the
+  table's two maps, measured on the BEAM; an eighth, since a garbage
+  collection counts the heap's old and new blocks at once, about four
+  times the live words, beside the batch's quarter. When it is full,
+  a walk or a create that would add an entry fails with `enfile`. A file that no fid names leaves the table, so a file closed
   and opened again may get a new path, which costs a client's cache a
   miss: a documented limitation of these formats, which store no file
   numbers.

@@ -15,8 +15,11 @@ and no chain reaches a free cluster.
 * **A batch.** grow/3 and shrink/3 change chains in an overlay of FAT entries,
   each tagged with the step of the batch that writes it (set/3): every entry of a
   cluster the batch allocates goes in `preparation`, so each new run is a chain of
-  its own ending in an end-of-chain mark that nothing reaches yet; the link from a
-  live chain's last cluster to a new run goes in `linking`; and an entry that
+  its own ending in an end-of-chain mark that nothing reaches yet, and a link from
+  one of its entries into another FAT sector is an end-of-chain mark there and the
+  link in `linking` (written/3), so preparation's sectors, landed in any order or
+  in part, leave lost clusters at worst; the link from a live chain's last
+  cluster to a new run goes in `linking`; and an entry that
   replaces a live chain's link, the end-of-chain mark that cuts it or, when a file
   shrinks and grows in one batch, the cut cluster's link to its new run, goes in
   `cutting`, after the caller's `publication` step has shrunk the file's size. A step's sectors carry every
@@ -259,17 +262,14 @@ set(Alloc = #alloc{batch = Batch}, Cluster, Value) ->
     Kind = case Batch of #{Cluster := {fresh, _}} -> fresh; #{} -> live end,
     Alloc#alloc{batch = Batch#{Cluster => {Kind, Value}}}.
 
-%% The step that writes Cluster's entry of the overlay, from what it replaces on the
-%% medium, so that a file's chain is never shorter than its size, which the caller's
-%% publication step changes between linking and cutting. A fresh cluster's entry
-%% goes in preparation. A live entry the medium ends a chain at only grows the chain,
+%% The step that writes live Cluster's entry of the overlay, from what it replaces on
+%% the medium (a fresh cluster's steps are written/3's), so that a file's chain is never shorter than its size, which the caller's
+%% publication step changes between linking and cutting. A live entry the medium ends a chain at only grows the chain,
 %% in linking; an end-of-chain mark that replaces a link only shrinks it, in
 %% cutting. A link that replaces a link, a cut cluster's link to a new run when a
 %% file shrinks and grows in one batch, goes in linking when the new rest of the
 %% chain is no shorter than the old one, and in cutting otherwise.
-step(_Alloc, _Cluster, {fresh, _Value}) ->
-    preparation;
-step(Alloc, Cluster, {live, Value}) ->
+step(Alloc, Cluster, Value) ->
     Old = element(1, medium(Alloc, Cluster, none)),
     case {end_of_chain(Alloc, Old), end_of_chain(Alloc, Value)} of
         {true, _} -> linking;
@@ -336,15 +336,22 @@ after_cluster(_Alloc, Cluster) -> Cluster + 1.
 
 -doc """
 The batch's share of what the volume holds, in sectors, at most: each FAT sector
-once for preparation when it holds a fresh entry and twice, for linking and
-cutting, when it holds a live one, and one for each waiting chain. It reads
+once for preparation when it holds a fresh entry, once more for linking when
+one of those links into another FAT sector, once each for linking and cutting
+when it holds a live one, and one for each waiting chain. It reads
 nothing. It is non-zero after a commit exactly when a chain still waits, and the
 caller commits again at once.
 """.
 -spec held(alloc()) -> non_neg_integer().
 held(Alloc = #alloc{batch = Batch, waiting = Waiting}) ->
-    Sectors = lists:usort([{Kind, entry_sector(Alloc, Cluster)} || Cluster := {Kind, _Value} <- Batch]),
-    lists:sum([case Kind of fresh -> 1; live -> 2 end || {Kind, _Index} <- Sectors]) + length(Waiting).
+    Writes = lists:usort([{Step, entry_sector(Alloc, Cluster)} || Cluster := Entry <- Batch,
+                                                                 Step <- held_steps(Alloc, Cluster, Entry)]),
+    length(Writes) + length(Waiting).
+
+held_steps(Alloc, Cluster, {fresh, Value}) ->
+    case crosses(Alloc, Cluster, Value) of true -> [preparation, linking]; false -> [preparation] end;
+held_steps(_Alloc, _Cluster, {live, _Value}) ->
+    [linking, cutting].
 
 -doc """
 The batch's plan, its preparation, linking, cutting and release steps each with the
@@ -406,14 +413,35 @@ batch_plan(Alloc) ->
     {[{Step, Writes} || {Step, Writes} <- Steps ++ [{release, copies(Alloc, Released)}], Writes =/= []], Waiting}.
 
 %% Entries' {Cluster, Value} of Step and of the steps before it.
+%% A cluster written in two steps takes the later step's value.
 upto(Step, Entries) ->
     {Before, _} = lists:splitwith(fun(Other) -> Other =/= Step end, ?STEPS),
-    [{Cluster, Value} || {Other, Cluster, Value} <- Entries, lists:member(Other, [Step | Before])].
+    maps:to_list(maps:from_list([{Cluster, Value} || Other <- Before ++ [Step], {Written, Cluster, Value} <- Entries,
+                                                    Written =:= Other])).
 
 %% The batch's entries by the FAT sector each lies in, as {Step, Cluster, Value}.
 by_sector(Alloc = #alloc{batch = Batch}) ->
     maps:groups_from_list(fun({_Step, Cluster, _Value}) -> entry_sector(Alloc, Cluster) end,
-                          [{step(Alloc, Cluster, Entry), Cluster, Value} || Cluster := {_Kind, Value} = Entry <- Batch]).
+                          lists:append([written(Alloc, Cluster, Entry) || Cluster := Entry <- Batch])).
+
+%% Cluster's entry of the overlay as the steps write it, {Step, Cluster, Value}: a
+%% fresh entry that links into another FAT sector is an end-of-chain mark in
+%% preparation and its link in linking, so that preparation's sectors, landed in
+%% any order or in part, hold only new chains that end within their own sector, and
+%% a cut leaves lost clusters at worst.
+written(Alloc, Cluster, {fresh, Value}) ->
+    case crosses(Alloc, Cluster, Value) of
+        true -> [{preparation, Cluster, eoc(Alloc)}, {linking, Cluster, Value}];
+        false -> [{preparation, Cluster, Value}]
+    end;
+written(Alloc, Cluster, {live, Value}) ->
+    [{step(Alloc, Cluster, Value), Cluster, Value}].
+
+%% Whether Value, Cluster's entry, links to a cluster whose entry lies in another
+%% FAT sector.
+crosses(Alloc, Cluster, Value) ->
+    not end_of_chain(Alloc, Value)
+        andalso entry_sector(Alloc, data_cluster(Alloc, Value)) =/= entry_sector(Alloc, Cluster).
 
 %% The waiting chains freed in order, each from its first cluster on, each entry read
 %% from its sector as the overlay's steps leave it, for as long as the release's FAT
@@ -438,7 +466,7 @@ release(Alloc, BySector, [{Cluster, Left} | Rest] = Waiting, Sectors) ->
         #{} when map_size(Sectors) >= ?BATCH_SECTORS ->
             {lists:sort(maps:to_list(Sectors)), Waiting};
         #{} ->
-            Overlay = [{C, V} || {_Step, C, V} <- maps:get(Index, BySector, [])],
+            Overlay = upto(lists:last(?STEPS), maps:get(Index, BySector, [])),
             release(Alloc, BySector, Waiting, Sectors#{Index => patched(Alloc, Index, Overlay)})
     end.
 

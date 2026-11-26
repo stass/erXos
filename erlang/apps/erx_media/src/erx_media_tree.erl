@@ -49,9 +49,9 @@ within the volume in its low 40 (erx_media_volume:path/0); the root, each `diskN
 -define(READ, 0).
 
 %% A node: the root, a drive's directory, its status or ctl, or a node of volume Pid,
-%% the FAT node itself beside its kind and qid path.
+%% its kind and its qid path, by which the volume holds it.
 -type node_() :: root | {drive | status | ctl, non_neg_integer()}
-               | {volume, pid(), erx_fat:fat_node(), dir | file, erx_media_volume:path()}.
+               | {volume, pid(), dir | file, erx_media_volume:path()}.
 
 %% ---------------------------------------------------------------------------
 %% The erx_fs callbacks
@@ -81,7 +81,7 @@ walk({drive, N}, Name, _Fs) ->
         {Name, Pid} -> named(Pid, erx_media_volume:root(Pid));
         false -> {error, enoent}
     end;
-walk({volume, Pid, Dir, dir, _Path}, Name, _Fs) ->
+walk({volume, Pid, dir, Dir}, Name, _Fs) ->
     named(Pid, erx_media_volume:walk(Pid, Dir, Name));
 walk(_File, _Name, _Fs) ->
     {error, enotdir}.
@@ -91,7 +91,7 @@ drive_walk(_N, {error, no_drive}) -> {error, enoent};
 drive_walk(_N, {error, eio}) -> {error, eio};
 drive_walk(N, _Medium) -> {ok, {drive, N}, qid({drive, N})}.
 
-named(Pid, {ok, Node, Kind, Path}) -> {ok, {volume, Pid, Node, Kind, Path}, qid(Kind, Path)};
+named(Pid, {ok, Kind, Path}) -> {ok, {volume, Pid, Kind, Path}, qid(Kind, Path)};
 named(_Pid, {error, _} = Refused) -> Refused.
 
 -doc false.
@@ -99,7 +99,7 @@ getattr(root, _Fs) -> erx_fs_node:attr(qid(root), dir, 8#555);
 getattr({drive, N}, _Fs) -> erx_fs_node:attr(qid({drive, N}), dir, 8#555);
 getattr({status, N}, _Fs) -> erx_fs_node:attr(qid({status, N}), file, 8#444);
 getattr({ctl, N}, _Fs) -> erx_fs_node:attr(qid({ctl, N}), file, 8#200);
-getattr({volume, Pid, Node, _Kind, _Path}, _Fs) ->
+getattr({volume, Pid, _Kind, Node}, _Fs) ->
     case erx_media_volume:attr(Pid, Node) of
         {ok, #{kind := Kind, size := Size, mtime := Mtime}, Path} ->
             {ok, Attr} = erx_fs_node:attr(qid(Kind, Path), Kind, mode(Kind)),
@@ -135,14 +135,14 @@ open({status, N}, _Flags, _Fs) ->
         {error, _NoMedium} ->
             {ok, {text, status(none, none, fun outcome/1)}}
     end;
-open({volume, Pid, Dir, dir, _Path}, _Flags, _Fs) ->
+open({volume, Pid, dir, Dir}, _Flags, _Fs) ->
     case erx_media_volume:list(Pid, Dir) of
         {ok, Entries} ->
             {ok, erx_fs_node:listing([{qid(Kind, Path), dirent_type(Kind), Name} || {Name, Kind, Path} <- Entries])};
         {error, _} = Refused ->
             Refused
     end;
-open({volume, Pid, File, file, _Path}, _Flags, _Fs) ->
+open({volume, Pid, file, File}, _Flags, _Fs) ->
     {ok, {file, Pid, File}}.
 
 dirent_type(dir) -> ?ERX_P9_DT_DIR;
@@ -192,7 +192,7 @@ setattr({open, _TreeHandle}, _Changes, _Fs) -> {error, eacces}.
 unlink(Dir, _Name, _Kind, _Fs) -> {error, refused_write(Dir)}.
 
 -doc false.
-rename({volume, From, _, _, _}, _Name, {volume, To, _, _, _}, _NewName, _Fs) when From =/= To ->
+rename({volume, From, _, _}, _Name, {volume, To, _, _}, _NewName, _Fs) when From =/= To ->
     {error, exdev};
 rename(Dir, _Name, NewDir, _NewName, _Fs) ->
     case {refused_write(Dir), refused_write(NewDir)} of
@@ -201,7 +201,7 @@ rename(Dir, _Name, NewDir, _NewName, _Fs) ->
     end.
 
 %% A change inside a volume, which has no write path, or of the tree's own entries.
-refused_write({volume, _, _, _, _}) -> erofs;
+refused_write({volume, _, _, _}) -> erofs;
 refused_write(_TreeNode) -> eacces.
 
 -doc false.

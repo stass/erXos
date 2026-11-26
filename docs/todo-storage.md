@@ -249,6 +249,30 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] storage, the FAT volume's crash report (`erlang/apps/erx_media/src/erx_media_volume.erl`):
+  a crash of the volume process logs its state, the batch's sector images among them (client file
+  data), and formatting that report in the volume can pass its heap bound and kill it; a
+  `format_status/1` that leaves out the batch and a write's bytes removes both.
+* [Medium] storage, the FAT volume's cuts test (`test/erlang/erx_media_volume_write_tests.erl`,
+  `cuts_test_`): a cut that leaves the medium `{ro, dirty}` has its tree checked by nothing, and the
+  RAM proxy fails every write after the cut, so a write after a failed one is never seen; check each
+  cut medium with `erx_fat:check` or fsimg's verify (lost clusters allowed) and add a proxy that
+  fails one write and takes the next, with a seeded fault on `terminate`'s failed clause.
+* [Medium] storage, a FAT listing's memory (`erx_media_volume:listed/3`, `erx_fat:list/2`): a
+  listing holds two lists of every entry, so a directory of some ten thousand names, which a
+  client of a writable volume can make, brings the volume near its memory bound; fold the
+  listing a page at a time.
+* [Medium] storage, the FAT volume's finish within its shutdown (`erx_media_medium.erl`, the
+  volume's child spec): a volume that ends without `finish/1`, as when its medium's supervisor
+  stops, finishes in `terminate/2`, and the default 5 s shutdown can end a finish that releases many
+  chains on a slow stick, which then mounts `{ro, dirty}`; derive the shutdown from the finish's
+  bound. An eject's `finish/1` waits on no such deadline.
+* [Medium] storage, a long FAT file's chain as a list (`erlang/apps/erx_fat/src/erx_fat_dir.erl`,
+  `contents/6`; `erx_fat:read/4`): a write, a cut or a read of a file holds the file's whole chain
+  as a list, two words a cluster, so a file of more than some tens of thousands of clusters (about
+  100 MiB at 4 KiB clusters) passes the volume's memory bound and ends the volume; the medium then
+  mounts read-only as dirty. The per-fid cursor of [todo-performance.md](todo-performance.md)'s
+  FAT write path item removes the list; a test writes and reads a file past the bound.
 * [Medium] media, an eject waits inside the ejecting grant (`erx_media_tree:write/4` on `ctl`,
   `erx_media_drive`'s `eject`): the finish answers every request a volume holds first, so a slow or
   stalled stick with many reads queued holds the drive process, every walk of `diskN` and `status`

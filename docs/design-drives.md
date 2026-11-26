@@ -1273,9 +1273,12 @@ Two things finish volumes:
   its FAT sectors need, each within the same quarter; and the two bit
   sets of its ownership check, which together stay within half of the
   bound, are dropped before its first batch
-  ([design-storage.md](design-storage.md#removable-media-fat)). So
-  neither writes that never sync, nor many small writes and names, nor
-  the removal of a large file pass the bound. A littlefs port's budget is a wall of `media_volume_bytes`
+  ([design-storage.md](design-storage.md#removable-media-fat)); and its
+  table of the files fids name holds as many entries as fit an
+  eighth ("File identity and version",
+  [design-storage.md](design-storage.md#read-write-storage)). So neither
+  writes that never sync, nor many small writes and names, nor many open
+  files, nor the removal of a large file pass the bound. A littlefs port's budget is a wall of `media_volume_bytes`
   carved from the media domain's, so the port draws on nothing the
   runtime was promised, and a carve the domain cannot promise fails that
   mount with `enomem`. Neither bounds all a volume makes the runtime

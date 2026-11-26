@@ -21,6 +21,7 @@ class ErxFatDirTest < Minitest::Test
   DIR = 'erlang/apps/erx_fat/src/erx_fat_dir.erl'
   NAME = 'erlang/apps/erx_fat/src/erx_fat_name.erl'
   FAT = 'erlang/apps/erx_fat/src/erx_fat.erl'
+  ALLOC = 'erlang/apps/erx_fat/src/erx_fat_alloc.erl'
   APPLICATIONS = %w[erx erx_fat].freeze
   TESTS = %w[test/erlang/erx_fat_dir_tests.erl test/erlang/erx_fat_alloc_tests.erl].freeze
 
@@ -56,8 +57,12 @@ class ErxFatDirTest < Minitest::Test
                   "    {lists:foldl(fun({I, E}, A) -> Fun(I, E, A) end, Acc, lists:reverse(Events)), Read}.",
               caught_by: 'a_directory_near_the_entries_bound_changes_within_the_memory_bound_test_'),
     Fault.new(name: 'a file grown by a truncate not zeroed', file: DIR,
-              from: 'contents(B, Fresh, Old, <<0:((Size - Old) * 8)>>, Size, Time);',
-              to: 'published(B, Fresh, erx_fat:first(Fresh), Size, Time);', caught_by: 'contents_test_')
+              from: 'contents(B, File, Old, <<0:((Size - Old) * 8)>>, Size, Publish);',
+              to: 'Publish(B, File, erx_fat:first(File), Size);', caught_by: 'contents_test_'),
+    Fault.new(name: "a new run's link into another FAT sector written in preparation", file: ALLOC,
+              from: "    not end_of_chain(Alloc, Value)\n        andalso entry_sector",
+              to: "    Value =:= Cluster andalso not end_of_chain(Alloc, Value)\n        andalso entry_sector",
+              caught_by: 'a_run_across_fat_sectors_survives_every_cut_test_')
   ].freeze
 
   def self.images

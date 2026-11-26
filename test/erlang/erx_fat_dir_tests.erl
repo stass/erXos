@@ -92,7 +92,7 @@ long_entries_carry_the_name_test() ->
 %% ---------------------------------------------------------------------------
 
 volumes_test_() ->
-    {timeout, 600, [{Name, fun() -> volume_ops(Name) end} || Name <- ["fat16.img", "fat32.img"]]}.
+    [{Name, {timeout, 600, fun() -> volume_ops(Name) end}} || Name <- ["fat16.img", "fat32.img"]].
 
 volume_ops(Image) ->
     Fat = mounted(Image),
@@ -405,14 +405,14 @@ big_directory_changes(Flat) ->
 %% ---------------------------------------------------------------------------
 
 contents_test_() ->
-    {timeout, 600, [{Name, fun() -> contents_ops(Name) end} || Name <- ["fat16.img", "fat32.img"]]}.
+    [{Name, {timeout, 600, fun() -> contents_ops(Name) end}} || Name <- ["fat16.img", "fat32.img"]].
 
 contents_ops(Image) ->
     Fat = mounted(Image),
     Root = erx_fat:root(Fat),
     Pattern = fun(N, Seed) -> << <<((I * 7 + Seed) rem 251)>> || I <- lists:seq(1, N) >> end,
     A = Pattern(9000, 1),
-    B1 = batch(Fat, fun mount_cuts/2, fun(B) ->
+    B1 = batch(Fat, fun cuts/2, fun(B) ->
                    {Ba, F} = node_of(erx_fat_dir:create(B, Root, <<"copied file.bin">>, ?TIME)),
                    {ok, F1, Bb} = erx_fat_dir:write(Ba, F, 0, binary:part(A, 0, 5000), ?TIME),
                    {ok, F2, Bc} = erx_fat_dir:write(Bb, F1, 5000, binary:part(A, 5000, 4000), ?TIME),
@@ -424,7 +424,7 @@ contents_ops(Image) ->
                    {ok, _, Be} = erx_fat_dir:write(Bd, H, 0, <<"rewritten">>, ?TIME),
                    Be
                end, dirty(Fat)),
-    B2 = batch(Fat, fun mount_cuts/2, fun(B) ->
+    B2 = batch(Fat, fun cuts/2, fun(B) ->
                    F = walked(B, Root, <<"copied file.bin">>),
                    %% A write past the size zeroes from the size to its offset.
                    {ok, F1, Ba} = erx_fat_dir:write(B, F, 12000, <<"tail">>, ?TIME),
@@ -439,12 +439,12 @@ contents_ops(Image) ->
                    ?assertEqual(0, erx_fat:first(G1)),
                    Be
                end, B1),
-    B3 = batch(Fat, fun mount_cuts/2, fun(B) ->
+    B3 = batch(Fat, fun cuts/2, fun(B) ->
                    G = walked(B, Root, <<"hello.txt">>),
                    {ok, _, Ba} = erx_fat_dir:write(B, G, 0, <<"again\n">>, ?TIME),
                    Ba
                end, B2),
-    finished(Fat, fun mount_cuts/2, B3),
+    finished(Fat, fun cuts/2, B3),
     F = walked(erx_fat_dir:new(Fat), Root, <<"copied file.bin">>),
     ?assertMatch(#{read_only := true, mtime := M} when M =:= ?TIME + 60, erx_fat:attr(F)),
     ?assertMatch({0, _}, erx_fat_alloc_tests:verify(erx_fat_alloc_tests:flat())),
@@ -452,26 +452,33 @@ contents_ops(Image) ->
     ?assertEqual(<<(binary:part(A, 0, 1000))/binary, 0:(2000 * 8)>>, proplists:get_value(<<"copied file.bin">>, Tree)),
     ?assertEqual(<<"again\n">>, proplists:get_value(<<"hello.txt">>, Tree)).
 
-%% Plan applied as cuts/2 applies it, every cut checked by what a mount then does:
-%% a cut inside a step whose FAT sectors split a new run may leave the run's first
-%% sector linking into a sector not yet written, which the ownership check finds,
-%% but every such cut leaves the volume dirty, so it mounts read-only as `dirty`
-%% before the check runs, and never answers wrongly.
-mount_cuts(Fat, Plan) ->
-    lists:foreach(fun({Step, Writes}) ->
-                          [mount_cut(Fat, Step, Some) || W <- Writes, Some <- [[W], Writes -- [W]]],
-                          erx_fat_alloc_tests:apply_plan([{Step, Writes}]),
-                          ?assertEqual({Step, ok}, {Step, erx_fat:check(Fat)})
-                  end, Plan).
 
-mount_cut(Fat, Step, Writes) ->
-    Saved = get(image),
-    erx_fat_alloc_tests:apply_plan([{Step, Writes}]),
-    case erx_fat:check(Fat) of
-        ok -> ok;
-        Refused ->
-            {ok, Cut} = erx_fat:mount(erx_fat_alloc_tests:reader(), byte_size(element(1, Saved)) div ?SECTOR),
-            ?assertMatch({cut_in, Step, {read_only, tree}, #{clean := false}},
-                         {cut_in, Step, Refused, erx_fat:info(Cut)})
-    end,
-    put(image, Saved).
+%% A new file's run that crosses from one FAT sector into the next: every cut inside
+%% each step of its batch leaves a volume that passes the check, its link across the
+%% sectors an end-of-chain mark until linking. A filler file first brings the next
+%% free cluster to two before a FAT sector's end, so a run of four crosses it.
+a_run_across_fat_sectors_survives_every_cut_test_() ->
+    [{Name, {timeout, 120, fun() -> run_across(Name) end}} || Name <- ["fat16.img", "fat32.img"]].
+
+run_across(Image) ->
+    Fat = mounted(Image),
+    Root = erx_fat:root(Fat),
+    #{type := Type, cluster_bytes := ClusterBytes} = erx_fat:info(Fat),
+    PerSector = ?SECTOR * 8 div Type,
+    Applied = fun(_Fat, Plan) -> erx_fat_alloc_tests:apply_plan(Plan) end,
+    Written = fun(Name, Clusters) ->
+                      fun(B) ->
+                              {Ba, F} = node_of(erx_fat_dir:create(B, Root, Name, ?TIME)),
+                              {ok, _, Bb} = erx_fat_dir:write(Ba, F, 0, <<0:(Clusters * ClusterBytes * 8)>>, ?TIME),
+                              Bb
+                      end
+              end,
+    B1 = batch(Fat, Applied, Written(<<"probe">>, 1), dirty(Fat)),
+    Next = erx_fat:first(walked(B1, Root, <<"probe">>)) + 1,
+    Fill = ((PerSector - 2 - Next rem PerSector) + PerSector) rem PerSector,
+    B2 = case Fill of 0 -> B1; _ -> batch(Fat, Applied, Written(<<"filler">>, Fill), B1) end,
+    B3 = batch(Fat, fun cuts/2, Written(<<"across">>, 4), B2),
+    Across = erx_fat:first(walked(B3, Root, <<"across">>)),
+    ?assertEqual(PerSector - 2, Across rem PerSector),
+    ?assertEqual({ok, <<0:(4 * ClusterBytes * 8)>>},
+                 erx_fat:read(walked(B3, Root, <<"across">>), 0, 4 * ClusterBytes, erx_fat_dir:view(B3))).

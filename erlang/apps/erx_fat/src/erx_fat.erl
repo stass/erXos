@@ -58,7 +58,8 @@ function raises propagates.
 """.
 
 -export([mount/2, info/1, layout/1, check/1, root/1, walk/3, attr/1, list/2, read/4, key/1]).
--export([with_read/2, first/1, fold/4, cluster_sectors/2, entry_slot/2, refreshed/2]).
+-export([with_read/2, first/1, fold/4, cluster_sectors/2, entry_slot/2, refreshed/2, with_contents/3,
+         with_attributes/3]).
 -export_type([fat/0, fat_node/0, finding/0, read_sector/0, dir/0, event/0]).
 
 -include("generated/erx_abi.hrl").
@@ -241,6 +242,18 @@ with_read(Fat, Read) -> Fat#fat{read = Read}.
 -doc "A node's first cluster: 0 for an empty file, root for the root directory.".
 -spec first(fat_node()) -> non_neg_integer() | root.
 first(#fat_node{first = First}) -> First.
+
+-doc "File File with first cluster First and size Size, as a removed file is kept by its server.".
+-spec with_contents(fat_node(), non_neg_integer(), non_neg_integer()) -> fat_node().
+with_contents(#fat_node{kind = file} = File, First, Size) -> File#fat_node{first = First, size = Size}.
+
+-doc """
+File File modified at Mtime (UNIX seconds, as an entry holds it) and read-only
+exactly when ReadOnly, as a removed file is kept by its server.
+""".
+-spec with_attributes(fat_node(), non_neg_integer(), boolean()) -> fat_node().
+with_attributes(#fat_node{kind = file} = File, Mtime, ReadOnly) ->
+    File#fat_node{mtime = Mtime, read_only = ReadOnly}.
 
 -doc """
 Where file File's short entry lies, `{Sector, Offset}`: entry Index of the directory

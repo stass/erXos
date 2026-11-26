@@ -93,6 +93,17 @@ walk(L = #{clusters := Clusters}, Cluster, Left, Got) when Cluster >= 2, Cluster
     end;
 walk(_L, Cluster, _Left, _Got) -> {breaks_at, Cluster}.
 
+%% Run up to its first link into another FAT sector: what preparation links of it.
+in_sector(#{type := Type}, Run) ->
+    in_sector(fun(C) -> C * Type div (?SECTOR * 8) end, Run, []).
+
+in_sector(Sector, [A, B | Rest], Got) ->
+    case Sector(A) =:= Sector(B) of
+        true -> in_sector(Sector, [B | Rest], [A | Got]);
+        false -> lists:reverse([A | Got])
+    end;
+in_sector(_Sector, Run, Got) -> lists:reverse(Got, Run).
+
 allocated(L = #{clusters := Clusters}) -> [C || C <- lists:seq(2, Clusters + 1), value(L, C) =/= 0].
 
 free_clusters(L = #{clusters := Clusters}) -> [C || C <- lists:seq(2, Clusters + 1), value(L, C) =:= 0].
@@ -154,7 +165,9 @@ committed(A) ->
 %% equal and keeps its top bits, and every published file's chain is whole, starts
 %% at its first cluster, is never shorter than its size, holds within its size only
 %% clusters the file held before the batch or during it, and shares no cluster with
-%% another's; a new run is whole before any step after preparation; a cluster the
+%% another's; a new run is whole within each FAT sector before any step after
+%% preparation, and whole before any step after linking, which writes its links
+%% across FAT sectors; a cluster the
 %% batch takes from a file stays allocated until the release; and after the batch
 %% every file's chain is exactly its own, the FAT allocates exactly the files'
 %% clusters and nothing waits. Every cluster the batch allocates was free before it
@@ -190,7 +203,8 @@ batches(A, L, Tops, Pre, Left) ->
                                     true -> files_hold(L, Tops, Post, Own), Post;
                                     false -> Published
                                 end,
-                        [?assertEqual(Run, walk(L, hd(Run))) || Step =/= preparation, Run <- Runs],
+                        [?assertEqual(Run, walk(L, hd(Run))) || not lists:member(Step, [preparation, linking]), Run <- Runs],
+                        [?assertEqual(in_sector(L, Run), walk(L, hd(Run))) || Step =:= linking, Run <- Runs],
                         write(Writes),
                         [?assertEqual([], [C || C <- Freed, value(L, C) =:= 0]) || Step =/= release],
                         files_hold(L, Tops, Shown, Own),

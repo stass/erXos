@@ -50,7 +50,10 @@ whose ownership check (erx_fat:check/1) passed.
   publication. A write or cut past the end of a chain shorter than its file's size
   is `does_not_read`, and one past 4 GiB less one byte `efbig`.
 * **Removal.** remove/3 and rmdir/3 take the name away and answer its node; its
-  chain is the caller's to free with free/2 once no fid names it.
+  chain is the caller's to free with free/2 once no fid names it. Until then
+  write_removed/4, truncate_removed/3 and setattr_removed/3 change a removed file
+  as write/5, truncate/4 and setattr/3 do, from the node the caller keeps, and
+  publish no entry.
 * **Renaming** onto an existing name removes it, a directory onto a file is
   `enotdir`, a file onto a directory `eisdir`, a directory onto one that holds
   entries `enotempty`, and a directory into its own subtree `einval`, found by
@@ -66,7 +69,8 @@ as it was.
 """.
 
 -export([new/1, view/1, create/4, mkdir/4, remove/3, rmdir/3, rename/5, free/2, held/1, commit/1, finish/1]).
--export([write/5, truncate/4, setattr/3, refreshed/2]).
+-export([write/5, write_removed/4, truncate/4, truncate_removed/3, setattr/3, setattr_removed/3,
+         refreshed/2]).
 -export_type([batch/0, error/0]).
 
 -include("erx_fat_entry.hrl").
@@ -260,14 +264,17 @@ then leaves it. A write past the file's size zeroes from the size to Offset firs
 -spec write(batch(), erx_fat:fat_node(), non_neg_integer(), binary(), integer()) ->
           {ok, erx_fat:fat_node(), batch()} | {error, error()}.
 write(B, File, Offset, Bytes, Time) ->
-    guarded(fun() ->
-                    Fresh = fresh(B, File),
-                    #{size := Size} = erx_fat:attr(Fresh),
-                    End = Offset + byte_size(Bytes),
-                    End =< ?FILE_MAX orelse fail(efbig),
-                    Start = min(Offset, Size),
-                    contents(B, Fresh, Start, <<0:((Offset - Start) * 8), Bytes/binary>>, max(Size, End), Time)
-            end).
+    guarded(fun() -> written(B, fresh(B, File), Offset, Bytes, entry_publisher(Time)) end).
+
+-doc """
+Bytes written to File, a removed file whose node the caller keeps, from Offset as
+write/5 writes them, but with no entry published: the file as it then reads, its
+first cluster and size changed.
+""".
+-spec write_removed(batch(), erx_fat:fat_node(), non_neg_integer(), binary()) ->
+          {ok, erx_fat:fat_node(), batch()} | {error, error()}.
+write_removed(B, File, Offset, Bytes) ->
+    guarded(fun() -> written(B, removed_file(File), Offset, Bytes, fun unpublished/4) end).
 
 -doc """
 File File cut or grown to Size bytes at Time: the file as the batch then leaves it.
@@ -275,22 +282,48 @@ What a cut takes off waits for its release; a growth reads as zeroes.
 """.
 -spec truncate(batch(), erx_fat:fat_node(), non_neg_integer(), integer()) ->
           {ok, erx_fat:fat_node(), batch()} | {error, error()}.
-truncate(B = #batch{alloc = Alloc}, File, Size, Time) ->
-    guarded(fun() ->
-                    Fresh = fresh(B, File),
-                    #{size := Old} = erx_fat:attr(Fresh),
-                    Size =< ?FILE_MAX orelse fail(efbig),
-                    case {Size >= Old, erx_fat:first(Fresh)} of
-                        {true, _} ->
-                            contents(B, Fresh, Old, <<0:((Size - Old) * 8)>>, Size, Time);
-                        {false, 0} ->
-                            published(B, Fresh, 0, Size, Time);
-                        {false, First} ->
-                            Keep = (Size + cluster_bytes(B) - 1) div cluster_bytes(B),
-                            Alloc1 = ok(erx_fat_alloc:shrink(Alloc, First, Keep)),
-                            published(B#batch{alloc = Alloc1}, Fresh, case Keep of 0 -> 0; _ -> First end, Size, Time)
-                    end
-            end).
+truncate(B, File, Size, Time) ->
+    guarded(fun() -> resized(B, fresh(B, File), Size, entry_publisher(Time)) end).
+
+-doc "Removed file File cut or grown to Size bytes as truncate/4 does, with no entry published.".
+-spec truncate_removed(batch(), erx_fat:fat_node(), non_neg_integer()) ->
+          {ok, erx_fat:fat_node(), batch()} | {error, error()}.
+truncate_removed(B, File, Size) ->
+    guarded(fun() -> resized(B, removed_file(File), Size, fun unpublished/4) end).
+
+%% Bytes written to File from Offset, zeroes first from its size when Offset is past
+%% it, and the file's new first cluster and size given to Publish.
+written(B, File, Offset, Bytes, Publish) ->
+    #{size := Size} = erx_fat:attr(File),
+    End = Offset + byte_size(Bytes),
+    End =< ?FILE_MAX orelse fail(efbig),
+    Start = min(Offset, Size),
+    contents(B, File, Start, <<0:((Offset - Start) * 8), Bytes/binary>>, max(Size, End), Publish).
+
+%% File cut or grown to Size, its new first cluster and size given to Publish.
+resized(B = #batch{alloc = Alloc}, File, Size, Publish) ->
+    #{size := Old} = erx_fat:attr(File),
+    Size =< ?FILE_MAX orelse fail(efbig),
+    case {Size >= Old, erx_fat:first(File)} of
+        {true, _} ->
+            contents(B, File, Old, <<0:((Size - Old) * 8)>>, Size, Publish);
+        {false, 0} ->
+            Publish(B, File, 0, Size);
+        {false, First} ->
+            Keep = (Size + cluster_bytes(B) - 1) div cluster_bytes(B),
+            Alloc1 = ok(erx_fat_alloc:shrink(Alloc, First, Keep)),
+            Publish(B#batch{alloc = Alloc1}, File, case Keep of 0 -> 0; _ -> First end, Size)
+    end.
+
+%% A named file's new first cluster and size published in its entry, with Time.
+entry_publisher(Time) -> fun(B, File, First, Size) -> published(B, File, First, Size, Time) end.
+
+%% A removed file's new first cluster and size, kept in its node alone.
+unpublished(B, File, First, Size) -> {erx_fat:with_contents(File, First, Size), B}.
+
+removed_file(File) ->
+    kind(File) =:= file orelse fail(eisdir),
+    File.
 
 -doc """
 File File's attributes changed: `mtime` (UNIX seconds) and `read_only`, each when
@@ -307,6 +340,21 @@ setattr(B, File, Changes) ->
                                             end)
             end).
 
+-doc """
+Removed file File's attributes changed as setattr/3 changes a named file's, kept in
+its node alone, as FreeBSD's msdosfs keeps an unlinked file's in its denode and
+writes no entry for it (`sys/fs/msdosfs/msdosfs_denode.c:334-335` at
+`release/14.3.0`).
+""".
+-spec setattr_removed(batch(), erx_fat:fat_node(), #{mtime => integer(), read_only => boolean()}) ->
+          {ok, erx_fat:fat_node(), batch()} | {error, error()}.
+setattr_removed(B, File, Changes) ->
+    guarded(fun() ->
+                    #{mtime := Mtime, read_only := ReadOnly} = erx_fat:attr(removed_file(File)),
+                    Held = case Changes of #{mtime := T} -> erx_fat_entry:held_mtime(T); #{} -> Mtime end,
+                    {erx_fat:with_attributes(File, Held, maps:get(read_only, Changes, ReadOnly)), B}
+            end).
+
 -doc "File File as the batch leaves it (erx_fat:refreshed/2).".
 -spec refreshed(batch(), erx_fat:fat_node()) -> {ok, erx_fat:fat_node()} | {error, error()}.
 refreshed(B, File) ->
@@ -319,10 +367,10 @@ fresh(B, File) ->
 cluster_bytes(#batch{fat = Fat}) -> maps:get(cluster_bytes, erx_fat:info(Fat)).
 
 %% Data, the file's bytes from Start, written in preparation in the file's chain,
-%% grown first to hold them, and the file published with size Size.
-contents(B, File, _Start, <<>>, Size, Time) ->
-    published(B, File, erx_fat:first(File), Size, Time);
-contents(B = #batch{alloc = Alloc}, File, Start, Data, Size, Time) ->
+%% grown first to hold them, and its first cluster and size Size given to Publish.
+contents(B, File, _Start, <<>>, Size, Publish) ->
+    Publish(B, File, erx_fat:first(File), Size);
+contents(B = #batch{alloc = Alloc}, File, Start, Data, Size, Publish) ->
     #{size := Old} = erx_fat:attr(File),
     PerCluster = cluster_bytes(B),
     Need = (Start + byte_size(Data) + PerCluster - 1) div PerCluster,
@@ -338,7 +386,7 @@ contents(B = #batch{alloc = Alloc}, File, Start, Data, Size, Time) ->
                           {Chain, B}
                   end,
     B2 = data_written(B1, lists:nthtail(Start div PerCluster, Whole), Start rem PerCluster, Data),
-    published(B2, File, hd(Whole), Size, Time).
+    Publish(B2, File, hd(Whole), Size).
 
 %% Data written from byte Offset of the first of Clusters on, a sector at a time:
 %% a whole sector as it is, a part patched into the sector as the batch leaves it.

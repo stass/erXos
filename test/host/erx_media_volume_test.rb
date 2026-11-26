@@ -8,6 +8,7 @@ require 'tmpdir'
 require 'fileutils'
 require_relative '../fixtures/erlang_build'
 require_relative '../fixtures/fat_volumes'
+require_relative '../../tools/lib/erx/fsimg'
 
 # Runs test/erlang/erx_media_volume_tests.erl and erx_media_tree_tests.erl, the EUnit
 # cases of a medium's supervisor, reader and volume processes and of the media tree, against erx_media compiled from source on stock's
@@ -17,9 +18,11 @@ require_relative '../fixtures/fat_volumes'
 class ErxMediaVolumeTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APPLICATIONS = %w[erx erx_fat erx_media].freeze
-  MODULES = %w[erx_media_volume_tests erx_media_tree_tests].freeze
+  MODULES = %w[erx_media_volume_tests erx_media_tree_tests erx_media_volume_write_tests].freeze
+  # Helpers the suites call: fsimg's verify and its port.
+  HELPERS = %w[erx_fat_alloc_tests].freeze
   # The suites.
-  TESTS = MODULES.map { |name| "test/erlang/#{name}.erl" }.freeze
+  TESTS = (MODULES + HELPERS).map { |name| "test/erlang/#{name}.erl" }.freeze
   MEDIUM = 'erlang/apps/erx_media/src/erx_media_medium.erl'
   VOLUME = 'erlang/apps/erx_media/src/erx_media_volume.erl'
   DRIVE = 'erlang/apps/erx_media/src/erx_media_drive.erl'
@@ -41,18 +44,15 @@ class ErxMediaVolumeTest < Minitest::Test
               to: '{ok, _Lba} -> erx_media_medium:window(Proxy, {read, Sector, 1});',
               caught_by: 'each_volume_reads_at_its_own_place_test'),
     Fault.new(name: 'a failed flush taken as a medium that cannot flush', path: VOLUME,
-              from: 'flushed({error, enotsup}, _Clean, _Writes) -> {ro, flush};',
-              to: 'flushed({error, _}, _Clean, _Writes) -> {ro, flush};',
+              from: 'flushed({error, enotsup}, _Own) -> {ro, flush};',
+              to: 'flushed({error, _}, _Own) -> {ro, flush};',
               caught_by: 'a_flush_decides_between_rw_ro_and_none_test'),
     Fault.new(name: 'the also condition removed', path: VOLUME,
-              from: '{true, [Name | _]} -> {ro, {also, Name}};', to: '{true, [_Name | _]} -> flushed(Flush(), Clean, false);',
+              from: '{true, [Name | _]} -> {ro, {also, Name}};', to: '{true, [_Name | _]} -> flushed(Flush(), Own);',
               caught_by: 'the_rule_names_its_first_failing_condition_test'),
-    Fault.new(name: 'msdosfs taken as written though erx_fat has no write path', path: VOLUME,
-              from: '-define(WRITE_PATHS, []).', to: '-define(WRITE_PATHS, [msdosfs]).',
-              caught_by: 'a_clean_fat_stick_mounts_read_only_for_want_of_a_write_path_test'),
     Fault.new(name: 'a read-only mount not logged', path: VOLUME,
               from: '            log_read_only(Volume, Outcome),', to: '            log_read_only(Volume, Outcome#{mount := rw}),',
-              caught_by: 'a_clean_fat_stick_mounts_read_only_for_want_of_a_write_path_test'),
+              caught_by: 'a_dirty_fat_volume_mounts_read_only_test'),
     Fault.new(name: "a read-only volume's status without its reason", path: TREE,
               from: 'Reason <- [erx_media_volume:ro_reason(Shown)], Reason =/= none]',
               to: 'Reason <- [erx_media_volume:ro_reason(Shown)], Reason =:= x]',
@@ -70,8 +70,8 @@ class ErxMediaVolumeTest < Minitest::Test
               from: '_NewName, _Fs) when From =/= To ->', to: '_NewName, _Fs) when From =:= To ->',
               caught_by: 'exdev_is_decided_before_any_volume_is_asked_test'),
     Fault.new(name: "a qid path without its volume's mount number", path: VOLUME,
-              from: "\#{Key := Number} ->\n            {ok, (Mount bsl ?NODE_BITS) bor Number, State};",
-              to: "\#{Key := Number} ->\n            {ok, Number, State};",
+              from: '{(Mount bsl ?NODE_BITS) bor Next, State#{next := Next + 1}};',
+              to: '{Next, State#{next := Next + 1}};',
               caught_by: 'two_mounts_are_distinct_test'),
     Fault.new(name: 'a request admitted after the finish', path: VOLUME,
               from: "handle_call(_Request, _From, \#{finished := true} = State) ->\n    {reply, {error, eio}, State};\n",
@@ -84,7 +84,23 @@ class ErxMediaVolumeTest < Minitest::Test
               from: "handle_info(?ERX_FS_WAIT({_Grant, Alias}, _Request), \#{finished := true} = State) ->\n" \
                     "    Alias ! ?ERX_FS_ANSWER(Alias, {error, eio}),\n    {noreply, State};\n",
               to: '',
-              caught_by: 'the_finish_answers_what_came_before_and_refuses_what_comes_after_test')
+              caught_by: 'the_finish_answers_what_came_before_and_refuses_what_comes_after_test'),
+    Fault.new(name: "a step's flush dropped", path: VOLUME,
+              from: "                          answered(erx_media_medium:window(Proxy, flush))\n",
+              to: "                          ok\n",
+              caught_by: 'round_trip_test_/0-fun-1- (fat16.img)'),
+    Fault.new(name: 'the ownership check skipped at a writable mount', path: VOLUME,
+              from: 'ok -> case erx_fat:check(Fat) of',
+              to: 'ok -> case erx_fat_alloc:writable(erx_fat:info(Fat)) of',
+              caught_by: 'a_crossed_chain_mounts_read_only_test'),
+    Fault.new(name: "a removed file's key kept", path: VOLUME,
+              from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Fids}}};',
+              to: 'State#{places := Places, nodes := Nodes#{Path := {removed, Node, Fids}}};',
+              caught_by: 'a_removed_file_lives_by_its_fids_test'),
+    Fault.new(name: "a removed file's chain released while fids name it", path: VOLUME,
+              from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Fids}}};',
+              to: 'released(Node, State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Fids}}});',
+              caught_by: 'a_removed_file_lives_by_its_fids_test')
   ].freeze
 
   def self.images
@@ -117,8 +133,8 @@ class ErxMediaVolumeTest < Minitest::Test
   def eunit(replaced)
     Dir.mktmpdir('erx-media-volume-test') do |work|
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
-      Open3.capture2e({ 'ERX_FAT_IMAGES' => self.class.images },
-                      'gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
+      Open3.capture2e({ 'ERX_FAT_IMAGES' => self.class.images, 'ERX_FSIMG' => Erx::Fsimg.locate(root: ROOT) },
+                      'gtimeout', '-k', '10', '900', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       "halt(case eunit:test([#{MODULES.join(', ')}], [verbose]) of ok -> 0; _ -> 1 end)",
                       chdir: work, stdin_data: '')
     end

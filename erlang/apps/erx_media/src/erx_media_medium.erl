@@ -131,7 +131,8 @@ volume(#{serve := yes, number := Number} = Volume, Sup, Proxy) ->
     end.
 
 -doc """
-A window request through the proxy Proxy, for the reader and the volumes: the
+A window request through the proxy Proxy, for the reader and the volumes (a volume's
+writes among them, which the proxy passes to the block driver's one write path): the
 window answers within its own deadline, so the call needs no timer of its own, and
 a proxy that has ended answers `{error, eio}`.
 """.

@@ -145,7 +145,7 @@ status_names_why_a_volume_is_read_only_test() ->
 exdev_is_decided_before_any_volume_is_asked_test() ->
     Asked = fun() -> receive Message -> exit({asked, Message}) end end,
     [One, Two] = [spawn(Asked), spawn(Asked)],
-    Node = fun(Pid) -> {volume, Pid, dir_node, dir, 1} end,
+    Node = fun(Pid) -> {volume, Pid, dir, 1} end,
     ?assertEqual({error, exdev}, erx_media_tree:rename(Node(One), <<"a">>, Node(Two), <<"b">>, media)),
     ?assertEqual({error, erofs}, erx_media_tree:rename(Node(One), <<"a">>, Node(One), <<"b">>, media)),
     ?assertEqual([true, true], [is_process_alive(Pid) || Pid <- [One, Two]]),
@@ -155,7 +155,7 @@ exdev_is_decided_before_any_volume_is_asked_test() ->
 %% volume erofs, and ctl takes eject alone, which finds no mounted medium on a drive
 %% the registry does not hold.
 the_tree_refuses_every_change_test() ->
-    Volume = {volume, self(), dir_node, dir, 1},
+    Volume = {volume, self(), dir, 1},
     Tree = [root, {drive, 0}],
     [?assertEqual({error, eacces}, erx_media_tree:make(Dir, <<"x">>, dir, media)) || Dir <- Tree],
     [?assertEqual({error, eacces}, erx_media_tree:unlink(Dir, <<"x">>, file, media)) || Dir <- Tree],
@@ -165,7 +165,7 @@ the_tree_refuses_every_change_test() ->
     ?assertEqual({error, eacces}, erx_media_tree:rename(root, <<"a">>, root, <<"b">>, media)),
     ?assertEqual({error, eacces}, erx_media_tree:open({status, 0}, ?ERX_P9_O_WRONLY, media)),
     ?assertEqual({error, eacces}, erx_media_tree:open({drive, 0}, ?ERX_P9_O_RDWR, media)),
-    ?assertEqual({error, erofs}, erx_media_tree:open({volume, self(), file_node, file, 2}, ?ERX_P9_O_WRONLY, media)),
+    ?assertEqual({error, erofs}, erx_media_tree:open({volume, self(), file, 2}, ?ERX_P9_O_WRONLY, media)),
     ?assertEqual({error, erofs}, erx_media_tree:write({file, self(), file_node}, 0, <<"x">>, media)),
     ?assertEqual({error, enxio}, erx_media_tree:write({ctl, 9}, 0, <<"eject">>, media)),
     ?assertEqual({error, enxio}, erx_media_tree:write({ctl, 9}, 0, <<"eject\n">>, media)),

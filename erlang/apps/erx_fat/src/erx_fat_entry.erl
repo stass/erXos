@@ -20,7 +20,8 @@ names (erx_fat_name) and the directory changes (erx_fat_dir) share.
   outside FAT's range is written clamped to it.
 """.
 
--export([decode/1, encode/1, long/4, deleted/1, new/5, first/2, with_first/2, with_size/2, with_mtime/2, with_read_only/2, kind/1,
+-export([decode/1, encode/1, long/4, deleted/1, new/5, first/2, with_first/2, with_size/2, with_mtime/2,
+         held_mtime/1, with_read_only/2, kind/1,
          read_only/1, mtime/1]).
 -export_type([entry/0, short/0]).
 
@@ -133,6 +134,12 @@ kind(#{}) -> file.
 -doc "Whether a short entry carries the read-only attribute.".
 -spec read_only(short()) -> boolean().
 read_only(#{attributes := A}) -> A band ?READ_ONLY =/= 0.
+
+-doc "UNIX seconds Time as a short entry holds it: clamped to FAT's times, to 2 s.".
+-spec held_mtime(integer()) -> non_neg_integer().
+held_mtime(Time) ->
+    {Date, Clock} = fat_time(Time),
+    mtime(#{date => Date, time => Clock}).
 
 -doc "A short entry's modification time in UNIX seconds (see the module's doc).".
 -spec mtime(short()) -> non_neg_integer().
