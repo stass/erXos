@@ -27,6 +27,7 @@ class ErxMediaVolumeTest < Minitest::Test
   VOLUME = 'erlang/apps/erx_media/src/erx_media_volume.erl'
   DRIVE = 'erlang/apps/erx_media/src/erx_media_drive.erl'
   TREE = 'erlang/apps/erx_media/src/erx_media_tree.erl'
+  FAT = 'erlang/apps/erx_fat/src/erx_fat.erl'
 
   Fault = Data.define(:name, :path, :from, :to, :caught_by)
 
@@ -93,6 +94,16 @@ class ErxMediaVolumeTest < Minitest::Test
               from: 'ok -> case erx_fat:check(Fat) of',
               to: 'ok -> case erx_fat_alloc:writable(erx_fat:info(Fat)) of',
               caught_by: 'a_crossed_chain_mounts_read_only_test'),
+    Fault.new(name: "the ownership check's FAT pass building lists over the whole FAT", path: FAT,
+              from: "fat_pass(Fat = #fat{clusters = Clusters}, Fun) ->\n    fat_pass(Fat, Fun, 2, Clusters + 2).",
+              to: "fat_pass(Fat = #fat{read = Read, type = Type, fat_start = Start, clusters = Clusters}, Fun) ->\n" \
+                  "    PerSector = ?SECTOR * 8 div Type,\n" \
+                  "    Values = [{Index, [E band mask(Type) || <<E:Type/little>> <= sector(Read, Start + Index)]}\n" \
+                  "              || Index <- lists:seq(0, (Clusters + 1) div PerSector)],\n" \
+                  "    [Fun(C, V) || {Index, Sector} <- Values, {C, V} <- lists:enumerate(Index * PerSector, Sector),\n" \
+                  "                  C >= 2, C < Clusters + 2],\n" \
+                  '    fat_pass(Fat, Fun, Clusters + 2, Clusters + 2).',
+              caught_by: 'fat32_sticks_are_checked_within_the_memory_bound_test_/0-fun-2- (8 GB)'),
     Fault.new(name: "a removed file's key kept", path: VOLUME,
               from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Holders}}};',
               to: 'State#{places := Places, nodes := Nodes#{Path := {removed, Node, Holders}}};',

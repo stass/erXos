@@ -24,7 +24,8 @@ image(Name) ->
     {ok, Bytes} = file:read_file(filename:join(os:getenv("ERX_FAT_IMAGES"), Name)),
     Bytes.
 
-%% A window proxy over Medium whose flush answers Flush; it sends the test process
+%% A window proxy over Medium, a binary or {synthesized, Sectors, Sector}, a medium of
+%% Sectors sectors each Sector(Lba) answers, whose flush answers Flush; it sends the test process
 %% {flushed, self()} at each flush. A read answers a copy of its sector, as the window
 %% does, never a sub-binary of the whole medium, which a volume's memory bound counts.
 %% Sent `stall`, it answers nothing more, as a stick that hangs.
@@ -46,6 +47,10 @@ serve(Medium, Flush, Test) ->
 stalled() ->
     receive stop -> ok; _Unanswered -> stalled() end.
 
+answer(info, {synthesized, Sectors, _Sector}, _Flush, _Test) ->
+    {ok, #{role => drive, sectors => Sectors}};
+answer({read, Lba, 1}, {synthesized, Sectors, Sector}, _Flush, _Test) when Lba < Sectors ->
+    {ok, binary:copy(Sector(Lba))};
 answer(info, Medium, _Flush, _Test) ->
     {ok, #{role => drive, sectors => byte_size(Medium) div ?SECTOR}};
 answer({read, Lba, 1}, Medium, _Flush, _Test) when (Lba + 1) * ?SECTOR =< byte_size(Medium) ->
@@ -387,3 +392,36 @@ the_freeze_finishes_every_volume_of_every_drive_test() ->
     after
         [exit(P, kill) || P <- [D1, D2, Empty, F1, F2 | Proxies]]
     end.
+
+%% The ownership check reads the whole FAT within the volume's memory bound, whatever
+%% the volume's size: FAT32 sticks shaped as an 8 GB one, 15,628,288 sectors in
+%% clusters of eight, and a 16 GB one, whose 3,899,437 clusters come near the most the
+%% check holds, mount rw under their volume's own bound.
+fat32_sticks_are_checked_within_the_memory_bound_test_() ->
+    [{Name, {timeout, 120,
+             fun() ->
+                     Proxy = proxy(fat32_shaped(Total, 8), ok),
+                     {_Sup, {none, [{_, Volume}], 0}} = through(Proxy),
+                     ?assertMatch(#{fat := 32, mount := rw}, erx_media_volume:outcome(Volume)),
+                     Proxy ! stop
+             end}}
+     || {Name, Total} <- [{"8 GB", 15_628_288}, {"16 GB", 31_256_576}]].
+
+%% A FAT32 volume of Total sectors and PerCluster sectors a cluster, a sector at a
+%% time: the seed's reserved sectors with its boot sector's geometry changed, FATs whose
+%% one chain is the root's one cluster, and zeros elsewhere, so the root is empty.
+fat32_shaped(Total, PerCluster) ->
+    <<Head:13/binary, _, Reserved:16/little, Fats, Middle:15/binary, _:32, _:32, _:32, _:32, Tail/binary>> =
+        Seed = image("fat32.img"),
+    FatSectors = ((Total - Reserved) div PerCluster + 2) * 4 div ?SECTOR + 1,
+    Boot = <<Head/binary, PerCluster, Reserved:16/little, Fats, Middle/binary, Total:32/little,
+             FatSectors:32/little, 0:32, 2:32/little, (binary:part(Tail, 0, ?SECTOR - 48))/binary>>,
+    <<Media:32, Flags:32, _/binary>> = binary:part(Seed, Reserved * ?SECTOR, ?SECTOR),
+    First = <<Media:32, Flags:32, 16#0fffffff:32/little, 0:(?SECTOR - 12)/unit:8>>,
+    Zero = <<0:?SECTOR/unit:8>>,
+    {synthesized, Total,
+     fun(0) -> Boot;
+        (Lba) when Lba < Reserved -> binary:part(Seed, Lba * ?SECTOR, ?SECTOR);
+        (Lba) when Lba < Reserved + Fats * FatSectors, (Lba - Reserved) rem FatSectors =:= 0 -> First;
+        (_Lba) -> Zero
+     end}.

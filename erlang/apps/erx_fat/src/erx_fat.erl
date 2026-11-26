@@ -86,8 +86,10 @@ function raises propagates.
 %% The value a bad cluster's entry holds (section 4.1).
 -define(BAD_16, 16#fff7).
 -define(BAD_32, 16#0ffffff7).
-%% The ownership check's two sets, one bit a cluster each, stay within half of
-%% the volume's memory bound, so it checks at most 4,194,304 clusters.
+%% The ownership check's two sets, one bit a cluster each, are arrays outside the
+%% heap that the volume's memory bound counts; they stay within half of
+%% it, so the check holds at most 4,194,304 clusters, and the rest of what it holds,
+%% one sector of the FAT at a time and the directories pending, stays within the rest.
 -define(CHECKED_CLUSTERS_MAX, (?ERX_MEDIA_VOLUME_BYTES div 2 * 8 div 2)).
 %% The directories the check has found and not yet walked, each a list cell and a
 %% pair of small integers, five words, stay within a quarter of the bound.
@@ -474,15 +476,33 @@ check(Fat = #fat{clusters = Clusters}) ->
     end.
 
 %% Fun applied to every cluster of the data area with its entry's value, the FAT the
-%% server reads taken a sector at a time from start to end.
-fat_pass(#fat{read = Read, type = Type, fat_start = Start, clusters = Clusters}, Fun) ->
+%% server reads taken a sector at a time from start to end. The pass holds one sector
+%% and the next cluster's number and builds nothing, so it needs the same memory
+%% whatever the volume's size.
+fat_pass(Fat = #fat{clusters = Clusters}, Fun) ->
+    fat_pass(Fat, Fun, 2, Clusters + 2).
+
+%% The clusters from Cluster up to End, End not among them: those whose entries the
+%% sector holding Cluster's entry holds, then the rest.
+fat_pass(_Fat, _Fun, End, End) ->
+    ok;
+fat_pass(Fat = #fat{read = Read, type = Type, fat_start = Start}, Fun, Cluster, End) ->
     PerSector = ?SECTOR * 8 div Type,
-    lists:foreach(fun(Index) ->
-                          Values = [Entry band mask(Type) || <<Entry:Type/little>> <= sector(Read, Start + Index)],
-                          [Fun(Cluster, Value) || {Cluster, Value} <- lists:enumerate(Index * PerSector, Values),
-                                                  Cluster >= 2, Cluster < Clusters + 2]
-                  end, lists:seq(0, (Clusters + 1) div PerSector)),
-    ok.
+    Index = Cluster div PerSector,
+    Next = min(End, (Index + 1) * PerSector),
+    Skip = (Cluster - Index * PerSector) * Type div 8,
+    Bytes = (Next - Cluster) * Type div 8,
+    <<_:Skip/binary, Entries:Bytes/binary, _/binary>> = sector(Read, Start + Index),
+    fat_entries(Entries, Type, Cluster, Fun),
+    fat_pass(Fat, Fun, Next, End).
+
+%% Fun applied to each entry of Entries, the first Cluster's.
+fat_entries(<<>>, _Type, _Cluster, _Fun) ->
+    ok;
+fat_entries(Entries, Type, Cluster, Fun) ->
+    <<Entry:Type/little, Rest/binary>> = Entries,
+    Fun(Cluster, Entry band mask(Type)),
+    fat_entries(Rest, Type, Cluster + 1, Fun).
 
 %% What an entry holds: free, bad, the end of a chain, a link to a cluster of the
 %% data area, or a value the specification gives no entry (section 4.1).
