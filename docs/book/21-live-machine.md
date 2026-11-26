@@ -902,8 +902,8 @@ more: the cause, where it failed and each CPU's state, and for a kernel
 panic the message and the failing CPU's registers and backtrace, but
 nothing of what the root task held and no log
 ([design-debugger.md, The record's CPU entries](../design-debugger.md#the-records-cpu-entries)).
-The brief form is designed and not built; the root always writes the
-full form.
+A release image's root writes the brief form, and a development
+image's root the full form.
 
 A crash of any other domain ends only that domain, whose runtime
 writes its dump into the domain's crash area
