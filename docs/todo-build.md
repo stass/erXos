@@ -167,13 +167,13 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   `sensors` either, so a walk's sensor readings from the card are `unknown`. A netbooted current build binds
   `genet0` by DHCP on the same board and cable (`dhcp: genet0 bound to`, the walks' return boots). The walks
   survive it (they type `reboot` on the console when ssh fails); the fix is writing a current image to the card.
-* [Medium] benchmarks, re-run on the Pi 4 the cells whose `BENCH` lines the console cut: `nullcall`'s two `other-cpu`
-  cells (wide histograms, about 2-3 KiB a line) and `wake`'s `park-deadline` were `rejected` (`nullcall`'s record
-  `~/erxos-history/bench/pi4-4gb-erxos/20261125T200107Z-af9b3afc3c2c-dirty-8206ee98ebba`) because each line ended after
-  exactly 1,023 bytes, joined to the next. The likely cause is the relay outside the tree that gave the walk a pty
-  from the Glasgow applet's port: it dropped what a write to the pty's master did not take, and a macOS pty's master
-  takes about 1 KiB in one write. A re-run with `--console tcp:HOST:PORT` that carries those lines whole confirms
-  it; one that still cuts them points at `erx_fiasco_console_write` (`liberx/backend/fiasco/console.c`), which
+* [Medium] benchmarks, re-run `wake`'s `park-deadline` cell on the Pi 4 over the TCP console: its `BENCH` line
+  was `rejected` because it ended after exactly 1,023 bytes, joined to the next, as `nullcall`'s two `other-cpu`
+  cells' lines were (record
+  `~/erxos-history/bench/pi4-4gb-erxos/20261125T200107Z-af9b3afc3c2c-dirty-8206ee98ebba`). Those cells' lines arrive
+  whole with `--console tcp:HOST:PORT`, so the cut came from the relay outside the tree that gave the walk a pty
+  from the Glasgow applet's port, which dropped what a write to the pty's master did not take. A `park-deadline` line
+  that still arrives cut over TCP points at `erx_fiasco_console_write` (`liberx/backend/fiasco/console.c`), which
   returns at the first `l4_vcon_write` that fails and drops the rest of the write unreported.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
