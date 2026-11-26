@@ -22,8 +22,15 @@ CONFIG_PERF_CNT_USER=y
 CONFIG_EXPERT=y
 CONFIG_NO_VERSION=y
 # CONFIG_CPU_VIRT is not set
-# CONFIG_JDB_DISASM is not set
+# No build has the kernel debugger or the kernel's own console input, so a fatal
+# kernel error resets (docs/design-debugger.md, "On Fiasco"). L4Re's comparison
+# kernel turns the debugger on (tools/lib/erx/l4re_build.rb) without its logging,
+# which slows measured paths, or its compression.
+# CONFIG_JDB is not set
+# CONFIG_INPUT is not set
+# CONFIG_JDB_LOGGING is not set
 # CONFIG_JDB_GZIP is not set
+# CONFIG_JDB_DISASM is not set
 # CONFIG_COV is not set
 # The build names its LLVM programs in Makeconf.local; these keep the record truthful.
 CONFIG_CC="clang"

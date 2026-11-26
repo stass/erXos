@@ -31,15 +31,18 @@ module Erx
     REQUIRED = %w[CONFIG_FPU CONFIG_BENCHMARKING CONFIG_PERF_CNT_USER CONFIG_SYNC_CLOCK].freeze
     # The fork switches FP state eagerly and leaves SVE trapped ("Eager FP
     # switching"); the thread region is a constant of the non-hypervisor layout.
-    FORBIDDEN = %w[CONFIG_LAZY_FPU CONFIG_ARM_SVE CONFIG_CPU_VIRT].freeze
-    # What a release kernel leaves out (design-fiasco.md, the kernel): the kernel debugger and
-    # the kernel's own console input. With either built in, a panic waits on
-    # the console with interrupts off (JDB, which selects INPUT, and
-    # terminate.cpp's Exit_question::ask with INPUT); with neither, it
-    # resets once PSCI is known (design-fiasco.md, the kernel). These are the release defconfig's only differences
-    # (release_defconfig), and the check refuses them in the resolved file,
-    # where a select can set them again.
-    RELEASE_UNSET = %w[CONFIG_JDB CONFIG_INPUT].freeze
+    # No build has the kernel debugger, JDB, or the kernel's own console input
+    # (docs/design-debugger.md, "On Fiasco"): with either, a panic waits on the
+    # console with interrupts off (JDB, which selects INPUT, and terminate.cpp's
+    # Exit_question::ask with INPUT) instead of resetting.
+    FORBIDDEN = %w[CONFIG_LAZY_FPU CONFIG_ARM_SVE CONFIG_CPU_VIRT CONFIG_JDB CONFIG_INPUT].freeze
+    # What a release kernel leaves unset that a development kernel's defconfig may
+    # set: the release defconfig's only differences (release_defconfig), which the
+    # check also refuses in a release kernel's resolved file, where a select can set
+    # them again. The one the design names is the hold's option, CONFIG_ERX_HOLD
+    # (docs/design-debugger.md, "On Fiasco"), which the fork does not have, so the
+    # release defconfig is the development one.
+    RELEASE_UNSET = [].freeze
     MAX_BYTES = 1024 * 1024
     MAX_LINES = 16_384
     NAME = /CONFIG_[A-Za-z0-9_]{1,128}/

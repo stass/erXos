@@ -182,16 +182,15 @@ class FiascoTest < Minitest::Test
   end
 
   # The release kernel is configured from the development defconfig with the
-  # debugger and console input written as not set, in a directory of its own,
+  # release's differences (FiascoConfig::RELEASE_UNSET) appended, in a directory of its own,
   # beside the development kernel's. The development build and each board's own
   # bootstrap are built first, since the release's audit reads them: after a
   # source change the development build's outputs are gone until it runs again.
-  def test_release_kernel_is_configured_from_the_development_defconfig_without_the_debugger
+  def test_release_kernel_is_configured_from_the_development_defconfig
     path = @fiasco.build_release_kernel(jobs: 2)
     directory = Erx::Fiasco.kernel_directory(root: @directory, kind: Erx::BuildKind::RELEASE)
     assert_equal File.join(directory, 'fiasco'), path
-    assert_equal "#{KERNEL_CONFIG}# CONFIG_JDB is not set\n# CONFIG_INPUT is not set\n",
-                 File.read(File.join(directory, 'globalconfig.out'))
+    assert_equal KERNEL_CONFIG, File.read(File.join(directory, 'globalconfig.out'))
     development = Erx::Fiasco.kernel_directory(root: @directory, kind: Erx::BuildKind::DEVELOPMENT)
     assert_equal KERNEL_CONFIG, File.read(File.join(development, 'globalconfig.out'))
     names = @runner.commands.map { |command| command.fetch(:options).fetch(:name) }
@@ -223,8 +222,8 @@ class FiascoTest < Minitest::Test
     refute File.exist?(record)
   end
 
-  # Seeded fault: a development defconfig that turns the debugger on would
-  # leave it on in the release kernel; that build stops before any make.
+  # Seeded fault: a defconfig that turns the debugger on, which no build may
+  # have, stops the build before any make of the release kernel.
   def test_release_kernel_refuses_a_development_defconfig_naming_the_debugger
     File.write(kernel_config, KERNEL_CONFIG + "CONFIG_JDB=y\n")
     error = assert_raises(Erx::Error) { @fiasco.build_release_kernel }
@@ -240,7 +239,7 @@ class FiascoTest < Minitest::Test
       if options.fetch(:name) == 'fiasco-kernel-release-config'
         directory = argv.find { |argument| argument.start_with?('B=') }.delete_prefix('B=')
         resolved = File.join(directory, 'globalconfig.out')
-        File.write(resolved, File.read(resolved).sub("# CONFIG_INPUT is not set\n", "CONFIG_INPUT=y\n"))
+        File.write(resolved, "#{File.read(resolved)}CONFIG_INPUT=y\n")
       end
       result
     end

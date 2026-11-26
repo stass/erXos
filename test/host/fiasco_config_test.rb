@@ -104,52 +104,25 @@ class FiascoConfigTest < Minitest::Test
                  violations(resolved)
   end
 
-  # A release kernel is RESOLVED with the debugger and console input written
-  # as not set, as Kconfig writes them from FiascoConfig.release_defconfig.
-  RELEASE_RESOLVED = "#{RESOLVED}# CONFIG_INPUT is not set\n# CONFIG_JDB is not set\n".freeze
-
-  def test_a_release_configuration_without_the_debugger_and_input_passes
-    assert_empty violations(RELEASE_RESOLVED, kind: RELEASE)
-    assert_empty violations(RESOLVED, kind: RELEASE)
-  end
-
-  # Seeded faults: either option on keeps a panic on the console with
-  # interrupts off instead of rebooting, so a release kernel refuses it.
-  def test_a_release_configuration_with_the_debugger_or_input_fails
-    %w[CONFIG_JDB CONFIG_INPUT].each do |name|
-      resolved = RELEASE_RESOLVED.sub("# #{name} is not set\n", "#{name}=y\n")
-      assert_equal ["#{name} must be unset, found \"y\""], violations(resolved, kind: RELEASE)
-      assert_empty violations(resolved, kind: DEVELOPMENT)
+  # Seeded faults: the debugger or the console input on keeps a panic on the
+  # console with interrupts off instead of resetting, so no build takes either;
+  # JDB selects INPUT.
+  def test_the_debugger_and_console_input_fail_every_build
+    [DEVELOPMENT, RELEASE].each do |kind|
+      assert_equal [%q(CONFIG_JDB must be unset, found "y"), %q(CONFIG_INPUT must be unset, found "y")],
+                   violations("#{RESOLVED}CONFIG_INPUT=y\nCONFIG_JDB=y\n", kind: kind)
+      assert_empty violations("#{RESOLVED}# CONFIG_INPUT is not set\n# CONFIG_JDB is not set\n", kind: kind)
     end
-  end
-
-  # What a resolved development configuration holds: JDB selects INPUT.
-  def test_the_development_debugger_fails_the_release_check
-    resolved = "#{RESOLVED}CONFIG_INPUT=y\nCONFIG_JDB=y\n"
-    assert_empty violations(resolved)
-    assert_equal ['CONFIG_JDB must be unset, found "y"', 'CONFIG_INPUT must be unset, found "y"'],
-                 violations(resolved, kind: RELEASE)
   end
 
   def test_an_unknown_build_kind_is_refused
     assert_raises(Erx::Error) { violations(RESOLVED, kind: 'production') }
   end
 
-  def test_the_release_defconfig_is_the_development_one_with_the_differences_appended
+  def test_the_release_defconfig_is_the_development_one_with_its_newline
     development = "# A comment\nCONFIG_ARM=y\n# CONFIG_COV is not set\n"
-    assert_equal "#{development}# CONFIG_JDB is not set\n# CONFIG_INPUT is not set\n",
-                 Erx::FiascoConfig.release_defconfig(development)
-    assert_equal "CONFIG_ARM=y\n# CONFIG_JDB is not set\n# CONFIG_INPUT is not set\n",
-                 Erx::FiascoConfig.release_defconfig('CONFIG_ARM=y')
-  end
-
-  # The release's differences are stated once: a development defconfig that
-  # names one of them would leave the release defconfig naming it twice.
-  def test_a_development_defconfig_naming_a_release_difference_is_refused
-    { "CONFIG_JDB=y\n" => 'CONFIG_JDB', "# CONFIG_INPUT is not set\n" => 'CONFIG_INPUT' }.each do |line, name|
-      error = assert_raises(Erx::Error) { Erx::FiascoConfig.release_defconfig("CONFIG_ARM=y\n#{line}") }
-      assert_includes error.message, name
-    end
+    assert_equal development, Erx::FiascoConfig.release_defconfig(development)
+    assert_equal "CONFIG_ARM=y\n", Erx::FiascoConfig.release_defconfig('CONFIG_ARM=y')
   end
 
   def test_the_checked_in_defconfig_derives_a_release_defconfig

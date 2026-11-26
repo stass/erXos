@@ -97,15 +97,15 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   still builds JDB, the kernel's console input and `jdb_object.cpp` (GPL-2.0-only) into every development
   kernel, where a panic waits in the debugger, and the design documents describe the fork without them. To
   land, in parts that each stand alone:
-  1. the stop: the core `kernel/core/machine_stop.c` with its exhaustive host test, the glue
-     `fiasco/kernel/src/erx/erx_machine_stop.cpp`, the anchor and the stop slots in `abi/kernel.txt`, the CPU
-     entries of the crash record in the writer and both readers, the routes from `panic`, `assert_fail`,
-     `kdb_ke` and the four trap reports, the park in the debug inter-processor interrupt's handler, the check
-     in the spinlock's wait, the admission at the end of a secondary CPU's start, the bounded take of the printf
-     lock, and with it the removal of `src/jdb`, `jdb_object.cpp`, `CONFIG_INPUT` and the
-     `LicenseCheck::TABLE` row; a boot of a kernel without the object, which the release kernel already is
-     (`Modules.generic` lists `jdb_object.cpp` only for a kernel built with the debugger), checks that `sigma0`
-     ignores its object-naming calls failing (P9), and no such boot has run;
+  1. the stop: the glue `fiasco/kernel/src/erx/erx_machine_stop.cpp`, the anchor and the stop slots in
+     `abi/kernel.txt`, the routes from `panic`, `assert_fail`, `kdb_ke` and the four trap reports, the park in
+     the debug inter-processor interrupt's handler, the check in the spinlock's wait, the admission at the end of
+     a secondary CPU's start, the bounded take of the printf lock, and the `native_machine_stop` cells (the core,
+     its exhaustive host test, the crash record's CPU entries and the litmus tests of the admission and the slot
+     are in the tree, and no build has `CONFIG_JDB` or `CONFIG_INPUT`); and with it the removal of `src/jdb`,
+     `jdb_object.cpp`, the JDB menu of `src/Kconfig`, the `debug` and `log` parts and the `LicenseCheck::TABLE`
+     row, which no build uses; every development boot is now one of a kernel without the object, and a boot
+     checks that `sigma0` ignores its object-naming calls failing (P9);
   2. `tools/erx debug` over crash records and memory images, the debug bundle with its layout table and
      walkers, and the harness's image and report on a failing QEMU run;
   3. the hold and `erx.hold=1`, in the kernel, with its readable-RAM map, the classification of Fiasco's memory
@@ -119,9 +119,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   once, with a test whose seeded failure removes the check; an estimate of tens of lines, unverified
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
 * [High] 0.2 on Fiasco, `tools/lib/erx/fiasco_config.rb`: the release configuration as an exact allowlist, as
-  the development one is (the hold off, and until the debugger's replacement lands the debugger off; the fixed-priority scheduler, `EXPLICIT_REPLY_CAPS` and `IOMMU`
+  the development one is (the hold off; the fixed-priority scheduler, `EXPLICIT_REPLY_CAPS` and `IOMMU`
   kept; `PAGEFAULT_TRAMPOLINE`, `ALIEN`, `IRQ_DIRECT_INJECT` and every other option without a
-  consumer off), and its check, which fails an option off the list and a release build with the hold or the debugger on;
+  consumer off), and its check, which fails an option off the list and a release build with the hold on;
   the landing gate boots the release configuration once, a smoke test, and the milestone gate runs the QEMU
   suites on it ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
 * [High] 0.2 on Fiasco, `test/guest`: the system-call fuzz campaign, a test domain invoking every slot of its
@@ -1142,8 +1142,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 ## Planned features
 
 * [Medium] Fiasco, release builds (design-fiasco.md, "Boot handoff", the kernel): a
-  release kernel is configured without JDB and the kernel's console input, so a panic reboots
-  instead of waiting on the console (`tools/erx build release-kernel`, `FiascoConfig::RELEASE_UNSET`),
+  release kernel is built (`tools/erx build release-kernel`, `FiascoConfig::RELEASE_UNSET`),
   but no image packs it: every image is a development build (`ProductionImage::BUILD_KIND`);
   the release image build must take `Fiasco#build_release_kernel`'s kernel and extend the
   provenance audit (`fiasco_provenance.rb`, which reads `build/fiasco/kernel`) and the build

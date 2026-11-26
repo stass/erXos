@@ -12,10 +12,9 @@ require_relative '../../tools/lib/erx/fiasco'
 # result. The seeded case puts Fiasco's LAZY_FPU option back with the
 # `select` from BENCHMARKING and gives the defconfig a line saying it is not
 # set: the select wins over that line, and the check must catch the result.
-# The release defconfig (FiascoConfig.release_defconfig) resolves with the
-# debugger and console input unset, which no select turns back on, while the
-# development kernel's resolved configuration, which has both, fails the
-# release check.
+# The defconfig resolves with the debugger and console input unset, which no
+# select turns back on (INPUT defaults to on where the serial option exists),
+# and both build kinds' checks accept it.
 class FiascoConfigIntegrationTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   DEFCONFIG = File.join(ROOT, 'config/fiasco/kernel.defconfig')
@@ -51,17 +50,6 @@ class FiascoConfigIntegrationTest < Minitest::Test
     resolved = resolve(kernel_copy('fork'), name: 'fork')
     assert_empty Erx::FiascoConfig.violations(File.binread(resolved), kind: DEVELOPMENT)
     assert_nil Erx::FiascoConfig.check(resolved, kind: DEVELOPMENT)
-    lines = File.binread(resolved).lines
-    assert_includes lines, "CONFIG_JDB=y\n"
-    assert_includes lines, "CONFIG_INPUT=y\n"
-    error = assert_raises(Erx::FiascoConfig::Violation) { Erx::FiascoConfig.check(resolved, kind: RELEASE) }
-    assert_includes error.message, 'CONFIG_JDB must be unset'
-    assert_includes error.message, 'CONFIG_INPUT must be unset'
-  end
-
-  def test_the_release_defconfig_resolves_without_the_debugger_and_input
-    resolved = resolve(kernel_copy('release'), name: 'release',
-                                               defconfig: Erx::FiascoConfig.release_defconfig(File.binread(DEFCONFIG)))
     lines = File.binread(resolved).lines
     assert_includes lines, "# CONFIG_JDB is not set\n"
     assert_includes lines, "# CONFIG_INPUT is not set\n"

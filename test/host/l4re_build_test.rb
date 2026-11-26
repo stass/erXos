@@ -90,19 +90,25 @@ class L4ReBuildTest < Minitest::Test
     end
   end
 
-  def test_only_the_compiler_lines_of_the_kernel_defconfig_change
+  # Only the compiler lines change, and the debugger erXos's builds leave out is on.
+  def test_only_the_compiler_and_debugger_lines_of_the_kernel_defconfig_change
     text = File.read(File.join(ROOT, Erx::L4ReBuild::KERNEL_DEFCONFIG))
     built = Erx::L4ReBuild.kernel_defconfig(text)
     changed = built.lines - text.lines
-    assert_equal ["CONFIG_CC=\"gcc\"\n", "CONFIG_CXX=\"g++\"\n", "CONFIG_LD=\"ld\"\n"], changed
+    assert_equal ["CONFIG_JDB=y\n", "CONFIG_INPUT=y\n", "CONFIG_CC=\"gcc\"\n", "CONFIG_CXX=\"g++\"\n", "CONFIG_LD=\"ld\"\n"],
+                 changed
     assert_equal text.lines.size, built.lines.size
   end
 
   # A defconfig that drops or repeats a compiler line would build with a compiler the
-  # record does not name.
-  def test_a_defconfig_without_exactly_one_line_per_compiler_is_refused
-    assert_match(/CONFIG_LD 0 times/, assert_raises(Erx::Error) { Erx::L4ReBuild.kernel_defconfig("CONFIG_CC=\"a\"\nCONFIG_CXX=\"b\"\n") }.message)
-    twice = "CONFIG_CC=\"a\"\nCONFIG_CC=\"a\"\nCONFIG_CXX=\"b\"\nCONFIG_LD=\"c\"\n"
+  # record does not name, and one that drops the debugger's line would leave the board
+  # run without the reboot it types.
+  def test_a_defconfig_without_exactly_one_line_per_setting_is_refused
+    rest = "# CONFIG_JDB is not set\n# CONFIG_INPUT is not set\n"
+    assert_match(/CONFIG_LD 0 times/, assert_raises(Erx::Error) { Erx::L4ReBuild.kernel_defconfig("CONFIG_CC=\"a\"\nCONFIG_CXX=\"b\"\n#{rest}") }.message)
+    assert_match(/CONFIG_JDB 0 times/,
+                 assert_raises(Erx::Error) { Erx::L4ReBuild.kernel_defconfig("CONFIG_CC=\"a\"\nCONFIG_CXX=\"b\"\nCONFIG_LD=\"c\"\n") }.message)
+    twice = "CONFIG_CC=\"a\"\nCONFIG_CC=\"a\"\nCONFIG_CXX=\"b\"\nCONFIG_LD=\"c\"\n#{rest}"
     assert_match(/CONFIG_CC 2 times/, assert_raises(Erx::Error) { Erx::L4ReBuild.kernel_defconfig(twice) }.message)
   end
 

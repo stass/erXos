@@ -49,9 +49,14 @@ module Erx
     # Where each tree sits in the container: the manifest's layout under /tmp, so mk is
     # copied first and every package's parent, its pkg directory, exists when it lands.
     SOURCE_ROOT = '/tmp'
-    # erXos's kernel defconfig names its LLVM programs; upstream Fiasco is built by the
-    # image's gcc, so only these lines change (the record keeps what else differs).
-    COMPILERS = { 'CONFIG_CC' => 'gcc', 'CONFIG_CXX' => 'g++', 'CONFIG_LD' => 'ld' }.freeze
+    # The options of erXos's kernel defconfig that L4Re's Fiasco sets otherwise, each to
+    # the value that takes the defconfig line's place (the record keeps what else differs):
+    # upstream Fiasco is built by the image's gcc, not erXos's LLVM programs, and keeps
+    # the kernel debugger, whose reboot the run on the board types (docs/design-bench.md,
+    # "L4Re on the board"), with the console input the debugger reads. The defconfig
+    # leaves the debugger's logging and compression off for this kernel.
+    SETTINGS = { 'CONFIG_CC' => '"gcc"', 'CONFIG_CXX' => '"g++"', 'CONFIG_LD' => '"ld"',
+                 'CONFIG_JDB' => 'y', 'CONFIG_INPUT' => 'y' }.freeze
     # What the container script leaves in /tmp/out beside the target's bootable file, each
     # with the most bytes it may hold.
     OUTPUTS = { 'globalconfig.out' => 1 << 20, 'l4re.kconfig' => 1 << 20, 'compiler' => 4096 }.freeze
@@ -70,15 +75,16 @@ module Erx
     # Every file target's build leaves in /tmp/out, with the most bytes it may hold.
     def outputs_of(target) = OUTPUTS.merge(target.bootable => BOOTABLE_BYTES)
 
-    # erXos's kernel defconfig with gcc's programs in place of its compiler lines; each
-    # line must be present exactly once, so a renamed line cannot keep clang silently.
+    # erXos's kernel defconfig with SETTINGS in place of its lines; each option must be
+    # set or unset exactly once, so a renamed line cannot keep clang, or leave the
+    # debugger out, silently.
     def kernel_defconfig(text)
-      COMPILERS.reduce(text) do |config, (name, program)|
-        pattern = /^#{name}="[^"\n]*"$/
+      SETTINGS.reduce(text) do |config, (name, value)|
+        pattern = /^(?:#{name}=.*|\# #{name} is not set)$/
         raise Error, "#{KERNEL_DEFCONFIG} sets #{name} #{config.scan(pattern).size} times, not once" unless
           config.scan(pattern).size == 1
 
-        config.sub(pattern, "#{name}=\"#{program}\"")
+        config.sub(pattern, "#{name}=#{value}")
       end
     end
 

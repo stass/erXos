@@ -2140,8 +2140,9 @@ Fiasco's kernel debugger's reboot on the console it holds, a key a
 second: ESC, `^`, and the Return the debugger asks for to confirm it
 (`Return reboots, "k" enters L4 kernel debugger...`), and waits for erXos's banner from the way-back
 entry, within the boot deadline of [the walk](#the-walk). The debugger
-is in the image because erXos's kernel configuration leaves Fiasco's
-`JDB` at its default, which is on; the run's deadline types the reboot
+is in the image because L4Re's build turns Fiasco's `JDB` and the console
+input it reads on in its copy of erXos's kernel defconfig, which leaves both
+out (`L4ReBuild::SETTINGS`, `tools/lib/erx/l4re_build.rb`); the run's deadline types the reboot
 too, since the debugger may still answer when ipcbench has not
 finished. A board that shows no banner by then is left to a person: the
 run says so, the link names the found target again, and a power cycle
