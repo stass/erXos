@@ -155,11 +155,12 @@ module Erx
       hz ? Quantity.new(amount: Rational(ticks * 1_000_000_000, hz), unit: 'ns') : Quantity.new(amount: ticks, unit: unit)
     end
 
-    # entry's median over erXos's, where both are histograms in nanoseconds and neither was
-    # converted from cycles at a configured clock; a mean is never set in a ratio
-    # (docs/design-bench.md, "A mean").
+    # entry's median over erXos's, where both are histograms in nanoseconds, neither was
+    # converted from cycles at a configured clock, and both runs placed their threads alike
+    # (an unpinned run is never set in a ratio beside a pinned one); a mean is never set in
+    # a ratio (docs/design-bench.md, "A mean").
     def ratio(entry, erxos)
-      return nil if entry.converted_hz || erxos&.converted_hz
+      return nil if erxos.nil? || entry.unpinned != erxos.unpinned || entry.converted_hz || erxos.converted_hz
 
       own, base = [entry, erxos].map { |side| side&.form == 'histogram' ? side.values['p50'] : nil }
       own && base && base.unit == 'ns' && own.unit == 'ns' && base.amount.positive? ? own.amount / base.amount : nil

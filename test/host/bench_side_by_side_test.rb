@@ -129,6 +129,8 @@ class BenchSideBySideTest < Minitest::Test
     same, = Tables.tables(BENCHMARK, tcg, systems: %w[erxos linux]).first.rows
     assert_equal 4, same.cpus
     assert_equal [[false], [true]], %w[erxos linux].map { |system| column(same, system).entries.map(&:unpinned) }
+    # An unpinned run is never set in a ratio beside erXos's pinned one.
+    assert_equal [nil], column(same, 'linux').entries.map(&:ratio)
     assert(Tables.render(Tables.tables(BENCHMARK, tcg, systems: %w[erxos linux])).any? { |line| line.include?('unpinned, measured') })
   end
 

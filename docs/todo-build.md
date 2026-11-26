@@ -485,11 +485,9 @@ design does not have, to be deleted so no side-by-side table can show it under s
   library. `tools/erx build genode` (`GenodeBuild`) runs the build on the x86-64 host's engine: it writes the
   run script, checks every archive the engine extracts and hands it a fresh ustar copy (`CheckedTar`), and
   brings back `image.elf`, the configuration and the build record; which file the run tool names the boot
-  image, and whether init takes the documented configuration, are settled by its first run. Still to do: boot
-  the image under erXos's own QEMU harness, import its lines (the label dropped, as the design says), give
-  init's start node the boot's CPUs as its affinity, and show by a cross-CPU handshake that
-  `pthread_setaffinity_np` moves the thread before any row is published as pinned; the image takes the posix
-  run's CPU count when built (`GenodeBuild.build`'s `cpus:`, 1 from the command line).
+  image, and whether init takes the documented configuration, are settled by its first run. Still to do: run the
+  TCG session (`tools/erx bench posix --systems erxos,genode-hw`) once and import its records; the image is
+  built for `GenodeBuild::MACHINE`'s four CPUs with its program unpinned.
 * [Medium] Genode's build, `CheckedTar` and the engine (`tools/lib/erx/genode_build.rb`): that no tool archive
   writes through a link of the image rests on the engine refusing a directory entry over a non-directory, as
   moby v27.5.1 does for `docker cp` (docs/design-bench.md, "Genode's guest"); nothing checks that the context's
