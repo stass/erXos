@@ -26,8 +26,8 @@ class ErxBtWindowTest < Minitest::Test
              replacement: '    Opened = Core#core{window = {admitting, Id, Mode, Deadline, false}, last_failure = none},',
              catching_case: 'back_to_back_windows_do_not_shorten_the_wait_test'),
     Seed.new(fault: 'a disconnection mid-pairing not counted',
-             anchor: '    failure(Address, disconnected, Now, Core);',
-             replacement: '    {Actions, Failed} = failure(Address, disconnected, Now, Core), ' \
+             anchor: '    unbonded(disconnected, Now, Core);',
+             replacement: '    {Actions, Failed} = unbonded(disconnected, Now, Core), ' \
                           '{Actions, Failed#core{last_failure = Core#core.last_failure}};',
              catching_case: 'a_disconnection_mid_pairing_fails_and_counts_test'),
     Seed.new(fault: "the link's monitor kept past its keeping, so its end fails a kept bond",
@@ -39,8 +39,8 @@ class ErxBtWindowTest < Minitest::Test
              replacement: 'input({link, Link, {outcome, _Stale, {failed, Reason}}}, Now,',
              catching_case: 'stale_tags_change_nothing_test'),
     Seed.new(fault: 'a closed window leaving its running pairing unwithdrawn',
-             anchor: '    {[{send, Link, {withdraw, Tag}}], Core#core{window = none}};',
-             replacement: '    {[], Core#core{window = none}};',
+             anchor: '    {[{send, Link, {withdraw, Tag}}], Core#core{window = none, pairing = {Link, Tag, Address, withdrawn}}};',
+             replacement: '    {[], Core#core{window = none, pairing = {Link, Tag, Address, withdrawn}}};',
              catching_case: 'closing_withdraws_a_running_pairing_test'),
     Seed.new(fault: "an open allowed while a closed window's pairing has no outcome",
              anchor: 'input({open, Id}, _Now, #core{window = none, pairing = none, lines = Lines} = Core) ->',

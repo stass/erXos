@@ -20,8 +20,8 @@ module ErxBtCtlFuzz
   TREE = 'erlang/apps/erx_bt/src/erx_bt_fs_tree.erl'
   FUZZ = 'test/erlang/erx_bt_ctl_fuzz.erl'
   PAIR = 'erlang/apps/erx_bt_client/src/erx_bt_pair.erl'
-  CLAUSE = 'C >= $a andalso C =< $f end, Id).'
-  SEEDED = 'C >= $a andalso C =< $f orelse C >= $A andalso C =< $F end, Id).'
+  CLAUSE = 'is_id_digit(C) -> C >= $0 andalso C =< $9 orelse C >= $a andalso C =< $f.'
+  SEEDED = 'is_id_digit(C) -> C >= $0 andalso C =< $9 orelse C >= $a andalso C =< $f orelse C >= $A andalso C =< $F.'
   DEADLINE_SECONDS = '120'
   VERDICT = 'disagrees_with_writer'
 

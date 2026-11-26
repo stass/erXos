@@ -32,7 +32,7 @@ class ErxBtLinkTest < Minitest::Test
              anchor: '{[{window, wait}], Core0#core{bond = {candidate, Rest, asking}}};',
              replacement: '{[{window, wait}, {registry, {security, #{level => open, bond => maps:get(id, Rest)}}}], ' \
                           'Core0#core{bond = {candidate, Rest, asking}}};',
-             catching_case: 'resolved_bond_is_taken_on_at_encryption_test'),
+             catching_case: 'security_request_once_never_during_encryption_test'),
     Seed.new(fault: 'a frame on an unknown channel dropped without being counted',
              anchor: '    {[], Core#core{dropped = Dropped + 1}}.',
              replacement: '    {[], Core}.',
