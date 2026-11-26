@@ -770,7 +770,7 @@ the domain, and the new incarnation mints every grant anew
 process that has ended, and nothing re-binds one.
 A grantee finds it at `/svc/bluetooth`, by the rule that every
 service's control tree is at `/svc/NAME`, NAME being the service's
-name and not its server's ("Service trees: `/svc/NAME`" in [design-app-trees.md](design-app-trees.md));
+name and not its server's ([design-app-trees.md](design-app-trees.md));
 a session whose template holds no grant of it has no `/svc/bluetooth`
 ([Decisions](#decisions), 11).
 
@@ -786,7 +786,7 @@ a session whose template holds no grant of it has no `/svc/bluetooth`
   This design declares no interface of its own. `svc` speaks 9P2000.L
   as `files` does, with one parameter, the grant's rights, `ro` or
   `rw`, and `rw` where a row states none, and its row says `links
-  none` ("Service trees: `/svc/NAME`" in [design-app-trees.md](design-app-trees.md)): the tree's server parses what strangers send,
+  none` ([design-app-trees.md](design-app-trees.md)): the tree's server parses what strangers send,
   so a link in it is a stranger's, and the resolver follows none,
   answering `eacces` where it would
   ([design-files.md](design-files.md#resolving-a-path), "Symbolic
@@ -808,7 +808,7 @@ a session whose template holds no grant of it has no `/svc/bluetooth`
   of an `ro` grant reads `bonds` and nothing else, since `pair` opens
   only for reading and writing and `ctl` only for writing. The tree
   checks no name: there is no administrator flag beside the facet rows,
-  as for `/machine`
+  as for `/svc/machine`
   ([design-system.md](design-system.md#a-sessions-request)).
 * **Who is granted it.** Every development manifest that has a `bt` row
   grants it `rw` to root's session template, so an administrator at the
@@ -4687,7 +4687,7 @@ list ([todo-performance.md](todo-performance.md)):
 11. **Decided: the control tree is the service `bluetooth`, found at
     `/svc/bluetooth`.** Every service's control tree, an app's, a
     configured domain's or the system domain's, is at `/svc/NAME`
-    ("Service trees: `/svc/NAME`" in [design-app-trees.md](design-app-trees.md)), and the Bluetooth domain's is no exception: its
+    ([design-app-trees.md](design-app-trees.md)), and the Bluetooth domain's is no exception: its
     `pair`, `bonds` and `ctl` are a tree of the interface `svc`, whose
     row gives the one property the tree needs from its interface, that
     no link in it is followed ([The Bluetooth domain](#the-bluetooth-domain)).
