@@ -808,7 +808,13 @@ The manifest check refuses:
   lack `rx`;
 * a `service` row or a `facet` row of the interface `drive`, whose only
   grants are the drive windows, and a `service` row named `drive`, the
-  service of every drive window's grant record.
+  service of every drive window's grant record;
+* an `apps` row whose `services` names a service of the interface
+  `media`, whatever its name: a `media` grant reaches every drive's
+  volumes (DR-R8) and each drive's `ctl` ([Paths](#paths),
+  [Commands](#commands)), so no app takes one, and no app package that
+  declares one is admitted
+  ([design-packaging.md](design-packaging.md#the-apps-row)).
 
 The media domain's row allows it no sub-spaces (`spaces none`), since
 FAT and EROFS run in its own processes; a row that serves littlefs

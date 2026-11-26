@@ -335,7 +335,14 @@ board's source does not hold and the build record lists:
   declares the five quantities. A service of the files interface is
   refused until the data partition's storage service roots a grant at
   `tree apps`, since without it its grant would reach the whole tree
-  rather than the app's own directory.
+  rather than the app's own directory. A service of the media interface,
+  whatever its name, is never one an app takes: its grant reaches every
+  drive's volumes and the `ctl` that ejects each drive
+  ([design-drives.md](design-drives.md#paths),
+  [Commands](design-drives.md#commands)), all of the
+  machine's removable storage rather than anything of the app's own, so
+  the check refuses it as invalid, not as unsupported, and admission,
+  which takes only a service the row offers, never grants it either.
   The default rule's one exception is `ble`, whose `services` has none: its row
   carries `services` with the names of the `apps` row's `gatt`, the
   services apps may handle, so `ble_grant` checks it as it checks every

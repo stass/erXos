@@ -156,7 +156,9 @@ class ErxAppAdmitTest < Minitest::Test
      [package('low', memory: min - 1), :development, :base, error(Tuple.new([:memory, min - 1]))],
      [package('high', memory: (128 * MIB) + 1), :development, :base, error(Tuple.new([:memory, (128 * MIB) + 1]))],
      [package('netuser', needs: %w[display net]), :development, :base, error(Tuple.new([:not_offered, 'net']))],
-     [package('pkgs', needs: %w[packages]), :development, :base, error(Tuple.new([:not_offered, 'packages']))]] +
+     [package('pkgs', needs: %w[packages]), :development, :base, error(Tuple.new([:not_offered, 'packages']))],
+     # No apps row offers a service of the media interface; the manifest check refuses one that does.
+     [package('drives', needs: %w[media]), :development, :base, error(Tuple.new([:not_offered, 'media']))]] +
       earlier_check_answers
   end
 

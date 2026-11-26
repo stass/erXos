@@ -1877,11 +1877,13 @@ module Erx
       # name of exactly one service of the manifest, none of app_services_refused, of an
       # interface an ABI file declares, which gives every parameter a default (an optional
       # parameter), since an app's row is granted with no parameter stated, and every
-      # quantity (derived_quantities). A service of the inspect interface is refused until
-      # the scope an app principal gets is checked to be its own, never all, and one of
-      # the files or media interface (an interface files_grant checks) until the storage
-      # service's `tree apps` roots its grant at the app's own directory, by interface,
-      # whatever its name.
+      # quantity (derived_quantities). Three refusals go by interface, whatever the
+      # service's name. A service of the media interface is invalid: its grant reaches
+      # every drive's volumes and each drive's ctl, which ejects it (docs/design-drives.md,
+      # "Paths" and "Commands"), so no app takes it. One of the inspect interface is
+      # unsupported until the scope an app principal gets is checked to be its own, never
+      # all. One of any other interface files_grant checks is unsupported until the
+      # storage service's `tree apps` roots its grant at the app's own directory.
       def check_apps(tables)
         invalid('a facet of the source carries a tree, which only the rows the build derives may', 'facet.parameter') if
           records('facet').any? { |record| record.parameters.any? { |key, _value| key.value == 'tree' } }
@@ -1894,9 +1896,11 @@ module Erx
           invalid("services names #{name}, which is not the name of one service of the manifest", 'apps.services') unless
             matching.size == 1
           interface = service_rows.fetch(matching.first).fetch('interface')
+          invalid("services names #{name}, of the media interface, which no app takes: its grant reaches " \
+                  "every drive's volumes and ctl", 'apps.services') if interface == fetch_interface('media')
           unsupported("services names #{name}, of the inspect interface, whose scope for an app is not checked", 'apps.services') if
             interface == fetch_interface('inspect')
-          unsupported("services names #{name}, of a files or media interface, whose grant no tree apps roots yet", 'apps.services') if
+          unsupported("services names #{name}, of a files interface, whose grant no tree apps roots yet", 'apps.services') if
             grant_checker(interface) == 'files_grant'
           declared = declared_parameters(interface) ||
                      invalid("services names #{name}, whose interface no ABI file declares", 'apps.services')
