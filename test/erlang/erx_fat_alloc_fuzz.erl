@@ -6,9 +6,10 @@
 %% writes into the directory it is given. A round takes one, as it is or with its FATs
 %% and its files' first clusters mutated (16-bit words set to random or telling
 %% values: free, reserved, bad, end of chain, small cluster numbers), mounts it, and
-%% when it mounts writable runs random batches of grows, shrinks and frees over its
+%% when it mounts writable and passes the ownership check (erx_fat:check/1), as the
+%% server mounts a volume writable, runs random batches of grows, shrinks and frees over its
 %% files, as erx_fat_alloc_tests:op/3 makes them, each file's directory entry given
-%% its new first cluster and size, then the finish. Whatever the volume holds, each
+%% its new first cluster and size, then the finish's batches. Whatever the volume holds, each
 %% round ends in a finding of the allocator's closed set or a volume fsimg's verify
 %% (ERX_FSIMG) passes whenever it passed the round's starting volume; the allocator
 %% reads only sectors of the first FAT and FSInfo, and every plan writes only FAT and
@@ -23,6 +24,8 @@
 -define(MIN_VERIFIED, ?ROUNDS div 4).
 -define(SECTOR, 512).
 -define(FINDINGS, [does_not_read, no_space, read_failed]).
+%% A batch's held/1 never passes what one batch writes of the FAT and its chains.
+-define(HELD_MAX, 1024).
 
 run([Seed, Directory]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
@@ -43,7 +46,7 @@ round_of(Base) ->
     case Fat of
         {ok, Mounted} when map_size(Entries) > 0 ->
             case erx_fat_alloc:writable(erx_fat:info(Mounted)) of
-                ok -> written(Mounted, Entries, Image, Mutated);
+                ok -> checked(Mounted, Entries, Image, Mutated);
                 {read_only, _} -> refused
             end;
         _ ->
@@ -57,27 +60,38 @@ written(Fat, Entries, Image, Mutated) ->
     try
         Chains = maps:map(fun(_Offset, 0) -> []; (_Offset, First) -> answer(erx_fat_alloc:chain(A, First)) end,
                           Entries),
-        %% Files that already share a cluster, which only a scan of every chain
-        %% would find (a residual in TODO.md), are not the allocator's to keep apart.
         All = lists:append(maps:values(Chains)),
-        length(All) =:= length(lists:usort(All)) orelse throw(crossed),
+        length(All) =:= length(lists:usort(All)) orelse error({checked_volume_crossed, Chains}),
         planned(answer(erx_fat_alloc:dirty(A)), L),
         {A1, _} = lists:foldl(fun(_, {Ai, Ci}) -> batch(Ai, Ci, L, ClusterBytes) end, {A, Chains},
                               lists:seq(1, rand:uniform(4))),
-        {Finish, _} = answer(erx_fat_alloc:finish(A1)),
-        planned(Finish, L),
+        finished(A1, L),
         verdict(Image, Mutated)
     catch
         throw:{refused, Finding} ->
             lists:member(Finding, ?FINDINGS) orelse error({finding, Finding}),
-            refused;
-        throw:crossed ->
-            crossed
+            refused
+    end.
+
+%% The ownership check first, as a writable mount runs it.
+checked(Fat, Entries, Image, Mutated) ->
+    case erx_fat:check(Fat) of
+        ok -> written(Fat, Entries, Image, Mutated);
+        {read_only, tree} -> refused;
+        {error, read_failed} -> refused
+    end.
+
+finished(A, L) ->
+    case erx_fat_alloc:finish(A) of
+        {ok, Plan, finished} -> planned(Plan, L);
+        {ok, Plan, A1} -> planned(Plan, L), finished(A1, L);
+        {error, Finding} -> throw({refused, Finding})
     end.
 
 batch(A, Chains, L, ClusterBytes) ->
     {A1, Post} = lists:foldl(fun(_, {Ai, Ci}) -> erx_fat_alloc_tests:op(Ai, Ci, maps:keys(Ci)) end, {A, Chains},
                              lists:seq(1, rand:uniform(4))),
+    erx_fat_alloc:held(A1) =< ?HELD_MAX orelse error({held, erx_fat_alloc:held(A1)}),
     {Plan, A2} = answer(erx_fat_alloc:commit(A1)),
     planned(Plan, L),
     maps:foreach(fun(Offset, Chain) -> erx_fat_alloc_tests:entry(Offset, Chain, ClusterBytes) end, Post),
@@ -130,14 +144,19 @@ mutated(Image) ->
     lists:foldl(fun(_, Acc) -> mutation(Acc, Reserved, FatSectors) end, Image, lists:seq(1, rand:uniform(8))).
 
 %% A word of the first 2 KiB of the first FAT, or of both FATs, or a file's first
-%% cluster's low word, set to a telling value.
+%% cluster's low word, set to a telling value; or a file's first cluster given
+%% another's, so two names share a chain.
 mutation(Image, Reserved, FatSectors) ->
     Word = Reserved * ?SECTOR + 2 * rand:uniform(1023),
-    case rand:uniform(3) of
+    case rand:uniform(4) of
         1 -> put16(Image, Word, telling());
         2 -> Value = telling(), put16(put16(Image, Word, Value), Word + FatSectors * ?SECTOR, Value);
         3 -> Offsets = maps:keys(erx_fat_alloc_tests:entries(Image)),
-             put16(Image, lists:nth(rand:uniform(length(Offsets)), Offsets) + 26, telling())
+             put16(Image, lists:nth(rand:uniform(length(Offsets)), Offsets) + 26, telling());
+        4 -> Entries = erx_fat_alloc_tests:entries(Image),
+             Offsets = maps:keys(Entries),
+             From = maps:get(lists:nth(rand:uniform(length(Offsets)), Offsets), Entries),
+             put16(Image, lists:nth(rand:uniform(length(Offsets)), Offsets) + 26, From band 16#ffff)
     end.
 
 telling() ->

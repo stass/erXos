@@ -34,6 +34,13 @@ byte of the volume is untrusted input.
   the chain; a link out of the data area, a cluster seen twice and an end of
   chain before the clusters needed are `does_not_read`. A read answers at most
   the bytes the directory entry's size gives.
+* **The ownership check.** check/1 runs before a writable mount writes anything:
+  two passes over the FAT the server reads and a walk of every directory, which
+  marks in two sets of one bit a cluster every cluster an entry links to and every
+  name's first cluster, and finds a cluster linked to twice, a first cluster named
+  twice or linked to, a dot entry that names no parent, and a reached cluster whose
+  entry is free or bad. Any finding, a directory the read path would refuse with
+  `does_not_read` among them, is `tree`; the sets are atomics local to the call.
 
 A sector the function does not answer with 512 bytes is `read_failed`, about the
 medium's reading and not the volume's form. Each finding leaves through one
@@ -41,8 +48,10 @@ throw, `{erx_fat, Finding}`, caught at each exported entry; anything else the re
 function raises propagates.
 """.
 
--export([mount/2, info/1, layout/1, root/1, walk/3, attr/1, list/2, read/4, key/1]).
+-export([mount/2, info/1, layout/1, check/1, root/1, walk/3, attr/1, list/2, read/4, key/1]).
 -export_type([fat/0, fat_node/0, finding/0, read_sector/0]).
+
+-include("generated/erx_abi.hrl").
 
 -define(SECTOR, 512).
 -define(ENTRY, 32).
@@ -77,6 +86,15 @@ function raises propagates.
 %% fsimg b6c1ea2).
 -define(CLUSTERS_MAX_32, 16#0ffffff5).
 -define(VERSION_32, 0).
+%% The value a bad cluster's entry holds (section 4.1).
+-define(BAD_16, 16#fff7).
+-define(BAD_32, 16#0ffffff7).
+%% The dot entries' short names (section 6.1).
+-define(DOT, <<".          ">>).
+-define(DOTDOT, <<"..         ">>).
+%% The ownership check's two sets, one bit a cluster each, stay within half of
+%% the volume's memory bound, so it checks at most 4,194,304 clusters.
+-define(CHECKED_CLUSTERS_MAX, (?ERX_MEDIA_VOLUME_BYTES div 2 * 8 div 2)).
 
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
 -type finding() :: not_its_volume | does_not_read | read_failed.
@@ -349,6 +367,133 @@ cluster(Fat = #fat{read = Read}, Cluster) ->
     [sector(Read, Sector) || Sector <- cluster_sectors(Fat, Cluster)].
 
 %% ---------------------------------------------------------------------------
+%% The ownership check
+%% ---------------------------------------------------------------------------
+
+-doc """
+The ownership check a writable mount runs before it writes anything
+(docs/design-storage.md, "The ownership check"): `ok` when the volume's names and
+chains form one tree; `{read_only, too_large}` for a volume of more than
+?CHECKED_CLUSTERS_MAX clusters, read not at all; `{read_only, tree}` for a
+finding; `{error, read_failed}` when a sector does not read.
+""".
+-spec check(fat()) -> ok | {read_only, too_large | tree} | {error, read_failed}.
+check(#fat{clusters = Clusters}) when Clusters > ?CHECKED_CLUSTERS_MAX ->
+    {read_only, too_large};
+check(Fat = #fat{clusters = Clusters}) ->
+    Sets = {bits(Clusters), bits(Clusters)},
+    try
+        fat_pass(Fat, fun(Cluster, Value) -> linked_once(Fat, Sets, Cluster, Value) end),
+        names_pass(Fat, Sets),
+        fat_pass(Fat, fun(Cluster, Value) -> held_allocated(Fat, Sets, Cluster, Value) end)
+    catch
+        throw:{?MODULE, read_failed} -> {error, read_failed};
+        throw:{?MODULE, _Tree} -> {read_only, tree}
+    end.
+
+%% Fun applied to every cluster of the data area with its entry's value, the FAT the
+%% server reads taken a sector at a time from start to end.
+fat_pass(#fat{read = Read, type = Type, fat_start = Start, clusters = Clusters}, Fun) ->
+    PerSector = ?SECTOR * 8 div Type,
+    lists:foreach(fun(Index) ->
+                          Values = [Entry band mask(Type) || <<Entry:Type/little>> <= sector(Read, Start + Index)],
+                          [Fun(Cluster, Value) || {Cluster, Value} <- lists:enumerate(Index * PerSector, Values),
+                                                  Cluster >= 2, Cluster < Clusters + 2]
+                  end, lists:seq(0, (Clusters + 1) div PerSector)),
+    ok.
+
+%% What an entry holds: free, bad, the end of a chain, a link to a cluster of the
+%% data area, or a value the specification gives no entry (section 4.1).
+entry_kind(#fat{type = Type, clusters = Clusters}, Value) ->
+    case Value of
+        0 -> free;
+        _ when Type =:= 16, Value =:= ?BAD_16; Type =:= 32, Value =:= ?BAD_32 -> bad;
+        _ when Type =:= 16, Value >= ?END_MARK_16; Type =:= 32, Value >= ?END_MARK_32 -> end_of_chain;
+        _ when Value >= 2, Value < Clusters + 2 -> {to, Value};
+        _ -> invalid
+    end.
+
+%% The first pass: every cluster an entry links to marked once.
+linked_once(Fat, {Linked, _Named}, _Cluster, Value) ->
+    case entry_kind(Fat, Value) of
+        {to, Next} -> mark(Linked, Next) andalso fail(tree);
+        invalid -> fail(tree);
+        _ -> ok
+    end.
+
+%% The third pass: a cluster a chain or a name reaches holds neither free nor bad.
+held_allocated(Fat, {Linked, Named}, Cluster, Value) ->
+    Held = marked(Linked, Cluster) orelse marked(Named, Cluster),
+    Held andalso lists:member(entry_kind(Fat, Value), [free, bad]) andalso fail(tree).
+
+%% The second pass: the directories walked from the root, FAT32's root cluster
+%% named first.
+names_pass(Fat = #fat{root = Root}, Sets) ->
+    is_integer(Root) andalso named(Fat, Sets, Root),
+    directories(Fat, Sets, [{root, 0}]).
+
+%% Each directory once, from Work, which holds {Dir, Parent}: Dir is root or a
+%% subdirectory's first cluster, and Parent the cluster its `..` names, 0 for the
+%% root (section 6.1). A subdirectory holds both its dot entries.
+directories(_Fat, _Sets, []) ->
+    ok;
+directories(Fat, Sets, [{Dir, Parent} | Work]) ->
+    Node = #fat_node{key = root, kind = dir, first = Dir, size = 0, mtime = ?FAT_EPOCH, read_only = false},
+    #{dot := Dot, dotdot := DotDot, work := Next} =
+        fold_entries(Fat, dir_sectors(Node, Fat), fun(Entry, Acc) -> owned(Fat, Sets, Dir, Parent, Entry, Acc) end,
+                     #{dot => false, dotdot => false, work => Work}),
+    Dir =:= root orelse (Dot andalso DotDot) orelse fail(tree),
+    directories(Fat, Sets, Next).
+
+%% One entry of directory Dir: a name's first cluster named, a subdirectory queued,
+%% and a subdirectory's `.` and `..` matched against its own first cluster and its
+%% parent's. Deleted, long-name and label entries hold no cluster (sections 6 and
+%% 7), and the root has no dot entries, so any it holds are not read.
+owned(_Fat, _Sets, _Dir, _Parent, <<?DELETED, _/binary>>, Acc) ->
+    Acc;
+owned(_Fat, _Sets, _Dir, _Parent, <<_:11/binary, Attributes, _/binary>>, Acc)
+  when Attributes band ?VOLUME_ID =/= 0 ->
+    Acc;
+owned(Fat, Sets, Dir, Parent, <<Short:11/binary, Attributes, _:8/binary, High:16/little, _:4/binary,
+                                Low:16/little, _:32>>, Acc = #{work := Work}) ->
+    First = case Fat of #fat{type = 32} -> (High bsl 16) bor Low; _ -> Low end,
+    case {Short, Attributes band ?DIRECTORY =/= 0} of
+        {_, _} when Dir =:= root, Short =:= ?DOT orelse Short =:= ?DOTDOT -> Acc;
+        {?DOT, _} -> First =:= Dir orelse fail(tree), Acc#{dot := true};
+        {?DOTDOT, _} -> First =:= Parent orelse fail(tree), Acc#{dotdot := true};
+        {_, true} -> named(Fat, Sets, First), Acc#{work := [{First, number(Dir)} | Work]};
+        {_, false} when First =:= 0 -> Acc;
+        {_, false} -> named(Fat, Sets, First), Acc
+    end.
+
+%% The cluster a directory's children's `..` entries name.
+number(root) -> 0;
+number(Cluster) -> Cluster.
+
+%% First, a name's first cluster: a cluster of the volume, so never 0, which no
+%% subdirectory's entry may give, that no entry links to and no other name gives.
+named(#fat{clusters = Clusters}, {Linked, Named}, First) ->
+    First >= 2 andalso First < Clusters + 2 orelse fail(tree),
+    marked(Linked, First) andalso fail(tree),
+    mark(Named, First) andalso fail(tree).
+
+%% A set of clusters, one bit each, local to one check.
+bits(Clusters) -> atomics:new((Clusters + 63) div 64, [{signed, false}]).
+
+%% Cluster added to Set; whether Set held it before.
+mark(Set, Cluster) ->
+    {Word, Bit} = bit(Cluster),
+    Old = atomics:get(Set, Word),
+    ok = atomics:put(Set, Word, Old bor Bit),
+    Old band Bit =/= 0.
+
+marked(Set, Cluster) ->
+    {Word, Bit} = bit(Cluster),
+    atomics:get(Set, Word) band Bit =/= 0.
+
+bit(Cluster) -> {(Cluster - 2) div 64 + 1, 1 bsl ((Cluster - 2) rem 64)}.
+
+%% ---------------------------------------------------------------------------
 %% Directories
 %% ---------------------------------------------------------------------------
 
@@ -371,23 +516,28 @@ chain_sectors(Fat, First) ->
 %% checksum all carry and the parts read so far, first part first.
 entries(Dir = #fat_node{key = Parent}, Fat) ->
     Cursor = #{fat => Fat, parent => Parent, index => 0, long => none, got => []},
-    lists:reverse(sectors(dir_sectors(Dir, Fat), Cursor)).
+    #{got := Got} = fold_entries(Fat, dir_sectors(Dir, Fat),
+                                 fun(Entry, Next = #{index := Index, long := Long}) ->
+                                         (entry(Entry, Long, Next))#{index := Index + 1}
+                                 end, Cursor),
+    lists:reverse(Got).
 
-sectors([], #{got := Got}) ->
-    Got;
-sectors([{Sector, Count} | Rest], Cursor = #{fat := #fat{read = Read}}) ->
-    case sector_entries(sector(Read, Sector), Count, Cursor) of
-        {done, Got} -> Got;
-        {next, Next} -> sectors(Rest, Next)
+%% Fun folded over a directory's entries, given as its sectors with how many entries
+%% each holds, a sector read at a time, to its end marker or its last entry.
+fold_entries(_Fat, [], _Fun, Acc) ->
+    Acc;
+fold_entries(Fat = #fat{read = Read}, [{Sector, Count} | Rest], Fun, Acc) ->
+    case fold_sector(sector(Read, Sector), Count, Fun, Acc) of
+        {done, Done} -> Done;
+        {next, Next} -> fold_entries(Fat, Rest, Fun, Next)
     end.
 
-sector_entries(_Bytes, 0, Cursor) ->
-    {next, Cursor};
-sector_entries(<<?END_OF_DIRECTORY, _/binary>>, _Left, #{got := Got}) ->
-    {done, Got};
-sector_entries(<<Entry:?ENTRY/binary, Rest/binary>>, Left, Cursor = #{index := Index, long := Long}) ->
-    Next = entry(Entry, Long, Cursor),
-    sector_entries(Rest, Left - 1, Next#{index := Index + 1}).
+fold_sector(_Bytes, 0, _Fun, Acc) ->
+    {next, Acc};
+fold_sector(<<?END_OF_DIRECTORY, _/binary>>, _Left, _Fun, Acc) ->
+    {done, Acc};
+fold_sector(<<Entry:?ENTRY/binary, Rest/binary>>, Left, Fun, Acc) ->
+    fold_sector(Rest, Left - 1, Fun, Fun(Entry, Acc)).
 
 entry(<<?DELETED, _/binary>>, _Long, Cursor) ->
     Cursor#{long := none};

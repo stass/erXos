@@ -15,26 +15,26 @@ require_relative '../../test/fixtures/fat_volumes'
 # compiled from source with erx_fat's mount and the allocator's suite, whose image
 # helpers it shares, and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the
 # oracle's), so it needs no hosted build, over the volumes FatVolumes has fsimg write
-# as its seeds, with fsimg's verify its oracle. It runs the allocator as it is, then a
-# copy that follows a FAT link without checking that it names a cluster of the data
-# area, which must fail: a mutated link then has the allocator read a sector past
-# the first FAT.
+# as its seeds, with fsimg's verify its oracle. It runs the allocator as it is, then
+# with a copy of erx_fat whose ownership check skips its walk of the names, which
+# must fail: a mutated first cluster that names another file's chain then reaches the
+# allocator.
 module ErxFatAllocFuzz
   ROOT = File.expand_path('../..', __dir__)
-  CORE = 'erlang/apps/erx_fat/src/erx_fat_alloc.erl'
-  SOURCES = %w[erlang/apps/erx_fat/src/erx_fat.erl erlang/apps/erx_fat/src/erx_fat_read.erl
+  CORE = 'erlang/apps/erx_fat/src/erx_fat.erl'
+  SOURCES = %w[erlang/apps/erx_fat/src/erx_fat_alloc.erl erlang/apps/erx_fat/src/erx_fat_read.erl
                test/erlang/erx_fat_alloc_tests.erl test/erlang/erx_fat_alloc_fuzz.erl].freeze
-  CHECKED = 'when is_integer(Value), Value >= 2, Value < Clusters + 2 ->'
-  UNCHECKED = 'when is_integer(Value), Clusters > 0 ->'
+  CHECKED = '        names_pass(Fat, Sets),'
+  UNCHECKED = '        _ = fun names_pass/2,'
   DEADLINE_SECONDS = '600'
-  VERDICT = 'read_outside'
+  VERDICT = 'checked_volume_crossed'
 
   module_function
 
   def run(seed:)
     Erx::Generated.ensure(root: ROOT)
     core = File.binread(File.join(ROOT, CORE))
-    raise "no range check on a link in #{CORE}" unless core.scan(CHECKED).size == 1
+    raise "no names pass in #{CORE}" unless core.scan(CHECKED).size == 1
 
     Dir.mktmpdir('erx-fat-alloc-volumes') do |volumes|
       FatVolumes.write(volumes, root: ROOT)
@@ -42,7 +42,7 @@ module ErxFatAllocFuzz
       abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ verified$/)
       puts output[/^fuzz: .*$/]
       output, status = fuzz(core.sub(CHECKED, UNCHECKED), seed: seed, volumes: volumes)
-      abort("a link followed without its range checked passed:\n#{output}") if status.success? || !output.include?(VERDICT)
+      abort("an ownership check without its names pass passed:\n#{output}") if status.success? || !output.include?(VERDICT)
     end
     puts 'erx_fat_alloc reads only its FATs and FSInfo, and the unchecked copy does not pass'
   end

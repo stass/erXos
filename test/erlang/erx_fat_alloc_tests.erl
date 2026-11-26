@@ -13,7 +13,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% The image helpers test/erlang/erx_fat_alloc_fuzz.erl shares.
--export([use/1, reader/0, apply_plan/1, flat/0, entries/1, entry/3, op/3, verify/1]).
+-export([use/1, reader/0, apply_plan/1, flat/0, entries/1, entry/3, op/3, verify/1, finished/1]).
 
 -define(SECTOR, 512).
 -define(UNKNOWN, 16#ffffffff).
@@ -148,12 +148,17 @@ committed(A) ->
 %% ---------------------------------------------------------------------------
 
 %% Random batches of grows, shrinks and frees over files in ?SLOTS slots, each plan
-%% applied a step at a time. After every step every FAT is equal and keeps its top
-%% bits, and every file's chain is whole and ends in an end-of-chain mark, no
-%% cluster in two: as before the batch while only its allocation step has landed,
-%% as after it from then on (a batch that only frees has its publication in the
-%% directory steps the directory code writes). Every cluster the batch allocates was free before it and is no
-%% cluster it frees, and after the batch the FAT allocates exactly the files'.
+%% applied a step at a time in its order, which is the batch's. Each file's first
+%% cluster and size, in clusters, are published as the caller's publication step
+%% writes them, before the cutting and release steps. After every step every FAT is
+%% equal and keeps its top bits, and every published file's chain is whole, starts
+%% at its first cluster, is never shorter than its size, holds within its size only
+%% clusters the file held before the batch or during it, and shares no cluster with
+%% another's; a new run is whole before any step after preparation; a cluster the
+%% batch takes from a file stays allocated until the release; and after the batch
+%% every file's chain is exactly its own, the FAT allocates exactly the files'
+%% clusters and nothing waits. Every cluster the batch allocates was free before it
+%% and is none it frees.
 batches_keep_every_chain_whole_at_every_cut_test_() ->
     {timeout, 300, fun() -> [property(Seed) || Seed <- lists:seq(1, 80)] end}.
 
@@ -166,37 +171,51 @@ property(Seed) ->
 batches(_A, _L, _Tops, _Chains, 0) ->
     ok;
 batches(A, L, Tops, Pre, Left) ->
-    {A1, Post} = lists:foldl(fun(_, {Ai, Ci}) -> op(Ai, Ci, lists:seq(1, ?SLOTS)) end, {A, Pre},
-                             lists:seq(1, 1 + rand:uniform(6))),
+    {A1, Post, Own} =
+        lists:foldl(fun(_, {Ai, Ci, Oi}) ->
+                            {Aj, Cj} = op(Ai, Ci, lists:seq(1, ?SLOTS)),
+                            {Aj, Cj, maps:merge_with(fun(_K, Before, After) -> lists:usort(Before ++ After) end, Oi, Cj)}
+                    end, {A, Pre, Pre}, lists:seq(1, 1 + rand:uniform(6))),
     Free = free_clusters(L),
     New = lists:append([maps:get(K, Post) -- maps:get(K, Pre, []) || K <- maps:keys(Post)]),
     Freed = lists:append([Chain -- maps:get(K, Post, []) || K := Chain <- Pre]),
     ?assertEqual([], New -- Free),
     ?assertEqual([], [C || C <- New, lists:member(C, Freed)]),
     Runs = [Run || K := Chain <- Post, [_ | _] = Run <- [Chain -- maps:get(K, Pre, [])]],
-    Old = [{C, value(L, C)} || C <- Freed],
     {ok, Plan, A2} = erx_fat_alloc:commit(A1),
     Steps = [Step || {Step, _} <- Plan],
-    ?assertEqual([S || S <- [allocation, publication, release], lists:member(S, Steps)], Steps),
+    ?assertEqual([S || S <- [preparation, linking, cutting, release], lists:member(S, Steps)], Steps),
     lists:foldl(fun({Step, Writes}, Published) ->
-                        %% Every new run is whole before anything can reach it.
-                        [?assertEqual(Run, walk(L, hd(Run))) || Step =/= allocation, Run <- Runs],
+                        Shown = case lists:member(Step, [cutting, release]) of
+                                    true -> files_hold(L, Tops, Post, Own), Post;
+                                    false -> Published
+                                end,
+                        [?assertEqual(Run, walk(L, hd(Run))) || Step =/= preparation, Run <- Runs],
                         write(Writes),
-                        %% Every freed cluster keeps its entry until its release.
-                        [?assertEqual(Old, [{C, value(L, C)} || {C, _} <- Old]) || Step =/= release],
-                        Now = Published orelse Step =/= allocation,
-                        cut_holds(L, Tops, case Now of true -> Post; false -> Pre end),
-                        Now
-                end, false, Plan),
+                        [?assertEqual([], [C || C <- Freed, value(L, C) =:= 0]) || Step =/= release],
+                        files_hold(L, Tops, Shown, Own),
+                        Shown
+                end, Pre, Plan),
+    files_hold(L, Tops, Post, Own),
+    [?assertEqual(Chain, walk(L, First)) || _ := [First | _] = Chain <- Post],
     ?assertEqual(lists:sort(lists:append(maps:values(Post))), allocated(L)),
+    ?assertEqual(0, erx_fat_alloc:held(A2)),
     batches(A2, L, Tops, Post, Left - 1).
 
-cut_holds(L, Tops, Live) ->
+%% Every FAT equal with its top bits kept, and each of Files' chains, as the medium
+%% holds it from the file's first cluster, whole and at least as long as the file,
+%% the clusters within the file's size among Own's for it; no cluster in two chains.
+files_hold(L, Tops, Files, Own) ->
     copies_equal(L),
     ?assertEqual(Tops, tops(L)),
-    All = lists:append(maps:values(Live)),
-    ?assertEqual(length(All), length(lists:usort(All))),
-    [?assertEqual(Chain, walk(L, First)) || _ := [First | _] = Chain <- Live].
+    Walked = [{K, length(Chain), walk(L, First)} || K := [First | _] = Chain <- Files],
+    [?assertEqual({K, []}, {K, within(Medium, Size) -- maps:get(K, Own)}) || {K, Size, Medium} <- Walked],
+    All = lists:append([Medium || {_, _, Medium} <- Walked]),
+    ?assertEqual(length(All), length(lists:usort(All))).
+
+%% The first Size clusters of a walk; a walk that broke or is shorter fails.
+within(Medium, Size) when is_list(Medium), length(Medium) >= Size -> lists:sublist(Medium, Size);
+within(Medium, Size) -> error({short_or_broken, Size, Medium}).
 
 %% One random change to the file under one of Keys, whose chains Chains holds; the
 %% allocator's own view of the chain checked first. A finding but no_space is
@@ -277,13 +296,13 @@ every_fat_is_written_in_the_same_step_the_first_first_test() ->
     L = #{fat_start := Start, fat_sectors := FatSectors} = synthetic(16, 600, 3, fun zero/1),
     craft(L, links(L, lists:seq(2, 254))),
     {ok, _Run, A} = erx_fat_alloc:grow(erx_fat_alloc:new(L), 2, 4),
-    {ok, [{allocation, Allocation}, {publication, Publication}], _} = erx_fat_alloc:commit(A),
+    {ok, [{preparation, Preparation}, {linking, Linking}], _} = erx_fat_alloc:commit(A),
     [begin
          Sectors = [Index || {Index, _} <- Writes],
          ?assertEqual(Sectors, lists:sort(Sectors)),
          Copies = [[Bytes || {Index, Bytes} <- Writes, (Index - Start) div FatSectors =:= Copy] || Copy <- [0, 1, 2]],
          ?assertMatch([Same, Same, Same], Copies)
-     end || Writes <- [Allocation, Publication]].
+     end || Writes <- [Preparation, Linking]].
 
 a_run_starts_after_the_last_cluster_allocated_and_wraps_test() ->
     L = synthetic(16, 40, 1, fun zero/1),
@@ -297,10 +316,76 @@ a_run_starts_after_the_last_cluster_allocated_and_wraps_test() ->
     %% No run of five: the first five free clusters met, from 8 on.
     ?assertMatch({ok, [8, 9, 41, 2, 3], _}, erx_fat_alloc:grow(committed(A2), none, 5)).
 
+%% The volume's last batches, each plan applied, until nothing waits.
+finished(A) ->
+    case erx_fat_alloc:finish(A) of
+        {ok, Plan, finished} -> apply_plan(Plan);
+        {ok, Plan, A1} -> apply_plan(Plan), finished(A1)
+    end.
+
+%% A FAT32 volume of one FAT whose clusters form one chain from cluster 2, its last
+%% entry Last.
+long_chain(Clusters, Last) ->
+    FatSectors = ((Clusters + 2) * 4 + ?SECTOR - 1) div ?SECTOR,
+    Raw = << <<Value:32/little>> || Value <- [16#0ffffff8, 16#0fffffff | lists:seq(3, Clusters + 1)] ++ [Last] >>,
+    use(<<0:(?SECTOR * 8), (fsinfo(4660, 77))/binary, Raw/binary, 0:((FatSectors * ?SECTOR - byte_size(Raw)) * 8)>>),
+    #{read => reader(), type => 32, fat_start => 2, fats => 1, fat_sectors => FatSectors, clusters => Clusters,
+      fsinfo => 1}.
+
+%% A chain of 140,000 clusters cut to its first: the cut's sector, counted for linking
+%% and cutting, and one waiting chain are what the batch holds; its release frees 1,024 FAT sectors' worth from cluster 3 on
+%% and leaves the rest waiting, allocated and reached by nothing; the next batch can
+%% allocate what the first freed; and the finish frees the rest before it cleans.
+a_long_chain_is_released_over_several_batches_each_within_the_bound_test_() ->
+    {timeout, 120,
+     fun() ->
+             Clusters = 140000,
+             L = long_chain(Clusters, 16#0fffffff),
+             {ok, A} = erx_fat_alloc:shrink(erx_fat_alloc:new(L), 2, 1),
+             ?assertEqual(3, erx_fat_alloc:held(A)),
+             {ok, Plan, A1} = erx_fat_alloc:commit(A),
+             ?assertEqual([cutting, release], [Step || {Step, _} <- Plan]),
+             Released = proplists:get_value(release, Plan),
+             ?assertEqual(lists:seq(2, 2 + 1023), [Sector || {Sector, _} <- Released]),
+             apply_plan(Plan),
+             ?assertEqual(1, erx_fat_alloc:held(A1)),
+             ?assertEqual([2], walk(L, 2)),
+             ?assertEqual(lists:seq(1024 * 128, Clusters + 1), walk(L, 1024 * 128)),
+             ?assertEqual(0, value(L, 1024 * 128 - 1)),
+             ?assertMatch({ok, [3], _}, erx_fat_alloc:grow(A1, none, 1)),
+             {ok, Last, finished} = erx_fat_alloc:finish(A1),
+             ?assertEqual([release, clean], [Step || {Step, _} <- Last]),
+             apply_plan(Last),
+             ?assertEqual([2], allocated(L))
+     end}.
+
+%% A chain that ends in a loop back to its second cluster, on a medium that forgets
+%% every write, as a device may answer: each release reads the chain as it was, so
+%% only the waiting chain's budget, the volume's count of clusters, ends the finish,
+%% with does_not_read.
+a_release_ends_on_a_medium_that_forgets_its_writes_test_() ->
+    {timeout, 120,
+     fun() ->
+             L = long_chain(140000, 3),
+             {ok, A} = erx_fat_alloc:shrink(erx_fat_alloc:new(L), 2, 1),
+             ?assertEqual({error, does_not_read}, forgetful(A, 4))
+     end}.
+
+forgetful(_A, 0) -> gave_up;
+forgetful(A, Left) ->
+    case erx_fat_alloc:finish(A) of
+        {ok, _Plan, finished} -> finished;
+        {ok, _Plan, A1} -> forgetful(A1, Left - 1);
+        Error -> Error
+    end.
+
 %% ---------------------------------------------------------------------------
 %% Chains a crafted medium holds
 %% ---------------------------------------------------------------------------
 
+%% A loop, a link to a free cluster, out of the data area, to a bad cluster or to 1
+%% are refused by every walk, and by the release of a chain that holds one, which
+%% frees each cluster before it follows its link.
 a_chain_that_loops_or_leaves_the_data_area_is_refused_test() ->
     [begin
          L = synthetic(Type, 300, 2, fun zero/1),
@@ -310,20 +395,11 @@ a_chain_that_loops_or_leaves_the_data_area_is_refused_test() ->
          [begin
               ?assertEqual({error, does_not_read}, erx_fat_alloc:chain(A, First)),
               ?assertEqual({error, does_not_read}, erx_fat_alloc:grow(A, First, 1)),
-              ?assertEqual({error, does_not_read}, erx_fat_alloc:free(A, First))
-          end || First <- [2, 10, 20, 30, 40, 0, 1, 302]]
+              {ok, Waiting} = erx_fat_alloc:free(A, First),
+              ?assertEqual({error, does_not_read}, erx_fat_alloc:commit(Waiting))
+          end || First <- [2, 10, 20, 30, 40]],
+         [?assertEqual({error, does_not_read}, erx_fat_alloc:free(A, First)) || First <- [0, 1, 302]]
      end || Type <- [16, 32]].
-
-two_chains_crossing_are_refused_test() ->
-    L = synthetic(16, 300, 2, fun zero/1),
-    %% 2 -> 3 and 4 -> 3 share 3; 6 -> 7, whose entry is free, which a new run then takes.
-    craft(L, [{2, 3}, {3, eoc(L)}, {4, 3}, {5, eoc(L)}, {6, 7}]),
-    {ok, A} = erx_fat_alloc:free(erx_fat_alloc:new(L), 2),
-    ?assertEqual({error, does_not_read}, erx_fat_alloc:chain(A, 4)),
-    ?assertEqual({error, does_not_read}, erx_fat_alloc:chain(A, 3)),
-    {ok, [7], A1} = erx_fat_alloc:grow(erx_fat_alloc:new(L), none, 1),
-    ?assertEqual({error, does_not_read}, erx_fat_alloc:chain(A1, 6)),
-    ?assertEqual({ok, [7]}, erx_fat_alloc:chain(A1, 7)).
 
 a_shrink_past_the_chain_is_refused_test() ->
     L = synthetic(16, 300, 1, fun zero/1),
@@ -351,7 +427,7 @@ the_dirty_and_clean_steps_keep_the_top_bits_and_set_the_hints_test() ->
     copies_equal(L),
     {ok, [2, 3, 4], A1} = erx_fat_alloc:grow(A, none, 3),
     {ok, Plan, _} = erx_fat_alloc:finish(A1),
-    ?assertEqual([allocation, release, clean], [Step || {Step, _} <- Plan]),
+    ?assertEqual([preparation, release, clean], [Step || {Step, _} <- Plan]),
     apply_plan(Plan),
     ?assertEqual([2, 3, 4], walk(L, 2)),
     ?assertEqual(#{clean => true, hard_error => false}, erx_fat_alloc:volume_flags(32, raw(L, 0, 1))),
@@ -413,6 +489,7 @@ seeded(Name, Seed) ->
     use(Base),
     {ok, Fat} = erx_fat:mount(reader(), byte_size(Base) div ?SECTOR),
     ok = erx_fat_alloc:writable(erx_fat:info(Fat)),
+    ok = erx_fat:check(Fat),
     L = erx_fat:layout(Fat),
     #{cluster_bytes := ClusterBytes} = erx_fat:info(Fat),
     Entries = entries(Base),
@@ -421,8 +498,7 @@ seeded(Name, Seed) ->
     {ok, Dirty} = erx_fat_alloc:dirty(A),
     apply_plan(Dirty),
     {A1, _} = lists:foldl(fun(_, {Ai, Ci}) -> seeded_batch(Ai, Ci, ClusterBytes) end, {A, Chains}, lists:seq(1, 4)),
-    {ok, Finish, _} = erx_fat_alloc:finish(A1),
-    apply_plan(Finish),
+    finished(A1),
     ?assertMatch({0, _}, verify(flat())).
 
 seeded_batch(A, Chains, ClusterBytes) ->

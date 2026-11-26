@@ -1765,14 +1765,16 @@ designed. It maps the format onto the file protocol as follows:
      a directory; and the data a file rewrites in place in the clusters
      it keeps.
   2. **Linking**: the FAT entry that joins a file's or a directory's old
-     last cluster to its new run, and the `..` entry of a directory the
-     batch moves to another parent.
+     last cluster to its new run, or, for a file the batch cuts and grows
+     again, its cut cluster to a new run no shorter than the part cut off,
+     and the `..` entry of a directory the batch moves to another parent.
   3. **Publication**: the directory entries that add or change names, and
      what they hold: a new file's or directory's entry with its first
      cluster, a renamed or moved file's new entry, and a file's new size,
      times and attributes.
   4. **Cutting**: the end-of-chain marks that cut a shrinking file's
-     chain at its new last cluster.
+     chain at its new last cluster, and the link of a cut cluster to a new
+     run shorter than the part cut off.
   5. **Release**: the FAT entries that free clusters, which since step 4
      no live chain and no name reaches, and at the finish FAT32's
      next-free hint (below).

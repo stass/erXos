@@ -102,8 +102,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      `erx_fat`'s core, so that FAT has one volume model and design-storage.md's "the pure read core
      ... that the FAT server reads through too" holds (today the server shares only
      `boot_sector/1`). The batches' FAT entries are built: `erx_fat_alloc` plans grows, shrinks
-     and frees in the allocation, publication and release steps, the dirty flag's step and the
-     finish, not yet called by the volume. A volume whose sectors are not 512 bytes is
+     and frees in the preparation, linking, cutting and release steps, the dirty flag's step and the
+     finish, and `erx_fat:check/1` runs the ownership check, neither yet called by the volume. A volume whose sectors are not 512 bytes is
      `not_its_volume`.
   6. EROFS: `erx_erofs` reading through its mount's source function, with `mount_source/2` beside
      `mount/2`; `erx_media_blocks` and `erx_media_erofs`; `erx_erofs_tree` factored out of
@@ -249,13 +249,24 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [High] storage, the FAT allocator's state grows with a chain (`erlang/apps/erx_fat/src/erx_fat_alloc.erl`;
-  [design-storage.md](design-storage.md#removable-media-fat), design-drives.md "Time and memory"): a
-  shrink or free walks the whole chain into a list and puts every cluster it frees in the batch's map, so
-  removing a file of a few hundred thousand clusters (1 GB of 4 KiB clusters) needs several MiB, past the
-  volume process's 2 MiB heap bound, which ends the process and loses the writes it had answered. The
-  volume (P3) must bound it before it calls the allocator: release a long chain over several batches, or
-  keep a batch's frees as runs, and pass grow the tail the open file already knows.
+* [Medium] storage, the FAT ownership check's directory list (`erlang/apps/erx_fat/src/erx_fat.erl`
+  `check/1`; [design-storage.md](design-storage.md#removable-media-fat)): the check's two cluster sets
+  are bounded to half of `media_volume_bytes`, but the list of directories it has found and not yet
+  walked grows with the volume's directories, about 40 bytes each, so a crafted volume of tens of
+  thousands of sibling directories passes the volume process's heap bound, which ends the process
+  (`none failed`) instead of mounting the volume read-only. A bound on the list, refused as
+  `too large`, or a walk that keeps one cursor per level, would end it.
+* [Medium] storage, a FAT directory's slots past its end marker (`erx_fat`;
+  [design-storage.md](design-storage.md#removable-media-fat), "Directory growth"): the read path and
+  the ownership check stop at a directory's first end-marker entry, as the specification has
+  readers do, but a crafted volume can hold live-looking entries after it. A new name written into
+  never-used slots that end in such entries would make them reachable, entries the check never
+  saw. The write path's directory growth (P3) must write the slot after a new name's last entry
+  as an end marker, or zero the rest of the cluster, when the name takes the end marker's slot.
+* [Low] storage, a FAT directory of exactly the entries' bound refused (`erlang/apps/erx_fat/src/erx_fat.erl`
+  `walk_chain/5`): the `{at_most, 1}` clause fails before it asks whether the cluster ends the chain,
+  so a directory of exactly 65,536 entries is `does_not_read` and, through the ownership check,
+  mounts its volume read-only with `tree`. Fix with a regression test of a directory of that length.
 * [Medium] media, an eject waits inside the ejecting grant (`erx_media_tree:write/4` on `ctl`,
   `erx_media_drive`'s `eject`): the finish answers every request a volume holds first, so a slow or
   stalled stick with many reads queued holds the drive process, every walk of `diskN` and `status`
@@ -598,13 +609,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Security residuals
 
-* [Low] storage, FAT chains that cross on the medium (`erlang/apps/erx_fat/src/erx_fat_alloc.erl`;
-  [design-storage.md](design-storage.md#removable-media-fat)): the allocator refuses a chain that
-  reaches a cluster its batch freed or, through a link the medium holds, a run its batch allocated,
-  but two files of a crafted or damaged volume that already share a cluster are not found, since that
-  takes a walk of every chain: shrinking one frees the shared cluster under the other, and a later
-  batch may give it to a third file, so the damaged files' bytes mix within the volume. A check of
-  every chain at a writable mount, bounded by the volume's clusters, would refuse such a volume.
 * [Low] files, a path-named grant's moved root (`erlang/apps/erx_storage/src/erx_lfs.erl`, `root/1`;
   design-files.md, "Version and attach"): a grant's root identity is fixed at its start, so a rename or
   removal of its root directory through another grant leaves it failing until it is restarted, and a

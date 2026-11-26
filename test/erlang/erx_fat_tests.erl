@@ -234,3 +234,171 @@ a_sector_the_medium_does_not_read_is_read_failed_test() ->
                                     (_) -> {error, eio}
                                  end, byte_size(Image) div ?SECTOR),
     ?assertEqual({error, read_failed}, erx_fat:read(File, 0, 10, Broken)).
+
+%% ---------------------------------------------------------------------------
+%% The ownership check
+%% ---------------------------------------------------------------------------
+
+%% Where an image keeps its FATs and clusters, from its own boot sector.
+geometry(<<_:11/binary, ?SECTOR:16/little, PerCluster, Reserved:16/little, Fats, RootEntries:16/little, _:16, _Media,
+           Fat16:16/little, _:8/binary, _:32, Fat32:32/little, _/binary>>) ->
+    FatSectors = case Fat16 of 0 -> Fat32; _ -> Fat16 end,
+    RootSectors = (RootEntries * 32 + ?SECTOR - 1) div ?SECTOR,
+    #{type => case Fat16 of 0 -> 32; _ -> 16 end, fat => Reserved * ?SECTOR, fats => Fats,
+      fat_bytes => FatSectors * ?SECTOR, cluster_bytes => PerCluster * ?SECTOR,
+      data => (Reserved + Fats * FatSectors + RootSectors) * ?SECTOR}.
+
+%% Cluster's entry in every FAT set to Value, or as the first FAT holds it.
+fat_put(Image, Cluster, Value) ->
+    G = #{type := Type, fat := Fat, fats := Fats, fat_bytes := FatBytes} = geometry(Image),
+    lists:foldl(fun(Copy, Acc) ->
+                        Offset = Fat + Copy * FatBytes + Cluster * (Type div 8),
+                        case G of #{type := 16} -> put16(Acc, Offset, Value); #{type := 32} -> put32(Acc, Offset, Value) end
+                end, Image, lists:seq(0, Fats - 1)).
+
+fat_get(Image, Cluster) ->
+    #{type := Type, fat := Fat} = geometry(Image),
+    <<_:(Fat + Cluster * (Type div 8))/binary, Entry:Type/little, _/binary>> = Image,
+    Entry band 16#0fffffff.
+
+%% The byte offset of a cluster, and of a short entry: by its name, or the long-named
+%% file's by its size.
+cluster_at(Image, Cluster) ->
+    #{data := Data, cluster_bytes := Bytes} = geometry(Image),
+    Data + (Cluster - 2) * Bytes.
+
+short_entry(Image, Short) ->
+    {Offset, 11} = binary:match(Image, Short),
+    Offset.
+
+long_entry(Image) ->
+    hd([Offset || Offset <- lists:seq(0, byte_size(Image) - 32, 32),
+                  <<Name, _:10/binary, Attr, _:16/binary, 5000:32/little>> <- [binary:part(Image, Offset, 32)],
+                  Name =/= 16#e5, Attr band 16#18 =:= 0]).
+
+first_of(Image, Entry) ->
+    <<_:Entry/binary, _:20/binary, High:16/little, _:4/binary, Low:16/little, _/binary>> = Image,
+    (High bsl 16) bor Low.
+
+first_set(Image, Entry, First) ->
+    put16(put16(Image, Entry + 20, First bsr 16), Entry + 26, First band 16#ffff).
+
+%% A subdirectory's first cluster, from the read path's key for it.
+dir_first(Image, Names) ->
+    {ok, Dir} = path(mounted(Image), Names),
+    {dir, First} = erx_fat:key(Dir),
+    First.
+
+checked(Image) -> erx_fat:check(mounted(Image)).
+
+%% A FAT16 mark, 16#fff0 or above, as the image's type writes it.
+mark(Image, Mark16) ->
+    case geometry(Image) of #{type := 16} -> Mark16; #{type := 32} -> Mark16 bor 16#0fff0000 end.
+
+each_image(Test) ->
+    [Test(image(Name)) || Name <- ["fat16.img", "fat32.img"]].
+
+%% A cluster free in both seeds, far past their files.
+-define(SPARE, 300).
+
+the_seed_volumes_pass_the_ownership_check_test() ->
+    each_image(fun(Image) -> ?assertEqual(ok, checked(Image)) end).
+
+a_chain_no_name_reaches_passes_test() ->
+    each_image(fun(Image) ->
+                       Lost = fat_put(fat_put(fat_put(fat_put(Image, ?SPARE, ?SPARE + 1), ?SPARE + 1, ?SPARE),
+                                              ?SPARE + 2, ?SPARE + 3), ?SPARE + 3, mark(Image, 16#fff8)),
+                       ?assertEqual(ok, checked(Lost))
+               end).
+
+a_cluster_linked_to_twice_is_a_tree_finding_test() ->
+    each_image(fun(Image) ->
+                       Second = fat_get(Image, first_of(Image, long_entry(Image))),
+                       ?assertEqual({read_only, tree}, checked(fat_put(Image, ?SPARE, Second)))
+               end).
+
+an_entry_of_no_value_the_specification_gives_is_a_tree_finding_test() ->
+    each_image(fun(Image) ->
+                       #{clusters := Clusters} = erx_fat:info(mounted(Image)),
+                       [?assertEqual({read_only, tree}, checked(fat_put(Image, ?SPARE, Value)))
+                        || Value <- [1, Clusters + 2, mark(Image, 16#fff0)]]
+               end).
+
+a_first_cluster_outside_the_volume_is_a_tree_finding_test() ->
+    each_image(fun(Image) ->
+                       #{clusters := Clusters} = erx_fat:info(mounted(Image)),
+                       Hello = short_entry(Image, <<"HELLO   TXT">>),
+                       ?assertEqual({read_only, tree}, checked(first_set(Image, Hello, Clusters + 2))),
+                       ?assertEqual({read_only, tree}, checked(first_set(Image, short_entry(Image, <<"SUB        ">>), 0)))
+               end).
+
+a_first_cluster_named_twice_is_a_tree_finding_test() ->
+    each_image(fun(Image) ->
+                       Long = first_of(Image, long_entry(Image)),
+                       ?assertEqual({read_only, tree}, checked(first_set(Image, short_entry(Image, <<"HELLO   TXT">>), Long)))
+               end).
+
+a_first_cluster_linked_to_is_a_tree_finding_test() ->
+    each_image(fun(Image) ->
+                       Long = first_of(Image, long_entry(Image)),
+                       Hello = short_entry(Image, <<"HELLO   TXT">>),
+                       ?assertEqual({read_only, tree}, checked(first_set(Image, Hello, fat_get(Image, Long)))),
+                       %% A loop back to the chain's own first cluster.
+                       Last = lists:last(chain_of(Image, Long)),
+                       ?assertEqual({read_only, tree}, checked(fat_put(Image, Last, Long)))
+               end).
+
+chain_of(Image, First) ->
+    case fat_get(Image, First) of
+        Next when Next >= 2, Next < 16#fff0 -> [First | chain_of(Image, Next)];
+        _ -> [First]
+    end.
+
+a_dot_entry_naming_another_directory_is_a_tree_finding_test() ->
+    each_image(fun(Image) ->
+                       Sub = dir_first(Image, [<<"sub">>]),
+                       Deeper = dir_first(Image, [<<"sub">>, <<"Deeper">>]),
+                       ?assertEqual(Sub, first_of(Image, cluster_at(Image, Deeper) + 32)),
+                       ?assertEqual({read_only, tree}, checked(first_set(Image, cluster_at(Image, Sub), Deeper))),
+                       ?assertEqual({read_only, tree}, checked(first_set(Image, cluster_at(Image, Deeper) + 32, 0))),
+                       ?assertEqual({read_only, tree}, checked(first_set(Image, cluster_at(Image, Sub) + 32, Sub)))
+               end).
+
+a_subdirectory_without_its_dot_entries_is_a_tree_finding_test() ->
+    each_image(fun(Image) ->
+                       Deeper = cluster_at(Image, dir_first(Image, [<<"sub">>, <<"Deeper">>])),
+                       [?assertEqual({read_only, tree}, checked(put16(Image, At, 16#e5 bor ($. bsl 8))))
+                        || At <- [Deeper, Deeper + 32]]
+               end).
+
+a_reached_cluster_whose_entry_is_free_or_bad_is_a_tree_finding_test() ->
+    each_image(fun(Image) ->
+                       Hello = first_of(Image, short_entry(Image, <<"HELLO   TXT">>)),
+                       Long = first_of(Image, long_entry(Image)),
+                       Bad = mark(Image, 16#fff7),
+                       [?assertEqual({read_only, tree}, checked(fat_put(Image, Cluster, Value)))
+                        || Cluster <- [Hello, lists:last(chain_of(Image, Long))], Value <- [0, Bad]]
+               end).
+
+%% A FAT32 boot sector claiming 4,300,000 one-sector clusters over the seed: the check
+%% answers too_large without reading a sector.
+a_volume_past_the_checked_count_is_too_large_and_unread_test() ->
+    Total = 4_300_000,
+    Image = put32(put32(image("fat32.img"), 32, Total), 36, (Total + 2) * 4 div ?SECTOR + 1),
+    <<_:13/binary, _, Rest/binary>> = Image,
+    Huge = <<(binary:part(Image, 0, 13))/binary, 1, Rest/binary>>,
+    Read = reader(Huge),
+    put(reads, true),
+    {ok, Fat} = erx_fat:mount(fun(Sector) -> case get(reads) of true -> Read(Sector); false -> {error, read} end end,
+                              Total),
+    put(reads, false),
+    ?assertMatch(#{clusters := C} when C > 4_194_304, erx_fat:info(Fat)),
+    ?assertEqual({read_only, too_large}, erx_fat:check(Fat)).
+
+a_sector_that_does_not_read_fails_the_check_test() ->
+    Image = image("fat16.img"),
+    #{fat := FatStart, fats := Fats, fat_bytes := FatBytes} = geometry(Image),
+    Root = (FatStart + Fats * FatBytes) div ?SECTOR,
+    {ok, Fat} = erx_fat:mount(fun(Sector) when Sector < Root -> (reader(Image))(Sector); (_) -> {error, eio} end,
+                              byte_size(Image) div ?SECTOR),
+    ?assertEqual({error, read_failed}, erx_fat:check(Fat)).

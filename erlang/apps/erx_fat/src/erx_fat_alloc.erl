@@ -8,36 +8,50 @@ cluster chains of one FAT16 or FAT32 volume as a pure core that reads the volume
 sectors through the function its layout carries (erx_fat:layout/1) and answers
 write plans, `[{Step, [{Sector, Bytes}]}]`, which its caller writes in order with a
 flush after each step. It does no I/O of its own, and its function must answer the
-medium as every plan answered before has left it.
+medium as every plan answered before has left it. It starts on a volume whose
+ownership check (erx_fat:check/1) passed, so every chain it reaches is one name's
+and no chain reaches a free cluster.
 
-* **A batch.** grow/3, shrink/3 and free/2 change chains in an overlay of FAT
-  entries, each tagged with the step of the batch that writes it, which
-  commit/1 turns into sectors. The tag follows from the entry alone (step/2):
-  every entry of a cluster the batch allocates goes in `allocation`, so each new
-  run is a chain of its own ending in an end-of-chain mark that nothing reaches
-  yet; a link or a mark on a cluster a live chain holds goes in `publication`;
-  a cluster freed goes in `release`. A step's sectors carry every entry of the
-  steps before it, so no write undoes an earlier step's.
+* **A batch.** grow/3 and shrink/3 change chains in an overlay of FAT entries,
+  each tagged with the step of the batch that writes it (set/3): every entry of a
+  cluster the batch allocates goes in `preparation`, so each new run is a chain of
+  its own ending in an end-of-chain mark that nothing reaches yet; the link from a
+  live chain's last cluster to a new run goes in `linking`; and an entry that
+  replaces a live chain's link, the end-of-chain mark that cuts it or, when a file
+  shrinks and grows in one batch, the cut cluster's link to its new run, goes in
+  `cutting`, after the caller's `publication` step has shrunk the file's size. A step's sectors carry every
+  entry of the steps before it, so no write undoes an earlier step's. The
+  allocator writes nothing in `publication`, which holds directory entries alone.
+* **Release.** What a shrink cuts off, or a chain freed whole, waits as its first
+  cluster alone. commit/1 frees the waiting chains in its `release` step, in the
+  order they came, each from its first cluster on through the batch's entries and
+  the medium, for as long as the step's FAT sectors stay within ?BATCH_SECTORS; a
+  chain it does not finish waits from the cluster it reached, for the next
+  commit. Releases are chosen only at commit, after every allocation of the
+  batch, and a waiting chain's entries are not free on the medium, so a cluster
+  freed in a batch is allocated again only in a later one, by construction.
 * **Every copy.** Each sector goes to every FAT, the first first, built from the
   first's bytes; a FAT32 entry keeps the top four bits it was read with.
 * **Allocation.** Next-fit from the cluster after the last one the mount
-  allocated, starting at the first: the first run of free clusters long enough
-  for the request, or failing that the first free clusters met. A cluster the
-  batch freed is not free again until the batch is committed, so a cut before
-  its release reaches the medium leaves every old entry naming its own data.
+  allocated, starting at the first: the first run of clusters free on the medium
+  and not in the batch long enough for the request, or failing that the first
+  such clusters met.
+* **The measure.** held/1 is the batch's share of what the volume holds: each FAT
+  sector once for every step that writes it, and one sector for each waiting
+  chain. A grow of N clusters adds at most one sector per ?SECTOR bytes of their
+  entries, so a caller that grows a cluster at a time with the data it holds
+  keeps the overlay within the batch's bound.
 * **The volume's flags and FSInfo.** dirty/1 clears the clean bit of the FAT's
-  second entry and writes FAT32's FSInfo hints unknown; finish/1 commits the
-  last batch, writes in its release step a next-free hint, the cluster after the
-  last one the mount allocated, when it allocated any, and then sets the clean
-  bit. The hard-error bit is written as it was read. An FSInfo sector without
-  its signatures is left as it is.
+  second entry and writes FAT32's FSInfo hints unknown; finish/1 commits batches
+  until no chain waits, writes in the last one's release step a next-free hint,
+  the cluster after the last one the mount allocated, when it allocated any, and
+  then sets the clean bit. The hard-error bit is written as it was read. An
+  FSInfo sector without its signatures is left as it is.
 * **Chains read from the medium** are untrusted: one is followed only through
-  clusters of the data area, each at most once, so a walk takes at most as many
-  steps as the volume has clusters; a free, reserved or bad link, a loop, a link
-  from the medium into a run the batch allocated and a link into a cluster the
-  batch freed are each `does_not_read`. Those are the only crossings of two chains
-  found: two chains the medium already joins elsewhere are followed as they are
-  (a residual in docs/todo-storage.md).
+  clusters of the data area, at most as many links as the volume has clusters,
+  and a release frees each cluster it reaches before it follows the next, so a
+  release that comes back to a cluster reads it free; a free, reserved or bad
+  link and a loop are each `does_not_read`.
 
 A sector the function does not answer with 512 bytes is `read_failed`; a request
 for more clusters than are free is `no_space`. Each finding leaves through one
@@ -45,8 +59,11 @@ throw, `{erx_fat_alloc, Finding}`, caught at each exported entry, and leaves the
 allocator as it was.
 """.
 
--export([new/1, chain/2, grow/3, shrink/3, free/2, commit/1, dirty/1, finish/1, volume_flags/2, writable/1]).
+-export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, volume_flags/2,
+         writable/1]).
 -export_type([alloc/0, layout/0, plan/0, step/0, finding/0, cluster/0]).
+
+-include("generated/erx_abi.hrl").
 
 -define(SECTOR, 512).
 %% Entry values (the FAT specification, section 4): free, the end-of-chain mark
@@ -68,19 +85,29 @@ allocator as it was.
 -define(NO_ERROR_32, 16#04000000).
 %% FSInfo's signatures and hints (fsimg's lib/formats/fat/verify.c:171-180).
 -define(UNKNOWN, 16#ffffffff).
--define(STEPS, [allocation, publication, release]).
+%% The steps that write FAT entries of the overlay, in the batch's order; the
+%% caller's publication step lies between linking and cutting, and release follows.
+-define(STEPS, [preparation, linking, cutting]).
+%% The FAT sectors one release step writes at most, a quarter of the volume's memory
+%% bound, media_volume_bytes, as every batch's bound is.
+-define(BATCH_SECTORS, (?ERX_MEDIA_VOLUME_BYTES div 4 div ?SECTOR)).
 
 -type cluster() :: pos_integer().
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
 -type layout() :: #{read := read_sector(), type := 16 | 32, fat_start := pos_integer(), fats := pos_integer(),
                     fat_sectors := pos_integer(), clusters := pos_integer(), fsinfo := pos_integer() | none}.
--type step() :: dirty | allocation | publication | release | clean.
+-type step() :: dirty | preparation | linking | publication | cutting | release | clean.
 -type plan() :: [{step(), [{non_neg_integer(), binary()}]}].
 -type finding() :: does_not_read | read_failed | no_space.
 
 %% next is where the next search starts; allocated whether the mount has allocated
 %% a cluster, so next names the one after the last it allocated. batch maps each
-%% cluster whose entry the batch changes to {Step, Value}, Value the low bits.
+%% cluster whose entry the batch changes to {fresh, Value} for one it allocates or
+%% {live, Value}, Value the low bits;
+%% waiting holds the chains to free, each as {Cluster, Left}: the first cluster not
+%% yet freed and how many more clusters its release may free, the volume's count at
+%% first, so a medium that answers a chain differently on a later read cannot keep
+%% a release going across commits.
 -record(alloc, {read :: read_sector(),
                 type :: 16 | 32,
                 fat_start :: pos_integer(),
@@ -90,7 +117,8 @@ allocator as it was.
                 fsinfo :: pos_integer() | none,
                 next = 2 :: cluster(),
                 allocated = false :: boolean(),
-                batch = #{} :: #{cluster() => {allocation | publication | release, non_neg_integer()}}}).
+                batch = #{} :: #{cluster() => {fresh | live, non_neg_integer()}},
+                waiting = [] :: [{cluster(), non_neg_integer()}]}).
 
 -opaque alloc() :: #alloc{}.
 
@@ -107,7 +135,8 @@ volume_flags(Type, Entry) ->
 -doc """
 The writable rule's fourth condition (docs/design-drives.md, "The writable rule")
 over erx_fat:info/1: the volume is not dirty, records no hard error and mirrors its
-FATs, checked in that order; otherwise the reason it mounts read-only.
+FATs, checked in that order; otherwise the reason it mounts read-only. The
+ownership check, erx_fat:check/1, follows it.
 """.
 -spec writable(#{clean := boolean(), hard_error := boolean(), mirrored := boolean(), _ => _}) ->
           ok | {read_only, dirty | hard_error | mirror}.
@@ -130,75 +159,69 @@ new(#{read := Read, type := Type, fat_start := FatStart, fats := Fats, fat_secto
 -doc "The chain from First as the batch leaves it, first to last.".
 -spec chain(alloc(), cluster()) -> {ok, [cluster()]} | {error, finding()}.
 chain(Alloc, First) ->
-    guarded(fun() -> walk(Alloc, First) end).
+    guarded(fun() -> lists:reverse(whole(Alloc, First, fun(Cluster, Got) -> [Cluster | Got] end, [])) end).
 
 -doc """
 Count new clusters at the end of the chain from First, or as a new chain when First
 is none: the new clusters, first to last, and the allocator holding them.
 """.
 -spec grow(alloc(), cluster() | none, pos_integer()) -> {ok, [cluster()], alloc()} | {error, finding()}.
-grow(Alloc, First, Count) when is_integer(Count), Count >= 1 ->
+grow(Alloc = #alloc{batch = Batch}, First, Count) when is_integer(Count), Count >= 1 ->
     guarded(fun() ->
-                    Tail = case First of none -> none; _ -> follow(Alloc, First, fun(Cluster, _) -> Cluster end, none) end,
+                    Tail = case First of none -> none; _ -> whole(Alloc, First, fun(Cluster, _) -> Cluster end, none) end,
                     Run = find(Alloc, Count),
-                    Linked = lists:foldl(fun({Cluster, Next}, Acc) -> fresh(Acc, Cluster, Next) end,
-                                         Alloc, lists:zip(Run, tl(Run) ++ [eoc(Alloc)])),
-                    Grown = case Tail of none -> Linked; _ -> set(Linked, Tail, hd(Run)) end,
-                    {Run, Grown#alloc{next = after_cluster(Alloc, lists:last(Run)), allocated = true}}
+                    Fresh = lists:foldl(fun({Cluster, Next}, Acc) -> Acc#{Cluster => {fresh, Next}} end,
+                                        Batch, lists:zip(Run, tl(Run) ++ [eoc(Alloc)])),
+                    Prepared = Alloc#alloc{batch = Fresh, next = after_cluster(Alloc, lists:last(Run)), allocated = true},
+                    {Run, case Tail of none -> Prepared; _ -> set(Prepared, Tail, hd(Run)) end}
             end).
 
 -doc """
-The chain from First cut to its first Keep clusters, the rest freed; Keep 0 frees
-it all. A chain shorter than Keep is does_not_read.
+The chain from First cut to its first Keep clusters, the rest waiting for its
+release; Keep 0 has the whole chain wait. A chain shorter than Keep is
+does_not_read. Only the kept clusters are walked.
 """.
 -spec shrink(alloc(), cluster(), non_neg_integer()) -> {ok, alloc()} | {error, finding()}.
-shrink(Alloc, First, Keep) when is_integer(Keep), Keep >= 0 ->
+shrink(Alloc = #alloc{waiting = Waiting, clusters = Clusters}, First, 0) ->
+    guarded(fun() -> Alloc#alloc{waiting = Waiting ++ [{data_cluster(Alloc, First), Clusters}]} end);
+shrink(Alloc = #alloc{waiting = Waiting, clusters = Clusters}, First, Keep) when is_integer(Keep), Keep >= 1 ->
     guarded(fun() ->
-                    Chain = walk(Alloc, First),
-                    length(Chain) >= Keep orelse fail(does_not_read),
-                    {Kept, Cut} = lists:split(Keep, Chain),
-                    Ended = case {Kept, Cut} of
-                                {[], _} -> Alloc;
-                                {_, []} -> Alloc;
-                                _ -> set(Alloc, lists:last(Kept), eoc(Alloc))
-                            end,
-                    lists:foldl(fun(Cluster, Acc) -> set(Acc, Cluster, ?FREE) end, Ended, Cut)
+                    case follow(Alloc, First, Keep, fun(Cluster, {Count, _}) -> {Count + 1, Cluster} end, {0, none}) of
+                        {{Keep, _Last}, done} -> Alloc;
+                        {{_Shorter, _Last}, done} -> fail(does_not_read);
+                        {{Keep, Last}, Rest} -> (set(Alloc, Last, eoc(Alloc)))#alloc{waiting = Waiting ++ [{Rest, Clusters}]}
+                    end
             end).
 
--doc "Every cluster of the chain from First freed.".
+-doc "The whole chain from First waiting for its release.".
 -spec free(alloc(), cluster()) -> {ok, alloc()} | {error, finding()}.
 free(Alloc, First) ->
     shrink(Alloc, First, 0).
 
-%% The chain from First through the batch's entries, first to last.
-walk(Alloc, First) ->
-    lists:reverse(follow(Alloc, First, fun(Cluster, Got) -> [Cluster | Got] end, [])).
+%% The whole chain from First folded through Take; one of more links than the
+%% volume has clusters loops.
+whole(Alloc = #alloc{clusters = Clusters}, First, Take, Acc) ->
+    case follow(Alloc, First, Clusters, Take, Acc) of
+        {Folded, done} -> Folded;
+        {_Folded, _Next} -> fail(does_not_read)
+    end.
 
-%% The chain from First folded through Take, cluster by cluster. A chain takes at
-%% most as many links as the volume has clusters less one, so one that takes more
-%% loops. A link the medium holds may not reach a run the batch allocated, and no
-%% link a cluster the batch freed.
-follow(Alloc = #alloc{clusters = Clusters}, First, Take, Acc) ->
-    data_cluster(Alloc, First),
-    freed(Alloc, First) andalso fail(does_not_read),
-    follow(Alloc, First, Clusters, Take, Take(First, Acc), none).
+%% Take folded over at most Max clusters of the chain from First, through the batch's
+%% entries and the medium: {Acc, done} when the chain ends within them, else {Acc,
+%% Next} with the cluster that follows the Max-th.
+follow(Alloc, First, Max, Take, Acc) ->
+    follow(Alloc, data_cluster(Alloc, First), Max, Take, Acc, none).
 
-follow(_Alloc, _Cluster, 0, _Take, _Acc, _Cache) ->
-    fail(does_not_read);
+follow(_Alloc, Cluster, 0, _Take, Acc, _Cache) ->
+    {Acc, Cluster};
 follow(Alloc = #alloc{batch = Batch}, Cluster, Left, Take, Acc, Cache) ->
     {Value, Read} = case Batch of
                         #{Cluster := {_Step, Entry}} -> {Entry, Cache};
                         #{} -> medium(Alloc, Cluster, Cache)
                     end,
     case end_of_chain(Alloc, Value) of
-        true ->
-            Acc;
-        false ->
-            Next = data_cluster(Alloc, Value),
-            Crossed = freed(Alloc, Next)
-                orelse (fresh_cluster(Alloc, Next) andalso not is_map_key(Cluster, Batch)),
-            Crossed andalso fail(does_not_read),
-            follow(Alloc, Next, Left - 1, Take, Take(Next, Acc), Read)
+        true -> {Take(Cluster, Acc), done};
+        false -> follow(Alloc, data_cluster(Alloc, Value), Left - 1, Take, Take(Cluster, Acc), Read)
     end.
 
 %% Value as a cluster of the data area, the one check every link passes.
@@ -213,27 +236,42 @@ end_of_chain(#alloc{type = 32}, Value) -> Value >= ?END_MARK_32.
 eoc(#alloc{type = 16}) -> ?EOC_16;
 eoc(#alloc{type = 32}) -> ?EOC_32.
 
-freed(#alloc{batch = Batch}, Cluster) ->
-    element(1, maps:get(Cluster, Batch, {none, 0})) =:= release.
-
-fresh_cluster(#alloc{batch = Batch}, Cluster) ->
-    element(1, maps:get(Cluster, Batch, {none, 0})) =:= allocation.
-
-%% A cluster this batch allocates, Value its entry.
-fresh(Alloc = #alloc{batch = Batch}, Cluster, Value) ->
-    Alloc#alloc{batch = Batch#{Cluster => {allocation, Value}}}.
-
-%% Cluster's entry set to Value, in the step that entry belongs to.
+%% Cluster's entry set to Value: a cluster the batch allocates stays fresh, whatever
+%% it holds, and any other is live.
 set(Alloc = #alloc{batch = Batch}, Cluster, Value) ->
-    Step = step(fresh_cluster(Alloc, Cluster), Value),
-    Alloc#alloc{batch = Batch#{Cluster => {Step, Value}}}.
+    Kind = case Batch of #{Cluster := {fresh, _}} -> fresh; #{} -> live end,
+    Alloc#alloc{batch = Batch#{Cluster => {Kind, Value}}}.
 
-%% The step that writes an entry: a freed cluster's in release, a cluster's the
-%% batch allocated in allocation, and a link or mark on a live chain in
-%% publication.
-step(_Fresh, ?FREE) -> release;
-step(true, _Value) -> allocation;
-step(false, _Value) -> publication.
+%% The step that writes Cluster's entry of the overlay, from what it replaces on the
+%% medium, so that a file's chain is never shorter than its size, which the caller's
+%% publication step changes between linking and cutting. A fresh cluster's entry
+%% goes in preparation. A live entry the medium ends a chain at only grows the chain,
+%% in linking; an end-of-chain mark that replaces a link only shrinks it, in
+%% cutting. A link that replaces a link, a cut cluster's link to a new run when a
+%% file shrinks and grows in one batch, goes in linking when the new rest of the
+%% chain is no shorter than the old one, and in cutting otherwise.
+step(_Alloc, _Cluster, {fresh, _Value}) ->
+    preparation;
+step(Alloc, Cluster, {live, Value}) ->
+    Old = element(1, medium(Alloc, Cluster, none)),
+    case {end_of_chain(Alloc, Old), end_of_chain(Alloc, Value)} of
+        {true, _} -> linking;
+        {false, true} -> cutting;
+        {false, false} ->
+            New = whole(Alloc, Value, fun(_, Count) -> Count + 1 end, 0),
+            case ends_within(Alloc, Old, New) of true -> linking; false -> cutting end
+    end.
+
+%% Whether the medium's chain from Cluster, without the batch's entries, ends within
+%% Max clusters.
+ends_within(Alloc, Cluster, Max) ->
+    ends_within(Alloc, data_cluster(Alloc, Cluster), Max, none).
+
+ends_within(_Alloc, _Cluster, 0, _Cache) ->
+    false;
+ends_within(Alloc, Cluster, Left, Cache) ->
+    {Value, Read} = medium(Alloc, Cluster, Cache),
+    end_of_chain(Alloc, Value) orelse ends_within(Alloc, data_cluster(Alloc, Value), Left - 1, Read).
 
 %% ---------------------------------------------------------------------------
 %% Allocation
@@ -241,7 +279,7 @@ step(false, _Value) -> publication.
 
 %% Count free clusters, next-fit from next: the first run of Count contiguous ones,
 %% the search wrapping once from the last cluster to the first, or else the first
-%% Count met. A cluster the batch names in any step is not free.
+%% Count met. A cluster the batch names is not free.
 find(#alloc{clusters = Clusters}, Count) when Count > Clusters ->
     fail(no_space);
 find(Alloc = #alloc{next = Next, clusters = Clusters}, Count) ->
@@ -280,13 +318,28 @@ after_cluster(_Alloc, Cluster) -> Cluster + 1.
 %% ---------------------------------------------------------------------------
 
 -doc """
-The batch's plan, its allocation, publication and release steps each with the FAT
-sectors it writes, steps without a write left out; and the allocator with no batch
-open.
+The batch's share of what the volume holds, in sectors, at most: each FAT sector
+once for preparation when it holds a fresh entry and twice, for linking and
+cutting, when it holds a live one, and one for each waiting chain. It reads
+nothing. It is non-zero after a commit exactly when a chain still waits, and the
+caller commits again at once.
+""".
+-spec held(alloc()) -> non_neg_integer().
+held(Alloc = #alloc{batch = Batch, waiting = Waiting}) ->
+    Sectors = lists:usort([{Kind, entry_sector(Alloc, Cluster)} || Cluster := {Kind, _Value} <- Batch]),
+    lists:sum([case Kind of fresh -> 1; live -> 2 end || {Kind, _Index} <- Sectors]) + length(Waiting).
+
+-doc """
+The batch's plan, its preparation, linking, cutting and release steps each with the
+FAT sectors it writes, steps without a write left out; and the allocator with no
+batch open, holding the chains the release did not finish.
 """.
 -spec commit(alloc()) -> {ok, plan(), alloc()} | {error, finding()}.
 commit(Alloc) ->
-    guarded(fun() -> {batch_plan(Alloc), Alloc#alloc{batch = #{}}} end).
+    guarded(fun() ->
+                    {Plan, Waiting} = batch_plan(Alloc),
+                    {Plan, Alloc#alloc{batch = #{}, waiting = Waiting}}
+            end).
 
 -doc """
 The plan that marks the volume in use before its first change: the second entry's
@@ -301,49 +354,87 @@ dirty(Alloc) ->
             end).
 
 -doc """
-The volume's last batch: commit/1's plan with the next-free hint in its release
-step, when the mount allocated, then the clean bit set in every FAT.
+One of the volume's last batches: commit/1's plan and the allocator, while a chain
+still waits after it, for the caller to finish again; or, once none waits, that
+plan with the next-free hint in its release step, when the mount allocated, then
+the clean bit set in every FAT, and `finished`.
 """.
--spec finish(alloc()) -> {ok, plan(), alloc()} | {error, finding()}.
+-spec finish(alloc()) -> {ok, plan(), alloc() | finished} | {error, finding()}.
 finish(Alloc = #alloc{next = Next, allocated = Allocated}) ->
     guarded(fun() ->
-                    Hint = case Allocated of true -> fsinfo_writes(Alloc, keep, Next); false -> [] end,
-                    Batch = case {batch_plan(Alloc), Hint} of
-                                {Plan, []} -> Plan;
-                                {Plan, _} -> lists:keystore(release, 1, Plan,
-                                                            {release, proplists:get_value(release, Plan, []) ++ Hint})
-                            end,
-                    {Clean, _} = flag_bits(Alloc#alloc.type),
-                    Entries = maps:get(0, by_sector(Alloc), []),
-                    {Batch ++ [{clean, flag_writes(Alloc, fun(Entry) -> Entry bor Clean end, Entries)}],
-                     Alloc#alloc{batch = #{}}}
+                    case batch_plan(Alloc) of
+                        {Plan, [_ | _] = Waiting} ->
+                            {Plan, Alloc#alloc{batch = #{}, waiting = Waiting}};
+                        {Plan, []} ->
+                            Hint = case Allocated of true -> fsinfo_writes(Alloc, keep, Next); false -> [] end,
+                            Last = case Hint of
+                                       [] -> Plan;
+                                       _ -> lists:keystore(release, 1, Plan,
+                                                           {release, proplists:get_value(release, Plan, []) ++ Hint})
+                                   end,
+                            {Clean, _} = flag_bits(Alloc#alloc.type),
+                            {Last ++ [{clean, flag_writes(Alloc, fun(Entry) -> Entry bor Clean end, Last)}], finished}
+                    end
             end).
 
-%% Each step's FAT sectors, each built from the medium's with the entries of that
-%% step and of every step before it.
+%% The overlay's steps, each FAT sector built from the medium's with the entries of
+%% that step and of every step before it, then the release; with the chains still
+%% waiting after it.
 batch_plan(Alloc) ->
-    BySector = maps:to_list(by_sector(Alloc)),
-    {Plan, _Earlier} =
-        lists:foldl(fun(Step, {Acc, Earlier}) ->
-                            Upto = [Step | Earlier],
-                            Bytes = [{Index, patched(Alloc, Index, [{C, V} || {S, C, V} <- Entries, lists:member(S, Upto)])}
-                                     || {Index, Entries} <- lists:sort(BySector), lists:keymember(Step, 1, Entries)],
-                            {[{Step, copies(Alloc, Bytes)} || Bytes =/= []] ++ Acc, Upto}
-                    end, {[], []}, ?STEPS),
-    lists:reverse(Plan).
+    BySector = lists:sort(maps:to_list(by_sector(Alloc))),
+    Steps = [{Step, copies(Alloc, [{Index, patched(Alloc, Index, upto(Step, Entries))}
+                                   || {Index, Entries} <- BySector, lists:keymember(Step, 1, Entries)])}
+             || Step <- ?STEPS],
+    {Released, Waiting} = release(Alloc, maps:from_list(BySector), Alloc#alloc.waiting, #{}),
+    {[{Step, Writes} || {Step, Writes} <- Steps ++ [{release, copies(Alloc, Released)}], Writes =/= []], Waiting}.
+
+%% Entries' {Cluster, Value} of Step and of the steps before it.
+upto(Step, Entries) ->
+    {Before, _} = lists:splitwith(fun(Other) -> Other =/= Step end, ?STEPS),
+    [{Cluster, Value} || {Other, Cluster, Value} <- Entries, lists:member(Other, [Step | Before])].
 
 %% The batch's entries by the FAT sector each lies in, as {Step, Cluster, Value}.
 by_sector(Alloc = #alloc{batch = Batch}) ->
     maps:groups_from_list(fun({_Step, Cluster, _Value}) -> entry_sector(Alloc, Cluster) end,
-                          [{Step, Cluster, Value} || Cluster := {Step, Value} <- Batch]).
+                          [{step(Alloc, Cluster, Entry), Cluster, Value} || Cluster := {_Kind, Value} = Entry <- Batch]).
+
+%% The waiting chains freed in order, each from its first cluster on, each entry read
+%% from its sector as the overlay's steps leave it, for as long as the release's FAT
+%% sectors stay within ?BATCH_SECTORS: the release's sectors, sorted, and the chains
+%% still waiting, the first from the cluster the release reached with what is left of
+%% its budget; a chain past its budget loops. A cluster is freed
+%% before its link is followed, so a link back to one reads it free.
+release(_Alloc, _BySector, [], Sectors) ->
+    {lists:sort(maps:to_list(Sectors)), []};
+release(_Alloc, _BySector, [{_Cluster, 0} | _Rest], _Sectors) ->
+    fail(does_not_read);
+release(Alloc, BySector, [{Cluster, Left} | Rest] = Waiting, Sectors) ->
+    Index = entry_sector(Alloc, Cluster),
+    case Sectors of
+        #{Index := Sector} ->
+            Freed = Sectors#{Index := put_entry(Alloc, Cluster, ?FREE, Sector)},
+            Value = entry_value(Alloc, Cluster, Sector),
+            case end_of_chain(Alloc, Value) of
+                true -> release(Alloc, BySector, Rest, Freed);
+                false -> release(Alloc, BySector, [{data_cluster(Alloc, Value), Left - 1} | Rest], Freed)
+            end;
+        #{} when map_size(Sectors) >= ?BATCH_SECTORS ->
+            {lists:sort(maps:to_list(Sectors)), Waiting};
+        #{} ->
+            Overlay = [{C, V} || {_Step, C, V} <- maps:get(Index, BySector, [])],
+            release(Alloc, BySector, Waiting, Sectors#{Index => patched(Alloc, Index, Overlay)})
+    end.
 
 %% FAT sector Index of the first FAT with Entries, each of which lies in it, written.
-patched(Alloc = #alloc{type = Type}, Index, Entries) ->
-    lists:foldl(fun({Cluster, Value}, Sector) ->
-                        Offset = entry_offset(Alloc, Cluster),
-                        <<Before:Offset/binary, Old:Type/little, After/binary>> = Sector,
-                        <<Before/binary, (encode(Type, Old, Value)):Type/little, After/binary>>
-                end, fat_sector(Alloc, Index), Entries).
+patched(Alloc, Index, Entries) ->
+    lists:foldl(fun({Cluster, Value}, Sector) -> put_entry(Alloc, Cluster, Value, Sector) end,
+                fat_sector(Alloc, Index), Entries).
+
+%% Sector, the one holding Cluster's entry, with that entry set to Value.
+put_entry(Alloc = #alloc{type = Type}, Cluster, Value, Sector) ->
+    Offset = entry_offset(Alloc, Cluster),
+    <<Before:Offset/binary, Old:Type/little, After/binary>> = Sector,
+    <<Before/binary, (encode(Type, Old, Value)):Type/little, After/binary>>.
 
 %% An entry's bytes: FAT32 keeps the top four bits the entry held.
 encode(16, _Old, Value) -> Value;
@@ -353,11 +444,15 @@ encode(32, Old, Value) -> (Old band ?RESERVED_32) bor (Value band ?VALUE_32).
 copies(#alloc{fat_start = FatStart, fats = Fats, fat_sectors = FatSectors}, Sectors) ->
     [{FatStart + Copy * FatSectors + Index, Bytes} || Copy <- lists:seq(0, Fats - 1), {Index, Bytes} <- Sectors].
 
-%% The second entry, rewritten by Change, in every FAT, its sector carrying Entries,
-%% the batch's that the steps before have written.
-flag_writes(Alloc = #alloc{type = Type}, Change, Entries) ->
+%% The second entry, rewritten by Change, in every FAT, its sector as Plan last wrote
+%% it, or as the medium holds it.
+flag_writes(Alloc = #alloc{type = Type, fat_start = FatStart}, Change, Plan) ->
+    Sector = case [Bytes || {_Step, Writes} <- Plan, {Index, Bytes} <- Writes, Index =:= FatStart] of
+                 [] -> fat_sector(Alloc, 0);
+                 Written -> lists:last(Written)
+             end,
     Offset = Type div 8,
-    <<First:Offset/binary, Entry:Type/little, After/binary>> = patched(Alloc, 0, [{C, V} || {_, C, V} <- Entries]),
+    <<First:Offset/binary, Entry:Type/little, After/binary>> = Sector,
     copies(Alloc, [{0, <<First/binary, (Change(Entry)):Type/little, After/binary>>}]).
 
 flag_bits(16) -> {?CLEAN_16, ?NO_ERROR_16};
@@ -388,6 +483,7 @@ fsinfo_writes(Alloc = #alloc{fsinfo = Sector}, Count, Next) ->
 guarded(Fun) ->
     try Fun() of
         {Result, #alloc{} = Alloc} -> {ok, Result, Alloc};
+        {Result, finished} -> {ok, Result, finished};
         #alloc{} = Alloc -> {ok, Alloc};
         Result -> {ok, Result}
     catch throw:{?MODULE, Finding} -> {error, Finding}
@@ -410,11 +506,15 @@ entry_offset(#alloc{type = Type}, Cluster) -> Cluster * (Type div 8) rem ?SECTOR
 %% Sector Index of the first FAT, as the medium holds it.
 fat_sector(Alloc = #alloc{fat_start = FatStart}, Index) -> sector(Alloc, FatStart + Index).
 
-%% Cluster's entry as the medium holds it, in its value bits, read through Cache,
-%% the last FAT sector read as {Index, Bytes} or none; with the sector read.
-medium(Alloc = #alloc{type = Type}, Cluster, Cache) ->
+%% Cluster's entry in Sector, the FAT sector that holds it, in its value bits.
+entry_value(Alloc = #alloc{type = Type}, Cluster, Sector) ->
+    Offset = entry_offset(Alloc, Cluster),
+    <<_:Offset/binary, Entry:Type/little, _/binary>> = Sector,
+    case Type of 16 -> Entry; 32 -> Entry band ?VALUE_32 end.
+
+%% Cluster's entry as the medium holds it, read through Cache, the last FAT sector
+%% read as {Index, Bytes} or none; with the sector read.
+medium(Alloc, Cluster, Cache) ->
     Index = entry_sector(Alloc, Cluster),
     Bytes = case Cache of {Index, Cached} -> Cached; _ -> fat_sector(Alloc, Index) end,
-    Offset = entry_offset(Alloc, Cluster),
-    <<_:Offset/binary, Entry:Type/little, _/binary>> = Bytes,
-    {case Type of 16 -> Entry; 32 -> Entry band ?VALUE_32 end, {Index, Bytes}}.
+    {entry_value(Alloc, Cluster, Bytes), {Index, Bytes}}.

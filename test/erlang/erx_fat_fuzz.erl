@@ -10,7 +10,9 @@
 %% 64 KiB. Whatever the volume holds, the server never raises and makes no atom,
 %% reads no sector outside the volume, serves no name holding a slash or a NUL, and
 %% answers only its closed set of findings; an unmutated seed reads hello.txt as the
-%% tree holds it. The seed comes from make check-fuzz.
+%% tree holds it. A mounted volume also runs the ownership check, and one it finds
+%% no tree is one fsimg's verify (ERX_FSIMG) also rejects. The seed comes from make
+%% check-fuzz.
 
 -module(erx_fat_fuzz).
 
@@ -56,7 +58,7 @@ round_of({Seed, Count}, Hello) ->
     Atoms = erlang:system_info(atom_count),
     Said = try
                case erx_fat:mount(Read, Count) of
-                   {ok, Fat} -> {mounted, tree(Fat, erx_fat:root(Fat), ?DEPTH)};
+                   {ok, Fat} -> owned(Fat, Sectors, Count), {mounted, tree(Fat, erx_fat:root(Fat), ?DEPTH)};
                    {error, Finding} -> {refused, [finding(Finding)]}
                end
            catch Class:Reason -> error({raised, Class, Reason, changed(Seed, Sectors)})
@@ -67,6 +69,31 @@ round_of({Seed, Count}, Hello) ->
     case Said of
         {mounted, _} -> 1;
         _ -> 0
+    end.
+
+%% The ownership check over a mounted volume: it answers one of its outcomes, and a
+%% volume it finds no tree is one fsimg's verify (ERX_FSIMG) also rejects.
+owned(Fat, Sectors, Count) ->
+    case erx_fat:check(Fat) of
+        ok -> ok;
+        {read_only, too_large} -> error(too_large_seed);
+        {error, read_failed} -> ok;
+        {read_only, tree} ->
+            Path = filename:absname("owned.img"),
+            Zero = <<0:(?SECTOR * 8)>>,
+            ok = file:write_file(Path, [maps:get(Index, Sectors, Zero) || Index <- lists:seq(0, Count - 1)]),
+            Port = open_port({spawn_executable, os:getenv("ERX_FSIMG")},
+                             [{args, ["W", "-f", Path]}, exit_status, stderr_to_stdout, binary]),
+            case verified(Port) of
+                0 -> error({tree_refused_but_fsimg_passes, Path});
+                _ -> ok
+            end
+    end.
+
+verified(Port) ->
+    receive
+        {Port, {data, _}} -> verified(Port);
+        {Port, {exit_status, Status}} -> Status
     end.
 
 %% Every name the walk reaches with what its read answered, for files, or the

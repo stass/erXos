@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fsimg'
 require_relative '../../test/fixtures/fat_volumes'
 
 # The fuzz target of the FAT server's read path, erx_fat (test/erlang/erx_fat_fuzz.erl,
@@ -55,7 +56,8 @@ module ErxFatFuzz
                                        stdin_data: '')
       raise output unless status.success?
 
-      Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
+      Open3.capture2e({ 'ERX_FSIMG' => Erx::Fsimg.locate(root: ROOT) },
+                      'gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_fat_fuzz', 'run', seed.to_s, volumes, '-s', 'init', 'stop',
                       chdir: work, stdin_data: '')
     end
