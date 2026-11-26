@@ -495,9 +495,9 @@ design does not have, to be deleted so no side-by-side table can show it under s
   moby v27.5.1 does for `docker cp` (docs/design-bench.md, "Genode's guest"); nothing checks that the context's
   engine does. Send a canary archive first (a directory entry `usr/lib/ssl/certs/` over the image's link) and
   refuse the build unless the engine refuses it.
-* [Medium] Genode's guest in the bench session (`GenodeBench::Guest`): the posix benchmark's operations declare
-  no `genode-hw` counterpart, so `tools/erx bench posix --systems genode-hw` plans no boot. Declare Genode's
-  counterparts (the program's FreeBSD branch) and boot `build/genode/1cpu` and a 4-CPU image.
+* [Medium] Genode's guest in the bench session (`GenodeBench::Guest`): every posix operation declares its
+  `genode-hw` counterpart, but no boot of `build/genode/1cpu` or `4cpu` under erXos's harness has run, so no
+  Genode row is recorded.
 * [Low] Source ids and run names, `Dependencies` (`tools/lib/erx/dependencies.rb`) and `Runner::COMMAND_NAME`: a
   lock accepts an id with a capital letter, which the fetch then refuses as a run name ("invalid command name").
   No lock has one; give ids and run names one pattern.

@@ -72,6 +72,18 @@ class BenchSessionTest < Minitest::Test
     assert_equal [1], one_cpu.steps.map(&:cpus)
   end
 
+  # Genode runs every posix row through its C library and its own services
+  # (docs/design-bench.md, "The operations and their paths"), so its posix boot asks every
+  # cell erXos's does.
+  def test_genode_boots_every_posix_cell
+    posix = Erx::BenchSuite.benchmark('posix')
+    guests = [Guest.new('erxos', boot: 'posix'), Guest.new('genode-hw', boot: 'posix')]
+    plan = Session.plan(posix, systems: %w[erxos genode-hw], profile: 'landing', guests: guests)
+    cells = plan.steps.group_by(&:system).transform_values { |steps| steps.map { |step| step.cells.map(&:operation) } }
+    refute_empty cells.fetch('genode-hw')
+    assert_equal cells.fetch('erxos'), cells.fetch('genode-hw')
+  end
+
   def test_systems_are_refused_before_any_boot
     guests = [Guest.new('erxos')]
     refusal = ->(systems, profile: 'landing') { assert_raises(Erx::Error) { Session.plan(wake, systems: systems, profile: profile, guests: guests) }.message }
