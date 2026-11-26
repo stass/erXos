@@ -22,8 +22,8 @@
 %% most (ask/1), which the driver answers with {read, Ref, Chars}; format_status/1
 %% hides the shell history and the input typed or waiting (edit 75).
 %%
-%% Modified by erXos: the group watches the process that asked for input while its request is
-%% unfinished, and a reader that ends abandons the request (handle_info/3).
+%% Modified by erXos (edit 82): the group watches the process that asked for input while its
+%% request is unfinished, and a reader that ends abandons the request (handle_info/3).
 %%
 %% Modified by erXos, the loss of input (edit 81): the driver answers an ask with
 %% {read, Ref, lost} where input was lost. A loss damages every unfinished request

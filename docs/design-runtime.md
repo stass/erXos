@@ -709,7 +709,19 @@ every character a group takes after a loss lands in a damaged request until the 
 discards one, and no shell that edits with `edlin`, the Erlang shell
 or `erx_shell`, runs a line that lost bytes; the user empties the buffer to go on. Stock
 has no loss event. `test/host/edlin_lost_test.rb` pins both, through `edlin` and through a
-group, nested reads among them.
+group, nested reads among them. 82\. `group` watches the process that asked for input
+while its request is unfinished: it monitors the requester when the request starts and
+drops the monitor when the request ends through `pop_state/2`. A requester that ends,
+local or of another domain alike, abandons its request, which ends as an error, so it
+gets no reply and holds the loss of a damaged read as edit 81 does, in xterm erases the
+line shown as a request set aside does, and leaves the typed input for the next
+request; a request set aside whose requester ends is dropped, and a request from a
+process of the node that ended before the group read it is dropped at once and takes no
+line the group holds. Stock leaves a dead reader's request in the group, which takes the
+next line typed and gives it to nobody, and the shell's job leader had to guard against
+that by dropping the requests of its dead local processes, which it cannot do for a
+remote pid. `test/host/edlin_lost_test.rb` pins it, each case with a seeded fault
+([design-live.md](design-live.md#lost-input)).
 39\. `standard_error` calls no `prim_tty`: its encoding is `unicode`, and it
 writes with `erlang:display_string(stderr, Bytes)`, which waits as any
 process's write does. 42. While another process holds `erx_tty_owner`,

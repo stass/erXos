@@ -1266,7 +1266,8 @@ takes how the request ended, and a
 damaged request reaches it only by the user's discard (`Ctrl-C`), by
 the end of input, or by an error (a driver's `{error, _}`, a failed
 translation or collection, or the end of the process that asked, which
-`group` watches while its request is unfinished), since it returns no line. An error is
+`group` watches while its request is unfinished, edit 82 of
+[design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), since it returns no line. An error is
 neither the user's act nor the end, so a damaged request that ends with
 one leaves its loss held for the group's next ask, and the next request
 takes that loss first, as a held flushed loss is taken. `pop_state/2`
