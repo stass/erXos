@@ -836,7 +836,13 @@ and needs what erXos does not offer, so the operations are erXos's own
 acts, run as the same code on every system compared, and an Erlang
 module runs the ones that make sense to an Erlang program (spawning a
 process, a message back and forth, copying a file through `file`) on
-erXos and on stock OTP. One summary number per group, a geometric mean
+erXos and on stock OTP. The operations other suites share join them
+the same way (**designed**): waiting on many descriptors, opening and
+closing a TCP connection, `fork` where a system has it, signals, a storm
+of messages among many senders and receivers, mapped files and their
+page faults, random-offset file input and output with `fsync`, many
+small files, semaphores, `malloc`, and a contended mutex, and every
+operation also runs as one copy per processor. One summary number per group, a geometric mean
 of each row's rate against Linux's on the same machine, follows
 UnixBench's own way of keeping one row from dominating; it is not a
 UnixBench score and is never set beside one.
