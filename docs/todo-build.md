@@ -498,6 +498,13 @@ design does not have, to be deleted so no side-by-side table can show it under s
   moby v27.5.1 does for `docker cp` (docs/design-bench.md, "Genode's guest"); nothing checks that the context's
   engine does. Send a canary archive first (a directory entry `usr/lib/ssl/certs/` over the image's link) and
   refuse the build unless the engine refuses it.
+* [Low] Board records and thread placement, `BoardRecord`, `L4ReBoard` and `LinuxBoard`
+  (`tools/lib/erx/board_record.rb`, `l4re_board.rb`, `linux_board.rb`): a session's records state
+  `pinned` in their environment details and `BenchSideBySide.tables` refuses a session run that does not,
+  but the board's records do not state it, so the board's tables (`same_cpu` nil, erXos's four-CPU run beside
+  L4Re's one-CPU run) mark no entry unpinned and set ratios whatever erXos's placement was. Have each board record state whether its guest
+  pinned its threads, from what the guest's benchmark program does, and apply the refusal to the board's
+  tables too.
 * [Low] Source ids and run names, `Dependencies` (`tools/lib/erx/dependencies.rb`) and `Runner::COMMAND_NAME`: a
   lock accepts an id with a capital letter, which the fetch then refuses as a run name ("invalid command name").
   No lock has one; give ids and run names one pattern.
