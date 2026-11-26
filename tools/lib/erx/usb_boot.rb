@@ -428,9 +428,10 @@ MEDIA_BODY = [
     def self.rc_body(volume: STICK_VOLUME)
       steps = RC_STEPS.each_with_index.map { |step, index| [step, "RtS#{index}"] }
       [
-        # RtRc(Line): how Line ended and what it wrote to descriptors 1 and 2, a terminal.
+        # RtRc(Line): how Line ended and what it wrote to descriptors 1 and 2, a terminal
+        # COLUMNS wide, so ls never asks the remote group leader for its width.
         'RtRc=fun(RtLine)->RtSelf=self(),RtTty={tty,fun(RtB)->RtSelf!{rt_out,RtB},ok end},' \
-        'RtEnd=try erx_shell_script:run(RtLine,#{fds=>#{0=>null,1=>RtTty,2=>RtTty}}) catch RtC:RtR->{RtC,RtR} end,' \
+        'RtEnd=try erx_shell_script:run(RtLine,#{fds=>#{0=>null,1=>RtTty,2=>RtTty},vars=>#{<<"COLUMNS">>=>[<<"80">>]}}) catch RtC:RtR->{RtC,RtR} end,' \
         'RtOut=fun RtO(RtA)->receive {rt_out,RtB2}->RtO([RtA,RtB2]) after 0->iolist_to_binary(RtA) end end,' \
         '{RtEnd,RtOut([])} end',
         # RtHolds(Out, Exact, Has, Lacks): Out is Exact, unless that is any, and holds each
@@ -464,8 +465,7 @@ MEDIA_BODY = [
                  exact: "hello\nagain\n", has: [], lacks: []),
       RcStep.new(stage: 'removed', template: 'echo bye > %<v>s/bye.txt && rm %<v>s/bye.txt && ls %<v>s',
                  exact: nil, has: ['docs'], lacks: ['bye.txt', 'hello.txt']),
-      # erXos has no rmdir command; rm -r removes a directory, as FreeBSD's does.
-      RcStep.new(stage: 'removed_dir', template: 'mkdir %<v>s/empty && rm -r %<v>s/empty && ls %<v>s',
+      RcStep.new(stage: 'removed_dir', template: 'mkdir %<v>s/empty && rmdir %<v>s/empty && ls %<v>s',
                  exact: nil, has: ['docs'], lacks: ['empty'])
     ].freeze
     # The volume's tree the steps leave, as fsimg extracts it (Stick.tree_of): FILE

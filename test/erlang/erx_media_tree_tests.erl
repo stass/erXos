@@ -369,6 +369,50 @@ session(Name) ->
         stop(Tree)
     end.
 
+%% A user's rc lines over a volume, as a client sends them: a file written and appended
+%% to, a directory made, a walk to the target that misses, then the file moved into the
+%% directory under its own name in one exchange of a new attach, two walks, the renameat
+%% and the clunks, as erx_file_remote:rename/3 sends them.
+a_file_moves_into_a_new_directory_test_() ->
+    {timeout, 120, fun moves_into_a_new_directory/0}.
+
+moves_into_a_new_directory() ->
+    #{grant := Grant} = Tree = start_proxy(ram(image("fat16.img"), infinity)),
+    S1 = [<<"disk0">>, <<"s1">>],
+    try
+        {ok, _} = call(Grant, {walk, 1, 2, S1}),
+        {ok, []} = call(Grant, {walk, 2, 3, []}),
+        {ok, _, _} = call(Grant, {lcreate, 3, <<"made.txt">>, ?ERX_P9_O_WRONLY bor ?ERX_P9_O_TRUNC, 8#644, 0}),
+        {ok, 6, 0} = call(Grant, {write, 3, 0, <<"hello\n">>}),
+        ok = call(Grant, {clunk, 3}),
+        {ok, _} = call(Grant, {walk, 2, 3, [<<"made.txt">>]}),
+        {ok, _, _} = call(Grant, {lopen, 3, ?ERX_P9_O_WRONLY bor ?ERX_P9_O_APPEND}),
+        {ok, 6, 6} = call(Grant, {write, 3, 0, <<"again\n">>}),
+        ok = call(Grant, {clunk, 3}),
+        {ok, _} = call(Grant, {mkdir, 2, <<"docs">>, 8#755, 0}),
+        ?assertMatch({error, _}, call(Grant, {walk, 1, 3, S1 ++ [<<"docs">>, <<"made.txt">>]})),
+        ?assertEqual([ok, ok, ok, ok, ok, ok, ok],
+                     exchanged(Grant, [{attach, 10, ?NOFID, <<"root">>, <<"media">>, 0},
+                                       {walk, 10, 11, S1}, {walk, 10, 12, S1 ++ [<<"docs">>]},
+                                       {renameat, 11, <<"made.txt">>, 12, <<"made.txt">>},
+                                       {clunk, 10}, {clunk, 11}, {clunk, 12}])),
+        ?assertEqual({ok, <<"hello\nagain\n">>}, read_all(Grant, S1 ++ [<<"docs">>, <<"made.txt">>], 3)),
+        ?assertEqual({error, enoent}, call(Grant, {walk, 2, 3, [<<"made.txt">>]}))
+    after
+        stop(Tree)
+    end.
+
+%% Requests sent all at once, each to an alias of its own, as erx_file_remote's exchange
+%% sends them; each reply reduced to ok or its error, or no_reply past the bound.
+exchanged(Grant, Requests) ->
+    Aliases = [begin Alias = alias([reply]), Grant ! {erx_9p, Alias, self(), Request}, Alias end
+               || Request <- Requests],
+    [receive {erx_9p, Alias, Reply} -> settled(Reply) after ?REPLY_BOUND -> no_reply end
+     || Alias <- Aliases].
+
+settled({error, _} = Error) -> Error;
+settled(_) -> ok.
+
 %% Fids: a walk of three names, which holds the node it reached and the directory of
 %% its entry, a clone and a second grant's walks each leave the volume's table as it
 %% was once their fids are clunked or their grant ends, and a
