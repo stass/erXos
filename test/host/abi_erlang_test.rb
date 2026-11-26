@@ -124,14 +124,15 @@ class AbiErlangTest < Minitest::Test
   def test_generated_events_describe_each_trace_event
     @runner.run([File.join(@oracle, 'erlc'), '-Werror', '-o', @directory,
                  File.join(@directory, 'erx_abi_events.erl')], name: 'erlc-events', deadline: 60, env: @environment)
-    script = 'io:format("~w~n", [[erx_abi_events:describe(trace_event, V) || V <- lists:seq(0, 6)]]), ' \
+    script = 'io:format("~w~n", [[erx_abi_events:describe(trace_event, V) || V <- lists:seq(0, 8)]]), ' \
              'io:format("~w~n", [{erx_abi_events:status(-12), erx_abi_events:status(1), ' \
              'erx_abi_events:flags(trace_record_flags), erx_abi_events:flags(trace_event)}]), halt().'
     record = @runner.run([File.join(@oracle, 'erl'), '+S', '1:1', '+SDcpu', '1', '+SDio', '1', '-noshell',
                           '-noinput', '-pa', @directory, '-eval', script], name: 'events', deadline: 60, env: @environment)
     expected = '[unknown,{park,[{slot,u64},{deadline,u64}]},{wake,[{slot,u64},{result,status}]},' \
                '{irq_deliver,[{label,u64}]},{space_start,[{target,u64}]},' \
-               "{space_end,[{target,u64},{status,i64}]},unknown]\n{notsup,unknown,[{cpu_unknown,1}],[]}\n"
+               '{space_end,[{target,u64},{status,i64}]},{ipc_receive,[{sender,u64},{receiver,u64},{tag,u64}]},' \
+               "{switch,[{next,u64},{next_space,u64}]},unknown]\n{notsup,unknown,[{cpu_unknown,1}],[]}\n"
     assert_equal expected, File.binread(record.fetch('log'))
   end
 

@@ -218,7 +218,7 @@ class AbiGenerationTest < Minitest::Test
       int
       main(void)
       {
-      	for (uint32_t value = 0; value <= 6; value++)
+      	for (uint32_t value = 0; value <= 8; value++)
       		show(value);
       	show(UINT32_MAX);
       	return (0);
@@ -248,7 +248,9 @@ class AbiGenerationTest < Minitest::Test
         3 irq_deliver label:u64
         4 space_start target:u64
         5 space_end target:u64 status:i64
-        6 unknown
+        6 ipc_receive sender:u64 receiver:u64 tag:u64
+        7 switch next:u64 next_space:u64
+        8 unknown
         4294967295 unknown
       TEXT
     end
