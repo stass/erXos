@@ -2092,7 +2092,8 @@ ends the run as closed, the link pointed back.
 **Import.** `tools/erx bench import NAME --env pi4-4gb-l4re --subject
 FILE LOG` makes the record from that log and the build record of
 `build/l4re-raspi4b`, the importer of [L4Re's guest](#l4res-guest)
-giving its cells; the environment is `pi4` with system `l4re` and one
+giving its cells, and the set's `boot.receipt.json` beside LOG, without
+which the import is refused; the environment is `pi4` with system `l4re` and one
 CPU. ipcbench pins none of the threads the comparison reads, so, as
 under HVF, one CPU is the only form in which their placement is known:
 the set's device tree keeps only the boot CPU's node, so Fiasco starts

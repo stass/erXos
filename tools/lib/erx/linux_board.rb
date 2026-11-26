@@ -81,7 +81,7 @@ module Erx
     # initramfs line, which loads INITRAMFS at INITRAMFS_ADDRESS and names it in the tree.
     def config(platform)
       BootPartition::ConfigPlan.new(platform: platform, overlays: [], build_kind: BuildKind::DEVELOPMENT,
-                                    tail: "initramfs #{INITRAMFS} 0x#{INITRAMFS_ADDRESS.to_s(16)}\n")
+                                    initramfs: BootPartition::Initramfs.new(file: INITRAMFS, address: INITRAMFS_ADDRESS))
     end
 
     # Lays the set of a run of benchmark name out into directory, an empty directory under

@@ -60,12 +60,13 @@ module Erx
       raise Error, "board record: #{path} is not the one the walk's entries were made from" unless
         Digest::SHA256.hexdigest(bytes) == boot_set.record_sha256
 
-      receipt = JsonInput.parse(bytes, max_bytes: BootPartition::RECORD_BYTES, label: path)
+      label = "board record: #{path}"
+      receipt = JsonInput.parse(bytes, max_bytes: BootPartition::RECORD_BYTES, label: label)
       files = BootPartition.listed_files(receipt)
       receipt.fetch('source').fetch_values('commit', 'dirty') => [String => commit, dirty]
       receipt.fetch('inputs').fetch('firmware') => Array => firmware
       receipt.fetch('inputs').fetch('linux', nil) => Hash | nil => linux
-      card = CardSettings.read(receipt, label: "board record: #{path}")
+      card = CardSettings.read(receipt, label: label)
       SetFacts.new(
         environment: BenchRecord::Environment.new(
           kind: 'pi4', model: nil, cpus: CPUS, system: linux ? 'linux' : 'erxos',

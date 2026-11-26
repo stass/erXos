@@ -65,10 +65,17 @@ module Erx
     # config.txt in a plan, which every plan holds as one of these and never as a Text:
     # write and write_set write it (config_txt) from the card settings each derives
     # (card_settings), so a bench set's config.txt and its build record state one card.
-    # tail is lines a set adds after the board's own, such as Linux's initramfs line.
-    ConfigPlan = Data.define(:platform, :overlays, :build_kind, :tail) do
+    # initramfs is the firmware's initramfs line a set adds after the board's own lines
+    # (Initramfs), or nil; a plan adds no other setting.
+    ConfigPlan = Data.define(:platform, :overlays, :build_kind, :initramfs) do
       # config.txt with card's settings.
-      def text(card) = BootPartition.config_txt(platform, overlays: overlays, build_kind: build_kind, card: card) + tail
+      def text(card)
+        BootPartition.config_txt(platform, overlays: overlays, build_kind: build_kind, card: card) + (initramfs&.line || '')
+      end
+    end
+    # The firmware's initramfs line: it loads file, a name of the layout, at address.
+    Initramfs = Data.define(:file, :address) do
+      def line = "initramfs #{file} 0x#{address.to_s(16)}\n"
     end
     # The firmware's files, by deps.lock pin; each keeps its pinned file name.
     FIRMWARE = %w[rpi-firmware-start4 rpi-firmware-fixup4 rpi-firmware-license].freeze
@@ -266,7 +273,7 @@ module Erx
     def plan(platform:, build_kind:, bootable:, bl31:, bl31_license:, tree:, firmware:)
       board = BoardTree.board(platform)
       own = { KERNEL => bootable, ARMSTUB => bl31, ARMSTUB_LICENSE => bl31_license,
-              CONFIG => ConfigPlan.new(platform: platform, overlays: tree.overlays.keys, build_kind: build_kind, tail: ''),
+              CONFIG => ConfigPlan.new(platform: platform, overlays: tree.overlays.keys, build_kind: build_kind, initramfs: nil),
               **command_line_entry(platform, build_kind),
               board.file => tree.board, BoardTree.source_file(board) => tree.source,
               BoardTree::LICENSE_FILE => tree.license,
@@ -305,7 +312,8 @@ module Erx
     def write_set(root:, directory:, plan:, record:)
       directory = staged(root: root, directory: directory, plan: plan, bench: true, entries: SET_ENTRIES,
                          record_name: SET_RECORD) do |_work, _files, written, card|
-        receipt(record.merge(card.to_record), image: nil, files: written, pieces: {})
+        settings = [CardSettings::CLOCK_KEY, CardSettings::MEMORY_KEY]
+        receipt(record.except(*settings).merge(card.to_record), image: nil, files: written, pieces: {})
       end
       WrittenSet.new(files: File.join(directory, PARTITION), record: File.join(directory, SET_RECORD))
     end
