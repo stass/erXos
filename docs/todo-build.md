@@ -500,8 +500,8 @@ design does not have, to be deleted so no side-by-side table can show it under s
   refuse the build unless the engine refuses it.
 * [Low] Board records and thread placement, `BoardRecord`, `L4ReBoard` and `LinuxBoard`
   (`tools/lib/erx/board_record.rb`, `l4re_board.rb`, `linux_board.rb`): a session's records state
-  `pinned` in their environment details and `BenchSideBySide.tables` refuses a session run that does not,
-  but the board's records do not state it, so the board's tables (`same_cpu` nil, erXos's four-CPU run beside
+  `pinned` in their environment details and `BenchSideBySide.session_tables` refuses a session run that does not,
+  but the board's records do not state it, so the board's tables (`board_tables`, erXos's four-CPU run beside
   L4Re's one-CPU run) mark no entry unpinned and set ratios whatever erXos's placement was. Have each board record state whether its guest
   pinned its threads, from what the guest's benchmark program does, and apply the refusal to the board's
   tables too.

@@ -2137,7 +2137,7 @@ IDs as CPU0).` for another); a log that names more than one is not
 imported. The import prints the board's side-by-side table: the record
 beside erXos's newest board record of the benchmark, each system in its
 own form, erXos on four CPUs and L4Re on one, so the rows name no CPU
-form (`BenchSideBySide.tables` with `forms: false`).
+form (`BenchSideBySide.board_tables`).
 
 ### Linux on the same board
 

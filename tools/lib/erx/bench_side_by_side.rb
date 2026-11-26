@@ -12,13 +12,14 @@ module Erx
   # There is one table per layer, the kernel table of the native boot, the Erlang table of
   # the xdomain boot and the program table of the posix boot, each with a row per erXos
   # cell and a column per system; a program row also prints its operation's act, whether
-  # both systems do the same work for the call (docs/design-bench.md, "Fairness"). A cell on
-  # one CPU is read from the runs of the fewest CPUs that hold it (one, or the fixed count
-  # of a session whose guests boot only there) and one across CPUs from the runs at the
-  # landing boot's count. The runs must share one environment kind and host model, so TCG
-  # rows are never set beside HVF or board rows, and a run made without pinning says so on
-  # each of its entries. The tables give no verdict: setting systems beside each other is
-  # never a comparison.
+  # both systems do the same work for the call (docs/design-bench.md, "Fairness"). In a
+  # session's tables (session_tables) a cell on one CPU is read from the runs at the count
+  # the session's plan gives its boot (Plan#same_cpu) and one across CPUs from the runs at
+  # the landing boot's count; in the board's tables (board_tables), where each system boots
+  # in its own form, every row reads every run and names no form. The runs must share one
+  # environment kind and host model, so TCG rows are never set beside HVF or board rows,
+  # and a run made without pinning says so on each of its entries. The tables give no
+  # verdict: setting systems beside each other is never a comparison.
   #
   # A number is converted to nanoseconds only by its own run's clocks: a clock with a
   # frequency by its run's clock group, and a cell in CPU cycles by the ARM clock its sets'
@@ -55,33 +56,46 @@ module Erx
 
     module_function
 
-    # The tables of runs for each landing boot of benchmark, with a column for each of
-    # systems; runs of more than one environment kind or host model are refused. A
-    # session's tables (same_cpu given, the session's Plan#same_cpu) cover only the boots
-    # same_cpu names, read each boot's one-CPU cells at the count it gives and its other
-    # cells at the boot's count, and refuse a run that does not say whether its threads
-    # were pinned. The board's tables (same_cpu nil), where each system boots in its own
-    # form, read every run on each row and name no form; board records do not state
-    # pinning, so no board entry is marked unpinned.
-    def tables(benchmark, runs, systems:, same_cpu: nil)
+    # A session's tables of runs, for each landing boot of benchmark that same_cpu (the
+    # session's Plan#same_cpu) names: a boot's one-CPU cells read from the runs at the count
+    # same_cpu gives it, its other cells from the runs at the boot's count. A run that does
+    # not say whether its threads were pinned is refused.
+    def session_tables(benchmark, runs, systems:, same_cpu:)
+      silent = runs.map { |run| run.record.environment }
+                   .find { |environment| ![true, false].include?(environment.details['pinned']) }
+      raise Error, "bench: the run #{silent.name} does not say whether its threads were pinned" if silent
+
+      layer_tables(benchmark, runs, systems: systems, boots: same_cpu.keys) do |boot, entry, cell|
+        cpus = cell.cpus == 1 ? same_cpu.fetch(boot) : entry.cpus
+        [cpus, runs.select { |run| run.record.environment.cpus == cpus }]
+      end
+    end
+
+    # The board's tables of runs, for each landing boot of benchmark: each system boots in
+    # its own form there, so every row reads every run and names no form. Board records do
+    # not state pinning, so no board entry is marked unpinned.
+    def board_tables(benchmark, runs, systems:)
+      layer_tables(benchmark, runs, systems: systems, boots: BenchSuite::BOOTS.keys) { [nil, runs] }
+    end
+
+    # The tables of benchmark's landing boots among boots, with a column for each of
+    # systems; the block gives each cell's row its CPU form and the runs it reads. Runs of
+    # more than one environment kind or host model are refused.
+    def layer_tables(benchmark, runs, systems:, boots:)
       places = runs.map { |run| run.record.environment }.map { |environment| "#{environment.kind} #{environment.model}" }.uniq
       raise Error, "bench: runs of #{places.join(' and ')} are never set side by side" if places.size > 1
 
-      silent = same_cpu && runs.map { |run| run.record.environment }.find { |environment| ![true, false].include?(environment.details['pinned']) }
-      raise Error, "bench: the run #{silent.name} does not say whether its threads were pinned" if silent
-
       BenchSuite::BOOTS.filter_map do |boot, entry|
-        cells = benchmark.landing[boot] or next
-        next if same_cpu && !same_cpu.key?(boot)
+        cells = (benchmark.landing[boot] if boots.include?(boot)) or next
         rows = cells.map do |cell|
-          cpus = (cell.cpus == 1 ? same_cpu.fetch(boot) : entry.cpus if same_cpu)
-          read = same_cpu ? runs.select { |run| run.record.environment.cpus == cpus } : runs
+          cpus, read = yield(boot, entry, cell)
           Row.new(benchmark: benchmark.name, cell: cell, cpus: cpus, act: benchmark.operations.fetch(cell.operation).act,
                   columns: columns(benchmark, cell, read, systems))
         end
         Table.new(layer: entry.layer, benchmark: benchmark.name, rows: rows)
       end
     end
+    private_class_method :layer_tables
 
     def columns(benchmark, cell, runs, systems)
       entries = systems.to_h do |system|

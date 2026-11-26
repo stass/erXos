@@ -78,7 +78,7 @@ class BenchSideBySideTest < Minitest::Test
   # The tables of runs, the same-CPU cells of every boot read at fewest CPUs, as a
   # session's plan gives them.
   def sides(benchmark, runs, systems:, fewest: 1)
-    Tables.tables(benchmark, runs, systems: systems, same_cpu: benchmark.landing.keys.to_h { |boot| [boot, fewest] })
+    Tables.session_tables(benchmark, runs, systems: systems, same_cpu: benchmark.landing.keys.to_h { |boot| [boot, fewest] })
   end
 
   def table = sides(BENCHMARK, runs, systems: %w[erxos l4re linux]).first
@@ -102,18 +102,31 @@ class BenchSideBySideTest < Minitest::Test
   # so the board table sets every run beside each cell and names no CPU form.
   def test_the_board_table_sets_each_systems_own_form_on_one_row
     board = [boot("erxos", 4, [histogram("same", "counter", 30)], clock: ERXOS_CLOCK), boot("l4re", 1, [mean("same")], clock: nil)]
-    same, = Tables.tables(BENCHMARK, board, systems: %w[erxos l4re]).first.rows
+    same, = Tables.board_tables(BENCHMARK, board, systems: %w[erxos l4re]).first.rows
     assert_nil same.cpus
     assert_equal [1, 1], %w[erxos l4re].map { |system| column(same, system).entries.size }
-    assert_includes Tables.render(Tables.tables(BENCHMARK, board, systems: %w[erxos l4re])),
+    assert_includes Tables.render(Tables.board_tables(BENCHMARK, board, systems: %w[erxos l4re])),
                     "probe.same idle same-cpu, on the board"
+  end
+
+  # A board record does not state pinning: the board's tables take it and mark no entry
+  # unpinned, while a session's tables refuse the same record.
+  def test_a_record_silent_on_pinning_is_taken_on_the_board_and_refused_in_a_session
+    silent = [boot('erxos', 4, [histogram('same', 'counter', 30)], clock: ERXOS_CLOCK, kind: 'pi4', details: {}),
+              boot('l4re', 1, [mean('same')], clock: nil, kind: 'pi4', details: {})]
+    same, = Tables.board_tables(BENCHMARK, silent, systems: %w[erxos l4re]).first.rows
+    assert_equal [[false], [false]], %w[erxos l4re].map { |system| column(same, system).entries.map(&:unpinned) }
+    error = assert_raises(Erx::Error) do
+      Tables.session_tables(BENCHMARK, silent, systems: %w[erxos l4re], same_cpu: { 'native' => 1 })
+    end
+    assert_match(/does not say whether its threads were pinned/, error.message)
   end
 
   # A run whose record states a clock config.txt could not set is refused, naming the run.
   def test_a_broken_arm_clock_is_refused_naming_its_run
     broken = boot('l4re', 1, [mean('same')], clock: nil, round: 2)
     broken = broken.with(record: broken.record.with(run: broken.record.run.with(details: { 'arm_clock_hz' => 1_500_500_000 })))
-    error = assert_raises(Erx::Error) { Tables.tables(BENCHMARK, [runs.first, broken], systems: %w[erxos l4re]) }
+    error = assert_raises(Erx::Error) { Tables.board_tables(BENCHMARK, [runs.first, broken], systems: %w[erxos l4re]) }
     assert_match(/\Abench: the record of round 2 in #{broken.record.environment.name}: arm_clock_hz/, error.message)
   end
 
@@ -195,7 +208,7 @@ class BenchSideBySideTest < Minitest::Test
   def test_cycles_of_a_run_that_recorded_its_arm_clock_are_shown_in_ns
     held = boot('l4re', 1, [mean('same')], clock: nil)
     held = held.with(record: held.record.with(run: held.record.run.with(details: { 'arm_clock_hz' => 1_500_000_000 })))
-    board = Tables.tables(BENCHMARK, [runs.first, held], systems: %w[erxos l4re]).first
+    board = Tables.board_tables(BENCHMARK, [runs.first, held], systems: %w[erxos l4re]).first
     entry = column(board.rows.first, 'l4re').entries.first
     assert_equal [ns(Rational(4_213_000 * 1000, 10_000 * 1500)), 1_500_000_000, nil],
                  [entry.values.fetch('mean'), entry.converted_hz, entry.ratio]

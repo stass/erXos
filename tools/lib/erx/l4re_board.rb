@@ -185,7 +185,7 @@ module Erx
     def table(benchmark, record, history:)
       runs = [newest_erxos(benchmark.name, history: history), record].compact
                                                                      .map { |each| BenchSideBySide::Run.new(round: 0, record: each) }
-      BenchSideBySide.render(BenchSideBySide.tables(benchmark, runs, systems: %w[erxos l4re]))
+      BenchSideBySide.render(BenchSideBySide.board_tables(benchmark, runs, systems: %w[erxos l4re]))
     end
 
     # erXos's newest board record of benchmark name under history, or nil.
