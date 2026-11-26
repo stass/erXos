@@ -87,7 +87,7 @@ What the process steps: a link's `join` call and its messages, a write with the 
 `Req` the process made for it, a facet's operation with its caller, and the
 `down` of a monitored process.
 """.
--type input() :: {join, Link :: pid(), reference(), #{address := erx_smp_crypto:address()}, from()}
+-type input() :: {join, Link :: pid(), reference(), erx_smp_crypto:address(), from()}
                | {write, Link :: pid(), Ref :: pos_integer(), key(), binary(), Req :: reference()}
                | {link, Link :: pid(), {subscribed, key(), none | notify | indicate} | {mtu, pos_integer()}
                                        | {security, security()}}
@@ -125,7 +125,7 @@ advertised(#core{gap = Gap, advertise = Advertise, handlers = Handlers}) ->
 
 -doc "Steps one input: the actions to perform, in order, and the next core.".
 -spec step(input(), core()) -> {[action()], core()}.
-step({join, Link, Conn, #{address := Address}, From}, #core{links = Links, conns = Conns} = Core)
+step({join, Link, Conn, Address, From}, #core{links = Links, conns = Conns} = Core)
   when not is_map_key(Link, Links), not is_map_key(Conn, Conns) ->
     Security = #{level => open, bond => none},
     Joined = Core#core{links = Links#{Link => #{conn => Conn, address => Address, security => Security,

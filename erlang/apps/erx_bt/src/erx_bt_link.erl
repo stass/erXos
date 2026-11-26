@@ -79,7 +79,7 @@ handle_continue({start, Info}, #link{conn = Conn} = Link) ->
     #{peer := Address, identity := Identity, share := Share, acl_tx_max := AclTxMax} = Info,
     try
         Bond = called(store, fun() -> erx_bt_store:resolve(Address) end),
-        #{table := Table, values := Values} = called(registry, fun() -> erx_gatt_srv:join(Conn, #{address => Address}) end),
+        #{table := Table, values := Values} = called(registry, fun() -> erx_gatt_srv:join(Conn, Address) end),
         Core = erx_bt_link_core:new(#{table => Table, values => Values, bond => Bond, share => Share,
                                       acl_tx_max => AclTxMax, now => erlang:monotonic_time(millisecond),
                                       addresses => #{central => Address, peripheral => {random, Identity}}}),

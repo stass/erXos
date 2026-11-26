@@ -58,10 +58,14 @@ class ErxBtWindowTest < Minitest::Test
              anchor: '    {[], Core#core{refusing = false}};',
              replacement: '    {[], Core};',
              catching_case: 'a_confirmed_forget_ends_the_refusal_test'),
-    Seed.new(fault: "a failure's line composed before the window is checked, so a pairing withdrawn at a close raises",
-             anchor: '     ended({failed, Octets, Reason}, wait_from(Now, Core))}.',
-             replacement: '     begin _ = text({failed, Octets, Reason}), ended({failed, Octets, Reason}, wait_from(Now, Core)) end}.',
-             catching_case: 'an_interrupted_pairing_writes_no_line_test')
+    Seed.new(fault: "a closed window's pairing left running, so the link's withdrawn is never taken",
+             anchor: 'Core#core{window = none, pairing = {Link, Tag, Address, withdrawn}}};',
+             replacement: 'Core#core{window = none}};',
+             catching_case: 'an_interrupted_pairing_writes_no_line_test'),
+    Seed.new(fault: "a link's failure taken only while its pairing runs, so one that crossed the withdrawal is lost",
+             anchor: "#core{pairing = {Link, Tag, _, Stage}} = Core)\n  when Stage =/= keeping ->\n    {Actions, Failed} = unbonded(Reason, Now, Core),",
+             replacement: "#core{pairing = {Link, Tag, _, Stage}} = Core)\n  when Stage =:= running ->\n    {Actions, Failed} = unbonded(Reason, Now, Core),",
+             catching_case: 'a_failure_crossing_the_withdrawal_writes_no_line_test')
   ].freeze
 
   def test_window_cases_pass_under_eunit

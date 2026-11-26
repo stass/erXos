@@ -54,7 +54,7 @@ attach_answers_the_limits_and_refuses_test() ->
 
 attach_hears_the_live_links_test() ->
     C = make_ref(),
-    {Actions, _} = steps([{join, ?L1, C, #{address => ?ADDRESS}, j},
+    {Actions, _} = steps([{join, ?L1, C, ?ADDRESS, j},
                           {link, ?L1, {security, #{level => encrypted, bond => ?BOND}}},
                           {facet, ?H1, {attach, a}, f}]),
     ?assertEqual({event, ?H1, {connected, C, #{level => encrypted, bond => ?BOND}}},
@@ -65,7 +65,7 @@ attach_hears_the_live_links_test() ->
 %% attach hears none of them (docs/design-bluetooth.md, "Host tests of the cores").
 attach_replays_a_connected_link_test() ->
     C = make_ref(),
-    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {mtu, 247}},
+    Joined = [{join, ?L1, C, ?ADDRESS, j}, {link, ?L1, {mtu, 247}},
               {link, ?L1, {subscribed, {a, x}, notify}}, {link, ?L1, {subscribed, {b, y}, indicate}}],
     {Actions, _} = steps(Joined ++ [{facet, ?H1, {attach, a}, f}]),
     ?assertEqual([{connected, C, #{level => open, bond => none}}, {mtu, C, 247},
@@ -105,7 +105,7 @@ advertised_follows_the_handlers_test() ->
 %% "Host tests of the cores", the registry's `connected`).
 connected_holds_the_level_and_bond_test() ->
     C = make_ref(),
-    {Joined, Core} = steps([{facet, ?H1, {attach, a}, f}, {join, ?L1, C, #{address => ?ADDRESS}, j}]),
+    {Joined, Core} = steps([{facet, ?H1, {attach, a}, f}, {join, ?L1, C, ?ADDRESS, j}]),
     ?assertEqual([{event, ?H1, {connected, C, #{level => open, bond => none}}}],
                  [A || {event, _, _} = A <- Joined]),
     {Unbonded, Encrypted} = step({link, ?L1, {security, #{level => encrypted, bond => none}}}, Core),
@@ -127,7 +127,7 @@ set_refusals_test() ->
 
 notify_refusals_test() ->
     C = make_ref(),
-    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a}, f0}],
+    Joined = [{join, ?L1, C, ?ADDRESS, j}, {facet, ?H1, {attach, a}, f0}],
     ?assertMatch({[{request, _, {notify, notify, {a, x}, <<1>>}, f}], _},
                  steps(Joined ++ [{facet, ?H1, {notify, C, a, x, <<1>>}, f}])),
     ?assertMatch({[{reply, f, {error, gone}}], _}, steps(Joined ++ [{facet, ?H1, {notify, make_ref(), a, x, <<1>>}, f}])),
@@ -138,7 +138,7 @@ notify_refusals_test() ->
 %% of none, is refused not_attached, and nothing reaches a link.
 set_notify_and_indicate_only_from_the_handler_test() ->
     C = make_ref(),
-    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a}, f0}, {facet, ?H2, {attach, b}, f1}],
+    Joined = [{join, ?L1, C, ?ADDRESS, j}, {facet, ?H1, {attach, a}, f0}, {facet, ?H2, {attach, b}, f1}],
     Refused = {error, not_attached},
     ?assertMatch({[{reply, f, Refused}], _}, steps(Joined ++ [{facet, ?H2, {set, a, x, <<1>>}, f}])),
     ?assertMatch({[{reply, f, Refused}], _}, steps(Joined ++ [{facet, ?H2, {notify, C, a, x, <<1>>}, f}])),
@@ -148,13 +148,13 @@ set_notify_and_indicate_only_from_the_handler_test() ->
     ?assertMatch({[{reply, f, Refused}], _}, steps(Joined ++ [{down, ?H1}, {facet, ?H1, {set, a, x, <<1>>}, f}])).
 
 write_without_a_handler_is_unlikely_error_test() ->
-    {Actions, _} = steps([{join, ?L1, make_ref(), #{address => ?ADDRESS}, j}, {write, ?L1, 1, {b, y}, <<0>>, req}]),
+    {Actions, _} = steps([{join, ?L1, make_ref(), ?ADDRESS, j}, {write, ?L1, 1, {b, y}, <<0>>, req}]),
     ?assertEqual([{to_link, ?L1, {answer, 1, {error, unlikely_error}}}], Actions).
 
 subscription_goes_to_its_service_alone_test() ->
     C = make_ref(),
     {Actions, _} = steps([{facet, ?H1, {attach, a}, f1}, {facet, ?H2, {attach, b}, f2},
-                          {join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {subscribed, {b, y}, indicate}}]),
+                          {join, ?L1, C, ?ADDRESS, j}, {link, ?L1, {subscribed, {b, y}, indicate}}]),
     ?assertEqual([{event, ?H2, {subscribed, C, y, indicate}}], Actions).
 
 %% ---- the core, every sequence against a model ----
@@ -204,7 +204,7 @@ walk(Depth, Alphabet, Model, Core, Count) ->
 input({join, L}, #model{joined = J, ended = E}) ->
     case is_map_key(L, J) orelse lists:member(L, E) of
         true -> skip;
-        false -> {join, L, conn(L), #{address => ?ADDRESS}, from}
+        false -> {join, L, conn(L), ?ADDRESS, from}
     end;
 input({write, L, Key}, #model{writes = N}) -> {write, L, 1, Key, <<1>>, {req, N}};
 input({attach, H, S}, _M) -> {facet, H, {attach, S}, from};
@@ -455,11 +455,11 @@ link_stand_in(Test) ->
 link_loop(Test) ->
     receive
         join ->
-            Answer = erx_gatt_srv:join(make_ref(), #{address => ?ADDRESS}),
+            Answer = erx_gatt_srv:join(make_ref(), ?ADDRESS),
             Test ! {joined, self(), Answer},
             link_loop(Test);
         {join, Conn} ->
-            Test ! {joined, self(), erx_gatt_srv:join(Conn, #{address => ?ADDRESS})},
+            Test ! {joined, self(), erx_gatt_srv:join(Conn, ?ADDRESS)},
             link_loop(Test);
         stop ->
             ok;

@@ -37,7 +37,7 @@ keeps them out of what its crash reports and logs show, as the window does.
 -include("generated/erx_abi.hrl").
 
 -export([format_bond/1, parse_bond/1, id/1, is_bond_id/1, format/1, parse/1, reason/1, reader/1, next/1, bonds/1]).
--export_type([address/0, bond/0, bond_id/0, line/0, reason/0, reader/0]).
+-export_type([address/0, bond/0, bond_id/0, line/0, reason/0, failure/0, reader/0]).
 
 %% An address as erx_hci decodes it, most significant octet first.
 -type address() :: <<_:48>>.
@@ -45,8 +45,18 @@ keeps them out of what its crash reports and logs show, as the window does.
 -type bond_id() :: <<_:256>>.
 -type bond() :: #{id := bond_id(), address := address(), type := public | random,
                   level := authenticated | unauthenticated}.
-%% One of ?REASONS, the one list of them.
--type reason() :: atom().
+%% A failed pairing's reasons (docs/design-bluetooth.md, "Refusals and error results"):
+%% SMP's, each mapped from one Pairing Failed code or one event, the store's, and the
+%% link's end. This type is the one source: the Security Manager's, the store's and the
+%% window's reasons are written as it, and ?REASONS holds its words for parse/1, which
+%% erx_bt_pair_tests reads back from this type.
+-type reason() :: secure_connections_required | key_size | method | confirm | dhkey | bonding
+                | invalid | unexpected | peer | timeout | already_bonded | bonds_full
+                | unavailable | disconnected.
+%% Why a pairing failed, as the Security Manager, the store and the window report it: a
+%% reason, or the phone's own Pairing Failed with its code, which a line gives as `peer`.
+%% A window's withdrawal is no failure of this type, so no line can be composed for it.
+-type failure() :: reason() | {peer, byte()}.
 %% A passkey is its six decimal digits.
 -type line() :: {wait, 1..?ERX_BT_PAIR_WAIT_MAX_S} | waiting | {passkey, <<_:48>>, address()}
               | {bonded, bond()} | {failed, address(), reason()} | {closed, timeout}.
@@ -55,8 +65,7 @@ keeps them out of what its crash reports and logs show, as the window does.
 -record(reader, {file :: file:io_device(), held = <<>> :: binary()}).
 -opaque reader() :: #reader{}.
 
-%% A failed pairing's reasons (docs/design-bluetooth.md, "Refusals and error results"):
-%% SMP's, each mapped from one Pairing Failed code or one event, and the store's.
+%% The words of reason(), which parse/1 alone reads.
 -define(REASONS, [secure_connections_required, key_size, method, confirm, dhkey, bonding,
                   invalid, unexpected, peer, timeout, already_bonded, bonds_full,
                   unavailable, disconnected]).
@@ -98,20 +107,18 @@ format(waiting) -> <<"waiting">>;
 format({passkey, <<_:6/binary>> = Digits, Address}) ->
     iolist_to_binary(["passkey ", Digits, $\s, address_text(Address)]);
 format({bonded, Bond}) -> <<"bonded ", (format_bond(Bond))/binary>>;
-format({failed, Address, Reason}) ->
-    true = lists:member(Reason, ?REASONS),
+format({failed, Address, Reason}) when is_atom(Reason) ->
     iolist_to_binary(["failed ", address_text(Address), $\s, atom_to_binary(Reason)]);
 format({closed, timeout}) -> <<"closed timeout">>.
 
 -doc """
-The reason a `failed` line gives for a pairing's failure Failure: the phone's own Pairing
-Failed, `{peer, Code}` from the Security Manager, is `peer` whatever its code; every other
-reason of the list is itself. Any other failure, `withdrawn` among them, which only a
-window its opener closed meets and so never writes, is not a line's reason and raises.
+The reason a `failed` line gives for a pairing's failure: the phone's own Pairing Failed,
+`{peer, Code}` from the Security Manager, is `peer` whatever its code; every other reason
+is itself. It takes every failure() and raises on none.
 """.
--spec reason({peer, byte()} | reason()) -> reason().
+-spec reason(failure()) -> reason().
 reason({peer, Code}) when is_integer(Code) -> peer;
-reason(Reason) when is_atom(Reason) -> true = lists:member(Reason, ?REASONS), Reason.
+reason(Reason) when is_atom(Reason) -> Reason.
 
 -doc "The term a window's line holds, or `invalid` for any line `format/1` does not make.".
 -spec parse(binary()) -> line() | invalid.

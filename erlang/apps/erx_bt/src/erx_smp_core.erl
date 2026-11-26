@@ -42,9 +42,10 @@ nor static random, Invalid Parameters; a key off the curve, a reflected key or a
 wrong check value, DHKey Check Failed; a wrong commitment, Confirm Value Failed. A PDU out of its turn fails the pairing with Unspecified Reason,
 or Command Not Supported for a command a responder never takes. The window's
 `{withdraw, Tag}`, when its opener closes it, fails the pairing of that `Tag` with
-Unspecified Reason, reported as `withdrawn`. Every failure of a pairing but the
-timeout and a request in `done` goes through one route, `failed/4`, which sends
-Pairing Failed, reports the reason (`{failed, Reason}`) and stops the timer; the
+Unspecified Reason, reported as `withdrawn` and not as a failure. Every failure of a
+pairing but the timeout and a request in `done` goes through one route, `failed/4`, which
+sends Pairing Failed, reports the reason (`{failed, Reason}`, `Reason` one of
+`erx_bt_pair:failure()`, or `withdrawn`) and stops the timer; the
 phone's Pairing Failed (`peer_failed/1`) is reported as `{peer, Code}` and sends
 nothing. A failure after the link has its key, in the third phase,
 also ends the link (`end_link`) and the core with it, so a link's key is a kept bond's
@@ -81,10 +82,14 @@ link keeps out of crash reports and status output.
 -type input() :: {pdu, erx_smp:decoded()} | {admission, tag(), verdict()} | {withdraw, tag()} | encrypted | timeout.
 -doc "What a successful pairing leaves: the LTK, its level and the phone's identity.".
 -type bond() :: #{ltk := value(), level := level(), irk := value(), identity := erx_smp_crypto:address()}.
--type reason() :: already_bonded | secure_connections_required | key_size | method | bonding | invalid
-                | confirm | dhkey | unexpected | timeout | withdrawn | {peer, byte()}.
+-doc """
+Why a pairing ended without a bond: a failure of the control tree's one reason type,
+whose words a `failed` line gives, or the window's own withdrawal, which the core reports
+as `withdrawn` and not as a failure, so no line can be composed for it.
+""".
+-type reason() :: erx_bt_pair:failure() | withdrawn.
 -type action() :: {admit, tag()} | timer | timer_stop | end_link | {send, erx_smp:pdu()} | {passkey, 0..?ERX_SMP_PASSKEY_MAX}
-                | {key, value(), level()} | {bonded, bond()} | {failed, reason()}.
+                | {key, value(), level()} | {bonded, bond()} | {failed, erx_bt_pair:failure()} | withdrawn.
 %% The pairing's context once admitted: the method, both feature exchanges, the fresh
 %% values and, from the public key exchange on, the phone's key and the DHKey.
 -type pairing() :: #{method := passkey | just_works, request := erx_smp:features(), response := erx_smp:features(),
@@ -117,11 +122,16 @@ step(Input, #{phase := Phase} = State) ->
 %% reason reported and the timer stopped; once the link has the pairing's key, the
 %% link ends too, its key discarded with it, and the core with the link.
 failed(ToSend, Reason, Phase, State) ->
-    Reported = [{send, {pairing_failed, Code}} || Code <- ToSend] ++ [{failed, Reason}, timer_stop],
+    Reported = [{send, {pairing_failed, Code}} || Code <- ToSend] ++ [report(Reason), timer_stop],
     case keyed(Phase) of
         true -> {Reported ++ [end_link], State#{phase := ended}};
         false -> {Reported, State#{phase := idle}}
     end.
+
+%% What the link hears of a pairing's end without a bond: `withdrawn` for the window's own
+%% withdrawal, every other reason as the failure it is.
+report(withdrawn) -> withdrawn;
+report(Failure) -> {failed, Failure}.
 
 %% The phases after authentication stage 2 gave the link its key.
 keyed({encrypting, _}) -> true;

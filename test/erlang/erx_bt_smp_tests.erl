@@ -203,7 +203,8 @@ honest_inputs(Request, Mode) ->
          {pdu, {identity_address_information, 1, h("c1c2c3c4c5c6")}}].
 
 sent_failure(Actions) -> [Code || {send, {pairing_failed, Code}} <- Actions].
-failures(Actions) -> [Reason || {failed, Reason} <- Actions].
+%% The failures a run reports, the window's withdrawal among them as `withdrawn`.
+failures(Actions) -> [Reason || {failed, Reason} <- Actions] ++ [withdrawn || withdrawn <- Actions].
 
 passkey_entry_completes_authenticated_test() ->
     {Actions, _} = run(honest_inputs(?KEYBOARD, display)),

@@ -69,7 +69,8 @@ the store the same way; on any other link it is answered at once ("Bonds and the
 **A pairing's outcome has one ordering point**: the step in which the Security Manager
 ends its third phase sends `{keep, Tag, Bond, Subscriptions}` to the store and `{keeping,
 Tag}` to the window. Before it, a failure is the link's to report (`{outcome, Tag,
-{failed, Reason}}`); from it, the store tells the window the outcome, and the store's
+{failed, Reason}}`, or `{withdrawn, Tag}` for the window's own withdrawal); from it, the
+store tells the window the outcome, and the store's
 `kept` tells the link whether its key is a kept bond's.
 
 **Sending**: frames wait in the link's queue and are cut into ACL packets of at most the
@@ -126,12 +127,13 @@ table hash it takes on at its encryption with that key.
                     now := time()}.
 -doc """
 What a link tells the window (docs/design-bluetooth.md, "The link's messages"): a Pairing
-Request to admit, the passkey, a failure of the pairing it admitted, `keeping` when the
+Request to admit, the passkey, a failure of the pairing it admitted or its end by the
+window's own withdrawal, `keeping` when the
 bond goes to the store, or `wait`, a candidate's question of the pairing wait before its
 Security Request. `erx_bt_window` takes these as they are.
 """.
 -type to_window() :: {admit, tag(), erx_smp_crypto:address()} | {passkey, tag(), 0..?ERX_SMP_PASSKEY_MAX}
-                   | {outcome, tag(), {failed, erx_smp_core:reason()}} | {keeping, tag()} | wait.
+                   | {outcome, tag(), {failed, erx_bt_pair:failure()}} | {withdrawn, tag()} | {keeping, tag()} | wait.
 -doc """
 What the window tells a link: its verdict on a Pairing Request, its withdrawal, or the
 milliseconds the pairing wait has left, `0` once it has passed.
@@ -540,6 +542,10 @@ smp_action({bonded, Bond}, _Now, #core{awaiting = Tag, bearer = Bearer, bond = n
 smp_action({failed, Reason}, _Now, #core{awaiting = Tag} = Core) when Tag =/= none ->
     {[{window, {outcome, Tag, {failed, Reason}}}], Core#core{awaiting = none}};
 smp_action({failed, _Reason}, _Now, Core) ->
+    {[], Core};
+smp_action(withdrawn, _Now, #core{awaiting = Tag} = Core) when Tag =/= none ->
+    {[{window, {withdrawn, Tag}}], Core#core{awaiting = none}};
+smp_action(withdrawn, _Now, Core) ->
     {[], Core};
 smp_action(end_link, _Now, Core) ->
     {[{close, pairing}], Core}.

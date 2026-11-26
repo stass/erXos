@@ -484,7 +484,7 @@ withdrawn_after_key_sends_failure_before_close_test() ->
                       smp(Random), smp(Check)], core(#{share => 16})),
     {Actions, _} = core_step({withdraw, 1}, 0, Keyed),
     ?assertEqual([pairing_failed(16#08)], on(6, Actions)),
-    ?assertEqual([{outcome, 1, {failed, withdrawn}}], window(Actions)),
+    ?assertEqual([{withdrawn, 1}], window(Actions)),
     ?assertEqual({close, pairing}, lists:last(Actions)).
 
 %% A Pairing Request after the bond is refused, but that is no outcome for the window,

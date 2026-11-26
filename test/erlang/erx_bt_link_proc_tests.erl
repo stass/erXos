@@ -94,7 +94,7 @@ withdrawn_before_keeping_test() ->
         Link = start(self()),
         Tag = admitted(Link),
         Link ! {window, {withdraw, Tag}},
-        ?assertEqual({outcome, Tag, {failed, withdrawn}}, told(erx_bt_fs)),
+        ?assertEqual({withdrawn, Tag}, told(erx_bt_fs)),
         ?assertEqual([16#08], [Code || <<_:16, 6:16/little, 16#05, Code>> <- sent()]),
         ?assertEqual(nothing, next(erx_bt_store))
     end).
@@ -228,14 +228,13 @@ end_process(Pid) ->
     receive {'DOWN', Monitor, process, Pid, _} -> ok end.
 
 %% The store answers `resolve` with the case's bond, the registry `join` with the table;
-%% with `hold`, each hands the call to the case to answer instead. The registry answers
-%% only a join that carries the phone's address alone, so a link that hands it the
-%% resolved bond's id, a name its key has not yet proven, is never answered.
+%% with `hold`, each hands the call to the case to answer instead. A join carries the
+%% phone's address alone.
 stand_in(Name, Test, Options) ->
     receive
         {'$gen_call', From, {resolve, _Address}} when Name =:= erx_bt_store ->
             answer(Name, From, maps:get(bond, Options, none), Test, Options);
-        {'$gen_call', From, {join, _Conn, Info}} when Name =:= erx_gatt_srv, Info =:= #{address => ?CENTRAL} ->
+        {'$gen_call', From, {join, _Conn, ?CENTRAL}} when Name =:= erx_gatt_srv ->
             answer(Name, From, #{table => table(), values => #{}}, Test, Options);
         {erx_bt_link, Link, Message} ->
             Test ! {owner, Name, Link, Message}

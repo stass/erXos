@@ -339,7 +339,7 @@ clunking_the_window_withdraws_its_pairing_test() ->
     ?assertEqual(ok, call(Grant, {clunk, 2})),
     ?assertEqual({withdraw, 4}, told(Link)),
     ?assertEqual({error, ebusy}, open(Grant, 3)),
-    say(Link, {outcome, 4, {failed, withdrawn}}),
+    say(Link, {withdrawn, 4}),
     {ok, _, _} = open(Grant, 4),
     {ok, _, _} = call(Grant, {write, 4, 0, <<"nodisplay">>}),
     ?assertEqual({ok, <<"wait 2\n">>}, call(Grant, {read, 4, 0, 4096})),

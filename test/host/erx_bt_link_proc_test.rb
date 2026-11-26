@@ -23,11 +23,6 @@ class ErxBtLinkProcTest < Minitest::Test
   Seed = Data.define(:fault, :anchor, :replacement, :catching_case)
 
   SEEDS = [
-    Seed.new(fault: "the resolved bond's id handed to the registry at the join, before its key proved it",
-             anchor: 'erx_gatt_srv:join(Conn, #{address => Address})',
-             replacement: 'erx_gatt_srv:join(Conn, #{address => Address, ' \
-                          'bond => case Bond of none -> none; #{id := Id} -> Id end})',
-             catching_case: 'reconnection_with_a_kept_bond_test'),
     Seed.new(fault: 'format_status/1 showing the state, the core with its keys',
              anchor: 'link_facts(#link{name = Name, conn = Conn, core = Core}) -> #{name => Name, conn => Conn, core => facts(Core)};',
              replacement: 'link_facts(#link{name = Name, conn = Conn, core = Core}) -> {Name, Conn, Core};',

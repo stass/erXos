@@ -29,7 +29,7 @@ alphabet() ->
     [{open, a}, {open, b}, {write, a, display}, {write, b, nodisplay}, {clunk, a}, {clunk, b},
      {link, ?L1, {admit, 1, ?PHONE}}, {link, ?L1, {admit, 2, ?PHONE}}, {link, ?L2, {admit, 1, ?PHONE}},
      {link, ?L1, {passkey, 1, 123}}, {link, ?L1, {outcome, 1, {failed, confirm}}},
-     {link, ?L1, {outcome, 2, {failed, withdrawn}}}, {link, ?L1, {keeping, 1}}, {link, ?L2, {keeping, 1}},
+     {link, ?L1, {withdrawn, 1}}, {link, ?L1, {withdrawn, 2}}, {link, ?L1, {keeping, 1}}, {link, ?L2, {keeping, 1}},
      {link, ?L1, wait}, {down, ?L1}, {down, ?L2},
      {store, {outcome, ?L1, 1, {bonded, ?BOND(authenticated)}}}, {store, {outcome, ?L1, 1, {failed, unavailable}}},
      {store, {outcome, ?L2, 1, {failed, bonds_full}}}, deadline, later].
@@ -78,13 +78,6 @@ transition(deadline, #x{core = Core, now = Now} = X) ->
     end;
 transition(later, #x{now = Now} = X) ->
     transition(expired, X#x{now = Now + 64001});
-%% A link reports `withdrawn` only for a pairing its window withdrew at a clunk, so the
-%% exploration offers it only while the awaited pairing has no window.
-transition({link, _, {outcome, _, {failed, withdrawn}}} = Input, #x{core = Core} = X) ->
-    case erx_bt_window:facts(Core) of
-        #{window := {pairing, _}} -> X;
-        #{} -> step(Input, X)
-    end;
 transition({open, Id} = Input, #x{core = Core} = X) ->
     case lists:member(Id, erx_bt_window:opens(Core)) of
         true -> X;   % an open names a fid, which the grant never reuses while open
@@ -118,8 +111,15 @@ monitors([], Monitored) ->
 check(Input, Before, Actions, After, Monitored, Monitored1, Now) ->
     %% The monitors follow the pairing's stage.
     case After of
-        #{pairing := {Link, _, running}} -> ?assertEqual([Link], Monitored1);
+        #{pairing := {Link, _, Stage}} when Stage =/= keeping -> ?assertEqual([Link], Monitored1);
         #{} -> ?assertEqual([], Monitored1)
+    end,
+    %% A running pairing is its window's, and a withdrawn one has none, so it has no open
+    %% to write a line to.
+    case After of
+        #{pairing := {_, _, running}} -> ?assertMatch(#{window := {pairing, _}}, After);
+        #{pairing := {_, _, withdrawn}} -> ?assertNotMatch(#{window := {pairing, _}}, After);
+        #{} -> ok
     end,
     %% At most one window, and a window takes its one pairing.
     case After of
@@ -142,13 +142,16 @@ check(Input, Before, Actions, After, Monitored, Monitored1, Now) ->
     %% A withdrawal comes only from a clunk, to the running pairing's link and tag.
     [begin
          ?assertMatch({clunk, _}, Input),
-         ?assertMatch(#{pairing := {L, T, running}} when L =:= Link1 andalso T =:= Tag1, Before)
+         ?assertMatch(#{pairing := {L, T, running}} when L =:= Link1 andalso T =:= Tag1, Before),
+         ?assertMatch(#{pairing := {L, T, withdrawn}} when L =:= Link1 andalso T =:= Tag1, After)
      end || {send, Link1, {withdraw, Tag1}} <- Actions],
     %% The wait moves at exactly the failures of the awaited pairing: its link's failure
-    %% or end while it runs, or the store's failed outcome.
+    %% or end before `keeping`, the end of a pairing its window withdrew, or the store's
+    %% failed outcome.
     Failure = case {Input, Before} of
-                  {{down, L2}, #{pairing := {L2, _, running}}} -> true;
-                  {{link, L2, {outcome, T2, {failed, _}}}, #{pairing := {L2, T2, running}}} -> true;
+                  {{down, L2}, #{pairing := {L2, _, S2}}} when S2 =/= keeping -> true;
+                  {{link, L2, {outcome, T2, {failed, _}}}, #{pairing := {L2, T2, S2}}} when S2 =/= keeping -> true;
+                  {{link, L2, {withdrawn, T2}}, #{pairing := {L2, T2, withdrawn}}} -> true;
                   {{store, {outcome, L2, T2, {failed, _}}}, #{pairing := {L2, T2, _}}} -> true;
                   _ -> false
               end,
@@ -298,7 +301,8 @@ an_interrupted_pairing_writes_no_line_test() ->
     ?assertEqual(<<"waiting\npasskey 123456 C0:01:02:03:04:05\n">>, lines(a, W1)),
     {[{send, Link, {withdraw, 2}}], W2} = erx_bt_window:step({clunk, a}, 20, W1),
     ?assertEqual(?L1, Link),
-    {Actions, W3} = erx_bt_window:step({link, ?L1, {outcome, 2, {failed, withdrawn}}}, 30, W2),
+    ?assertMatch(#{window := none, pairing := {Link, 2, withdrawn}}, erx_bt_window:facts(W2)),
+    {Actions, W3} = erx_bt_window:step({link, ?L1, {withdrawn, 2}}, 30, W2),
     ?assertMatch([{demonitor, Link}, {log, #{outcome := {failed, withdrawn}}}], Actions),
     ?assertMatch(#{window := none, pairing := none, wait_until := 2030}, erx_bt_window:facts(W3)),
     ?assertMatch({[{answer, ok}], _}, erx_bt_window:step({open, b}, 2030, W3)).
@@ -309,9 +313,22 @@ closing_withdraws_a_running_pairing_test() ->
     {[{send, Link, {withdraw, 3}}], W2} = erx_bt_window:step({clunk, a}, 20, W1),
     ?assertEqual(?L1, Link),
     ?assertMatch({[{answer, {error, ebusy}}], _}, erx_bt_window:step({open, b}, 25, W2)),
-    {Actions, W3} = erx_bt_window:step({link, ?L1, {outcome, 3, {failed, withdrawn}}}, 30, W2),
+    {Actions, W3} = erx_bt_window:step({link, ?L1, {withdrawn, 3}}, 30, W2),
     ?assertMatch([{demonitor, _}, {log, #{outcome := {failed, withdrawn}}}], Actions),
     ?assertMatch(#{wait_until := 2030}, erx_bt_window:facts(W3)),
+    ?assertEqual([], erx_bt_window:opens(W3)).
+
+%% A link's failure that crossed its window's withdrawal ends the withdrawn pairing as
+%% `withdrawn` would: logged with its own reason and counted, with no line, since the
+%% opener has gone; a `withdrawn` for a pairing its window holds is a late message.
+a_failure_crossing_the_withdrawal_writes_no_line_test() ->
+    W = window(a, display, 0, new()),
+    {_, W1} = run([{link, ?L1, {admit, 4, ?PHONE}}], 10, W),
+    ?assertEqual({[], W1}, erx_bt_window:step({link, ?L1, {withdrawn, 4}}, 15, W1)),
+    {[{send, Link, {withdraw, 4}}], W2} = erx_bt_window:step({clunk, a}, 20, W1),
+    {Actions, W3} = erx_bt_window:step({link, ?L1, {outcome, 4, {failed, confirm}}}, 30, W2),
+    ?assertMatch([{demonitor, Link}, {log, #{outcome := {failed, confirm}}}], Actions),
+    ?assertMatch(#{window := none, pairing := none, wait_until := 2030}, erx_bt_window:facts(W3)),
     ?assertEqual([], erx_bt_window:opens(W3)).
 
 stale_tags_change_nothing_test() ->

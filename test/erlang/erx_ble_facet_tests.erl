@@ -82,7 +82,7 @@ call(Facet, Request) ->
 stand_in_link(Test) ->
     spawn(fun() ->
                   Conn = make_ref(),
-                  #{table := _} = erx_gatt_srv:join(Conn, #{address => ?ADDRESS}),
+                  #{table := _} = erx_gatt_srv:join(Conn, ?ADDRESS),
                   Test ! {joined, self(), Conn},
                   link_loop(Test)
           end).

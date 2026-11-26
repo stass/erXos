@@ -395,7 +395,7 @@ joined_link() ->
     Test = self(),
     Conn = make_ref(),
     Link = spawn(fun() ->
-                         Test ! {joined, self(), erx_gatt_srv:join(Conn, #{address => ?ADDRESS})},
+                         Test ! {joined, self(), erx_gatt_srv:join(Conn, ?ADDRESS)},
                          pass_on(Test)
                  end),
     receive {joined, Link, #{table := _}} -> {Link, Conn} after ?WAIT_MS -> error(no_join) end.

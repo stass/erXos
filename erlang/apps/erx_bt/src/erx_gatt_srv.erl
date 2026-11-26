@@ -52,15 +52,17 @@ advertised() ->
     gen_server:call(?MODULE, advertised).
 
 -doc """
-A link joins the registry at its start: the registry maps `Conn` to the calling link,
-tells the handlers `connected` at level `open` with no bond, and answers the table and
-the values the handlers last set. It takes `join` and `set` in one order, so every `set`
-after the values it answered reaches the link.
+A link joins the registry at its start with its `Conn` and its phone's address, and
+nothing else, so nothing the link learned of a bond before its encryption can reach
+the registry at the join: the registry maps `Conn` to the calling link, tells the
+handlers `connected` at level `open` with no bond, and answers the table and the values
+the handlers last set. It takes `join` and `set` in one order, so every `set` after the
+values it answered reaches the link.
 """.
--spec join(reference(), #{address := erx_smp_crypto:address()}) ->
+-spec join(reference(), erx_smp_crypto:address()) ->
           #{table := erx_gatt_db:table(), values := #{erx_gatt_db:key() => binary()}}.
-join(Conn, Info) ->
-    gen_server:call(?MODULE, {join, Conn, Info}).
+join(Conn, Address) ->
+    gen_server:call(?MODULE, {join, Conn, Address}).
 
 -doc """
 A `ble` facet's operation `Op` for `Caller`, the process that becomes a service's
@@ -81,8 +83,8 @@ init({Gap, Services}) ->
 
 handle_call(advertised, _From, #srv{core = Core} = Srv) ->
     {reply, erx_gatt_registry:advertised(Core), Srv};
-handle_call({join, Conn, Info}, {Link, _Tag} = From, Srv) ->
-    step({join, Link, Conn, Info, From}, Srv);
+handle_call({join, Conn, Address}, {Link, _Tag} = From, Srv) ->
+    step({join, Link, Conn, Address, From}, Srv);
 handle_call({facet, Caller, Op}, From, Srv) ->
     step({facet, Caller, Op, From}, Srv).
 

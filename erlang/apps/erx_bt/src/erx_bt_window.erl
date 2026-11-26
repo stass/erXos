@@ -31,15 +31,21 @@ then moves through these phases:
   the pairing runs.
 
 **The pairing** awaited is `{Link, Tag, Address, Stage}`: the link's pid, the number of
-its Pairing Request and the phone's address, `running` from the `open` verdict, when
-the core monitors the link, and `keeping` from the link's `keeping`, when it drops the
-monitor and the store's outcome alone decides. Before `keeping` the link's failure or
-its `'DOWN'`, `disconnected`, decides; the store's outcome is taken in either stage,
-since the store's message and the link's `keeping` come from two processes and a link
-sends `keeping` or a failure, never both. Closing
-a window while its pairing runs sends the link `{withdraw, Tag}`, and the pairing stays
-awaited, without a window, until its outcome. Every message is matched by its link and
-tag, so a late one changes nothing.
+its Pairing Request and the phone's address, and its stage:
+
+- `running` from the `open` verdict, when the core monitors the link; the window
+  that admitted it holds it, and writes its outcome's line;
+- `withdrawn` once that window closed while the pairing ran, when the core sent the
+  link `{withdraw, Tag}`; it stays awaited, without a window, until its outcome, and its
+  end, the link's `withdrawn` or a failure that crossed the withdrawal, writes no line;
+- `keeping` from the link's `keeping`, when the core drops the monitor and the store's
+  outcome alone decides.
+
+Before `keeping` the link's failure, its `withdrawn` or its `'DOWN'`, `disconnected`,
+decides; the store's outcome is taken in any stage, since the store's message and the
+link's `keeping` come from two processes and a link sends `keeping` or a failure, never
+both. Every message is matched by its link and tag, so a late one changes nothing, and
+`withdrawn` by the stage that alone sent a withdrawal.
 
 **The pairing wait** belongs to the core, not to a window. The first failure since the
 start imposes `bt_pair_wait_min_s`; every later one imposes twice the wait the last
@@ -51,8 +57,9 @@ instant and its wait, so it needs no timer of its own. A success leaves the wait
 addresses and words of closed sets alone, so nothing a radio peer sends reaches them as
 text and they need no escaping: `wait N`, `waiting`, `passkey NNNNNN ADDR`, `bonded BOND
 ADDR TYPE LEVEL`, `failed ADDR REASON` and `closed timeout`. A line is composed only for
-an open whose lines go on, so a pairing withdrawn by its window's close, whose
-`withdrawn` no line gives, writes none. After the last three the open's lines end;
+an open whose lines go on, and a pairing withdrawn by its window's close, whose
+`withdrawn` is no failure a line gives, writes none. After the last three the open's
+lines end;
 `take/3` gives what is left, then `eof`. A closed window's open keeps its unread lines
 until its clunk.
 
@@ -76,7 +83,7 @@ deadline is due.
 """.
 -type input() :: {open, id()} | {write, id(), mode()} | {clunk, id()}
                | {link, link(), erx_bt_link_core:to_window()}
-               | {store, {outcome, link(), tag(), {bonded, erx_bt_pair:bond()} | {failed, atom()}}}
+               | {store, {outcome, link(), tag(), {bonded, erx_bt_pair:bond()} | {failed, erx_bt_pair:failure()}}}
                | {store, read}
                | {down, link()}
                | expired.
@@ -93,10 +100,10 @@ level or the failure's reason.
                 | {monitor, link()} | {demonitor, link()}
                 | {log, #{address := erx_smp_crypto:address(),
                           outcome := {bonded, erx_bt_pair:bond_id(), authenticated | unauthenticated}
-                                   | {failed, erx_smp_core:reason() | atom()}}}.
+                                   | {failed, erx_smp_core:reason()}}}.
 
 -type phase() :: none | {reserved, id()} | {admitting, id(), mode(), integer(), boolean()} | {pairing, id()}.
--type pairing() :: none | {link(), tag(), erx_smp_crypto:address(), running | keeping}.
+-type pairing() :: none | {link(), tag(), erx_smp_crypto:address(), running | withdrawn | keeping}.
 
 -record(core, {
     refusing :: boolean(),                                % the store is `unknown` since its start
@@ -219,30 +226,35 @@ input({link, Link, {passkey, Tag, Passkey}}, _Now,
       #core{window = {pairing, Id}, pairing = {Link, Tag, {_Type, Octets}, running}} = Core) ->
     Digits = iolist_to_binary(io_lib:format("~6..0B", [Passkey])),
     {[], write(Id, {passkey, Digits, Octets}, Core)};
-input({link, Link, {outcome, Tag, {failed, Reason}}}, Now, #core{pairing = {Link, Tag, Address, running}} = Core) ->
-    {Actions, Failed} = failure(Address, Reason, Now, Core),
+input({link, Link, {outcome, Tag, {failed, Reason}}}, Now, #core{pairing = {Link, Tag, _, Stage}} = Core)
+  when Stage =/= keeping ->
+    {Actions, Failed} = unbonded(Reason, Now, Core),
     {[{demonitor, Link} | Actions], Failed};
-input({link, Link, {keeping, Tag}}, _Now, #core{pairing = {Link, Tag, Address, running}} = Core) ->
+input({link, Link, {withdrawn, Tag}}, Now, #core{pairing = {Link, Tag, _, withdrawn}} = Core) ->
+    {Actions, Failed} = unbonded(withdrawn, Now, Core),
+    {[{demonitor, Link} | Actions], Failed};
+input({link, Link, {keeping, Tag}}, _Now, #core{pairing = {Link, Tag, Address, Stage}} = Core)
+  when Stage =/= keeping ->
     {[{demonitor, Link}], Core#core{pairing = {Link, Tag, Address, keeping}}};
 input({link, Link, wait}, Now, Core) ->
     {[{send, Link, {wait, left(Now, Core)}}], Core};
 input({link, _Link, _Late}, _Now, Core) ->
     {[], Core};
-input({down, Link}, Now, #core{pairing = {Link, _Tag, Address, running}} = Core) ->
-    failure(Address, disconnected, Now, Core);
+input({down, Link}, Now, #core{pairing = {Link, _Tag, _, Stage}} = Core) when Stage =/= keeping ->
+    unbonded(disconnected, Now, Core);
 input({down, _Link}, _Now, Core) ->
     {[], Core};
 %% ---------------------------------------------------------------------------
 %% The store
 %% ---------------------------------------------------------------------------
-input({store, {outcome, Link, Tag, Outcome}}, Now, #core{pairing = {Link, Tag, Address, Stage}} = Core) ->
-    Demonitor = [{demonitor, Link} || Stage =:= running],
+input({store, {outcome, Link, Tag, Outcome}}, Now, #core{pairing = {Link, Tag, _, Stage}} = Core) ->
+    Demonitor = [{demonitor, Link} || Stage =/= keeping],
     case Outcome of
         {bonded, #{id := Id, address := Octets, type := Type, level := Level}} ->
             Log = #{address => {Type, Octets}, outcome => {bonded, Id, Level}},
             {Demonitor ++ [{log, Log}], ended(Outcome, Core)};
         {failed, Reason} ->
-            {Actions, Failed} = failure(Address, Reason, Now, Core),
+            {Actions, Failed} = unbonded(Reason, Now, Core),
             {Demonitor ++ Actions, Failed}
     end;
 input({store, {outcome, _Link, _Tag, _Outcome}}, _Now, Core) ->
@@ -270,8 +282,8 @@ until(#core{last_failure = {At, Wait}}) -> At + Wait.
 
 %% Closing an open: the window ends, and a pairing it took that the link still runs is
 %% withdrawn; one at `keeping` is the store's already.
-close(Id, #core{window = {pairing, Id}, pairing = {Link, Tag, _, running}} = Core) ->
-    {[{send, Link, {withdraw, Tag}}], Core#core{window = none}};
+close(Id, #core{window = {pairing, Id}, pairing = {Link, Tag, Address, running}} = Core) ->
+    {[{send, Link, {withdraw, Tag}}], Core#core{window = none, pairing = {Link, Tag, Address, withdrawn}}};
 close(Id, #core{window = {reserved, Id}} = Core) ->
     {[], Core#core{window = none}};
 close(Id, #core{window = {admitting, Id, _, _, _}} = Core) ->
@@ -288,11 +300,17 @@ ended(Line, #core{window = {pairing, Id}} = Core) ->
 ended(_Line, Core) ->
     Core#core{pairing = none}.
 
-%% The awaited pairing failed: its log record, its `failed` line if the window still has
-%% its opener, and the pairing wait it starts.
-failure({_Type, Octets} = Address, Reason, Now, Core) ->
-    {[{log, #{address => Address, outcome => {failed, Reason}}}],
-     ended({failed, Octets, Reason}, wait_from(Now, Core))}.
+%% The awaited pairing ended without a bond, by a failure or, in its `withdrawn` stage
+%% alone, by its window's withdrawal: its log record and the pairing wait it starts, and,
+%% unless it is withdrawn, its `failed` line if its window still has its opener. A
+%% withdrawn pairing composes no line, whatever ended it.
+unbonded(Why, Now, #core{pairing = {_Link, _Tag, {_Type, Octets} = Address, Stage}} = Core) ->
+    Log = {log, #{address => Address, outcome => {failed, Why}}},
+    Failed = wait_from(Now, Core),
+    case Stage of
+        withdrawn -> {[Log], Failed#core{pairing = none}};
+        _ -> {[Log], ended({failed, Octets, erx_bt_pair:reason(Why)}, Failed)}
+    end.
 
 %% A failure at Now starts the wait it imposes: the minimum for the first, else twice the
 %% last failure's wait halved for each whole decay period since it, within the minimum
@@ -306,15 +324,14 @@ imposed(Now, {At, Wait}) ->
     Halvings = (Now - At) div (?ERX_BT_PAIR_WAIT_DECAY_S * 1000),
     max(?ERX_BT_PAIR_WAIT_MIN_S * 1000, min(?ERX_BT_PAIR_WAIT_MAX_S * 1000, (2 * Wait) bsr Halvings)).
 
-%% Line, an erx_bt_pair:line() but for a failure's reason as the link or the store gives
-%% it, joins the lines of open Id while they go on, and only then is it composed.
+%% Line, an erx_bt_pair:line(), joins the lines of open Id while they go on, and only then
+%% is it composed.
 write(Id, Line, #core{lines = Lines} = Core) ->
     case Lines of
         #{Id := {Text, open}} -> Core#core{lines = Lines#{Id := {<<Text/binary, (text(Line))/binary>>, open}}};
         #{} -> Core
     end.
 
-text({failed, Octets, Reason}) -> <<(erx_bt_pair:format({failed, Octets, erx_bt_pair:reason(Reason)}))/binary, $\n>>;
 text(Line) -> <<(erx_bt_pair:format(Line))/binary, $\n>>.
 
 finish(Id, Line, Core) ->
