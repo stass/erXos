@@ -480,9 +480,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   domain: by an estimate from the code, 4,096 fids each walked into a chain of about 400 directories with
   1-byte names (about 100 with 255-byte names), some 100,000 walks charging only about 130 KB of a 32 MiB
   cap. Repeated, it passes `erx_ramfs_sup`'s restart intensity (the residual below). The design says the
-  bound is met only by a bug or `o` set too low. Fixes, in order: bound the path steps a grant holds and
-  refuse a walk past it (`emfile`), deriving the reserve from that bound; or keep a fid's steps shared with
-  the tree; or charge steps to the cap. Each is a new bound the design must name first.
+  bound is met only by a bug or `o` set too low. The design ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
+  "What a fid denotes") keeps for a fid only its node and its entry, and the grammar refuses a walk naming `..`,
+  the chain's one consumer; implement it (`abi/protocols/9p.txt`'s `walk_name` refuses `dotdot`; `erx_fs_grant`'s
+  fid record and `repath/3`; `FID_WORDS` for one fid at its largest) with the deep-fid heap case and its seed of
+  [design-tmp.md](design-tmp.md#verification). It also closes the `repath/3` depth item above and the two
+  depth items of [todo-performance.md](todo-performance.md).
 * [Medium] /tmp, the heap-bound tests miss the cases that decide the bound (`test/erlang/erx_ramfs_tests.erl`;
   [design-tmp.md](design-tmp.md#verification)): the fills use 4 KiB chunks, which live off the heap; the
   worst tree, its cap full of empty files, directories and links (`o` about 1 by `erx_ramfs`'s own comment),

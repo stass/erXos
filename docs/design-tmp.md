@@ -295,14 +295,15 @@ each node's opens:
 | --- | --- |
 | attached | nothing: it names the root, which lives as long as the tree |
 | walked, cloned or walked in place | each name's `walk` adds the found node to `walked` in the step that finds it; a walk that stops makes no fid, and the grant forgets what it walked |
-| moved by `..`, walked in place past its node, or clunked | nothing until no step of the grant's fid paths names a node; then the grant's `forget` removes the node from `walked` and frees it if it has no links and no opens |
+| walked in place past its node, or clunked | nothing until no fid of the grant names a node, as its node or as its entry's directory; then the grant's `forget` removes the node from `walked` and frees it if it has no links and no opens |
 | opened by `lopen`, or made and opened by `lcreate` | counts an open of the node, by `open` or by `make` of a file |
 | clunked while open, by its client, its `remove` or its owner's end | `clunk` drops the open, and the fid's end its steps, as for an unopened fid |
 | left by a grant that ends | the tree ends with its grant, holds and all |
 
 Holding is idempotent: a node is in `walked` once however many fids
-name it, and the grant keeps the count of its fids' steps naming each
-node ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)),
+name it, and the grant keeps the count of its fids naming each node,
+at most two for each fid, its node and its entry's directory
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)),
 so it forgets a node exactly once, when that count reaches zero.
 `forget`, like every callback of an own tree, runs in the grant and
 returns the next tree, so it is ordered with the grant's walks by
@@ -325,8 +326,10 @@ needs no open and so never meets `tmpfs_open`'s refusal. A
 removed directory finds no name, takes no new one and opens nothing
 (`ENOENT`), as FreeBSD's tmpfs answers for a directory with no parent
 (its `tmpfs_open` refuses a node with no links, which a lookup reaches
-only through a removed directory), while `..` from it walks the grant's
-chain to the parent recorded on the way down.
+only through a removed directory). No walk names `..`
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)), so a
+removed directory keeps nothing above it alive: the fid holds its node
+and the directory it was walked from, and nothing more.
 
 **Permissions.** The domain is one user, who owns every file and is not
 a superuser: the tree checks the owner's permission bits and nothing
@@ -452,26 +455,38 @@ that state includes the tree, so the supervisor sets the bound as the
 sum of three parts:
 
 * **The reserve**, what any grant of `erx_fs` may hold at its bounds
-  with no tree at all: its root, its pool of fids with their paths and
-  per-node counts, its owners' monitors and its 64 requests in flight
-  with up to 64 KiB of payload each ([design-files.md](design-files.md#bounds)).
-  `erx_fs` computes it from the grant's bounds, the same figure for
-  every grant of the same bounds, so it is never zero and a `tmp` of 0 still
-  serves every request its bounds admit.
+  with no tree at all: its root, its pool of fids, its owners' monitors
+  and its 64 requests in flight with up to 64 KiB of payload each
+  ([design-files.md](design-files.md#bounds)). A fid's part is fixed:
+  a fid holds its node, its qid and its entry, one directory and one
+  name of at most 255 bytes, and two per-node counts, whatever its
+  depth, since the grant keeps no chain of directories for it
+  ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
+  "What a fid denotes"). So the reserve is the grant's own state plus
+  the pool times one fid at its largest, and `erx_fs` computes it from
+  the grant's bounds, the same figure for every grant of the same
+  bounds, so it is never zero and a `tmp` of 0 still serves every
+  request its bounds admit.
 * **The tree at its cap**, `cap` times `1 + o`, where `o` is ERTS's
   memory per charged byte beyond the charge (headers, map entries,
-  records), a constant of `erx_ramfs` set above the ratio the [watch
-  list](todo-performance.md) measures.
+  records), a constant of `erx_ramfs` set above the worst ratio a tree
+  reaches, a cap full of empty files, directories and links, whose
+  measurement the [watch list](todo-performance.md) holds.
 * **The same again for what a step leaves behind**: a write rebuilds
   each chunk it touches, a step rebuilds the nodes and maps on its
   path, and the old ones stay allocated until the grant's next
   collection, so the bound doubles the tree's part.
 
-The cap, not the heap bound, is what a legal request meets: a request
-that would pass the cap is refused with `enospc` before it builds
-anything (T2), so the heap bound is reached only if `o` is set too low
-or a bug leaks, and then the grant is killed and `/tmp` restarts empty,
-as for any crash ([Failure handling](#failure-handling)). Whether
+The cap and the grant's bounds, not the heap bound, are what a legal
+request meets: a request that would pass the cap is refused with
+`enospc` before it builds anything (T2), a new fid past the pool with
+`emfile`, and a request past the requests in flight with `emfile`; a
+walk adds nothing that grows with depth, so no sequence of legal walks
+grows the grant's state past the reserve. Every part of the bound
+therefore follows from a bound the grant enforces, except `o`, which
+is measured: the heap bound is reached only if `o` is set below what
+ERTS spends or a bug leaks, and then the grant is killed and `/tmp`
+restarts empty, as for any crash ([Failure handling](#failure-handling)). Whether
 twice the tree's part covers collection under every request mix is
 not derived from ERTS's collector here; the tests below settle it.
 
@@ -530,6 +545,7 @@ runs only in tests.
 | A write request, create or link would pass the cap | the step's charge check, before it builds anything | the tree as before the step; of a caller's write over 64 KiB, the requests before it | none | `{error, enospc}`, with an open file's offset past what was written; `ENOSPC` to a program |
 | The domain's budget is exhausted | ERTS's allocator | nothing: the domain ends | the domain library | as any ERTS allocation failure ([design-runtime.md](design-runtime.md#crash-handling)); the cap keeps `/tmp`'s charges to their share, ERTS's overhead on top ([Charges](#data-model)) |
 | A bug crashes the grant or the lock table, or the grant passes its heap bound | the link, then the supervisor | nothing of `/tmp` | both end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log; for the heap bound it is ERTS's own `max_heap_size` report, which names the bound and the grant, killed at once with no code of its own run, and the tree's `held` is what `statfs`, as `df /tmp` shows it, answered before |
+| A walk names `..` | `erx_fs`'s funnel, by the grammar's refusal of the name, before any callback | everything as before | none | `{error, einval}`; erXos's clients resolve `..` themselves and never send it ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)) |
 | A caller ends during a request or with files open | the grant's monitor on the fid's owner ([design-files.md](design-files.md#fid-owners)) | the effects of the steps that ran | the grant clunks every fid the caller owned, after every request it sent; a removed file it held open is freed | nothing |
 | A request names a fid whose node lost its names | the node's `links`, 0 | the node, held by the fid | the grant forgets it when no fid names it | `getattr` answers with `nlink` 0; `lopen` of a file opens it; `lopen` of a directory and `walk` answer `{error, enoent}` |
 | The version counter is exhausted | the counter's refusal | the tree | none | `{error, eio}` and a report, as for every server |
@@ -641,18 +657,27 @@ the code under test ran.
   is one exchange of a walk from `NOFID`, a clone and an `lopen`.
 Seeded: a callback that calls a process of its own, as a tree process
   would be called; a client that sends `attach`.
-* **The heap bound.** On the hosted runtime, with the bound the
-  supervisor computes and no other change: at a `tmp` of 0, every
-  creation answers `enospc` while the grant holds its whole pool of
-  fids on the root and its 64 requests in flight each carry a 64 KiB
-  write; at a `tmp` of 64 KiB and of 32 MiB, the same full pool, its
-  fids walked into the deepest directory chain the cap allows, and the
-  tree filled to its cap with 4 KiB files and then with one file, then
-  every chunk overwritten a hundred times, then everything removed
-  and filled again. The grant serves throughout, is never killed, and
-  `check/1` holds at the end. Seeded: a bound of the tree's part alone,
-  without the reserve, which the 64 KiB run's full pool and requests
-  in flight pass, killing the grant.
+* **The heap bound.** EUnit cases of `erx_ramfs_tests` on the stock
+  emulator, each grant started with the bound the supervisor computes
+  and no other change: at a `tmp` of 0, every creation answers `enospc`
+  while the grant holds its whole pool of fids on the root and its 64
+  requests in flight each carry a 64 KiB write; at a `tmp` of 64 KiB
+  and of 32 MiB, the same full pool, each fid walked to a directory of
+  its own whose name has 255 bytes, and the tree filled to its cap
+  with 4 KiB files and then with one file, then every chunk
+  overwritten a hundred times, then everything removed and filled
+  again. At 32 MiB also the walks of the deep-fid case: the full pool,
+  each fid walked on its own from `NOFID` and then in place, 16 names
+  at a time, about 400 directories down a chain of 1-byte names, and
+  one fid walked in place one directory at a time down the deepest
+  chain the cap allows, about 100,000 directories; with a fid's cost
+  fixed, each walk in place costs the grant the same at any depth, so
+  the case is linear in its walks. The grant serves throughout, is
+  never killed, and `check/1` holds at the end. Seeded: a bound of the
+  tree's part alone, without the reserve, which the 64 KiB run's full
+  pool and requests in flight pass, killing the grant; and a fid that
+  keeps the chain of directories it was walked through, which the
+  deep-fid case passes, killing the grant.
 * **Restart.** The grant killed with files open: their operations
   answer `eio`, `/tmp` is mounted again and empty, and new inode numbers
   lie above every old one. Seeded: inode numbers drawn from a counter in

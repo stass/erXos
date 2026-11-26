@@ -269,7 +269,7 @@ of each slot's system partition
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **F1.** A path never reaches a file server the domain does not hold | a request is a frame on the lane from the client's domain to the server's, addressed to a grant pid; the server's funnel admits a frame only to a pid its runtime exported to the domain that lane belongs to, with `send` ([design-domains.md](design-domains.md#invariants) D3); a grant's pid reaches a domain only through the system domain's introduction of the two; a namespace entry stores only a pid | a request path that names servers by anything but a pid; a server that acts on a pid named inside a request; a runtime that exported a grant to a domain the server did not make it for | a domain test mounts a pid its domain was never introduced to and finds every request fails with `eio`; the funnel's export tests |
-| **F2.** No request reaches above its grant's root | a grant's root is fixed at the server when the grant is made; a walk of `..` at the root stays at the root, as 9P's walk(5) specifies and 9P2000.L keeps, and the grammar refuses a name holding `/` or NUL; the server follows no link during a walk or an open, so a link's text is resolved by the client through its own namespace; erXos's clients send neither `.` nor `..`, since both act on the client's place (F11) and every walk `erx_path` asks for carries only plain names, and the client's one request function refuses a walk that names `.`, `..` or an empty name | a server that accepts `/` inside a name, walks above its root on `..`, follows a link during a walk or an open, or roots a grant from anything the client sends after it is made | the resolver's fuzz target and properties; the grammar's refusals; an `erx_fs` test that walks `..` from the root and from below it, and whose links point above the root, at other mounts and in loops |
+| **F2.** No request reaches above its grant's root | a grant's root is fixed at the server when the grant is made, and a walk only descends from it: the grammar refuses a walk name that is empty, `.` or `..` or holds `/` or NUL, so the funnel answers a walk naming `..` `einval` before any callback, where walk(5) has `..` move up and stay at the root; the server follows no link during a walk or an open, so a link's text is resolved by the client through its own namespace; erXos's clients send neither `.` nor `..`, since both act on the client's place (F11) and every walk `erx_path` asks for carries only plain names, and the client's one request function refuses a walk that names `.`, `..` or an empty name | a server that accepts `/` inside a name, walks `..`, follows a link during a walk or an open, or roots a grant from anything the client sends after it is made | the resolver's fuzz target and properties; the grammar's refusals; an `erx_fs` test whose walks of `..` from the root and from below it are refused, and whose links point above the root, at other mounts and in loops |
 | **F3.** Rearranging a namespace or narrowing it for a program never adds authority | `bind` copies an entry that exists, narrowed to a subtree; `unmount` removes one; `mount` takes a pid, which by F1 reaches only what the domain holds; a handler gives a program only entries of its starter's table, each on the provider of the starter's entry, rooted at or below that entry's root, with rights no wider than the starter's there, and walks for it only names the resolver produced over that table; no program's resolution reaches a facet that the registry holds as one of the `windows` interface, an interface the domain service sets and no server's reply does, read at every resolution, so no installation, replacement or name lets one through, and every description a program holds was opened through a program's resolution, so none lies on one; the one addition, for a program with a window, one its starter asked for or one its handler opened at its first open of `/dev/draw`, is a `/dev` tree of the session's own that serves that window's files through the session's own grant of the display the starter names, less the window's `ctl`, which the starter could open itself, in place of the export's `/dev`, which every program reaches, and of any entry at exactly `/dev`, whose rights cap it ([A program's window](#a-programs-window)) | an operation that creates a pid or a fid beyond its source; a handler that walks `..` for a program, records wider rights than its starter's, resolves for a program a facet of the `windows` interface, decides that from a tree's name or once at the program's start, or admits into a program's open table a description that no program's table opened | property tests over sequences of operations: the set of pids in the table only shrinks or gains pids the domain already held; a property test over chains of spawns that every program's mounts lie within, and carry rights within, its starter's, and that no program's resolution reaches a facet of the `windows` interface, over installations, replacements and names that arrive after the program starts |
 | **F4.** A client spends a server's CPU and memory only within the server's admission (on Fiasco: [FD31](design-fiasco.md#downsides-against-erxoss-kernel)) | the protocol checks fid, request, payload and lock bounds before any callback; a grant is one process with a `max_heap_size` that counts its binaries, so what it holds for its client is bounded by its fid pool times the server's per-fid bound; the server runs on its own group's grant and its grant processes schedule among themselves as Erlang processes do, so a flooding client fills its own lane and waits in its own runtime ([design-domains.md](design-domains.md#connections), [design-scheduler.md](design-scheduler.md#service-work)); a request that waits for an event, a blocking lock or a stream's read or write, is a waiting request held by the process that owns what it waits for, the tree's lock table for a lock and the tree's keeper for a stream ([Serving](#serving-the-erx_fs-behaviour), "Waiting requests"), within the client's requests in flight, and nothing in the server blocks on it | a callback before admission; a grant that holds unbounded state for one fid; a server thread that runs on a client's time; a request whose work grows with the client's input outside the grammar's bounds; a callback that waits for an event in the grant, which runs the client's other requests | hostile-client tests below: fid floods, lock floods, retained `/proc` results, a tiny expensive request, a client that never drains its replies, a window of waiting reads that is flushed and clunked |
 | **F5.** A read-only grant never writes | a grant with rights `ro` or `rx` refuses with `erofs`, as part of decoding the request and so before any callback, every operation the protocol's table marks as writing: `lopen` for writing or with truncation, `lcreate` whatever its flags, since whether it creates a file only the server learns, `write`, `setattr`, `remove`, `unlinkat`, `rename`, `renameat`, `link`, `symlink`, `mknod`, `mkdir`, `xattrcreate`, and a write lock | an operation added to the table and not marked; a request that reaches the grant's dispatch by a path other than its decoding funnel | the refusal set is generated from the protocol's operation table, each operation marked as reading or writing; a test of every writing operation through a read-only grant |
@@ -997,9 +997,14 @@ after it, as remove(5) says, so a refused `remove` never keeps a file,
 and the space it holds, for as long as its owner runs. Every other
 request beyond a bound fails with `emfile` or waits in the client,
 never at the server. A name is valid
-UTF-8 without NUL or `/` and at most 255 bytes; a walk holds at most 16
+UTF-8 without NUL or `/` and at most 255 bytes, and a walk's name is
+neither empty nor `.` nor `..`; a walk holds at most 16
 names, a symbolic link's text at most 4,095 bytes, an extended attribute's
-value at most 65,536 bytes. A session's handlers draw their programs'
+value at most 65,536 bytes. No bound limits a fid's depth, because
+nothing the grant keeps for a fid grows with it ([Serving](#serving-the-erx_fs-behaviour),
+"What a fid denotes"): what a grant holds for its fids is its pool times
+one fid at its largest, its record with a 255-byte name and two per-node
+counts, and `erx_fs` derives a grant's heap reserve from that. A session's handlers draw their programs'
 fids from the session's grants, at most 256 for each program, and leave a
 quarter of each grant's pool to the session's own processes, so the
 programs a session starts cannot spend the fids the session needs to go
@@ -2762,30 +2767,37 @@ other client's request can come between its parts:
   that lane alone.
 * **Walking.** `erx_fs` walks a request's names one by one from the fid,
   so a callback sees one plain name at a time and is never asked to follow
-  a link; a `..` at the grant's root stays there, and `..` below it walks
-  to the parent the grant's process recorded on the way down, so the
-  callback is never asked for it either. A walk from a fid whose qid is a
+  a link, and never sees `..`, which the grammar refuses (F2). erXos's
+  clients resolve `.` and `..` against their own place and walk only
+  plain names from the grant's root, so the server has no use for
+  `..`: answering it would mean either a record of every directory a
+  fid passed through, which grows with depth, or asking the tree for a
+  parent that a rename may have moved outside the grant's subtree. A
+  host's 9P client relayed by the host link's bridge
+  ([design-live.md](design-live.md#files-between-the-host-and-the-machine))
+  meets the same refusal. A walk from a fid whose qid is a
   `symlink` fails, and an `lopen` of one fails with `eloop`, so no request
   sent along with a walk acts on a link the client has not yet seen. A
   walk, an `lopen` or an `lcreate` from an opened fid fails with
   `einval`, as 9P2000.L walks and opens only unopened fids, so an opened
   fid stays on the node it opened.
-* **What a fid denotes.** A fid stands for three things the grant
-  records as it walks: the node it was walked to, the entry it was
-  walked by (the directory it was walked from and its name there), and
-  the chain of directories back to the grant's root. Operations on the
+* **What a fid denotes.** A fid stands for two things the grant
+  records as it walks: the node it was walked to, with its qid, and the
+  entry it was walked by, the directory it was walked from and its name
+  there, or none for a fid at the grant's root. Operations on the
   node (`getattr`, `lopen`, `setattr`, `readlink`, and a directory fid's
   `walk`, `mkdir`, `lcreate` and the rest) use the node, whatever it is
-  named now; `remove` uses the entry, with the node as its check; `..`
-  uses the chain. So `..` returns to the directory the fid was walked
-  through whatever renames have happened since, and never leaves the
-  grant's subtree, since the chain ends at its root. After the fid's
+  named now; `remove` uses the entry, with the node as its check. A
+  fid's record is therefore the same size at any depth, so the grant's
+  state is bounded by its pool and a walk costs the grant the same at
+  any depth; a tree that offers `forget` holds for a fid exactly its
+  node and its entry's directory, and the grant counts, per node, the
+  fids that name it so. After the fid's
   node is removed, the requests that reach it answer what the module
   answers for a node with no name, which `/tmp` keeps while a fid names
   it: `getattr` answers with `nlink` 0; `lopen` of a file opens it, so
   an open whose walk and `lopen` a rename over the name falls between
-  opens the old file; `lopen` of a directory and `walk` answer `enoent`;
-  `..` still walks to the recorded parent.
+  opens the old file; `lopen` of a directory and `walk` answer `enoent`.
 * **Held bytes.** What a grant holds for its client beyond its fids, such
   as the snapshot behind an open `/proc` file, is bounded by the server's
   per-fid bound and its pool; a server whose per-fid state is large sets a
@@ -3956,11 +3968,14 @@ request function.
   a program's sub-space holds only its channel, data area, pipe ends and
   mapped memory; a starter's table with a display facet mounted and bound
   elsewhere gives the program nothing of the display.
-* Walks from the root: a walk from `NOFID` of no names, of names and of
-  `..`, on a grant rooted at its tree's top and on a home grant rooted
+* Walks from the root: a walk from `NOFID` of no names and of names,
+  on a grant rooted at its tree's top and on a home grant rooted
   at one user's home, each answering the qids and making the fid that an
-  `attach` and a walk from its fid make, and `..` from it staying at the
-  grant's root (F2); a walk whose `NewFid` is `NOFID`, and `NOFID` as the
+  `attach` and a walk from its fid make; a walk naming `..` from
+  `NOFID`, from the root's fid and from a fid below it, refused with
+  `einval` before any callback, making no fid and leaving a walked fid
+  where it was (F2; seeded: `..` dropped from the walk name's
+  refusals in `abi/protocols/9p.txt`, which the case catches); a walk whose `NewFid` is `NOFID`, and `NOFID` as the
   fid of any other request, refused with `einval` before the grant's
   dispatch, making no fid; a host's walk from `NOFID` at the host link's
   bridge answered `ebadf`, while the host's ordinary walk from a fid it
@@ -4007,7 +4022,12 @@ request function.
   grant holds no monitor, a flood of a tiny slow request that delays only
   its own client's grant, and a window of 64 waiting reads that holds no
   server process beyond its grant and the keeper and can still be flushed
-  and clunked.
+  and clunked; and deep fids, a full pool each walked on its own about
+  400 directories deep, under the heap reserve with no tree part, which
+  the grant serves without being killed (seeded: a fid that keeps the
+  chain of directories it was walked through, which kills the grant;
+  `/tmp`'s case of [design-tmp.md](design-tmp.md#verification) runs it
+  against a tree of the grant's own).
 * F5 and F6: every writing operation through an `ro` and an `rx` grant,
   refused before its callback by a refusal test generated from the
   operation table; running a file through an `ro` or `rw` mount, through
@@ -4323,7 +4343,10 @@ through a rename as far as the fid's record does, still not to FreeBSD's
 current parent. It loses: whether a walk stays within a bind's root or a
 narrowed program's mount would rest on the client's count of how deep it
 stands below the entry's top, where no walk carries `..` at all (F2,
-F3); and the place would hold a fid whose owner must end it.
+F3); the place would hold a fid whose owner must end it; and the
+grant would keep, for every fid, the chain of directories it was
+walked through, state that grows with the fid's depth where a fid's
+record is otherwise fixed.
 
 **A walk plan from the namespace.** The namespace would turn a path into
 its whole list of walks at once. It loses: only the walks tell which
