@@ -1,0 +1,12 @@
+AArch64 stop-admission-fenced
+"a starting CPU sets its bit in the admitted set (a), a full barrier, loads the stop word (b); the leader claims the stop word, a full barrier, loads the admitted set: one load sees the other store (docs/design-debugger.md, Stopping every CPU). Each side's atomic read-modify-write is modelled as its write alone, a plain store, which drops its read, its atomicity and its ordering, so a Never here holds for the atomics too; the twins model the exclusive-pair form, where only the barrier orders the write before the load"
+{
+0:X1=a; 0:X3=b;
+1:X1=a; 1:X3=b;
+}
+ P0          | P1          ;
+ MOV W0,#1   | MOV W0,#1   ;
+ STR W0,[X1] | STR W0,[X3] ;
+ DMB ISH     | DMB ISH     ;
+ LDR W2,[X3] | LDR W2,[X1] ;
+exists (0:X2=0 /\ 1:X2=0)

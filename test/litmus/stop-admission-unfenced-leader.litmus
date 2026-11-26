@@ -1,0 +1,12 @@
+AArch64 stop-admission-unfenced-leader
+"stop-admission-fenced without the leader's barrier (P1): the leader loads the admitted set before its claim is seen, and the starting CPU misses the stop word"
+{
+0:X1=a; 0:X3=b;
+1:X1=a; 1:X3=b;
+}
+ P0          | P1          ;
+ MOV W0,#1   | MOV W0,#1   ;
+ STR W0,[X1] | STR W0,[X3] ;
+ DMB ISH     | NOP         ;
+ LDR W2,[X3] | LDR W2,[X1] ;
+exists (0:X2=0 /\ 1:X2=0)

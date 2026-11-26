@@ -32,7 +32,10 @@ module Erx
       Case.new('lane-wpos-acquire-c11', 'Never'), Case.new('lane-wpos-relaxed-c11', 'Sometimes'),
       Case.new('pipe-lock-waiters-fenced', 'Never'), Case.new('pipe-lock-waiters-unfenced', 'Sometimes'),
       Case.new('pipe-lock-cur-release', 'Never'), Case.new('pipe-lock-cur-relaxed', 'Sometimes'),
-      Case.new('pipe-wends-acquire', 'Never'), Case.new('pipe-wends-relaxed', 'Sometimes')
+      Case.new('pipe-wends-acquire', 'Never'), Case.new('pipe-wends-relaxed', 'Sometimes'),
+      Case.new('stop-admission-fenced', 'Never'), Case.new('stop-admission-unfenced', 'Sometimes'),
+      Case.new('stop-admission-unfenced-leader', 'Sometimes'),
+      Case.new('stop-slot-release', 'Never'), Case.new('stop-slot-relaxed', 'Sometimes')
     ].freeze
     OBSERVATION = /^Observation (?<name>\S+) (?<answer>Always|Sometimes|Never)\b/
     MAX_TEST_BYTES = 64 * 1024

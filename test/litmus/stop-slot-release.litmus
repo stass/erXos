@@ -1,0 +1,12 @@
+AArch64 stop-slot-release
+"a stopping CPU writes its registers (a), then stores its slot's state (b) with release ordering; the leader loads the state with acquire ordering, then reads the registers: a published state never comes with stale registers (docs/design-debugger.md, Stop slots)"
+{
+0:X1=a; 0:X3=b;
+1:X1=a; 1:X3=b;
+}
+ P0           | P1           ;
+ MOV W0,#42   | LDAR W0,[X3] ;
+ STR W0,[X1]  | LDR W2,[X1]  ;
+ MOV W2,#3    |              ;
+ STLR W2,[X3] |              ;
+exists (1:X0=3 /\ 1:X2=0)
