@@ -1795,7 +1795,7 @@ whatever a file holds. erXos's kernel checks each file at its first slice.
 ### The command line
 
 `/chosen/bootargs` reaches the root through `erx_boot_handoff_view_t`'s `bootargs` and `bootargs_len`.
-`erx_boot_args_parse(bytes, length, out)` in `liberx/backend/fiasco/boot_args.c`, a pure function with a
+`erx_boot_args_parse(bytes, length, out)` in `kernel/core/boot_args.c`, a pure function with a
 fuzz target, splits it on spaces and reads seven kinds of word: `erx.watchdog=P,D,B`, through the
 existing `erx_watchdog_parse`; `erx.det=1`; `erx.devsync=1`; `erx.group_report=1`; `erx.hostlink=1`; `erx.hold=1`; and `erx.arg=WORD`, at most as many as fit the page's
 strings. Other words are ignored, as a boot loader's may be there. A release build refuses the boot on `erx.det=1`, `erx.devsync=1` or `erx.hold=1` with a
@@ -2927,7 +2927,7 @@ The hosted backend keeps the same ring and writes the parks, wakes and deliverie
 **Reporters.** The ring's records carry the backend reporter `liberx_trace`, declared in `abi/inspection.txt` as standing in
 for the kernel and labelled `liberx trace`. The kernel's own records, which `erx_trace_read` returns from [the kernel's trace
 rings](#the-kernels-trace-rings), carry `kernel`, so the trace's `kernel` row and the inspector's `[kernel, trace]` show
-Fiasco's events, reported by `kernel`, and are `unsupported` only in a boot whose root could not map the rings.
+Fiasco's events, reported by `kernel`, and are `unsupported` only in a boot whose rings are off or whose root could not map them.
 
 ### The kernel's trace rings
 
@@ -2962,8 +2962,8 @@ runs; nothing after the handoff writes the decision, so no domain can turn the r
 refuses leaves them off, the root then refusing the boot with its diagnostic. A boot with its rings on prints, after the
 banner, `kernel trace rings: on; expect slower IPC and switches (erx.trace=0 turns them off)`. A release build with
 `erx.trace=1` records as a development build does, but its crash records stay in the brief form, which carries no tail,
-and only the root can map the rings, as in any boot. The root makes the same decision itself, with the same reader over
-the same line, as it reads its handoff and before anything can end it, so its crash records carry the decision from
+and only the root can map the rings, as in any boot. Every root makes the same decision itself, with the same reader over
+the same line (`erx_boot_line_trace`), as it reads its handoff (`erx_fiasco_root_handoff`) and before anything can end it, so its crash records carry the decision from
 its first moment; it asks for the window only in a boot whose rings are on, where `map_trace` confirms the decision and
 a refusal is an error the root prints, never a sign that the rings are off. A boot with its rings off records nothing:
 every hook returns at its first test, the root maps no window (`map_trace` would answer `-L4_ENOSYS`) and reports the
@@ -3116,13 +3116,22 @@ interrupt, which a write masks, so a CPU the stop parks is never mid-write
 ([design-debugger.md](design-debugger.md#stopping-every-cpu)); only the leader, if it trapped inside a write, or a CPU that
 did not answer can leave a record half written, and every reader drops it by the same rule.
 
-**Cost.** A write is the interrupt mask, one counter read, the conversion to nanoseconds (two divisions, as `erx_clock_ns`
-converts) and twelve stores with release order: eleven to the record's cache line (`seq` twice, the time, the event, `cpu`,
-`flags`, `thread`, `space` and three arguments) and one to the head, on a line of its own. A round trip from a task to the
-root writes about six records (a send, a receive, a switch, a reply, a receive and a switch). The cost is not measured:
-`tools/erx bench nullcall` (`root-same-space`, `root-cross-space`), `wake` and `vm` run before and after the patch on QEMU
-`virt` under HVF with four CPUs and on the Raspberry Pi 4, once more with a reader following every CPU's `kernel` row, and
-[todo-performance.md](todo-performance.md) holds the item until they have.
+**Cost.** A write runs with interrupts already masked by its hooked path: one counter read, the conversion to nanoseconds
+(two divisions, as `erx_clock_ns` converts) and twelve stores with release order: eleven to the record's cache line (`seq`
+twice, the time, the event, `cpu`, `flags`, `thread`, `space` and three arguments) and one to the head, on a line of its
+own. A round trip from a task to the root writes about six records (a send, a receive, a switch, a reply, a receive and a
+switch). On QEMU `virt` under HVF (an Apple M3 Max, Mac15,9, macOS 27; QEMU 11.1.3; Homebrew clang 23.1.3; the fork's
+development build, the bench root at the flags its run records; `tools/erx bench nullcall --systems erxos --profile landing`, the native bench image at one CPU and
+512 MiB, three interleaved rounds in one session), the mean of `nullcall.root-cross-space` is 230.1 ns before the kernel
+writes the rings (the baseline, the tree whose kernel has the rings and no writer), 227.1 ns with them off
+(`erx.trace=0`) and 275.9 ns with them on: the rings add 46 ns to the round trip, 20 %, about 8 ns a record, and move its
+median from 208.3 to 250.0 ns. Off, they cost nothing measurable: every hook returns at its first test, one load of the
+boot's decision and a branch, and the rounds with them off (221.1 to 233.8 ns) overlap the baseline's (227.8 to
+232.0 ns). The four-CPU cell varies more between rounds than between the three builds and settles nothing. The runs are
+in the history repository (`bench/qemu-hvf-Mac15,9-1cpu-erxos`, commit `10633aa`). HVF's numbers indicate only, since a
+counter read and a store under QEMU cost what the host makes them cost; the Raspberry Pi 4's number, which the default
+below rests on, is still to be measured, with `wake`, `vm` and a run with a reader following every CPU's `kernel` row,
+and [todo-performance.md](todo-performance.md) holds the item until it is.
 
 **What the rings may cost.** A development build keeps the rings on by default as long as
 `nullcall.root-cross-space` on the Raspberry Pi 4 rises by no more than 5 % with them. Past that, the writer is made cheaper
@@ -3130,6 +3139,9 @@ first: the counter converted to nanoseconds by a multiply and a shift in place o
 before the closing `seq` in place of a release store for each field, which the record's `atomic` lines then say and an
 AArch64 litmus test of the sequence protocol checks before it replaces the stores. Dropping events of the hot path from the
 rings comes last, only if the cheaper writer still costs more than 5 %; the crash record's trace tail is never dropped.
+Under HVF the rings add 20 % ("Cost" above), four times the bound; that number does not decide, but it makes the cheaper
+writer the likely outcome of the Pi 4's measurement. With the rings off a boot pays only the hooks' early return, which
+measures as nothing.
 
 **After a stop.** Two readers serve a stopped machine. The crash record's full form carries the newest records of each CPU's
 ring ([design-debugger.md](design-debugger.md#the-records-trace-tail)), whether the kernel's stop writes it or the root writes
@@ -4741,7 +4753,7 @@ ran the code it claims to:
 | **Interrupt**, `native_irq` and `fiasco_time_test.rb`: a UART line and a software object wake a parked executor across CPUs through the root's dispatcher; ack opens the line; a holder binds and acks its own line and is refused the root's group | ack removed; the listed flag ignored: a label reported twice; the interlock removed: the early trigger lost; the dispatcher's trigger removed; the hooked trigger removed; the home check of a task's bind removed |
 | **Trace ring**, `trace_ring_test.rb` and TSan: lapping, overwrite during a read, bounds, a task's call `ERX_ENOTSUP` | the second `seq` load removed; the head start returning 0; the skip counted one short; the cursor check removed: stale slots copied; the `max` bound removed; a read that ignores `max`: a copy past its slot; the terminal check removed; the exhausted head's check removed; the odd store removed; the ring linked into a task in place of the stub: the link lists' test fails |
 | **Trace with four CPUs booted**, `native_trace`: a backend `park` and `wake`, the workload's `in` not `late`; and from the kernel's rings, on every ring that records, `switch` records (the production image pins no thread, so its threads share CPU 0 and an idle CPU writes no switch: the one live ring; a check across four CPUs waits on a pinned workload), the test task's `object_create` with the slot the root's table holds it in and the task named by the root's record, a task made before the trace began shown by its id with the root's name unknown, an `ipc_send` from the test task's thread naming the root service's thread and the `ipc_receive` naming the same two as sender and receiver, for one of its requests on an open wait, a `fault` and `fault_end` for its first touch of a page, and an `irq` for its device line, each between the backend records around it on the one clock | the park core's `trace` effect removed; the clock offset's sign flipped; the hook in `Thread::do_ipc` removed: no `ipc_send`; the receive hook given `do_ipc_receive`'s `sender` in place of `transfer_msg`'s: the open wait's `ipc_receive` names no sender; the name given without its `object_create` in the trace: the earlier task is named; the reader's even-count check inverted: no kernel record kept; `map_trace` answered with no mapping: the kernel row is `unsupported` |
-| **Rings off**, `native_trace_off`: the production image booted with `erx.trace=0` | the kernel prints no `kernel trace rings: on` line, the boot reaches the shell, and a read of a kernel ring through `erx_trace_ring:read` answers `{error,unsupported}` | the hooks' and `map_trace`'s test of the boot's decision removed: the rings line is printed and the kernel ring reads |
+| **Rings off**, `native_trace_off`: the production image booted with `erx.trace=0` | the kernel prints no `kernel trace rings: on` line, the boot reaches the shell, and a read of a kernel ring through `erx_trace_ring:read` answers `{error,unsupported}` | the hooks' test of the boot's decision removed, or the root's (`erx_fiasco_root_handoff`): the rings line is printed, or the kernel ring reads |
 | **The window is read-only**, a test root of `native_trace` that stores to its window after mapping it | the root faults at the window's address and its crash frame says so | the window mapped with write rights: the store succeeds and the test root reports it |
 | **The reader of a kernel ring**, `tools/fuzz/trace_ring_fuzz.c` with the CPU number in its input, over a set of rings the input writes freely, heads and counts no writer would leave among them | whatever the rings hold, a read answers `ERX_OK`, `ERX_EINVAL` or `ERX_ELIMIT`, touches no ring past the count mapped, writes no record past `max`, accounts for every index between the cursor and the next, and keeps only records whose count is the even count of an index it read | the CPU's bound check against the rings mapped removed: AddressSanitizer on the read past the last ring; the count's check reduced to evenness: a record of an earlier lap is kept and the target's assertion fails |
 | **The window's refusals**, host test of `erx_fiasco_trace_window` | a window smaller than the rings, one outside user space and a second call are refused, an exact window is accepted | the size check removed: the small window is accepted |

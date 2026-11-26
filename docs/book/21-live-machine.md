@@ -362,7 +362,11 @@ boot: on by default in a development build, off in a release build, and
 `erx.trace=1` turns them on in either, with a line at boot warning that
 IPC and switches are slower. A development build keeps them on by
 default as long as they add no more than 5 % to a call from a task to
-the root service on the Raspberry Pi 4; if they cost more, their writer is made cheaper
+the root service on the Raspberry Pi 4. Under QEMU with HVF they add
+about a fifth to that call
+([design-fiasco.md](../design-fiasco.md#the-kernels-trace-rings), "Cost"), which only indicates the board's cost; turned off,
+they cost nothing measurable. If on the board they cost more, their
+writer is made cheaper
 before any event is dropped, and the crash record's share of them is
 never dropped. The kernel maps them once, read-only, into the root, so
 a read never enters the kernel and can change nothing it reads
