@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [!io]:
 
 class Io_space
@@ -43,7 +44,6 @@ class Space
   public Reply_space<Space>
 {
   MEMBER_OFFSET();
-  friend class Jdb_space;
 
 public:
 

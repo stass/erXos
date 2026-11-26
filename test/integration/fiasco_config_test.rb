@@ -12,7 +12,9 @@ require_relative '../../tools/lib/erx/fiasco'
 # result. The seeded case puts Fiasco's LAZY_FPU option back with the
 # `select` from BENCHMARKING and gives the defconfig a line saying it is not
 # set: the select wins over that line, and the check must catch the result.
-# The defconfig resolves with the debugger and console input unset, which no
+# The fork's Kconfig has no debugger option, so the resolved configuration
+# names none of the debugger's lines that the defconfig keeps for L4Re's kernel;
+# the defconfig resolves with console input unset, which no
 # select turns back on (INPUT defaults to on where the serial option exists),
 # and both build kinds' checks accept it.
 class FiascoConfigIntegrationTest < Minitest::Test
@@ -51,7 +53,7 @@ class FiascoConfigIntegrationTest < Minitest::Test
     assert_empty Erx::FiascoConfig.violations(File.binread(resolved), kind: DEVELOPMENT)
     assert_nil Erx::FiascoConfig.check(resolved, kind: DEVELOPMENT)
     lines = File.binread(resolved).lines
-    assert_includes lines, "# CONFIG_JDB is not set\n"
+    refute(lines.any? { |line| line.include?("CONFIG_JDB") }, "the fork's Kconfig has no debugger option")
     assert_includes lines, "# CONFIG_INPUT is not set\n"
     assert_nil Erx::FiascoConfig.check(resolved, kind: RELEASE)
   end

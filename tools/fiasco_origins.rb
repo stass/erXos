@@ -15,8 +15,6 @@ module Erx
   # notice of their own; Attribution reads a file's own SPDX line or
   # license notice first.
   module FiascoOrigins
-    # The SHA-256 of the imported jdb_object.cpp the debugger row names.
-    JDB_OBJECT = '6a1359080661ea097fae1a9228dc6448c87b95dcaa6e9974c5e5c6ffc87ec3a2'
     # The SHA-256 of each part's LICENSE.spdx, whose DataLicense was read.
     LICENSE_SPDX = {
       'bootstrap' => '3c32105532f6401644a9286ae3ab893b86d5ba5772e0938e2f54659c9da48c6f',
@@ -55,13 +53,6 @@ module Erx
           'evidence' => 'reviewed exact header declaration; standard GPL version selected; no custom grant asserted' }
       end
       rules = corrections
-      if part == 'kernel'
-        # The one GPL file a kernel with the debugger compiles
-        # (LicenseCheck's debugger row), GPL-2.0-only by its own notice as
-        # docs/design-kernel.md records; its notice is not in a stock GNU wording.
-        rules << { 'files' => { 'src/kern/jdb_object.cpp' => JDB_OBJECT }, 'license' => 'GPL-2.0-only',
-                   'evidence' => "reviewed: Fiasco's GPL-2.0-only debugger object, LicenseCheck's debugger row" }
-      end
       if part == 'l4re-core'
         rules.concat(ImportOrigins.musl_license_rules.map do |rule|
           rule.merge('files' => rule.fetch('files').transform_keys { |path| 'libc/musl/contrib/musl/' + path },

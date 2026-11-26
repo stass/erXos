@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "types.h"
@@ -75,25 +76,3 @@ Ipi::stat_received(Cpu_number /* on_cpu */)
 {}
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION[mp && debug]:
-
-#include "atomic.h"
-#include "globals.h"
-
-EXTENSION class Ipi
-{
-private:
-  friend class Jdb_ipi_module;
-  Mword _stat_sent;
-  Mword _stat_received;
-};
-
-PUBLIC static inline NEEDS["atomic.h"]
-void
-Ipi::stat_sent(Cpu_number from_cpu)
-{ atomic_add(&_ipi.cpu(from_cpu)._stat_sent, 1); }
-
-PUBLIC static inline
-void
-Ipi::stat_received(Cpu_number on_cpu)
-{ _ipi.cpu(on_cpu)._stat_received++; }

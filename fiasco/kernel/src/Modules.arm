@@ -1,3 +1,4 @@
+# Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 # -*- makefile -*-
 # vi:se ft=make:
 
@@ -19,7 +20,6 @@ endif
 # instance.
 NEED_TLB_IPI := $(if $(and $(CONFIG_MMU),$(CONFIG_ARM_V7PLUS)),,y)
 PREPROCESS_PARTS-$(CONFIG_MP)                 += $(if $(NEED_TLB_IPI),need_xcpu_tlb_flush)
-PREPROCESS_PARTS-$(CONFIG_JDB)                += debug log
 PREPROCESS_PARTS-$(CONFIG_ARM_CACHE_L2CXX0)   += outer_cache outer_cache_l2cxx0
 
 PREPROCESS_PARTS-$(CONFIG_ARM_920T)                 += arm_v5 vcache
@@ -50,7 +50,6 @@ CSRC_LIBC       += aeabi.c atexit-aeabi.c
 KERNEL 		:= fiasco
 KERNEL_EXTRA 	:= Symbols kernel.arm.lds fiasco.debug
 VPATH 		+= kern/$(CONFIG_XARCH)/$(BITS) kern/$(CONFIG_XARCH) kern
-VPATH		+= jdb/arm/$(BITS) jdb/arm jdb
 PRIVATE_INCDIR 	+= kern/$(CONFIG_XARCH)/$(BITS) kern/$(CONFIG_XARCH) kern
 
 INTERFACES_KERNEL += 	__main kmem_space boot_uart_init     \
@@ -114,7 +113,6 @@ iommu_IMPL		:= iommu-arm \
                            $(if $(CONFIG_IOMMU_ARM_SMMU_V2),iommu-arm-smmuv2) \
                            $(if $(CONFIG_IOMMU_ARM_SMMU_V3),iommu-arm-smmuv3)
 ipi_IMPL		:= ipi ipi-arm
-kdb_ke_IMPL		+= kdb_ke-arm
 kernel_task_IMPL	:= kernel_task kernel_task-arm
 kernel_thread_IMPL	:= kernel_thread kernel_thread-arm \
 			   kernel_thread-arm-$(BITS)
@@ -149,8 +147,8 @@ sys_call_page_IMPL	:= sys_call_page \
 			   $(if $(and $(CONFIG_BIT32),$(CONFIG_MMU)), sys_call_page-arm)
 task_IMPL		:= task task-arm
 thread_IMPL	  	:= thread thread-arm thread-arm-hyp \
-			   thread-jdb thread-jdb-$(BITS) thread-ipc \
-			   thread-pagefault  thread-log \
+			   thread-jdb thread-ipc \
+			   thread-pagefault \
 			   thread-vcpu thread-arm-$(BITS) \
 			   thread-pf_trampoline thread-pf_trampoline-arm
 timer_IMPL		:= timer timer-arm
@@ -160,38 +158,10 @@ utcb_support_IMPL       := utcb_support utcb_support-arm
 vgic_IMPL		:= vgic
 vgic_v3_IMPL		:= vgic_v3 vgic_v3-$(BITS)
 vmem_alloc_IMPL	  	:= vmem_alloc vmem_alloc-arch
-tb_entry_IMPL		:= tb_entry tb_entry-arm
 mpu_IMPL                := mpu mpu-arm-$(BITS)
 global_data_IMPL        := global_data global_data-arm-$(BITS)
 vcpu_IMPL		:= vcpu vcpu-arm
 
-
-ifeq ("$(CONFIG_JDB)","y")
-JDB			:= jdb_compound.o
-SUBSYSTEMS		+= JDB
-INTERFACES_JDB		+= jdb_trace_set jdb_log jdb_console_buffer
-
-INTERFACES_JDB-$(CONFIG_PERF_CNT) += jdb_perf
-INTERFACES_JDB-$(CONFIG_MMU) += jdb_ptab
-
-CXXSRC_JDB := tb_entry_output.cc
-
-
-jdb_IMPL		+= jdb-arm
-jdb_kern_info_IMPL	:= jdb_kern_info jdb_kern_info-arm \
-			   jdb_kern_info-bench jdb_kern_info-bench-arm \
-			   jdb_kern_info-cpu-arm
-jdb_dump_entry_frame_IMPL:= jdb_dump_entry_frame-arm
-jdb_tcb_IMPL		+= jdb_tcb-arm
-jdb_ptab_IMPL		:= jdb_ptab jdb_ptab-arm
-jdb_entry_frame_IMPL	:= jdb_entry_frame-arm
-jdb_trace_set_IMPL	:= jdb_trace_set jdb_trace_set-arm \
-			   jdb_trace_set-arm-$(BITS)
-jdb_bp_IMPL		:= jdb_bp-arm
-thread_IMPL		+= thread-debug
-jdb_tbuf_fe_IMPL        := jdb_tbuf_fe jdb_tbuf_fe-arm
-
-endif
 
 CXXSRC_KERNEL		:= kernel_panic.cc libc_backend_lock.cc
 ASSRC_KERNEL	  	:= $(if $(CONFIG_MP),tramp-mp.S)
@@ -200,10 +170,6 @@ ASSRC_KERNEL            += kip-time.S
 CPPFLAGS                += $(if $(MPCORE_PHYS_BASE),-DMPCORE_PHYS_BASE=$(MPCORE_PHYS_BASE))
 CPPFLAGS                += -DRAM_PHYS_BASE=$(RAM_PHYS_BASE)
 
-NOOPT			+= $(filter jdb%,\
-			     $(foreach in,$(INTERFACES_KERNEL), \
-			       $(if $($(in)_IMPL),$($(in)_IMPL),$(in))))
-NOOPT			+= tb_entry tb_entry_output
 
 
 #
@@ -225,69 +191,6 @@ ifneq ($(CONFIG_COV),)
  SUBSYSTEMS  += LIBCOV
 endif
 
-ifeq ("$(CONFIG_JDB_DISASM)","y")
-  # $(srcdir)/lib/disasm may be removed
-  ifeq ($(wildcard $(srcdir)/lib/disasm),)
-    $(error $(srcdir)/lib/disasm is missing, disable CONFIG_JDB_DISASM)
-  endif
-  SUBSYSTEMS          += LIBDISASM
-  KERNEL_EXTRA_LIBS   += $(LIBDISASM)
-  PREPROCESS_PARTS    += jdb_disasm
-
-  LIBDISASM           := libdisasm.a
-  VPATH               += lib/disasm lib/disasm/capstone
-  PRIVATE_INCDIR      += lib/disasm lib/disasm/capstone/include
-  CXXSRC_LIBDISASM    := disasm.cc
-  CSRC_LIBDISASM      := cs.c utils.c \
-                         MCInst.c MCInstrDesc.c MCRegisterInfo.c SStream.c
-  ifeq ("$(CONFIG_BIT32)","y")
-    VPATH             += lib/disasm/capstone/arch/ARM
-    CSRC_LIBDISASM    += ARMModule.c ARMInstPrinter.c \
-			 ARMDisassembler.c ARMMapping.c
-    CPPFLAGS          += -DCAPSTONE_HAS_ARM
-    CFLAGS_ARMDisassembler = -Wno-unused-parameter
-    CFLAGS_ARMMapping      = -Wno-unused-parameter
-    CFLAGS_ARMInstPrinter  = -Wno-bad-function-cast -Wno-unused-parameter
-    $(foreach f, $(patsubst %.c, %, $(CSRC_LIBDISASM)), \
-      $(eval CFLAGS_$(f) += -mno-unaligned-access))
-  else
-    VPATH             += lib/disasm/capstone/arch/AArch64
-    CSRC_LIBDISASM    += AArch64Module.c AArch64InstPrinter.c \
-			 AArch64Disassembler.c AArch64Mapping.c \
-			 AArch64BaseInfo.c
-    CPPFLAGS          += -DCAPSTONE_HAS_ARM64
-    CFLAGS_AArch64Mapping       = -Wno-unused-parameter
-    CFLAGS_AArch64Disassembler  = -Wno-unused-parameter
-    CFLAGS_AArch64InstPrinter   = -Wno-bad-function-cast -Wno-unused-parameter
-    # Clang does not support fallthrough warning elision via comments
-    CFLAGS_AArch64Mapping      += $(if $(CC_IS_CLANG),-Wno-implicit-fallthrough)
-    CFLAGS_AArch64Disassembler += $(if $(CC_IS_CLANG),-Wno-implicit-fallthrough)
-  endif
-endif
-
-ifeq ("$(CONFIG_JDB)","y")
-
-ifneq ($(CONFIG_JDB_GZIP),)
- ifneq ($(wildcard $(srcdir)/lib/gzip),)
-  SUBSYSTEMS		+= LIBGZIP
-  KERNEL_EXTRA_LIBS	+= $(LIBGZIP)
-  INTERFACES_KERNEL	+= jdb_gzip
- endif
-endif
-
-ifneq ($(wildcard $(srcdir)/lib/regex),)
-  SUBSYSTEMS            += LIBREGEX
-  KERNEL_EXTRA_LIBS     += $(LIBREGEX)
-  PREPROCESS_PARTS      += jdb_regex
-endif
-
-ifneq ($(filter LIBREGEX LIBDISASM,$(SUBSYSTEMS)),)
-  SUBSYSTEMS          += SIMPLEMALLOC
-  KERNEL_EXTRA_LIBS   += $(SIMPLEMALLOC)
-endif
-
-endif
-
 BSP_NAME         := $(patsubst "%",%,$(CONFIG_BSP_NAME))
 BSP_SRC_DIR      := kern/arm/bsp/$(BSP_NAME)
 MODULES_FILE_BSP := $(srcdir)/$(BSP_SRC_DIR)/Modules
@@ -299,7 +202,6 @@ include $(MODULES_FILE_BSP)
 VPATH                   += $(BSP_SRC_DIR)
 PREPROCESS_PARTS	+= $(PREPROCESS_PARTS-y)
 INTERFACES_KERNEL       += $(INTERFACES_KERNEL-y) $(INTERFACES_KERNEL-y-y)
-INTERFACES_JDB		+= $(INTERFACES_JDB-y)
 TRAMP_MP_ASM_INCLUDE    ?= kern/arm/tramp-mp-asm-default.h
 CPPFLAGS                += -DTRAMP_MP_ASM_INCLUDE=\"$(srcdir)/$(TRAMP_MP_ASM_INCLUDE)\"
 

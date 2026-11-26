@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: no scaler from microseconds to counts; Timer::us_to_ts
 // inverts the clock's own (timer-arm.cpp).
 // --------------------------------------------------------------------------
@@ -150,33 +151,3 @@ Timer::update_timer(Unsigned64 wakeup)
 }
 
 // --------------------------------------------------------------
-IMPLEMENTATION [arm && arm_generic_timer && jdb]:
-
-IMPLEMENT_OVERRIDE
-void
-Timer::switch_freq_jdb()
-{
-  _interval = interval(50'000); // 20 Hz
-}
-
-IMPLEMENT_OVERRIDE
-void
-Timer::switch_freq_system()
-{
-  _interval = interval(Config::scheduler_granularity());
-
-  // Frequency is going up, do not wait until slower jdb timer did hit
-  if (!Config::scheduler_one_shot())
-    Gtimer::compare(Gtimer::compare() + _interval);
-}
-
-IMPLEMENT_OVERRIDE
-void
-Timer::next_interval()
-{
-  if (Config::scheduler_one_shot())
-    {
-      Gtimer::compare(Gtimer::compare() + _interval);
-      Gtimer::control(CTL_ENABLE);
-    }
-}

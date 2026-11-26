@@ -1,3 +1,4 @@
+# Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 # -*- makefile -*-
 # vi:se ft=make:
 
@@ -16,7 +17,6 @@ PREPROCESS_PARTS-$(CONFIG_PAGE_SIZE_16KB)    += pagesize_16k
 PREPROCESS_PARTS-$(CONFIG_PAGE_SIZE_4KB)     += pagesize_4k
 PREPROCESS_PARTS-$(CONFIG_SERIAL)            += force_vkey
 PREPROCESS_PARTS-$(CONFIG_MP)                += need_xcpu_tlb_flush
-PREPROCESS_PARTS-$(CONFIG_JDB)               += debug log
 PREPROCESS_PARTS-$(CONFIG_WEAK_ORDERING)     += weak_ordering
 PREPROCESS_PARTS-$(CONFIG_LIGHTWEIGHT_BARRIERS) += mips_lw_barriers
 PREPROCESS_PARTS	+= $(PREPROCESS_PARTS-y)
@@ -66,7 +66,6 @@ entry_frame_IMPL	:= entry_frame entry_frame-mips
 fpu_IMPL		:= fpu fpu-mips
 ipi_IMPL		:= ipi ipi-mips
 kip_init_IMPL		+= kip_init-mips
-kdb_ke_IMPL		+= kdb_ke-mips
 kernel_task_IMPL	:= kernel_task
 kernel_thread_IMPL	:= kernel_thread kernel_thread-mips
 kernel_uart_IMPL  	:= kernel_uart kernel_uart-libuart
@@ -93,7 +92,7 @@ sys_call_page_IMPL	:= sys_call_page
 task_IMPL		:= task task-mips
 timer_IMPL		?= timer timer-mips
 timer_tick_IMPL         := timer_tick
-thread_IMPL		:= thread thread-log thread-pagefault \
+thread_IMPL		:= thread  thread-pagefault \
 			   thread-mips thread-ipc thread-jdb \
 			   thread-vcpu \
 			   thread-pf_trampoline thread-pf_trampoline-mips
@@ -114,7 +113,6 @@ jdb_trace_set_IMPL	+= jdb_trace_set jdb_trace_set-mips
 jdb_kern_info_IMPL	:= jdb_kern_info
 jdb_tbuf_init_IMPL	:= jdb_tbuf_init jdb_tbuf_init-mips
 jdb_ptab_IMPL		:= jdb_ptab jdb_ptab-mips
-thread_IMPL		+= thread-debug
 INTERFACES_JDB		+= jdb_log jdb_trace_set jdb_ptab jdb_mips_tlb \
 			   jdb_console_buffer
 INTERFACES_JDB		+= $(INTERFACES_JDB-y)

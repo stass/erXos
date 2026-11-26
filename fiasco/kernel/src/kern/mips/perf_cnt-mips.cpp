@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [mips && perf_cnt]:
 
 #include "cpu.h"
@@ -272,87 +273,6 @@ Perf_cnt::read_ctl(unsigned num)
     case 3: return Ctl_reg(Mips::mfc0_32(Mips::Cp0_perf_ctl_3));
     };
 }
-
-// ------------------------------------------------------------------------
-IMPLEMENTATION [mips && perf_cnt && jdb]:
-
-#include "tb_entry.h"
-
-PUBLIC static
-int
-Perf_cnt::setup_pmc(Mword slot, Mword event, Mword user, Mword kern, Mword)
-{
-  if (slot >= Max_slot)
-    return 0;
-
-  if (slot >= 2)
-    return 0; // P5600 requirement for 2 perf pairs
-
-  Ctl_reg v(0);
-  v.exl()   = kern;
-  v.k()     = kern;
-  v.s()     = kern;
-  v.u()     = user;
-  v.event() = event >> 1;
-  if (_ec_avail)
-    v.ec()  = 3;
-
-  _using_odd.current()[slot] = event & 1;
-
-  write_ctl(v, slot * 2 + _using_odd.current()[slot]);
-
-  Tb_entry::set_rdcnt(slot, read_pmc[slot]);
-
-  return 1;
-}
-
-PUBLIC static int
-Perf_cnt::mode(Mword slot, const char **mode, const char **name,
-               Mword *event, Mword *user, Mword *kern, Mword *edge)
-{
-  if (slot >= Max_slot)
-    return 0;
-
-  Ctl_reg v = read_ctl(slot * 2);
-
-  // could consider EC too
-  if (v.k() && v.u())
-    *mode = "all";
-  else if (v.k())
-    *mode = "kern";
-  else if (v.u())
-    *mode = "user";
-  else
-    *mode = "off";
-
-  static char namebuf[Max_slot][20];
-  switch (v.event())
-    {
-    case 0:
-    case 1: *name = "Cycles";
-            break;
-    case 2:
-    case 3: *name = "Insns";
-            break;
-    default:
-            snprintf(namebuf[slot], sizeof(namebuf[slot]),
-                     "Event-%d-%s", v.event().get(),
-                     _using_odd.current()[slot] ? "Odd" : "Even");
-            namebuf[slot][sizeof(namebuf[slot]) - 1] = 0;
-            *name = namebuf[slot];
-            break;
-    }
-
-  *event = v.event() * 2 + _using_odd.current()[slot];
-  *user = v.u();
-  *kern = v.k();
-  *edge = 0;
-
-  return 1;
-}
-
-PUBLIC static char const *
-Perf_cnt::perf_type() { return "MIPS"; }
 
 // ------------------------------------------------------------------------
 IMPLEMENTATION [mips && perf_cnt && !cpu_virt]:

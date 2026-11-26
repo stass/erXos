@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 /*
  * RISC-V Kernel-Info Page
  */
@@ -60,9 +61,3 @@ Kip::hart_idx(Mword hart_id)
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [riscv && debug]:
-
-IMPLEMENT inline
-void
-Kip::debug_print_syscalls() const
-{}

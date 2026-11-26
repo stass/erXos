@@ -1,3 +1,4 @@
+# Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 # -*- makefile -*-
 
 # Targets in this Makefile:
@@ -87,9 +88,6 @@ docs/stamp-doc.ready: $(srcdir)/doxygen.conf \
 		$(foreach m, $(GENERATED_MODULES), auto/stamp-$(m).ready) | docs
 	@touch $@
 	$(VERBOSE)doxygen $(srcdir)/doxygen.conf
-
-jdb_manual.pdf: $(srcdir)/../doc/jdb_manual.rst
-	rst2pdf -o $@ -s tango $<
 
 docs:
 	@mkdir -p docs

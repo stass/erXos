@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && arm_cache_l2cxx0]:
 
 #include "lock_guard.h"
@@ -225,38 +226,3 @@ Outer_cache::show_info(unsigned, Mword, Mword)
 {}
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [arm && arm_cache_l2cxx0 && debug]:
-
-#include "io.h"
-#include <cstdio>
-
-PRIVATE static
-void
-Outer_cache::show_info(unsigned ways, Mword cache_id, Mword aux)
-{
-  printf("L2: ID=%08lx Type=%08lx Aux=%08lx WMask=%x S=%d\n",
-         cache_id, l2cxx0->read<Mword>(L2cxx0::CACHE_TYPE), aux, waymask, need_sync);
-
-  const char *type;
-  switch ((cache_id >> 6) & 0xf)
-    {
-    case 1:
-      type = "210";
-      break;
-    case 2:
-      type = "220";
-      break;
-    case 3:
-      type = "310";
-      if ((cache_id & 0x3f) == 5)
-        printf("L2: r3p0\n");
-      break;
-    default:
-      type = "Unknown";
-      break;
-    }
-
-  unsigned waysize = 16 << (((aux >> 17) & 7) - 1);
-  printf("L2: Type L2C-%s Size = %d KiB  Ways=%d Waysize=%d\n",
-         type, ways * waysize, ways, waysize);
-}

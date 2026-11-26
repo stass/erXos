@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 /*
  * ARM Kernel-Info Page
  */
@@ -73,9 +74,3 @@ Kip::all_instances()
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [arm && debug]:
-
-IMPLEMENT inline
-void
-Kip::debug_print_syscalls() const
-{}

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && pf_rpi]:
 
 #include "initcalls.h"
@@ -198,9 +199,3 @@ Pic::init()
 }
 
 //-------------------------------------------------------------------------
-IMPLEMENTATION [debug && pf_rpi && !pic_gic]:
-
-PUBLIC
-char const *
-Irq_chip_bcm::chip_type() const override
-{ return "Raspberry Pi"; }

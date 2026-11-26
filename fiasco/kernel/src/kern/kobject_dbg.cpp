@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 //----------------------------------------------------------------------------
 INTERFACE[rt_dbg]:
 
@@ -21,8 +22,6 @@ struct Kobject_typeinfo_name
 
 class Kobject_dbg : public cxx::D_list_item
 {
-  friend class Jdb_kobject;
-  friend class Jdb_kobject_list;
   friend class Jdb_mapdb;
 
 public:
@@ -108,59 +107,6 @@ Kobject_dbg::~Kobject_dbg()
 }
 
 //----------------------------------------------------------------------------
-IMPLEMENTATION[debug]:
-
-PUBLIC static
-Kobject_dbg::Iterator
-Kobject_dbg::pointer_to_obj(void const *p)
-{
-  Mword obj_addr = reinterpret_cast<Mword>(p);
-  for (Iterator l = _kobjects->begin(); l != _kobjects->end(); ++l)
-    {
-      auto ti = l->_cxx_dyn_type();
-      Mword a = reinterpret_cast<Mword>(ti.base);
-      if (a <= obj_addr && obj_addr < (a + ti.type->size))
-        return l;
-    }
-  return _kobjects->end();
-}
-
-PUBLIC static
-unsigned long
-Kobject_dbg::pointer_to_id(void const *p)
-{
-  Iterator o = pointer_to_obj(p);
-  if (o != _kobjects->end())
-    return o->dbg_id();
-  return ~0UL;
-}
-
-PUBLIC static inline
-bool
-Kobject_dbg::is_kobj(void const *o)
-{
-  return pointer_to_obj(o) != _kobjects->end();
-}
-
-PUBLIC static
-Kobject_dbg::Iterator
-Kobject_dbg::id_to_obj(unsigned long id)
-{
-  for (Iterator l = _kobjects->begin(); l != _kobjects->end(); ++l)
-    if (l->dbg_id() == id)
-      return l;
-
-  return end();
-}
-
-PUBLIC static inline
-unsigned long
-Kobject_dbg::obj_to_id(void const *o)
-{
-  return pointer_to_id(o);
-}
-
-//---------------------------------------------------------------------------
 IMPLEMENTATION [!rt_dbg]:
 
 PUBLIC constexpr

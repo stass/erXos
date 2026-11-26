@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "irq_chip_generic.h"
@@ -91,10 +92,3 @@ Irq_chip_ingenic::set_cpu(Mword, Cpu_number) override
 { return false; }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC
-char const *
-Irq_chip_ingenic::chip_type() const override
-{ return "Ingenic"; }
-

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: lazy FP switching is deleted; FP state is switched
 // eagerly (docs/design-fiasco.md, "Eager FP switching").
 INTERFACE:
@@ -266,52 +267,3 @@ Context::arch_revoke_vcpu_irq(Vcpu_irq_list_item *, bool)
 
 
 // --------------------------------------------------------------------------
-INTERFACE [debug]:
-
-EXTENSION class Context
-{
-  static unsigned vcpu_log_fmt(Tb_entry *, int, char *)
-  asm ("__context_vcpu_log_fmt");
-};
-
-
-// --------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "kobject_dbg.h"
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Context::Vcpu_log::print(String_buffer *buf) const
-{
-  switch (type)
-    {
-    case 0:
-    case 4:
-      buf->printf("%sret pc=%lx sp=%lx state=%lx task=D:%lx",
-                  type == 4 ? "f" : "", ip, sp, state, space);
-      break;
-    case 1:
-      buf->printf("ipc from D:%lx task=D:%lx sp=%lx",
-                  Kobject_dbg::pointer_to_id(reinterpret_cast<Kobject*>(ip)),
-                  state, sp);
-      break;
-    case 2:
-      buf->printf("exc #%x err=%lx pc=%lx sp=%lx state=%lx task=D:%lx",
-                  trap, err, ip, sp, state, space);
-      break;
-    case 3:
-      buf->printf("pf  pc=%lx pfa=%lx err=%lx state=%lx task=D:%lx",
-                  ip, sp, err, state, space);
-      break;
-    case 5:
-      buf->printf("ipc after pf/exc pc=%lx sp=%lx state=%lx task=D:%lx",
-                  ip, sp, state, space);
-      break;
-    default:
-      buf->printf("vcpu: unknown");
-      break;
-    }
-}
-

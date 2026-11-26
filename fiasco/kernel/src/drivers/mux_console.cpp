@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "types.h"
@@ -364,22 +365,3 @@ Mux_console::char_avail() const
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION[debug]:
-
-PUBLIC
-void
-Mux_console::list_consoles()
-{
-  for (int i = 0; i < _items; i++)
-    if (_cons[i])
-      {
-        Mword attr = _cons[i]->get_attributes();
-
-        printf("  " L4_PTR_FMT "  %s  (%s)  ",
-               attr, _cons[i]->str_mode(), _cons[i]->str_state());
-        for (unsigned bit = 2; bit < sizeof(attr) * 4; bit++)
-          if (attr & (1 << bit))
-            printf("%s ", Console::str_attr(bit));
-        putchar('\n');
-      }
-}

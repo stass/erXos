@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include <cassert>
@@ -232,9 +233,3 @@ Irq_chip_sifive::set_cpu(Mword pin, Cpu_number cpu) override
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC
-char const *
-Irq_chip_sifive::chip_type() const override
-{ return "SiFive"; }

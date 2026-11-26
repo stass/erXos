@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "irq_chip_generic.h"
@@ -231,9 +232,3 @@ Mru::set_cpu(Mword, Cpu_number) override
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC
-char const *
-Mru::chip_type() const override
-{ return "MRU"; }

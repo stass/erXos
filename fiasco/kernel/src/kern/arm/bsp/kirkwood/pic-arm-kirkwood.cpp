@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && pf_kirkwood]:
 
 #include "initcalls.h"
@@ -115,9 +116,3 @@ void irq_handler()
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug && pf_kirkwood]:
-
-PUBLIC
-char const *
-Irq_chip_kirkwood::chip_type() const override
-{ return "HW Kirkwood IRQ"; }

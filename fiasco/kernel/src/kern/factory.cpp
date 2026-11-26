@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "fiasco_defs.h"
@@ -230,50 +231,6 @@ register_factory()
   Kobject_iface::set_factory(L4_msg_tag::Label_factory, factory_factory);
 }
 
-}
-
-// ------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Factory
-{
-private:
-  struct Log_entry : public Tb_entry
-  {
-    Smword op;
-    Cap_index buffer;
-    Mword id;
-    Mword ram;
-    Mword newo;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Log_entry) <= Tb_entry::Tb_entry_size);
-};
-
-// ------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Factory::Log_entry::print(String_buffer *buf) const
-{
-  static char const *const ops[] =
-  {
-    /*   0 */ "gate", "irq", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    /*  -8 */ nullptr, nullptr, nullptr, "task", "thread", nullptr, nullptr, "factory",
-    /* -16 */ "vm", "dmaspace", "irqsender", nullptr, "sem"
-  };
-  buf->printf("factory=%lx ", id);
-  if (op <= 0 && op > -int{cxx::size(ops)})
-    buf->printf("[%s]", ops[-op] ? ops[-op] : "(nan)");
-  else
-    buf->printf("[invalid proto %ld]", op);
-  buf->printf(" new=%lx cap=[C:%lx] ram=%lx",
-              newo, cxx::int_value<Cap_index>(buffer), ram);
 }
 
 // ------------------------------------------------------------------------

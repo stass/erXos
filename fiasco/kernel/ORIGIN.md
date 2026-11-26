@@ -31,20 +31,88 @@ and describes no byte in the tree.
   "archive_sha256": "e2f96d3ba1c15d4981d42b2f37258a082220e8e10cf72361c208519d4cd6f8ee",
   "exclusions": [
     {
+      "path": "doc/jdb_manual.rst",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
       "path": "src/Makerules.CODERULES",
       "reason": "not used by any erXos build"
+    },
+    {
+      "path": "src/Makerules.JDB",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/Makerules.LIBDISASM",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/Makerules.LIBGZIP",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/Makerules.LIBREGEX",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/Makerules.SIMPLEMALLOC",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
     },
     {
       "path": "src/Makerules.UTEST",
       "reason": "not used by any erXos build"
     },
     {
+      "path": "src/abi/amd64/kip-amd64-debug.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/abi/ia32/kip-ia32-debug.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/abi/kip-debug.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/abi/l4_types-debug.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/drivers/filter_console.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
       "path": "src/drivers/stream_crc32.cpp",
       "reason": "not used by any erXos build"
     },
     {
+      "path": "src/jabi/jdb_obj_info.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/jdb",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
       "path": "src/jdb/jdb_cov_module.cpp",
       "reason": "not used by any erXos build"
+    },
+    {
+      "path": "src/kern/arm/32/kdb_ke-arm.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/arm/32/thread-jdb-32.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/arm/64/kdb_ke-arm.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/arm/64/thread-jdb-64.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
     },
     {
       "path": "src/kern/arm/bsp/qcom/Kconfig",
@@ -85,6 +153,74 @@ and describes no byte in the tree.
     {
       "path": "src/kern/arm/bsp/qcom/timer-arm-generic-qcom.cpp",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
+    },
+    {
+      "path": "src/kern/arm/tb_entry-arm.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/dbg_page_info.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/ia32/32/tb_entry-ia32-32.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/ia32/64/tb_entry-ia32-64.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/ia32/apic-debug.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/ia32/kdb_ke-ia32.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/jdb_object.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/mips/kdb_ke-mips.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/mips/tb_entry-mips.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/riscv/kdb_ke-riscv.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/riscv/tb_entry-riscv.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/syscalls-log.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/tb_entry.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/tb_entry_output.cc",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/thread-debug.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/kern/thread-log.cpp",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
+      "path": "src/lib/disasm",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
     },
     {
       "path": "src/lib/gcov/contrib/llvm_compiler-rt_profile/llvm-17/InstrProfiling.c",
@@ -383,6 +519,10 @@ and describes no byte in the tree.
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
+      "path": "src/lib/gzip",
+      "reason": "the kernel debugger, which no erXos build has (docs/design-debugger.md, \"On Fiasco\")"
+    },
+    {
       "path": "src/lib/perfctr/event_set.h",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
@@ -534,14 +674,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "81b96aa138e90f541e42862c63d8c1b14e5b6ff7787aae458f7319f469d2b9b9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "doc/jdb_manual.rst": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d94359f36cc0db0e5b5131f193830b4601823bf933405e8dde9b1ca0076350bd",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -745,14 +877,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/Makerules.JDB": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8b57dcdfc68256f68d013804535402cbe9a19d7415110006f3e1d0cbb711a4c8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/Makerules.KERNEL": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -777,27 +901,11 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/Makerules.LIBDISASM": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "e4f5c610fc4d94dea8f1851348e157bed625092dc1bbaa5b530754a27bf58898",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/Makerules.LIBFDT": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "eff315b6d68a8a13e1677bb8adc13e5c363335b79a2f67e5639587a6cb4cd4d5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/Makerules.LIBGZIP": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "b0e9c76c64c9ee44a657ee25c188f30be2c0e1293040af171d3c9ef068632e78",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -817,27 +925,11 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/Makerules.LIBREGEX": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d9edae4976a346e796a3a5ac292cd629811053925d2d00366593c99dfc602557",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/Makerules.LIBUART": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "24f5107d85b0e2701804fd6d3300c1b85d50056cb00d3c9134eefb3e8f57ad49",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/Makerules.SIMPLEMALLOC": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "7977e49cd38c191b1caa35df0a2ed7591d761788dbc517854c4dd91e69fd5f1f",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -937,14 +1029,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/abi/amd64/kip-amd64-debug.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "666e20d2a9b2d0ea95d816304175291a3dc219cad16f14ac474f96be2acfdaae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/abi/amd64/kip-amd64.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -961,27 +1045,11 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/abi/ia32/kip-ia32-debug.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "84df65a93f82dc164f9199446343504f7858c6e61ecefd7cb82dd54dc5d85d91",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/abi/ia32/kip-ia32.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "41ba56cf5c2e85d1a63590a3dfe25a1375c4ba897d5b804667ce82769c5b462d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/abi/kip-debug.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "2b1a7bf8f756f719a2f5595e2919c7bf5af89dd8f1587bfcceed0b7250182986",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -1091,14 +1159,6 @@ and describes no byte in the tree.
         "0a89235727203ae227af58ecda3867364201f770598801da6ba474f40c0824bb",
         "0a89235727203ae227af58ecda3867364201f770598801da6ba474f40c0824bb"
       ]
-    },
-    "src/abi/l4_types-debug.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3ad7ca2a1ae7a1f7f603da0767233d9c881d3eca0b4ea016acbf4a605f1f4e13",
-      "kind": "file",
-      "non_ascii_lines": []
     },
     "src/abi/l4_types.cpp": {
       "license": "MIT",
@@ -1438,14 +1498,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/drivers/filter_console.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "e71a27d811841ee6acbedce5198836c529e1f1ba293350e66b748b3717a4f10f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/drivers/glue_libc.cc": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -1611,1006 +1663,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "314542d7588709ec04ce91d670a5445b4f082d8c9ab8a2e633d3a473f6fefd8c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jabi/jdb_obj_info.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "ea52415a4c26c492e5e1b110ca59c401709df0b7f62220bb9c18a444fc3ae6ce",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/32/jdb_tbuf-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "b26de516f31b4b3dcffb2e81789dd93ac7bde8d9410f4fc52c4ec71ebb2bbe64",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/32/jdb_tcb-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "ffe679ef0cda047063b81ad68ef9f482e0113fcd035000303e79b1e1e4f747bf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/32/jdb_trace_set-arm-32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6c4a291f4a9a0c94ff6ffd8e43b3cf6dbafe03f61b30a68628b9bf6fa53b7cf5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/64/jdb_tbuf-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "a95eeb8ec01728a4effc6ea25d6ee2b12a7b9425c08dd12833c9b4bbc4ce6c07",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/64/jdb_tcb-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f11fa84bcb379a8322b903ccaa06b17884f170d187244a6f769f3a5591b5124d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/64/jdb_trace_set-arm-64.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6c4a291f4a9a0c94ff6ffd8e43b3cf6dbafe03f61b30a68628b9bf6fa53b7cf5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "71ffca2317c59452f5e12cb7d07dcb6a535e69a010e974ffc592ca5e6308f31e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_bp-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "167804d90ef64e6494837ce20f9c595034b290998190e32c3242274bb0d7389b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_dump_entry_frame-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "365002c945dbe9051b42f1df10bbaf5ae9471a5c6efadf81dc7ff11658e4a7c0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_entry_frame-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "84da622ca81b4a5fc5bbfd62f892098fc2b5b4dad36b652e3b1e61901237c31c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_kern_info-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c9a401673de3ba4806d7f7f70506ef1234aa68b6b6d04907d752fab079f42f47",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_kern_info-bench-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d54b651b728bb92899efbdac651a7c8f5ea45819001efa3c4e4136a3e3d7a03f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_kern_info-cpu-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f7e17e3171a95135e678b281abdda91ef851adfdf319ba0a242a20e619f20580",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_mem_dump.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "cffab195f0a80e45588af928bbe78026366f4fdd6cb03ea749ec0195dd9fe88d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_perf.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "2103182581bf2e45e7e1b5a453c912da041a6075356d42d275344fffc96f8710",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_ptab-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "fcb3d061319d7837cb6be510fd3a420d2f891ad6b4789dc9106c12486492b376",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_reg_dump.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d5eb66b0811a6ab280c7cf387d8115551f49b745dad6c12f871f5524aca95185",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_tbuf_fe-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3b8ea5eaa3055a9b81a0f051e12e4f7c794be3128a16bd2e6fecb15d779cdd2f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_trace_set-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6f96427f56fd52366640a75dadd8c525de08d6a47da821dfced2917ee47ca21d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/arm/jdb_vm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "2219278a794c4bae7130bddc74b026b8b9cac12f4b4f95fef1d505b4c6eced8b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/32/jdb_bp-ia32-32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "466c5dbe9066928fa66e776ba9092c9901a58b408a4e258a70a65e4f33741a85",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/32/jdb_kern_info-bench-ia32-32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "0cbd8babb4a178c40558b2bfac42de4bf5b4be509f9cab938ea26c57cb00e039",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/32/jdb_kern_info-bench.txt": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "a672a861ea3dc438b91fc28a4da1b0d1c5853de1c94a938c16a82e22050fed82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/32/jdb_ptab-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "5cd57baba34fcdacb33bffa4747eb901e36add5d4dc7c4001d653c26fa77359a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/32/jdb_tbuf-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6392b4db37335398debd86ba3052777400eef09782c4b81ee6db15d0fdb79377",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/32/jdb_tcb-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f43640388d625ebaa4c67052617b52f523a9802ddd705c73c00b18a14da67cc1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/64/jdb_bp-amd64.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "86cb25bcc19caf48b7b106f215e213c3e03d7d51cdc73344ce23d54d91cd5a50",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/64/jdb_kern_info-bench-ia32-64.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "acc69619fe283288787cf53ac4a60ce99299c700e148348d1b85a762a455a310",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/64/jdb_ptab-amd64.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c5aa03bebaa723fa644c0b9168ed5b94a514edff161a08b0caddb4b20befc2d5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/64/jdb_tbuf-amd64.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "7bf24667796493689b676b563e7865d90c79a980c33bac0c2476483159cfb8d8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/64/jdb_tcb-amd64.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c8af022a654222e7751873117f689b4cf94bd557957b190f7a6b4b153feb6d9a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "105e75045c3f5254f3c5388dcd4599ccabb0fa5795817c5ab27397726b260aff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_bp-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "aee1b411d196b44dd88f1d99ac1f34c84ea6df61c57b2454ceaf2cc764082612",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_bt-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "dca71766a58ae04f62799db12de50058be74e52e1c67aacc6e8f287150d31b4e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_entry_frame-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c8e9312d25db96c5aca774d6ad6d8004b3e8d256e243a0bb1268c65f85d5ac3f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_io_ports.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "afea62e1583d087f015a4f44a902339fd86252a013fbec2fa94f5044a3f68190",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_iomap.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "919d3a45fc49eb9d1467ded92599761da0cf82dda44fa3cfa7240594c04ede45",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_kern_info-dr.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c1ab4df7e9eba888004379a12432138e7ab76124c71459550731237e715c5483",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_kern_info-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3c477ea619006c525483bbc927ca7fba3b7a611ea2f3bd78ca04f68264c2b9e9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_kern_info-mtrr.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3497d90f7906c6df89c1e6f14a2d68201ddca50f07d3c2cbb3fa20bdada9707c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_kern_info-pci.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "4328324f58411d06645cad1c8821c36d5a4b632d5410ed593821ba94b8878a9d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_misc-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "30cd12c01432aa6f0d7a422382ce89e358b92e568c57f5d4f616f76a88779a21",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_screen-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "46bf7d21bc19e54a29e5ea86081e501c1c12455cc16a895af5f01d03bebf0bfa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_tbuf_fe-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "5a88075353046e55c410f321307776c7af19580b7b76aa482220d5fb55abae48",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/ia32/jdb_trace_set-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "aad1796303ab168809a816ed1145e35607f23cb42641bcea05adff9aa5dbe448",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb-ansi.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "00fa798a86ddd6e12f5796fe04f3f872eacf08784fbd76a1c21b1e03db56bdaf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb-thread.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "533edc67062be014368bd3e2486672e53cdc135c7507ee286b88f40c44a1e8c4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "0e7722954aa0d38bf2b43fc0fc3013048f08beb89a40da60190c8dce94d4f298",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_attach_irq.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6c036c77ac0b90a1f68da3afd8799e0b98ad45cf3138c3ddadc4995253026965",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_bp.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3f10b931eac34cec5fae55b1f301f974ca053543a8897f2eea02b4f9fbdef0c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_bts.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "90f3de3dd632fc7babf6adc2dcf660e74a246267df1f9669d432ea153a174d17",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_console_buffer.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "ae3eb1a81d3159aba6bbaf83f5419c1c21ab506d28c26242c6a1778e2d560a7d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_core.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "0e17703a247747079287d895785dc9494fa2de0a3195f8c0d220ebdd8ef5d125",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_counters.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "874e1eb3d5b9055d66a4d2d390d0d68cfa2dd77695313d70cb267eb505dccbe3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_cpu_call.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "ad2058ef8872ee936155480dfcf11fea63312e3b3fc8be294d61c5cbbf332b4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_disasm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "e35dc74224c24a0415f5b2c8a5e16791a5732bff766f39785bd83b2bb419506f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_dump.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "36855577b9c9cb4f98481ffd4ebfe7cf686a9ccad9e97d3709650cb28853475b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_exit_module.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d27467e35c1ae889bcac88229c3ba9ba9d31ae90151887baf27c9506c5235c7f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_factory.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "069dbf19882eae2b0fbd531356c4e95ca21934bdcaa4440a08dc61da854c5075",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_gzip.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "ad31a56e3f00d640a41c9cf72f8c3ee3f26cfc2130438ba1ad6ba1e6b49a38a5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_halt_thread.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "2c0f400b8b2e34703964086841cc562d825feab22752d05e78452f473a094a7f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_handler_queue.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "bf7d15741ef9b507db1ed0828380eff9619657b9a9a59ef9082b42226fac1ac2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_idle_stats.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "5358b80cbd83616986cb49ca702398b9f6fc0acaf1bc3a9db7c9ef45041dc485",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_input.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8cea2dfc6a6534a57c237ee1748830ae030a39cb2a1cc8c5c5ae6b07f1448166",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_input_task.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "eac27c15e1678a9563f3d4d5b32f8b4a014e90e16bd2fac0718454da449fdd1c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_io_apic.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "7b9e47448d6ced024e9b4effd9e5ab351f895e68a7ccb2d8bd2dfad153ebdb8b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_ipc_gate.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "ae4de773e102ff567757d9137f8e09bd9fcc2030b1205b10336d7903eaf0af70",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_ipi.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f377fc4be0970fdd2320e0666dc299da15886ee09cc25c9264f286e478a09c85",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kern_info-apic.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c2fd6a007f036aff51ee2361897cc7b3d9dc1b456bebbc5d466562ff5686e21e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kern_info-bench.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c8c9a12dd282311bee243754572d6ede460ed264bb047dfd144512f7b065727e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kern_info.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "78e76c38ff9658adfd013620104959387b8bbc9531201b37c9ae5835322aee9b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kern_info_config.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "398ab04e31a37ebe4c66c1f06c3c0984e20c49c96b3a3b8befee464b0be7bd21",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kern_info_data.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1c734d4c00764c5afea5a04c2167f64dc5dd21c26e80b609eb3a3061178e626f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kern_info_kip.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c7c7f76696645f0f7a0b958c8457ed3e552bf0cfbe0015bc639425cc44b30dbf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kern_info_kmem_alloc.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "9624d04298352c965f098d2dd1584bd089f4386ebca78e15ae774b0a25fb2c62",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kern_info_region.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6039f32b412cd7fff60c843c58cf68b1c506f0847ee31629e9dd7ca8bc727740",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kobject.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "959713da202b399a554c51e95ac6813eb3c93eff3f3183e8fe02ea48d770fd87",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_kobject_names.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "9a48d5deb67d2902bd55f60bf7019c2d03762ea01aca25d91fc0069d81371071",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_list.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "36bd154ad97c42cb1b2ac7a9b37df69b849057197a82612c59faba4ecf9d37bc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_log.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "e3e8df17a2cdb49e43542007ccf51d58da56be4a28125b5bf25da79de8b10373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_mapdb.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8e20d1238028c445f4ad83cb1868b90d9463a9b2ba81ef03d81cf3d9d373192d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_module.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "87fa7f781c3768afe6258b86a64af69c5603b3356326f4d56d12e3222b2425d0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_obj_space.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "332b8c3da0f2bc1587efa3977988ae4912de1151a578f32c3037043ac88edd7f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_pic.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "365ad4d591589d3115f34add65d8d7779e07d925cc5d332f3e66c6a238f38f28",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_prompt_ext.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "10eb7e132af78c19d6482ee56b58b0e0b8e1d9f1ea88ca42af636503e0255b47",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_prompt_module.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "09d21d0a46618af03fba7aebf1b0eaeffdcc653193d3a5f5313576d08af84aa2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_ptab.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "54125244b776d89af9d13d2efcbece936131984404ecab4e90d4acd73d150578",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_rcupdate.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "128529fefbf7f6fb9b89b68a4bfd18328026441126d7f564d0a38be6273d3415",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_regex.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d6133195588c6af175a584a32484e79632f493e14f4ec04c4d9de8df90ce3968",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_report.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "5ca7e5765c6bbfaa4832d6cbda1e8ccf176e3a2f848b139100c115d3a04513e4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_screen.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "108a3b98f167b635253a923e973725cd28e594be243d38aba687174529dfcada",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_sender_list.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d651ba4d9bd55e7b6e86346964b6f8f946e0c88ac76a24f58eebd21541d6bccc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_space.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8a4a014de1e9fc1d332d8ed84db3e43b946f5ed76acc62ebb3f6d53ddeced0fe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_table.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3321c9798427c1ae2bfec828a39c8dc896cfdb14f244dbdd49a6dd886e6370bb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_tbuf.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "628565987c13531a798f4d0a413a9230754c545521e9146b2c7386088eae7e4c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_tbuf_fe.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "2a396ae84ff3821de98770c3853ef5d0b7f8eaba2c0b930c7ca0d5323c88502d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_tbuf_init.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "31092ff0167f03b7228a01b1c3313485eca833d674bd49a210943df618938323",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_tbuf_output.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "4bee2dec25ed277f1483ad99e2c0e23828a9bdcb4bec898455b7836c6f4b7520",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_tbuf_show.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6c72209ff99bdfb6dba035e520f3790f5dfc6f5403e067fc412653b3cbfcf143",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_tcb.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "73758727612d9d785b4176251017fc1f46322966388ad326c491d3e994af7dd9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_thread.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c02103e52d5abdb859ec26e11f784d9693dd25f3730034301fa7bf42e82a7163",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_thread_list.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "4c4037c9f46dde802afad51ec8ecfe93ac2a294e286cdf8011ca33e169119443",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_timeout.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "37c0da48e53156d79990f896729cb925783bd871ea45db905c36b2255ffaced6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_trace.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "b01e1377d0cc04120b60641fd49b6a2212c0859429636f86d379b4c329dda77f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_trace_set.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d0148d0ef05b1aa774869a9f512541dd274cb34ed35d0eeaad8f3938dd2f6909",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_trap_state.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c1a19b4db8155072d11085492313a69d35739bc625cce2d4c30b9b754f651176",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_types.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "164f7cf901e5d096c064613502c4c9c79239716bd811ba062613aa6d58c89a03",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_utcb.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f36631471a16c196d97722bbd3ac321ab6735683c0813bc989874347e4313c30",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/jdb_util.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "83512624063e95c240f9256124d1d852d0047c3069b86ef7ae29c83681f63760",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/mips/jdb-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f7e9982cf38a373d8c039e9d6cb297de13475b6f63cddbc672c3f0be934a8b6a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/mips/jdb_entry_frame-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "e02ca3b3d7e3da0df6c85905280df6a67592bbc7197f8592e184960658797fb2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/mips/jdb_mips_tlb.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "4823b45097086bfd671ca8e00021cf1a28a0b0b7d22498cc9605c580b37fef32",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/mips/jdb_ptab-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8ef3c68fd36f288cfb7ee73d84b5b0fbefea9c021e9e362ac456150ae326d189",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/mips/jdb_tbuf-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "aff4efceae2eca9b963ee39636fe55862f585104df473ff8db12f379ca3b5d8a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/mips/jdb_tbuf_init-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f1cf8376b08076cf9477f7bcdaafba460d1e4a21976d32953c42c20d5d988215",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/mips/jdb_tcb-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "18e8722ca35626b6e20bb927691a109e39a106e67554c42d1e80e338c485cf1b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/mips/jdb_trace_set-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8d449f56237b9ecb7c627a8c0e1e9733e3847cdc45c2b0b8790e473c88992fb6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/riscv/jdb-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "38e428668b6e8b8d07911d85f3f0dc5d6ee479c64a4a9a40e1d85266aa96388d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/riscv/jdb_entry_frame-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "53bb88cd963672252ad6b628d58818bed2b89aac0a52ff7583a3175a4521557a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/riscv/jdb_ptab-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1b025b381b4a60dead24a171c47a24321172a73e0be3e72f7ca8363d526ef9b2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/riscv/jdb_tbuf-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "ce509b2820efdf61dc228214d8e3f7ac89b845e1d384097c7ce798e3ef55fa3e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/riscv/jdb_tbuf_fe-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "db326e3205d95f182a6db78897ee384c56d95049a00cff595637ab5943b9f4dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/riscv/jdb_tcb-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "114c352b601242d11c213027851992197181a481a26a17499feee85a151d26ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/jdb/riscv/jdb_trace_set-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "9a43df3593854da558c2a82585e8941573590e29a1d5e690c1bdabfa7c24acff",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -2822,14 +1874,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/arm/32/kdb_ke-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3352aaed673e4989d0cd1c12d4f39765fbe43c6c8fbb520172222fcb748a9d80",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/arm/32/kernel_task-arm.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -2939,14 +1983,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "d3f3a7df23d6b75012bfddf8b9e5e59ae9efadb21244edf11ec27bd76234a271",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/arm/32/thread-jdb-32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "0f351767bad0af5769602e1caad2a1414167fa80ba6abcd83516b63f79fcc05e",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -3110,14 +2146,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/arm/64/kdb_ke-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "9a6c47ca755ca8df34f2bd19faa0c8663882fb15ae2c12323f88c5b453d6cf21",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/arm/64/kernel_task-arm.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -3219,14 +2247,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "60ce8657abf54ba65ee8c97df651afba7dca98d8ddca9b6d9368fcadd0d2fe44",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/arm/64/thread-jdb-64.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6f543e7215a7196919c74c5ef14f373ec371a4bc4bf1fef22eb1f962bf74f4b3",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -6150,14 +5170,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/arm/tb_entry-arm.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f542385184b301afa66aa0648feaff98cad27118993083886b99dc8ab4b32315",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/arm/thread-arm-hyp.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -6510,14 +5522,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/dbg_page_info.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "cc862069afac35e68fb27587e829432185848b7e11be1358777854261d19d45b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/dt.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -6766,14 +5770,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/ia32/32/tb_entry-ia32-32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "0c18b6c9fb6a692a6a75bbd8449763b47cb4904bbc48f26c075e4289b5038ff9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/ia32/32/thread-dbf.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -6958,14 +5954,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/ia32/64/tb_entry-ia32-64.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "91eda7262b66cd7ab3d59fc512496dd8105f22246531df0876c88f340753d999",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/ia32/64/thread-dbf.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -7051,14 +6039,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "f25f6615a0eb074ae5360fe7811328f6d396d98ea1f078dbbe2ad7a1a1605416",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/ia32/apic-debug.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "51af141fafb3c5202abebce58ea7ed6a944518b2da1a10cc8ee2d89a5b9c0a69",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -7299,14 +6279,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "afc37a63ce9afa4a0f38ae10e5f11aaefef2711a21a41f79709fe6c80661195d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/ia32/kdb_ke-ia32.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "e5dafa5c8e5cce047715afc9e4a914b4b3b6529e79a0740657a133de41153757",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -7813,14 +6785,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "47531b98367aecbee551e78f1c58f3425e0ea0f8372b949115290679fba03ca5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/jdb_object.cpp": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed: Fiasco's GPL-2.0-only debugger object, LicenseCheck's debugger row",
-      "reviewed": true,
-      "sha256": "6a1359080661ea097fae1a9228dc6448c87b95dcaa6e9974c5e5c6ffc87ec3a2",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -8508,14 +7472,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/mips/kdb_ke-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "adee7d352c23c834459f1a37ce160f2b1feff1dff00eae2cc6fd4424d8aebc89",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/mips/kernel_thread-mips.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -8665,14 +7621,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "5b9a9c0501b619e58edaf8dd7be45d433829728a0dce7b8279cb3e8ad88e023b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/mips/tb_entry-mips.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "0a89fdabb1f83d90742d5b24d1dd983fe1e6e8e254ea009922f22c6f24617c25",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -9326,14 +8274,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/riscv/kdb_ke-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "e8dfb68c2a01c6c401361ec6231c7e6a501dece80016a38e59b4ae2564a9a6fa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/riscv/kernel_thread-riscv.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -9483,14 +8423,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "04edd9bfae872dc6f07b8b2b2d2e129a6e84b18caca16524ad4d5fe6bb1f7243",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/riscv/tb_entry-riscv.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "516528751f1d00694f84a9351228d88ba801389902d3a9419324e78d0d4287fe",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -9721,14 +8653,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/syscalls-log.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8149d71815f65cb10dfb7b409ee4ee24b35720c842708ef41194ec0bfacfa2a7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/syscalls.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -9742,22 +8666,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "2f8102fdfff1f0988ee2f4ba0a30ab0c7523062c33c8fb7b12ed35cb61daa43f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/tb_entry.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8704e264e82d8d1dadcac9fc19aaa172d013fe9b0f2548eb62a5fa495bf51a90",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/kern/tb_entry_output.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "9f007cea0caaefbd108122b3db91f63ed682baf757c143c7797cfd6b7ea9ab7d",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -9785,14 +8693,6 @@ and describes no byte in the tree.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "src/kern/thread-debug.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3ea815feb0e8a2e8205fbbda805e8ccaef8ae9a706ce21d71aa020fd7eb9d590",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "src/kern/thread-ipc.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -9802,14 +8702,6 @@ and describes no byte in the tree.
       "non_ascii_lines": [
         "0bea48e87ab84a1e386b0f2a7addd71982dcc0ddd9c6940503f2644222159576"
       ]
-    },
-    "src/kern/thread-log.cpp": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "8d248070f2497cdc98d1265bcdd6b323e7601c3505d6a9c05ad5176e17f74b1e",
-      "kind": "file",
-      "non_ascii_lines": []
     },
     "src/kern/thread-pagefault.cpp": {
       "license": "MIT",
@@ -10056,1006 +8948,6 @@ and describes no byte in the tree.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "cf5866a4e47fea966cca80194ff129401c441736c752a96476412bda62fa2ec2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/LEB128.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "7407777de1d486ca512a511dd4549e923dcda097d4d387e8864b24c481b9d29b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/LICENSE.TXT": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "65e9ed46a59976eda8f5bd1ea79a680dea38dd299c760bc9a8d87a764ef5029b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MCDisassembler.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "d841adf87c92132037016ceefca8b6dd2e13d2e8c61fd00be571d0ad17ce5d26",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MCFixedLenDisassembler.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "a38633e42770cb7ea99c945058bdb036418e2a717ec3836711a73e6e43a41153",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MCInst.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "014684d37cb221ef9df9e285c69d021f951451e27ac5c2512315861ea2729e6d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MCInst.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "ea5f0cc89736237fe57fdbea5a07d02dfd82a7799e4164bd52f2077849fe07b2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MCInstrDesc.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "9ca9c5962545d7bc9cfda55bad35239235b40cbb211d3a0b0ff50becd0a10002",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MCInstrDesc.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "b2da8bf1eaef0b5434247566ecc02e8b27f38d370d813e235003caf5f7cc65e4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MCRegisterInfo.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "7243e125850d0d767a99c043337ff90f4ea0de4c2e9acda898cee7a8292e4b93",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MCRegisterInfo.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "5be79e1f6dc1e74209d6504ff0440189752faf2caac07a6fa939bf813109675c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/MathExtras.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "b19eb7cd15886722a7701a7b93552a61dc8f2c05d27fcf5c61c8cd8bfa224a1e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/SStream.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "78756da8579026c0e86a72fe56ce0235059b44e9ec0bf62475422d398ec4cccd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/SStream.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "22921be565cff3ea4e0664e495c287d2ff38cfb1be805780f32fd8908a9115ce",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64AddressingModes.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "a103c7ba4bbde9bed8c175a5c61650bcd1c695dd5eae8980b92f3a4f8494ee38",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64BaseInfo.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "59f4ef2e3f288117bd0d84b277fd4476fc30d4ec95890ad7123b1ba46a2fcf11",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64BaseInfo.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "d842527a3c2df5e56df7c82d30468c3b13b3a3d966cfe9e5af36e0ad6fdac90c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64Disassembler.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "4fde78e29124d8a86494566a1036bf2028c6ab514af0d5000793520c83178fd1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64Disassembler.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "1bb3b7d7f4aaa56c8ee49b938c99ef6ba3fa177a87127cb56c55aeabf49c3368",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64GenAsmWriter.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "a704dbba156fac8836198c995eed794a2b7d3d467ffac336ef98b55e1de260bf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64GenDisassemblerTables.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "3c62789a9c9abbd11588e10ef6244495d3ceeec6385b10f5be9e424c99304238",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64GenInstrInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "139f8e63894183f1c1311624417ccd87cc03c01d18bfbb6861c478e73648ebb4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64GenRegisterInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "145afa15a47b7417f2a9ecea40899ae7a9d357123127cb915d8cf816d514dbaa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64GenSubtargetInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "9f93db9d87048153d56ac8db6811eafc450f336de6d4c55b5b1cd6dd1f0fca32",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64InstPrinter.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "3f14e51504555bd9cb7f428f599146726d65cdfb2b0e444397602ad797072954",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64InstPrinter.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "9cf59a6429f34360eae2f64aa96b37c89aecc43c5ab96947702e0961e4f883a6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64Mapping.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "eda7a10d825e1155b323399ca907772b3912329e7a7838491fea59afbe76428d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64Mapping.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "b98a45aedfbb40d354080875aac156ce4741c6e8bf473a77676d21dacee24122",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64MappingInsn.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "d2cc39869a606719f5c02f182efe9d60536380ec510a43669ce69cbf5bee313d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64MappingInsnOp.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "1b580057df1a126eaf886012466f3b95cf6b96c3167d457f46185a3d93401711",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64Module.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "8986a105445d8a80be86e17fd14458d8189a634c4a3d7490f63407af3ea3133a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/AArch64/AArch64Module.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "51288cb01799a08e50826844e8bab3d93974a66209eb67e53c15b13b11abce8d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMAddressingModes.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "3c0e23801f881e38e1e0d959590df3f25dd2fe5c0302d2666e8a6fcf902769ed",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMBaseInfo.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "d61bfe473de5839455a29e6ee697d0f46b876d0d07ba19713e35ca14315ffcbe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMDisassembler.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "dfd11ea4926dce855b77aa51280c70cf883feaef13938d624091320272155544",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMDisassembler.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "a4f90a5fa8470a668491c5a572b8d2dd5d5d10f34866457b526271d7215cac83",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMGenAsmWriter.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "a53e44cc50ff08a4021ddcf8d8cfb81d953638d4bdccf62d8c848d4a0d77b87a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMGenDisassemblerTables.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "33f104c801ae5e45d516487078aa5a57f4f3869fead0040a6032f938ef2dcb43",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMGenInstrInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "3a7b367e21510b0c08e44278ad6d0e257b6dc2308144d642aebc93b767a83c51",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMGenRegisterInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "88dde53249f86c09b6f84c2e4ea03a7cc0670ae2cb6c12fb9139a95fa538176e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMGenSubtargetInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "85f8a6e09052e0da4027f631407240fbb45aa3ac17dd61af773dc41c81d37927",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMInstPrinter.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "f81c89e6954ea4f844603e9ca9297d9e642d84deb993e9f614f9412b522795db",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMInstPrinter.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "453588aafa19d6ea1c193917c96a41da773d9b72f45e2141a60a129cf3f39f66",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMMapping.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "796b4fdec7bd9c726982aa17267653aee28d3bf29e18f978c9518284655dc4c0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMMapping.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "8523d16dc7b24516dcc13a759a9d28fb13abc15abb37a7a64d9ca763b05cb128",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMMappingInsn.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "e76fadac1faa58de81152b280337f99754f2dde92afde675803172d2606ddf6b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMMappingInsnOp.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "8da10949c61b896e98a8ca63465ff83919d8fa978ca2e71383c2f5258676712d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMModule.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "2933d7692cd813228b0326ed28c0e69870d30e62f3cbee05be298e72b645906f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/ARM/ARMModule.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "22904c1cc44147d703f242aef281a85bd3e7e47fe7d954beb764869cad214ed9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsDisassembler.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "d7206d56fb50e43c3c1b22bdb03f4033a52aed26b737492fd430438561f66f55",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsDisassembler.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "643ea2a7aa39cbcba1ac567ab210571af65d83ce1a598093237879c7989089a3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsGenAsmWriter.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "14650be70d69680f8ab0f356b75e5e9ca709435e6120c92c725531a849bdcee6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsGenDisassemblerTables.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "1d1727fd7f9baa4cac428e4b17c7ed9a3a2ad3cb67727d56c31b5290ff9b8b82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsGenInstrInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "d003bf686f4f6ee8e315a0ac5f1bb4c3fa6ac4c65a2246137b17408819d05c33",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsGenRegisterInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "cef0401dd04151d59f5180879f179497856a124ca351a804e818938346e949ea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsGenSubtargetInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "3b21182fea9516615af14d35f28e1e5f2e69aa097baacb27ff20030921701669",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsInstPrinter.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "a4592187b95037ee30747ea289066ba491c45a28de2bea41a11a357266eca3a1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsInstPrinter.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "ba66009e3554e7251c910a38ba443ef9fb65ddcba22fd3723d31b6bcadfbccae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsMapping.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "7a538667690790e010df3e6e47a1672e523cf78226fc2cbbba59acba70ad14b2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsMapping.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "73d46826302d261d8cc495a44b2ae67398900b6f92107c973c8095767bf29cd1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsMappingInsn.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "212d442489aa9adf73a0e907037b8d571c7931bcc5183d7ea72ebb82ba068c85",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsModule.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "137afb82053f46add058fde243bf5fd7562883f0b6fcef173e85afb382e90605",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/Mips/MipsModule.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "37a720487bed0c2299da6e6b40e6527b11f3bec3d155ca8a14d205c9c5c0c316",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVBaseInfo.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "f2779ae3c7506a330644c679974787f8edcf23a3c0fb486e95eb9d1a621369e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVDisassembler.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "afeb8b56e9ebc303f077f48071667209d8a957c045b2f864bf4b390bc4010e51",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVDisassembler.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "ce5a6e94a5f899b8464949e2c007cb9738881d7433e35bfac460dcaf546a36b8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVGenAsmWriter.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "26940a7ed8ad3fe2fdaedfa6ff53c2690609f268258307218e63ce5165287969",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVGenDisassemblerTables.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "138523b52222370eac66fe7862d6cfdfa4ecb6e530be6b970f809ff76ef4348d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVGenInsnNameMaps.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "a32bf58474a6337f74cf6b2c944465bbed5337fb06f3b8cb48272b4e61cc0aa4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVGenInstrInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "69d95484ea7ffba6275f63b58e3e3ec579acdf8aac3c5f70f86ad24e235e5a59",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVGenRegisterInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "3e22d6381d2d86f1d265f7e855a004331b8cc9f4f92c71a8475299a91f8f7650",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVGenSubtargetInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "b20d4a6a75d59d629aee4268736897178226f219095df0fb58996505ad115324",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVInstPrinter.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "ebb7c27e3f4f849365f06621579c08d09a95faf597f2ae079bd91619c5b33e2e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVInstPrinter.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "2dadd989772c7973d6f9867b50c1e0b7d0a585bd07eeb3f9e0efc07671909239",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVMapping.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "c459c06a9d2dacfe00b98f59a1e2da8e4c708e3c33eb4df6ea40437160defa4c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVMapping.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "a9bca7a84a42a07b8949b16edb1305b77cc5204b38452b6ef23abe52e137b215",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVMappingInsn.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "156deccd9d387256a2f8cfccb22cf320b84ddbe22f7cdd8607ce731229a46349",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVModule.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "7b7cd5b27ff8a95b04bea2f2aacccb8c4d29ee7022d4c9b57437cf83fe2ac11e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/RISCV/RISCVModule.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "8921c2cda84d2c4c3dcf00e2fc9fd28be399c09925d7b55e8264c8852dba6dcf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86ATTInstPrinter.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "b8dbdc7753a0953ebae1d3a2f2215d421a03f1b8b2f5c02fecd7fa00dee0ed90",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86BaseInfo.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "6595b09d9343bc085de7d348be6f0941fe2e090b804eb7b41be013a399b5f164",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86Disassembler.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "022b6ea2fe4f50318ffbfedbdf231a4de5f893a916eae6999ad29af072112a8f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86Disassembler.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "c6b1022cdd1b6ab45c46ec9062daba50228766db98435aa0a44477d1074332b3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86DisassemblerDecoder.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "640f16cac521e6ac7cf782fecf836a33ea535df5b347efa9a649f147134a6520",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86DisassemblerDecoder.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "8a17fb566df43a67fe32c312149df59bc844917521ffad70cb230c876550bf97",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86DisassemblerDecoderCommon.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "5a5bbc564abca67fa02275795fb1948caa25bb34f6831f2c7b187c6c96de35bf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86GenAsmWriter.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "ad0938d58174b4dd39bbd47dcf27a9d29365f46d49fcc91ed170f38f62d1b2dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86GenAsmWriter1.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "9ac7561bd7a60524aef7006afd25ac522f1528c66c8730322f6b16efad3a25a7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86GenDisassemblerTables.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "c2c0704b8e4cc7a9242382335659c57a40484d88b6bd4db228092f83b1575548",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86GenInstrInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "a1eff98ad53eb87195f6e1f2c04f12c3d8e763086dfbd7705eb1b0183d08bb0c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86GenRegisterInfo.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "30403a1e08980272d86a863fdd273029e270b3ea10db328e314068349121b522",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86ImmSize.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "bdabb072d222fa25821d5cd13e12a8bcbdc4004b8cb69d858c743d24eca345aa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86InstPrinter.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "1cf8a1fcb491c9720c22160d64e045079dfb3c65ec6906312d23230c500af7ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86IntelInstPrinter.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "425a1fb42ea55e9025306c04bc65d9a477ade65f040fe702b3fc21d38fc69f7f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86Mapping.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "fc04b2b057cf1f5d904597f2ac2345379eff6842ca425d367b582fadb83b47da",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86Mapping.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "e1476f14c3eef4b6f9b940a3242faedad2a1fd3bf4dc8df7e9367c32a75a20ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86MappingInsn.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "3dd6f2bfe73f32b70d3e07f45fcbeb79cf226f0e2d601ab1418a347304cd6ba1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86MappingInsnOp.inc": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "263c9e645a360dbc3d577973a38a2ff0b50c7a0ce2d6b39f271f5eb2ea22903d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86Module.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "25d812cf57e6add4ff3f6c40c57bc22d6c2b6cae210fa623db2f01b63cc584cf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/arch/X86/X86Module.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "43eaa343228da3f51df7eb048e9118e34c86512ffb2c4ef9619c65f499f123d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/cs.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "aa55758a3f9036579c76e2ea1f28eedbf46891649f6b0b5f09add91be9af0632",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/cs_priv.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "04a6d7831448f697ac83a6dec52e1de765b8a7f6787f80007ca1ffcce7529a41",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/include/capstone/arm.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "489e0700e40901da4ae1cc307763b2c7b1e18cef8c04359ebd09cc8242e3d7a0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/include/capstone/arm64.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "92c8dfe570c4440c650957e77135a4c193676797052c7925826d0fbc6ff7d585",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/include/capstone/capstone.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "9a3ae0369d4071156c761e782d377534c3312e78dab1bff6057bb9642292347a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/include/capstone/mips.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "4bcc849f09b2c7de2b12432f000ba0a54bfb86b1578da1c0f6ede103053dae80",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/include/capstone/platform.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "65b1113df30e1bb7a758fe1ea48b058ed0eefb4d26fb4d00dd1147c178632784",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/include/capstone/riscv.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "8c5d9f083235d399c54c9705534e143999aeb100fab958099b07705fd9eb8405",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/include/capstone/x86.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "25978059125e97699345635b7719f24cfd2ed877f5e1e2eca2b3379d5ffde531",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/utils.c": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "29fcd89c066702897611fe05600667d194850639ed6c87f2091491153a3caaaf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/capstone/utils.h": {
-      "license": "BSD-3-Clause-Attribution",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/disasm/capstone",
-      "reviewed": true,
-      "sha256": "cb06bff30d63020a7d801d956b878a9bb01166e16555b8c7b7bc7f583fdb0f81",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/disasm.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "fbc51ce252ba2854604fb2911acde3270a2ce10e7c25d6d98d32938cc538719c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/disasm/disasm.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1f2fbeb488339ff5d3fbf2831ec9249b89aaee1090731e4481720d7d6391dfdc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/adler32.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "7a921ef4c444aa3f49c312b39499e17bf12b25856ca5a904ea768037016ab337",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/crc32.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "9522f5b68c3c87bbdc55b5639b75015cb3dd4066097f81093bee724ece6fe2bc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/deflate.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "24de2ffce0907d7692fc6eb5abcc200e9781a8eca24d8db9289f709fcdf5e3be",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/deflate.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "094cdbd9e851140334099f46a2047b9ee722dcc3f2cf3c0b32e4b56dd5cab823",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/gzip.c": {
-      "license": "Zlib",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/gzip",
-      "reviewed": true,
-      "sha256": "a6caeef2f681ee03d261eda33f1cd14524e79408dbb1fbb4b381ee482f6ca4e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/gzip.h": {
-      "license": "Zlib",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/gzip",
-      "reviewed": true,
-      "sha256": "9a7b4b7c8bc820d3da8f7c760cac177f718be7144b4f86d9455f35b67eb8193f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/my_conf.h": {
-      "license": "Zlib",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/gzip",
-      "reviewed": true,
-      "sha256": "5a6cb5c9f0ca0d4e0e1127623dd1488f1c3279959922b0041918374fdc26ffc3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/trees.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "41ea406e6be0b4f9d92c1877e89093868f5f25a723688880cd05cda1b5107f1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/trees.h": {
-      "license": "Zlib",
-      "evidence": "reviewed LICENSE.spdx package declaration for src/lib/gzip",
-      "reviewed": true,
-      "sha256": "81579041310716219bbbf7c98849d91f5aeabdd7eadb1f8e9d7e2aa57724b58b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/zconf.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "ed7b3394e9e6749dfe9190fb12cbcdef7d01d948b2795952c6a18820cf89cd13",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/zlib.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "7388aeb8cc550dcbc158fd43dc90ee900f5fc6a3d055ceaf4c83aa441e6d387f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/zutil.c": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "06004f5eb2bf807987c9339d78792a0ac78e4bb66b8151f447d81375df9ba64d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "src/lib/gzip/zutil.h": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "9e72b2bb8d7ef54a885fc09183ebbb0ec6431495e63c9154bb10aa4e5f2b2c5a",
       "kind": "file",
       "non_ascii_lines": []
     },

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "context.h"
@@ -427,38 +428,6 @@ Kobject::Reap_list::del_2()
   reset();
 }
 
-
-//---------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Kobject
-{
-protected:
-  struct Log_destroy : public Tb_entry
-  {
-    Kobject    *obj;
-    Mword       id;
-    cxx::Type_info const *type;
-    Mword       ram;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Log_destroy) <= Tb_entry::Tb_entry_size);
-};
-
-//---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Kobject::Log_destroy::print(String_buffer *buf) const
-{
-  buf->printf("obj=%lx [%p] (%p) ram=%lx", id, static_cast<void const *>(type),
-              static_cast<void *>(obj), ram);
-}
 
 //---------------------------------------------------------------------------
 IMPLEMENTATION [rt_dbg]:

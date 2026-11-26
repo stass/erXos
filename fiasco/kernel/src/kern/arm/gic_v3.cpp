@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "gic.h"
@@ -256,25 +257,6 @@ Gic_v3::migrate_irqs(Cpu_number from, Cpu_number to)
     }
 
   migrate_lpis(from, to);
-}
-
-//-------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC
-void
-Gic_v3::irq_prio_bootcpu(unsigned irq, unsigned prio) override
-{
-  assert(irq < 32);
-  _redist.cpu(Cpu_number::boot_cpu()).irq_prio(irq, prio);
-}
-
-PUBLIC
-unsigned
-Gic_v3::irq_prio_bootcpu(unsigned irq) override
-{
-  assert(irq < 32);
-  return _redist.cpu(Cpu_number::boot_cpu()).irq_prio(irq);
 }
 
 //-------------------------------------------------------------------

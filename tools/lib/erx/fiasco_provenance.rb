@@ -700,12 +700,6 @@ module Erx
         targets, sources = PackProvenance.dependencies(read(dependencies.first))
         raise Error, 'dependency does not name compiled object' unless targets.include?(object)
         evidence = reference(dependencies.first)
-      elsif object == 'jdb_compound.o' && File.file?(File.join(directory, '.jdb_compound.o.deps'))
-        parts = read(File.join(directory, '.jdb_compound.o.deps')).split
-        raise Error, 'unsupported compound object list' unless parts.all? { |part| part.match?(/\A[\w.-]+\.o\z/) }
-        return { 'object' => reference(path), 'components' => parts.map do |part|
-          audit_object(File.join(directory, part), ancestry: ancestry + [path])
-        end }
       else
         @unresolved << "object has no compiler dependency record: #{label(path)}"
         return { 'object' => reference(path), 'state' => 'unresolved' }

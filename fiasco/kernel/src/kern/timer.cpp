@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "initcalls.h"
@@ -93,29 +94,6 @@ private:
 };
 
 //----------------------------------------------------------------------------
-INTERFACE[jdb]:
-
-EXTENSION class Timer
-{
-public:
-  /**
-   * Reduce the timer frequency (when entering JDB).
-   */
-  static void switch_freq_jdb();
-
-  /**
-   * Return the timer frequency to normal (when leaving JDB).
-   */
-  static void switch_freq_system();
-
-  /**
-   * Program next interval timer tick.
-   */
-  static void next_interval();
-};
-
-
-//----------------------------------------------------------------------------
 IMPLEMENTATION:
 
 #include "kip.h"
@@ -156,24 +134,6 @@ Timer::update_timer(Unsigned64)
   // does nothing in periodic timer mode
   static_assert(TAG_ENABLED(!one_shot));
 }
-
-//----------------------------------------------------------------------------
-IMPLEMENTATION[jdb]:
-
-IMPLEMENT_DEFAULT inline
-void
-Timer::switch_freq_jdb()
-{}
-
-IMPLEMENT_DEFAULT inline
-void
-Timer::switch_freq_system()
-{}
-
-IMPLEMENT_DEFAULT inline
-void
-Timer::next_interval()
-{}
 
 //----------------------------------------------------------------------------
 IMPLEMENTATION[sync_clock && !test_support_code]:

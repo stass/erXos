@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && exynos_mct]: // -----------------------------------------
 
 #include "types.h"
@@ -124,17 +125,3 @@ Timer_tick::ack()
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [debug && arm && exynos_mct]:
-
-IMPLEMENT
-Timer_tick *
-Timer_tick::boot_cpu_timer_tick()
-{ return _timer_ticks.cpu(Cpu_number::boot_cpu()); }
-
-IMPLEMENT
-void
-Timer_tick::next_interval()
-{
-  Timer_tick &t = *_timer_ticks.cpu(current_cpu()).get();
-  t._timer->next_interval();
-}

@@ -1,7 +1,0 @@
-# -*- makefile -*-
-
-$(LIBREGEX): $(OBJ_LIBREGEX)
-	$(AR_MESSAGE)
-	$(VERBOSE)$(RM) $@
-	$(VERBOSE)$(AR) $(ARFLAGS) $@ $^
-

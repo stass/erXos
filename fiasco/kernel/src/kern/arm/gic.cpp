@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && pic_gic]:
 
 #include "cpu.h"
@@ -284,13 +285,6 @@ Gic::set_pending_irq(unsigned idx, Unsigned32 val)
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-PUBLIC
-char const *
-Gic::chip_type() const override
-{ return "GIC"; }
-
-// --------------------------------------------------------------------------
 IMPLEMENTATION [32bit && !cpu_virt]:
 
 PUBLIC static void

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && pf_xscale]: // -------------------------------------
 
 #include "initcalls.h"
@@ -126,9 +127,3 @@ void irq_handler()
 }
 
 // -------------------------------------------------------------
-IMPLEMENTATION [arm && debug && pf_xscale]:
-
-PUBLIC
-char const *
-Chip::chip_type() const override
-{ return "HW PXA/SA IRQ"; }

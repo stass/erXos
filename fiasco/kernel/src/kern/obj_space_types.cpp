@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include <cxx/cxx_int>
@@ -198,48 +199,6 @@ namespace Obj {
   };
   static_assert(Caps_per_page == Caps_per_page_max, "hm, not a power of two caps on a single memory page");
 }
-
-// ------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "dbg_page_info.h"
-#include "warn.h"
-
-class Space;
-
-namespace Obj
-{
-  struct Cap_page_dbg_info
-  {
-    Address offset;
-    Space *s;
-  };
-
-  inline void add_cap_page_dbg_info(void *p, Space *s, Address cap)
-  {
-    Dbg_page_info *info = new Dbg_page_info(Virt_addr(p));
-
-    if (!info) [[unlikely]]
-      {
-        WARN("oom: could not allocate debug info for page %p\n", p);
-        return;
-      }
-
-    info->info<Cap_page_dbg_info>()->s = s;
-    info->info<Cap_page_dbg_info>()->offset = (cap / Caps_per_page) * Caps_per_page;
-    Dbg_page_info::table().insert(info);
-  }
-
-  inline void remove_cap_page_dbg_info(void *p)
-  {
-    Dbg_page_info *info = Dbg_page_info::table().remove(Virt_addr(p));
-    if (info)
-      delete info;
-    else
-      WARN("could not find debug info for page %p\n", p);
-  }
-}
-
 
 // ------------------------------------------------------------------------
 INTERFACE [!debug]:

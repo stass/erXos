@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include <types.h>
@@ -633,9 +634,3 @@ Io_apic::active()
 { return _first; }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC inline
-char const *
-Io_apic::chip_type() const override
-{ return "IO-APIC"; }

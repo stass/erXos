@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && perf_cnt]:
 
 #include "cpu.h"
@@ -340,20 +341,3 @@ Perf_cnt::mode(Mword slot, const char **mode, const char **name,
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [arm && perf_cnt && jdb]:
-
-#include "tb_entry.h"
-
-PUBLIC static
-int
-Perf_cnt::setup_pmc(Mword slot, Mword event, Mword, Mword, Mword)
-{
-  if (slot >= Max_slot)
-    return 0;
-
-  set_event_type(slot, event);
-
-  Tb_entry::set_rdcnt(slot, slot ? &read_counter_1 : &read_counter_0);
-
-  return 1;
-}

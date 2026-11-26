@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 class Irq_base;
@@ -34,16 +35,6 @@ PUBLIC static
 void
 Vkey::irq(Irq_base *const *i)
 { vkey_irq = i; }
-
-// ------------------------------------------------------------------------
-IMPLEMENTATION [serial && input && debug]:
-
-PRIVATE static inline
-bool
-Vkey::is_debugger_entry_key(int key)
-{
-  return key == KEY_SINGLE_ESC;
-}
 
 // ------------------------------------------------------------------------
 IMPLEMENTATION [serial && input && !debug]:

@@ -1,31 +1,8 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: a receive from the thread itself whose timeout hit
 // before it would wait yields the time slice (docs/design-fiasco.md, "Scheduling"),
 // and a test kernel's seeded warning at the marked one (ERX_TEST_KERNEL_WARN,
 // tools/lib/erx/native_console_ring.rb); no other kernel builds it.
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Thread
-{
-protected:
-  struct Log_pf_invalid : public Tb_entry
-  {
-    Mword pfa;
-    Cap_index cap_idx;
-    Mword err;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Log_pf_invalid) <= Tb_entry::Tb_entry_size);
-
-  struct Log_exc_invalid : public Tb_entry
-  {
-    Cap_index cap_idx;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Log_exc_invalid) <= Tb_entry::Tb_entry_size);
-};
-
 INTERFACE:
 
 #include "l4_buf_iter.h"
@@ -1573,21 +1550,3 @@ Thread::remote_handshake_receiver(L4_msg_tag const &tag, Thread *partner,
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Thread::Log_pf_invalid::print(String_buffer *buf) const
-{
-  buf->printf("InvCap C:%lx pfa=%lx err=%lx",
-              cxx::int_value<Cap_index>(cap_idx), pfa, err);
-}
-
-IMPLEMENT
-void
-Thread::Log_exc_invalid::print(String_buffer *buf) const
-{
-  buf->printf("InvCap C:%lx", cxx::int_value<Cap_index>(cap_idx));
-}

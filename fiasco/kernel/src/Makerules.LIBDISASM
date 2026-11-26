@@ -1,7 +1,0 @@
-# -*- makefile -*-
-
-$(LIBDISASM): $(OBJ_LIBDISASM)
-	$(AR_MESSAGE)
-	$(VERBOSE)$(RM) $@
-	$(VERBOSE)$(AR) $(ARFLAGS) $@ $^
-

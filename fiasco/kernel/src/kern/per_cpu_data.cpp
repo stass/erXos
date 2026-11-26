@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 template< typename T, unsigned EXTRA = 0 >
@@ -380,11 +381,3 @@ Per_cpu_data::run_late_ctors(Cpu_number cpu)
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [mp && debug]:
-
-PUBLIC static
-long
-Per_cpu_data::offset(Cpu_number cpu)
-{
-  return _offsets[cpu];
-}

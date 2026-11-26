@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // ------------------------------------------------------------------------
 INTERFACE [!obj_space_phys_avl]:
 
@@ -446,9 +447,3 @@ Obj_space_phys<SPACE>::obj_map_max_address() const
 }
 
 // ------------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC template< typename SPACE >
-typename Obj_space_phys<SPACE>::Entry *
-Obj_space_phys<SPACE>::jdb_lookup_cap(Cap_index index)
-{ return get_cap(index, false); }

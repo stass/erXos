@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 /*
  * MIPS Kernel-Info Page
  */
@@ -22,9 +23,3 @@ public:
 };
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [mips && debug]:
-
-IMPLEMENT inline
-void
-Kip::debug_print_syscalls() const
-{}

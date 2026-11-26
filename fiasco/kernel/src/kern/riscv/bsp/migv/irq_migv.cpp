@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "cpu.h"
@@ -231,9 +232,3 @@ Irq_chip_migv::set_cpu(Mword pin, [[maybe_unused]] Cpu_number cpu) override
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC
-char const *
-Irq_chip_migv::chip_type() const override
-{ return "MiG-V"; }

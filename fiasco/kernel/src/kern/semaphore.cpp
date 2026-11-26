@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: a thread this semaphore dequeued does not leave sys_down
 // before its activation has landed (docs/design-fiasco.md, "Thread creation").
 INTERFACE:
@@ -12,7 +13,6 @@ class Semaphore : public Kobject_h<Semaphore, Irq>
   Semaphore() = delete;
 
 public:
-  friend class Jdb_kobject_irq;
   enum class Op : Mword
   {
     Down = 0
@@ -386,6 +386,3 @@ register_factory()
 }
 
 //-----------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC Locked_prio_list const* Semaphore::waiting() const { return &_waiting; }

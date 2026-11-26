@@ -5,7 +5,6 @@
 require_relative 'build_kind'
 require_relative 'dependency_status'
 require_relative 'error'
-require_relative 'fiasco_parts'
 require_relative 'license_expression'
 
 module Erx
@@ -51,17 +50,8 @@ module Erx
     EXAMPLE = Row.new(status: DependencyStatus::EXAMPLE, label: EXAMPLE_LABEL, licenses: EXAMPLE_LICENSES,
                       path: EXAMPLE_ARCHIVE, build_kinds: DEVELOPMENT_ONLY)
 
-    # The closed table of such inputs (docs/design.md, "Licenses and notices"). Fiasco's
-    # debugger is release, as docs/design.md's dependency table marks it.
-    TABLE = [
-      EXAMPLE,
-      # Fiasco's kernel debugger, carried in development builds by decision, distributed
-      # under the website exception with its source offered (CLAUDE.md, Dependencies,
-      # stopgaps and release components); the release kernel leaves it out.
-      Row.new(status: FiascoParts.status('kernel'), label: 'fiasco/kernel/src/kern/jdb_object.cpp',
-              licenses: ['GPL-2.0-only'].freeze, path: "#{FiascoParts::INPUTS}/kernel/src/kern/jdb_object.cpp",
-              build_kinds: DEVELOPMENT_ONLY)
-    ].freeze
+    # The closed table of such inputs (docs/design.md, "Licenses and notices").
+    TABLE = [EXAMPLE].freeze
 
     module_function
 

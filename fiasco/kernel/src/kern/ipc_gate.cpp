@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "kobject.h"
@@ -50,24 +51,6 @@ public:
     Thread *t = access_once(&_thread);
     return t && t->space() == s;
   }
-};
-
-//---------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Ipc_gate
-{
-protected:
-  struct Log_ipc_gate_invoke : public Tb_entry
-  {
-    Mword gate_dbg_id;
-    Mword thread_dbg_id;
-    Mword label;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Log_ipc_gate_invoke) <= Tb_entry::Tb_entry_size);
 };
 
 //---------------------------------------------------------------------------
@@ -584,15 +567,3 @@ Ipc_gate_obj::dbg_info() const override
 { return Ipc_gate::dbg_info(); }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Ipc_gate::Log_ipc_gate_invoke::print(String_buffer *buf) const
-{
-  buf->printf("D-gate=%lx D-thread=%lx L=%lx",
-              gate_dbg_id, thread_dbg_id, label);
-}
-

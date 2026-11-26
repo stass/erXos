@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 IMPLEMENTATION:
 
 #include "idt.h"
@@ -158,9 +159,3 @@ Irq_mgr_msi::init()
 
 STATIC_INITIALIZE(Irq_mgr_msi);
 
-IMPLEMENTATION [debug]:
-
-PUBLIC inline
-char const *
-Irq_chip_msi::chip_type() const override
-{ return "MSI"; }

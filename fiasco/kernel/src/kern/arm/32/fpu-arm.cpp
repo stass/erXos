@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: lazy FP switching is deleted; FP state is switched
 // eagerly (docs/design-fiasco.md, "Eager FP switching").
 INTERFACE [arm && fpu]:
@@ -399,20 +400,6 @@ PRIVATE inline
 void
 Fpu::finish_init()
 {}
-
-//-------------------------------------------------------------------------
-IMPLEMENTATION [arm && fpu && debug]:
-
-PRIVATE static
-void
-Fpu::show(Cpu_number cpu)
-{
-  const Fpsid s = fpu.cpu(cpu)._fpsid;
-  printf("FPU%d: Subarch: %x, Part: %x, Rev: %x, Var: %x, Impl: %x\n",
-         cxx::int_value<Cpu_number>(cpu), s.sub_arch().get(),
-         s.part_number().get(), s.rev().get(), s.variant().get(),
-         s.implementer().get());
-}
 
 //-------------------------------------------------------------------------
 IMPLEMENTATION [arm && fpu && !debug]:

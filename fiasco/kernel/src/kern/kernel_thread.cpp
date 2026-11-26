@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: a test kernel's seeded kernel trap (ERX_TEST_KERNEL_TRAP,
 // tools/lib/erx/native_kernel_trap.rb), which no other kernel builds; and the
 // tickless idle drives its CPU's pending RCU work before it halts
@@ -185,37 +186,6 @@ Kernel_thread::init_workload()
   extern void (*_init_workload_table[])();
   for (unsigned i = 0; _init_workload_table[i]; ++i)
     _init_workload_table[i]();
-}
-
-// ------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "koptions.h"
-#include "string_buffer.h"
-
-IMPLEMENT_OVERRIDE
-void
-Kernel_thread::check_debug_koptions()
-{
-  auto g = lock_guard(cpu_lock);
-
-  if constexpr (Config::Jdb)
-    {
-      if (   !Koptions::o()->opt(Koptions::F_nojdb)
-          && Koptions::o()->opt(Koptions::F_jdb_cmd))
-        {
-          // extract the control sequence from the command line
-          String_buf<128> cmd;
-          for (char const *s = Koptions::o()->jdb_cmd; *s && *s != ' '; ++s)
-            cmd.append(*s);
-
-          kdb_ke_sequence(cmd.c_str(), cmd.length());
-        }
-    }
-
-  // kernel debugger rendezvous
-  if (Koptions::o()->opt(Koptions::F_wait))
-    kdb_ke("Wait");
 }
 
 // ------------------------------------------------------------------------

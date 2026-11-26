@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "mmio_register_block.h"
@@ -135,10 +136,3 @@ Gt64120::set_cpu(Mword, Cpu_number) override
 { return false; }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [gt64120_irq && debug]:
-
-PUBLIC
-char const *
-Gt64120::chip_type() const override
-{ return "GT64120"; }
-

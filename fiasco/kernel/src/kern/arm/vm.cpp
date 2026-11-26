@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: FP state is switched eagerly, so no thread owns the
 // FPU (docs/design-fiasco.md, "Eager FP switching").
 INTERFACE [arm_em_tz]:
@@ -72,28 +73,6 @@ private:
     ER_undef      = 6,
   };
 
-};
-
-//-----------------------------------------------------------------------------
-INTERFACE [debug && arm_em_tz]:
-
-#include "tb_entry.h"
-
-EXTENSION class Vm
-{
-public:
-  struct Vm_log : public Tb_entry
-  {
-    bool is_entry;
-    Mword pc;
-    Mword cpsr;
-    Mword exit_reason;
-    Mword pending_events;
-    Mword r0;
-    Mword r1;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Vm_log) <= Tb_entry::Tb_entry_size);
 };
 
 //-----------------------------------------------------------------------------
@@ -260,95 +239,6 @@ PUBLIC
 bool
 Vm::get_fpu()
 { return true; }
-
-// --------------------------------------------------------------------------
-IMPLEMENTATION [debug && arm_em_tz]:
-
-#include "jdb.h"
-#include "string_buffer.h"
-
-PRIVATE
-Mword
-Vm::jdb_get(Mword *state_ptr)
-{
-  Mword v = ~0UL;
-  Jdb::peek(Jdb_addr<Mword>(state_ptr, this), v);
-  return v;
-}
-
-PUBLIC
-void
-Vm::dump_vm_state()
-{
-  Vm_state *s = state_for_dbg;
-  printf("pc: %08lx  cpsr: %08lx exit_reason:%ld \n",
-         jdb_get(&s->pc), jdb_get(&s->cpsr), jdb_get(&s->exit_reason));
-  printf("r0: %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx\n",
-         jdb_get(&s->r[0]), jdb_get(&s->r[1]), jdb_get(&s->r[2]), jdb_get(&s->r[3]),
-         jdb_get(&s->r[4]), jdb_get(&s->r[5]), jdb_get(&s->r[6]), jdb_get(&s->r[7]));
-  printf("r8: %08lx %08lx %08lx %08lx %08lx\n",
-         jdb_get(&s->r[8]), jdb_get(&s->r[9]), jdb_get(&s->r[10]), jdb_get(&s->r[11]),
-         jdb_get(&s->r[12]));
-
-  printf("usr: sp %08lx lr %08lx\n",
-         jdb_get(&s->sp_usr), jdb_get(&s->lr_usr));
-  printf("irq: sp %08lx lr %08lx psr %08lx\n",
-         jdb_get(&s->irq.sp), jdb_get(&s->irq.lr), jdb_get(&s->irq.spsr));
-  printf("fiq: sp %08lx lr %08lx psr %08lx\n",
-         jdb_get(&s->fiq.sp), jdb_get(&s->fiq.lr), jdb_get(&s->fiq.spsr));
-  printf("r8: %08lx %08lx %08lx %08lx %08lx\n",
-         jdb_get(&s->r_fiq[0]), jdb_get(&s->r_fiq[1]), jdb_get(&s->r_fiq[2]),
-         jdb_get(&s->r_fiq[3]), jdb_get(&s->r_fiq[4]));
-
-  printf("abt: sp %08lx lr %08lx psr %08lx\n",
-         jdb_get(&s->abt.sp), jdb_get(&s->abt.lr), jdb_get(&s->abt.spsr));
-  printf("und: sp %08lx lr %08lx psr %08lx\n",
-         jdb_get(&s->und.sp), jdb_get(&s->und.lr), jdb_get(&s->und.spsr));
-  printf("svc: sp %08lx lr %08lx psr %08lx\n",
-         jdb_get(&s->svc.sp), jdb_get(&s->svc.lr), jdb_get(&s->svc.spsr));
-}
-
-PUBLIC
-void
-Vm::show_short(String_buffer *buf)
-{
-  buf->printf(" utcb:%lx pc:%lx ",
-              reinterpret_cast<Mword>(state_for_dbg),
-              reinterpret_cast<Mword>(jdb_get(&state_for_dbg->pc)));
-}
-
-PUBLIC
-bool
-Vm::info_kobject(Address *utcb, Address *pc)
-{
-  *utcb = reinterpret_cast<Address>(state_for_dbg);
-  *pc = jdb_get(&state_for_dbg->pc);
-  return true;
-}
-
-IMPLEMENT
-void
-Vm::Vm_log::print(String_buffer *buf) const
-{
-  buf->printf("%s: pc:%08lx/%03lx psr:%lx er:%lx r0:%lx r1:%lx",
-              is_entry ? "entry" : "exit ",
-              pc, pending_events, cpsr, exit_reason, r0, r1);
-}
-
-PUBLIC static inline
-void
-Vm::log_vm(Vm_state *state, bool is_entry)
-{
-  LOG_TRACE("VM entry/entry", "VM", current(), Vm_log,
-      l->is_entry = is_entry;
-      l->pc = state->pc;
-      l->cpsr = state->cpsr;
-      l->exit_reason = state->exit_reason;
-      l->pending_events = state->pending_events;
-      l->r0 = state->r[0];
-      l->r1 = state->r[1];
-  );
-}
 
 // --------------------------------------------------------------------------
 IMPLEMENTATION [!debug && arm_em_tz]:

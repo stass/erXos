@@ -1,7 +1,0 @@
-# -*- makefile -*-
-
-$(LIBGZIP): $(OBJ_LIBGZIP)
-	$(AR_MESSAGE)
-	$(VERBOSE)$(RM) $@
-	$(VERBOSE)$(AR) $(ARFLAGS) $@ $^
-

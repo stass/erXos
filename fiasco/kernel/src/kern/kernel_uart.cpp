@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: the ring console stands in the UART console's place
 // (docs/design-fiasco.md, "The kernel's lines").
 INTERFACE:
@@ -27,7 +28,6 @@ INTERFACE [serial]:
 #include "std_macros.h"
 #include "pm.h"
 
-class Filter_console;
 
 /**
  * Glue between kernel and UART driver.
@@ -55,7 +55,6 @@ IMPLEMENTATION [serial]:
 #include <cstdlib>
 #include <cstdio>
 
-#include "filter_console.h"
 #include "irq_chip.h"
 #include "irq_mgr.h"
 #include "kdb_ke.h"
@@ -159,24 +158,6 @@ void
 Kernel_uart::init_filter_console()
 {
   Kconsole::console()->register_console(Erx_console_ring::wrap(_kernel_uart), 0);
-}
-
-// ------------------------------------------------------------------------
-IMPLEMENTATION [serial && jdb]:
-
-static DEFINE_GLOBAL Global_data<Static_object<Filter_console>> _fcon;
-
-PUBLIC static FIASCO_CONST
-Filter_console *
-Kernel_uart::fcon()
-{ return _fcon; }
-
-PRIVATE static FIASCO_INIT
-void
-Kernel_uart::init_filter_console()
-{
-  _fcon.construct(_kernel_uart, Config::serial_esc);
-  Kconsole::console()->register_console(Erx_console_ring::wrap(_fcon), 0);
 }
 
 // ------------------------------------------------------------------------

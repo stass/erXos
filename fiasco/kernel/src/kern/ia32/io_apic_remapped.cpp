@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "io_apic.h"
@@ -506,14 +507,3 @@ Io_apic_remapped::init_apics()
   return true;
 }
 
-IMPLEMENTATION [debug]:
-
-PUBLIC inline
-char const *
-Irq_chip_rmsi::chip_type() const override
-{ return "rMSI"; }
-
-PUBLIC inline
-char const *
-Io_apic_remapped::chip_type() const override
-{ return "rIO-APIC"; }

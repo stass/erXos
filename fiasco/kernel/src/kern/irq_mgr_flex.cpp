@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "irq_mgr.h"
@@ -112,13 +113,3 @@ Irq_mgr_flex<MAX_CHIPS>::print_infos()
   for (auto *e = _chips; e != _chips + _used; ++e)
     printf("  %3d-%3d: @%p\n", e->start, e->end - 1, e->chip);
 }
-IMPLEMENTATION [debug]:
-
-PUBLIC template<unsigned MAX_CHIPS>
-void
-Irq_mgr_flex<MAX_CHIPS>::print_infos()
-{
-  for (auto *e = _chips; e != _chips + _used; ++e)
-    printf("  %3d-%3d: %s\n", e->start, e->end - 1, e->chip->chip_type());
-}
-

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 IMPLEMENTATION:
 
 #include "thread_object.h"
@@ -35,12 +36,6 @@ IMPLEMENT extern "C" void FIASCO_FLATTEN sys_ipc_wrapper()
     f->tag(curr->commit_error(utcb, L4_error::Not_existent));
 }
 
-
-//---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "space.h"
-#include "task.h"
 
 //---------------------------------------------------------------------------
 INTERFACE [ia32 || amd64]:

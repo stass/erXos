@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 /*
  * MIPS top-level IRQ handling: provide a first stage IRQ chip with 8 slots for
  * Irq_base object that either signal IRQs to second level IRQ chips or to the
@@ -147,10 +148,4 @@ handle_irq(unsigned long irq)
   _chip->handle_irq<Mips_cpu_irq_chip>(irq, nullptr);
 }
 
-
-IMPLEMENTATION [debug]:
-
-PUBLIC char const *
-Mips_cpu_irq_chip::chip_type() const override
-{ return "MIPScpu"; }
 

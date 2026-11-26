@@ -1,3 +1,4 @@
+# Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 # -*- makefile -*-
 # vi:se ft=make:
 
@@ -13,7 +14,6 @@ PREPROCESS_PARTS 	+= arch $(CONFIG_ABI) 64bit iofp recover_jmpbuf \
 			   io realmode libuart
 
 PREPROCESS_PARTS-$(CONFIG_MP)                += need_xcpu_tlb_flush
-PREPROCESS_PARTS-$(CONFIG_JDB)               += debug log
 PREPROCESS_PARTS-$(CONFIG_SCHED_PIT)         += pit_timer
 PREPROCESS_PARTS-$(CONFIG_SCHED_RTC)         += rtc_timer
 PREPROCESS_PARTS-$(CONFIG_SCHED_APIC)        += apic_timer
@@ -30,7 +30,6 @@ PREPROCESS_PARTS        += $(PREPROCESS_PARTS-y)
 #
 INTERFACES_ABI		+= virt
 
-kip_IMPL		+= kip-amd64-debug
 virt_IMPL		+= virt-ia32
 
 #
@@ -84,7 +83,6 @@ entry_frame_IMPL	:= entry_frame entry_frame-amd64
 fpu_IMPL		:= fpu fpu-ia32
 ipi_IMPL		:= ipi ipi-ia32
 irq_IMPL		:= irq irq-ia32
-kdb_ke_IMPL		+= kdb_ke-ia32
 kernel_thread_IMPL	:= kernel_thread kernel_thread-ia32
 kernel_uart_IMPL	:= kernel_uart kernel_uart-libuart
 kip_init_IMPL		+= kip_init-ia32
@@ -112,8 +110,8 @@ task_IMPL		:= task task-ia32
 tb_entry_IMPL		:= tb_entry tb_entry-ia32-64
 timer_IMPL		:= timer timer-ia32
 thread_IMPL		:= thread thread-ia32 thread-ia32-64 \
-			   thread-ipc thread-pagefault thread-log \
-			   thread-debug thread-dbf thread-vcpu thread-io \
+			   thread-ipc thread-pagefault \
+			    thread-dbf thread-vcpu thread-io \
 			   thread-pf_trampoline thread-pf_trampoline-ia32
 tss_IMPL		:= tss-amd64
 utcb_init_IMPL		:= utcb_init utcb_init-ia32
@@ -151,7 +149,6 @@ INTERFACES_JDB		+= jdb_io_ports jdb_ptab jdb_trace_set \
 
 CXXSRC_JDB := tb_entry_output.cc
 
-apic_IMPL		+= apic-debug
 jdb_IMPL		+= jdb-ia32
 jdb_bp_IMPL		:= jdb_bp-ia32 jdb_bp-amd64
 jdb_bt_IMPL		:= jdb_bt-ia32

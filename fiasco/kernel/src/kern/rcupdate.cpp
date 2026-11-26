@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE[mp]:
 
 #include "cpu_mask.h"
@@ -151,33 +152,6 @@ private:
 };
 
 // ------------------------------------------------------------------------
-INTERFACE [mp && debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Rcu
-{
-public:
-  struct Log_rcu : public Tb_entry
-  {
-    Cpu_number cpu;
-    Rcu_item *item;
-    void *cb;
-    unsigned char event;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Log_rcu) <= Tb_entry::Tb_entry_size);
-
-  enum Rcu_events
-  {
-    Rcu_call = 0,
-    Rcu_process = 1,
-    Rcu_idle = 2,
-    Rcu_unidle = 3,
-  };
-};
-
-// ------------------------------------------------------------------------
 INTERFACE [!mp]:
 
 #include "options.h"
@@ -196,23 +170,6 @@ public:
 };
 
 // --------------------------------------------------------------------------
-IMPLEMENTATION [mp && debug]:
-
-#include "logdefs.h"
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Rcu::Log_rcu::print(String_buffer *buf) const
-{
-  static constinit char const *const events[] =
-  { "call", "process", "idle", "unidle" };
-  buf->printf("rcu-%s (cpu=%u) item=%p", events[event],
-              cxx::int_value<Cpu_number>(cpu), static_cast<void *>(item));
-}
-
-
-//--------------------------------------------------------------------------
 IMPLEMENTATION[mp]:
 
 #include "cpu.h"

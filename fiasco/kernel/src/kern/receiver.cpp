@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "atomic.h"
@@ -761,10 +762,3 @@ Receiver::abort_send(Sender *sender, Context *sender_context)
 }
 
 //----------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PROTECTED inline
-bool Receiver::has_partner() const
-{
-  return _partner != nullptr;
-}

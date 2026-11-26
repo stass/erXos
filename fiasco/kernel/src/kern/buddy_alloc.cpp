@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include <cassert>
@@ -275,55 +276,3 @@ Buddy_t_base<A,B>::avail() const
 }
 
 //----------------------------------------------------------------------------
-IMPLEMENTATION [debug || jdb_kmem_stats]:
-
-PUBLIC
-template< unsigned long A, int B>
-void
-Buddy_t_base<A,B>::dump() const
-{
-  auto print_freelist_entry = [](B_list::Const_iterator &h, bool valid)
-    {
-      void *hp = static_cast<void *>(*h);
-      if (!hp)
-        printf("null");
-      else
-        printf("%p", hp);
-      printf("(%lu)", valid ? h->index : 0UL);
-    };
-
-  unsigned long total = 0;
-  printf("Buddy_alloc [%ld,%ld]\n", Min_size, Num_sizes);
-  for (unsigned i = 0, shift = 10, unit = 0; i < Num_sizes; ++i)
-    {
-      unsigned long c = 0;
-      unsigned long avail = 0;
-      B_list::Const_iterator h = _free[i].begin();
-      static_assert(Min_size >= 1024); // 2^64 == 16 EiB
-      printf("  [%3lu %ciB] ", Min_size >> shift, "KMGTPE"[unit]);
-      print_freelist_entry(h, h != _free[i].end());
-      while (h != _free[i].end())
-        {
-          ++h;
-          if (c <= 5)
-            printf("\n%15s", c < 5 ? "-> " : "...");
-          if (c < 5)
-            print_freelist_entry(h, !!*h);
-
-          avail += Min_size << i;
-          ++c;
-        }
-      printf(" == %lu KiB (%lu bytes)\n", avail / 1024, avail);
-      total += avail;
-
-      // Avoid evaluation of (i % 10) and (i / 10) to prevent the compiler
-      // generating external references to __aeabi_idivmod.
-      if (--shift == 0)
-        {
-          ++unit;
-          shift = 10;
-        }
-    }
-
-  printf("sum of available memory: %lu KiB (%lu bytes)\n", total / 1024, total);
-}

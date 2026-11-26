@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // ---------------------------------------------------------------------
 INTERFACE [arm && pf_imx_28]:
 
@@ -108,9 +109,3 @@ void irq_handler()
 { mgr->c.irq_handler(); }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug && pf_imx]:
-
-PUBLIC
-char const *
-Irq_chip_imx_icoll::chip_type() const override
-{ return "i.MX-icoll IRQ"; }

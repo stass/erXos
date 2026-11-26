@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include <cstddef>
@@ -178,37 +179,3 @@ int Console::char_avail() const
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC
-const char*
-Console::str_mode() const
-{
-  static char const * const mode_str[] =
-    { "      ", "Output", "Input ", "InOut " };
-  return mode_str[get_attributes() & (OUT|IN)];
-}
-
-PUBLIC
-const char*
-Console::str_state() const
-{
-  static char const * const state_str[] =
-    { "Disabled       ", "Output disabled",
-      "Input disabled ", "Enabled        " };
-  if (!failed())
-    return state_str[state() & ENABLED];
-  else
-    return "FAILED!        ";
-}
-
-PUBLIC
-const char*
-Console::str_attr(Mword bit) const
-{
-  static char const * const attr_str[] =
-    { "Direct", "Uart", "Push", "Gzip", "Buffer", "Kdb" };
-
-  return (bit < 2 || bit >= cxx::size(attr_str)+2) ? "???" : attr_str[bit-2];
-}
-

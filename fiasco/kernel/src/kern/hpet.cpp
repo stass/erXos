@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "acpi.h"
@@ -221,9 +222,3 @@ Hpet::init()
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC static
-Hpet_device *
-Hpet::hpet()
-{ return _hpet; }

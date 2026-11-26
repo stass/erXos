@@ -1,3 +1,4 @@
+# Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 # Modified by erXos: no architecture selects lazy FP switching.
 # ARCH:           ARM arm
 # ARCHDESCR:      ARM processor family
@@ -8,8 +9,6 @@
 # ARCHSELECT:     FPU if CPU_VIRT
 # ARCHSELECT:     ARM_LPAE if MMU && (CPU_VIRT || BIT64)
 # ARCHSELECT:     HAS_SERIAL_OPTION
-# ARCHSELECT:     HAS_JDB_DISASM_OPTION
-# ARCHSELECT:     HAS_JDB_GZIP_OPTION
 # ARCHSELECT:     HAS_SYNC_CLOCK if USE_GENERIC_TIMER
 # ARCHSELECT:     HAS_ONE_SHOT if SYNC_CLOCK
 # ARCHSELECT:     HAS_TICKLESS_IDLE

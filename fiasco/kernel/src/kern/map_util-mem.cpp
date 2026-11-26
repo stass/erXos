@@ -1,11 +1,4 @@
-INTERFACE [debug]:
-
-#include "mapdb.h"
-#include "types.h"
-#include "global_data.h"
-
-extern Global_data<Static_object<Mapdb>> mapdb_mem;
-
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 IMPLEMENTATION:
 
 #include "config.h"

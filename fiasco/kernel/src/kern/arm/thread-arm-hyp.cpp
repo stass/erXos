@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 IMPLEMENTATION [arm && cpu_virt]:
 
 IMPLEMENT_OVERRIDE inline
@@ -167,23 +168,6 @@ extern "C" void hyp_mode_fault(Mword abort_type, Trap_state *ts)
 
   printf("Unhandled in-kernel fault -- halting!\n");
   L4::infinite_loop();
-}
-
-//-----------------------------------------------------------------------------
-IMPLEMENTATION [arm && 32bit && cpu_virt && debug]:
-
-PUBLIC static inline NEEDS[Thread::call_nested_trap_handler,
-                           Thread::is_transient_mpu_fault]
-bool
-Thread::handle_hyp_mode_fault(Mword abort_type, Trap_state *ts, Mword hsr)
-{
-  if (is_transient_mpu_fault(abort_type, hsr))
-    return true;
-
-  if (call_nested_trap_handler(ts) == 0)
-    return true; // Trap handled, try to continue.
-
-  return false;
 }
 
 //-----------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "types.h"
@@ -49,18 +50,3 @@ private:
 
 
 //----------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-static char const *__errors[] =
-{ "OK", "timeout", "not existent", "canceled", "overflow",
-  "xfer snd", "xfer rcv", "aborted", "map failed" };
-
-
-
-PUBLIC
-char const *
-L4_error::str_error()
-{
-  return __errors[(_raw >> 1) & 0xf];
-}
-

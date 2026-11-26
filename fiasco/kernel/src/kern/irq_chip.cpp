@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: an interrupt whose pin is unbound is ended at its chip
 // instead of dereferenced (docs/design-fiasco.md, "An unbound pin's interrupt").
 INTERFACE:
@@ -304,23 +305,6 @@ protected:
 };
 
 //----------------------------------------------------------------------------
-INTERFACE [debug]:
-
-EXTENSION class Irq_chip
-{
-public:
-  virtual char const *chip_type() const = 0;
-};
-
-//--------------------------------------------------------------------------
-IMPLEMENTATION[debug]:
-
-PUBLIC
-char const *
-Irq_chip_soft::chip_type() const override
-{ return "Soft"; }
-
-//--------------------------------------------------------------------------
 IMPLEMENTATION [cascade_irq]:
 
 PUBLIC inline explicit
@@ -459,55 +443,3 @@ IMPLEMENTATION [!debug]:
 PUBLIC inline void Irq_base::log() {}
 
 //-----------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Irq_base
-{
-public:
-  struct Irq_log : public Tb_entry
-  {
-    Irq_base *obj;
-    Irq_chip *chip;
-    Mword pin;
-    void print(String_buffer *buf) const;
-  };
-
-  static_assert(sizeof(Irq_log) <= Tb_entry::Tb_entry_size);
-};
-
-// --------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include <cstdio>
-#include "logdefs.h"
-#include "kobject_dbg.h"
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Irq_base::Irq_log::print(String_buffer *buf) const
-{
-  Kobject_dbg::Const_iterator irq = Kobject_dbg::pointer_to_obj(obj);
-
-  buf->printf("0x%lx/%lu @ chip %s (%p) ", pin, pin, chip->chip_type(),
-              static_cast<void *>(chip));
-
-  if (irq != Kobject_dbg::end())
-    buf->printf("D:%lx", irq->dbg_id());
-  else
-    buf->printf("irq=%p", static_cast<void *>(obj));
-}
-
-PUBLIC inline NEEDS["logdefs.h"]
-void
-Irq_base::log()
-{
-  Context *c = current();
-  LOG_TRACE("IRQ-Object triggers", "irq", c, Irq_log,
-      l->obj = this;
-      l->chip = chip();
-      l->pin = pin();
-  );
-}

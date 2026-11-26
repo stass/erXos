@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: lazy FP switching is deleted; FP state is switched
 // eagerly (docs/design-fiasco.md, "Eager FP switching").
 INTERFACE [riscv]:
@@ -704,33 +705,3 @@ Thread::do_syscall()
 }
 
 //----------------------------------------------------------------------------
-INTERFACE [riscv && debug]:
-
-EXTENSION class Thread
-{
-public:
-  typedef void (*Sys_call)(void);
-
-protected:
-  static Sys_call sys_call_entry;
-};
-
-//----------------------------------------------------------------------------
-IMPLEMENTATION [riscv && debug]:
-
-extern "C" void sys_ipc_wrapper();
-Thread::Sys_call Thread::sys_call_entry = sys_ipc_wrapper;
-
-PUBLIC static inline
-void
-Thread::set_sys_call_entry(Sys_call e)
-{
-  sys_call_entry = e;
-}
-
-PROTECTED static
-void
-Thread::do_syscall()
-{
-  sys_call_entry();
-}

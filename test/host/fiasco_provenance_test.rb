@@ -328,9 +328,9 @@ class FiascoProvenanceTest < Minitest::Test
     end
   end
 
-  # The seeded fault the release check exists for: jdb_object.cpp linked into
-  # a release kernel, under the license its row in fiasco/kernel/ORIGIN.md
-  # records, is refused by name; permissive terms, the FSF All Permissive
+  # The seeded fault the license check exists for: a GPL-2.0-only source
+  # linked into a kernel of either build kind is refused by name; permissive
+  # terms, the FSF All Permissive
   # License, a choice with a permissive branch, an exception to a permissive
   # license and each of GCC's three headers, from a GCC include directory under
   # the label its registration gives it, pass, as LicenseCheck passes them
@@ -340,12 +340,12 @@ class FiascoProvenanceTest < Minitest::Test
   # nothing the closure records is refused as having no license.
   def test_a_release_kernel_refuses_each_source_a_release_may_not_carry
     repository = File.expand_path('../..', __dir__)
-    license = Erx::Origin.new(root: File.join(repository, 'fiasco/kernel')).imported_file('src/kern/jdb_object.cpp').fetch('license')
+    license = 'GPL-2.0-only'
     # The report names the kernel build's copy; the build read the staged input.
-    jdb = 'build/fiasco/kernel-release/src/jdb_object.cpp'
-    staged = 'build/fiasco/inputs/fiasco/kernel/src/kern/jdb_object.cpp'
-    sources = [{ 'path' => jdb, 'license' => license, 'status' => 'release',
-                 'source' => staged, 'original_source' => 'fiasco/kernel/src/kern/jdb_object.cpp' },
+    gpl = 'build/fiasco/kernel-release/src/gpl_object.cpp'
+    staged = 'build/fiasco/inputs/fiasco/kernel/src/kern/gpl_object.cpp'
+    sources = [{ 'path' => gpl, 'license' => license, 'status' => 'release',
+                 'source' => staged, 'original_source' => 'fiasco/kernel/src/kern/gpl_object.cpp' },
                { 'path' => 'kip.cpp', 'license' => 'MIT' },
                { 'path' => 'kip_addr.S', 'license' => 'FSFAP' },
                { 'path' => 'fdt.c', 'license' => '(GPL-2.0-or-later OR BSD-2-Clause)' },
@@ -354,8 +354,9 @@ class FiascoProvenanceTest < Minitest::Test
                { 'path' => 'build/fiasco/kernel-release/globalconfig.h', 'role' => 'configuration', 'code' => [] },
                { 'path' => 'build/fiasco/kernel-release/tcboffset.h', 'role' => 'code', 'code' => [],
                  'objects' => [{ 'object' => { 'path' => 'tcboffset.o' }, 'sources' => [{ 'path' => 'fdt.c' }] }] }]
-    assert_equal [[jdb, 'GPL-2.0-only']], Erx::FiascoProvenance.non_permissive(sources, build_kind: 'release', registered: {})
-    assert_empty Erx::FiascoProvenance.non_permissive(sources, build_kind: 'development', registered: {})
+    %w[release development].each do |kind|
+      assert_equal [[gpl, 'GPL-2.0-only']], Erx::FiascoProvenance.non_permissive(sources, build_kind: kind, registered: {})
+    end
     orphan = { 'path' => 'orphan.h', 'role' => 'code', 'code' => [], 'objects' => [] }
     unrecorded = { 'path' => 'unrecorded.h', 'generated_from' => [{ 'path' => 'elsewhere.cpp' }] }
     unresolved = { 'path' => 'unresolved.c', 'state' => 'unresolved' }
@@ -366,7 +367,7 @@ class FiascoProvenanceTest < Minitest::Test
     auditor = Erx::FiascoProvenance.new(root: repository, runner: nil, kind: Erx::BuildKind::RELEASE)
     report = { 'state' => 'complete', 'unresolved' => [], 'sources' => sources.first(1) }
     error = assert_raises(Erx::Error) { auditor.check_permissive(report) }
-    assert_includes error.message, "#{jdb} (GPL-2.0-only)"
+    assert_includes error.message, "#{gpl} (GPL-2.0-only)"
     blocked = report.merge('state' => 'blocked', 'unresolved' => ['source has no origin: fixture.c'])
     assert_includes assert_raises(Erx::Error) { auditor.check_permissive(blocked) }.message, 'fixture.c'
   end
@@ -416,10 +417,10 @@ class FiascoProvenanceTest < Minitest::Test
       assert_equal Erx::BuildKind::RELEASE, passed.fetch('build_kind')
       assert_equal({ 'kernel' => { 'path' => 'build/fiasco/kernel-release/fiasco', 'sha256' => Digest::SHA256.hexdigest('kernel bytes') } },
                    passed.fetch('executables'))
-      error = assert_raises(Erx::Error) { certify.call([{ 'path' => 'jdb_object.cpp', 'license' => 'GPL-2.0-only' }]) }
+      error = assert_raises(Erx::Error) { certify.call([{ 'path' => 'gpl_object.cpp', 'license' => 'GPL-2.0-only' }]) }
       FileUtils.rm_f(record)
-      error = assert_raises(Erx::Error) { certify.call([{ 'path' => 'jdb_object.cpp', 'license' => 'GPL-2.0-only' }]) }
-      assert_includes error.message, 'jdb_object.cpp (GPL-2.0-only)'
+      error = assert_raises(Erx::Error) { certify.call([{ 'path' => 'gpl_object.cpp', 'license' => 'GPL-2.0-only' }]) }
+      assert_includes error.message, 'gpl_object.cpp (GPL-2.0-only)'
       refute File.exist?(record)
     end
   end
@@ -563,18 +564,6 @@ class FiascoProvenanceTest < Minitest::Test
   def test_duplicate_compiler_assignments_are_refused
     input = command_record('/source/header.h') + "source_src/root.o := /other/source.c\n"
     assert_raises(Erx::Error) { Erx::FiascoProvenance.recorded_compile(input, object: 'src/root.o') }
-  end
-
-  def test_compound_object_cycle_is_a_typed_refusal
-    Dir.mktmpdir do |root|
-      directory = File.join(root, 'build/fiasco/kernel')
-      FileUtils.mkdir_p(directory)
-      object = File.join(directory, 'jdb_compound.o')
-      File.binwrite(object, 'object')
-      File.write(File.join(directory, '.jdb_compound.o.deps'), 'jdb_compound.o')
-      auditor = Erx::FiascoProvenance.new(root: root, kind: Erx::BuildKind::DEVELOPMENT, runner: nil)
-      assert_raises(Erx::Error) { auditor.send(:audit_object, object) }
-    end
   end
 
   def test_unknown_external_file_is_not_hashed

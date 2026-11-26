@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "obj_space_types.h"
@@ -120,15 +121,6 @@ public:
 };
 
 // ------------------------------------------------------------------------------
-INTERFACE [debug]:
-
-EXTENSION class Generic_obj_space
-{
-public:
-  FIASCO_SPACE_VIRTUAL Entry *jdb_lookup_cap(Cap_index index);
-};
-
-// -------------------------------------------------------------------------
 IMPLEMENTATION:
 
 PUBLIC template< typename SPACE >

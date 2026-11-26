@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 IMPLEMENTATION [arm && mptimer && pf_exynos]: // -----------------------------
 
 #include "config.h"
@@ -131,12 +132,3 @@ Timer::update_timer(Unsigned64 wakeup)
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [arm && exynos_mct && jdb]:
-
-IMPLEMENT_OVERRIDE
-void
-Timer::next_interval()
-{
-  if (Config::scheduler_one_shot())
-    timers.current()->set_interval(us_to_mct(100000));
-}

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "types.h"
@@ -62,14 +63,3 @@ Timer_tick::ack()
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-IMPLEMENT
-Timer_tick *
-Timer_tick::boot_cpu_timer_tick()
-{ return _glbl_timer; }
-
-IMPLEMENT
-void
-Timer_tick::next_interval()
-{ /* No one_shot here */ }

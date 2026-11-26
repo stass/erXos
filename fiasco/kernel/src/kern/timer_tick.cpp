@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "irq_chip.h"
@@ -28,24 +29,6 @@ protected:
 private:
   // we do not support triggering modes
   void switch_mode(bool) override {}
-};
-
-// ------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Timer_tick
-{
-public:
-  struct Log : public Tb_entry
-  {
-    Address user_ip;
-    void print(String_buffer *) const;
-  };
-  static_assert(sizeof(Log) <= Tb_entry::Tb_entry_size);
-
-  static void next_interval();
 };
 
 // ------------------------------------------------------------------------
@@ -123,30 +106,6 @@ PUBLIC static inline
 void
 Timer_tick::log_timer()
 {}
-
-// --------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "logdefs.h"
-#include "irq_chip.h"
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Timer_tick::Log::print(String_buffer *buf) const
-{
-  buf->printf("u-ip=0x%lx", user_ip);
-}
-
-PUBLIC static inline NEEDS["logdefs.h"]
-void
-Timer_tick::log_timer()
-{
-  Context *c = current();
-  LOG_TRACE("Timer IRQs (kernel scheduling)", "timer", c, Log,
-      l->user_ip  = c->regs()->ip();
-  );
-}
 
 // --------------------------------------------------------------------------
 IMPLEMENTATION [!input]:

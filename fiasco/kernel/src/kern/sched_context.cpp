@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 #include "per_cpu_data.h"
 #include <options.h>
@@ -146,43 +147,4 @@ Sched_context::Ready_queue::deblock(Sched_context *sc, Sched_context *crs,
   ready_enqueue(sc);
   return reschedule;
 }
-
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-/** logged scheduling event. */
-class Tb_entry_sched : public Tb_entry
-{
-public:
-  unsigned short mode;
-  Context const *owner;
-  unsigned short id;
-  unsigned short prio;
-  signed long left;
-  unsigned long quantum;
-
-  void print(String_buffer *buf) const;
-};
-static_assert(sizeof(Tb_entry_sched) <= Tb_entry::Tb_entry_size);
-
-
-IMPLEMENTATION [debug]:
-
-#include "kobject_dbg.h"
-#include "string_buffer.h"
-
-// sched
-IMPLEMENT void
-Tb_entry_sched::print(String_buffer *buf) const
-{
-  Mword t = Kobject_dbg::pointer_to_id(owner);
-
-  buf->printf("(ts %s) owner:%lx id:%2x, prio:%2x, left:%6ld/%-6lu",
-              mode == 0 ? "save" :
-              mode == 1 ? "load" :
-              mode == 2 ? "invl" : "????",
-              t, id, prio, left, quantum);
-}
-
 

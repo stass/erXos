@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "initcalls.h"
@@ -957,19 +958,3 @@ Pic::reinit(Cpu_number)
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug && pf_exynos]:
-
-PUBLIC
-char const *
-Combiner_chip::chip_type() const override
-{ return "Comb"; }
-
-PUBLIC
-char const *
-Gpio_eint_chip::chip_type() const override
-{ return "EI-Gpio"; }
-
-PUBLIC
-char const *
-Gpio_wakeup_chip::chip_type() const override
-{ return "WU-GPIO"; }

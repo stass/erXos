@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: alloc_ku_mem refuses an area under 16 KiB or not aligned
 // to its size (docs/design-fiasco.md, "Congruent UTCB areas").
 INTERFACE:
@@ -20,7 +21,6 @@ class Task :
   public cxx::Dyn_castable<Task, Kobject>,
   public Space
 {
-  friend class Jdb_space;
 
 public:
   // The least order of a kernel-user area alloc_ku_mem grants: an area at least
@@ -1050,53 +1050,3 @@ Task::~Task() override
 
 
 // ---------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Task
-{
-private:
-  struct Log_map_unmap : public Tb_entry
-  {
-    Mword id;
-    Mword mask;
-    Mword fpage;
-    bool  map;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Log_map_unmap) <= Tb_entry::Tb_entry_size);
-};
-
-// ---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Task::Log_map_unmap::print(String_buffer *buf) const
-{
-  L4_fpage fp(fpage);
-  buf->printf("task=[%c:%lx] %s=%lx fpage=[%u/",
-              map ? 'M' : 'U', id,
-              map ? "snd_base" : "mask", mask, fp.order().get());
-  switch (fp.type())
-    {
-    case L4_fpage::Special:
-      buf->printf("spc] fpage=%lx", fpage);
-      break;
-    case L4_fpage::Memory:
-      buf->printf("mem] addr=%lx", cxx::int_value<Virt_addr>(fp.mem_address()));
-      break;
-    case L4_fpage::Io:
-      buf->printf("io] port=%lx", cxx::int_value<Port_number>(fp.io_address()));
-      break;
-    case L4_fpage::Obj:
-      buf->printf("obj] cap=C:%lx", cxx::int_value<Cap_index>(fp.obj_index()));
-      break;
-    default:
-      buf->printf("???] fpage=%lx", fpage);
-      break;
-    }
-}

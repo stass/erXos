@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "gic_its.h"
@@ -274,9 +275,3 @@ Gic_msi::msi_info(Mword pin, Unsigned64 src, Irq_mgr::Msi_info *info)
   return err;
 }
 
-IMPLEMENTATION [debug]:
-
-PUBLIC inline
-char const *
-Gic_msi::chip_type() const override
-{ return "GIC-MSI"; }

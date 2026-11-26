@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: lazy FP switching is deleted; FP state is switched
 // eagerly (docs/design-fiasco.md, "Eager FP switching"). activate() can add
 // state bits with Thread_ready (docs/design-fiasco.md, "Thread creation").
@@ -554,64 +555,6 @@ private:
   jmp_buf *_recover_jmpbuf; // setjmp buffer for page-fault recovery
 };
 
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Context
-{
-public:
-  struct Drq_log : public Tb_entry
-  {
-    void *func;
-    Context *thread;
-    Drq const *rq;
-    Cpu_number target_cpu;
-    enum class Type
-    {
-      Send, Do_send, Do_request, Send_reply, Do_reply, Done
-    } type;
-    bool wait;
-    void print(String_buffer *buf) const;
-    Group_order has_partner() const
-    {
-      switch (type)
-        {
-        case Type::Send: return Group_order::first();
-        case Type::Do_send: return Group_order(1);
-        case Type::Do_request: return Group_order(2);
-        case Type::Send_reply: return Group_order(3);
-        case Type::Do_reply: return Group_order(4);
-        case Type::Done: return Group_order::last();
-        }
-      return Group_order::none();
-    }
-
-    Group_order is_partner(Drq_log const *o) const
-    {
-      if (rq != o->rq || func != o->func)
-        return Group_order::none();
-
-      return o->has_partner();
-    }
-  };
-  static_assert(sizeof(Drq_log) <= Tb_entry::Tb_entry_size);
-
-  struct Vcpu_log : public Tb_entry
-  {
-    Mword state;
-    Mword ip;
-    Mword sp;
-    Mword space;
-    Mword err;
-    unsigned char type;
-    unsigned char trap;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Vcpu_log) <= Tb_entry::Tb_entry_size);
-};
-
-// --------------------------------------------------------------------------
 IMPLEMENTATION:
 
 #include <cassert>
@@ -2886,80 +2829,3 @@ Context::restore_fpu_on_resume()
 {}
 
 //----------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-/** logged context switch. */
-class Tb_entry_ctx_sw : public Tb_entry
-{
-public:
-  using Tb_entry::_ip;
-
-  Context const *dst;		///< switcher target
-  Address kernel_ip;
-  Mword lock_cnt;
-  Space const *from_space;
-  Sched_context const *from_sched;
-  Mword from_prio;
-  void print(String_buffer *buf) const;
-};
-static_assert(sizeof(Tb_entry_ctx_sw) <= Tb_entry::Tb_entry_size);
-
-
-// --------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "kobject_dbg.h"
-#include "string_buffer.h"
-
-PUBLIC inline
-Mword *
-Context::get_kernel_sp() const
-{
-  return _kernel_sp;
-}
-
-IMPLEMENT
-void
-Context::Drq_log::print(String_buffer *buf) const
-{
-  static char const *const _types[] =
-    { "send", "do send", "do request", "send reply", "do reply", "done" };
-
-  char const *t = "unk";
-  if (static_cast<unsigned>(type) < cxx::size(_types))
-    t = _types[static_cast<unsigned>(type)];
-
-  buf->printf("%s(%s) rq=%p to ctxt=%lx/%p (func=%p) cpu=%u",
-      t, wait ? "wait" : "no-wait", static_cast<void const *>(rq),
-      Kobject_dbg::pointer_to_id(thread), static_cast<void *>(thread), func,
-      cxx::int_value<Cpu_number>(target_cpu));
-}
-
-// context switch
-IMPLEMENT
-void
-Tb_entry_ctx_sw::print(String_buffer *buf) const
-{
-  Context *sctx = nullptr;
-  Mword sctxid = ~0UL;
-  Mword dst;
-
-  sctx = from_sched->context();
-  sctxid = Kobject_dbg::pointer_to_id(sctx);
-
-  dst = Kobject_dbg::pointer_to_id(this->dst);
-
-  if (sctx != ctx())
-    buf->printf("(%lx)", sctxid);
-
-  buf->printf(" ==> %lx ", dst);
-
-  if (lock_cnt)
-    buf->printf("(lck %lu)", lock_cnt);
-
-  buf->printf(" krnl " L4_PTR_FMT " @ " L4_PTR_FMT, kernel_ip, _ip);
-}
-
-

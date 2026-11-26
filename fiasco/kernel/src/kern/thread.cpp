@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: lazy FP switching is deleted, FP state is switched eagerly
 // (docs/design-fiasco.md, "Eager FP switching"); a test kernel's seed, ERX_TEST_KILL_UNMIGRATED.
 INTERFACE:
@@ -248,23 +249,6 @@ protected:
 };
 
 // ------------------------------------------------------------------------
-INTERFACE[debug]:
-
-EXTENSION class Thread
-{
-public:
-  class Dbg_stack
-  {
-  public:
-    enum { Stack_size = Config::PAGE_SIZE };
-    void *stack_top;
-    Dbg_stack();
-  };
-
-  static Per_cpu<Dbg_stack> dbg_stack;
-};
-
-
 IMPLEMENTATION:
 
 #include <cassert>
@@ -1159,27 +1143,6 @@ Thread::force_to_invalid_cpu()
 }
 
 //----------------------------------------------------------------------------
-INTERFACE [debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Thread
-{
-protected:
-  struct Migration_log : public Tb_entry
-  {
-    Mword    state;
-    Address  user_ip;
-    Cpu_number src_cpu;
-    Cpu_number target_cpu;
-
-    void print(String_buffer *) const;
-  };
-  static_assert(sizeof(Migration_log) <= Tb_entry::Tb_entry_size);
-};
-
-
-// ----------------------------------------------------------------------------
 IMPLEMENTATION [mp]:
 
 #include "ipi.h"
@@ -1551,68 +1514,6 @@ Thread::migrate_xcpu(Cpu_number cpu)
     Ipi::send(Ipi::Request, current_cpu(), cpu);
 
   return Reschedule::No;
-}
-
-//----------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include "string_buffer.h"
-#include "kdb_ke.h"
-#include "terminate.h"
-
-IMPLEMENT
-Thread::Dbg_stack::Dbg_stack()
-{
-  stack_top = Kmem_alloc::allocator()->alloc(Bytes(Stack_size));
-  if (stack_top)
-    stack_top = static_cast<char *>(stack_top) + Stack_size;
-  //printf("JDB STACK start= %p - %p\n", (char *)stack_top - Stack_size, (char *)stack_top);
-}
-
-DEFINE_PER_CPU Per_cpu<Thread::Dbg_stack> Thread::dbg_stack;
-
-PUBLIC [[noreturn]] static
-void
-Thread::system_abort()
-{
-  if (nested_trap_handler)
-    kdb_ke("abort");
-
-  terminate(EXIT_FAILURE);
-}
-
-IMPLEMENT
-void
-Thread::Migration_log::print(String_buffer *buf) const
-{
-  buf->printf("migrate from %u to %u (state=%lx user ip=%lx)",
-              cxx::int_value<Cpu_number>(src_cpu),
-              cxx::int_value<Cpu_number>(target_cpu), state, user_ip);
-}
-
-PUBLIC
-void
-Thread::halt()
-{
-  // Cancel must be cleared on all kernel entry paths. See slowtraps for
-  // why we delay doing it until here.
-  state_del(Thread_cancel);
-
-  // we haven't been re-initialized (cancel was not set) -- so sleep
-  if (state_change_safely(~Thread_ready, Thread_cancel | Thread_dead))
-    while (! (state() & Thread_ready))
-      schedule();
-}
-
-PUBLIC static
-void
-Thread::halt_current()
-{
-  for (;;)
-    {
-      current_thread()->halt();
-      kdb_ke("Thread not halted");
-    }
 }
 
 //----------------------------------------------------------------------------

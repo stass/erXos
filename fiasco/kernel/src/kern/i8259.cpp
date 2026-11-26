@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [i8259]:
 
 #include "atomic.h"
@@ -453,9 +454,3 @@ Irq_chip_i8259<IO>::mask_and_ack(Mword pin) override
 }
 
 // -----------------------------------------------------------------
-IMPLEMENTATION [i8259 && debug]:
-
-PUBLIC template<typename IO>
-char const *
-Irq_chip_i8259<IO>::chip_type() const override
-{ return "i8259"; }

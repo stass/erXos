@@ -610,35 +610,18 @@ class PackProvenanceTest < Minitest::Test
     end
   end
 
-  # Where the build reads each row's input of the closed table (LicenseCheck::TABLE)
-  # that the fixture places, and the build kinds that row names: Fiasco's debugger in the
-  # staged copy of its inputs that FiascoProvenance audits, in development builds only.
-  def table_rows
-    [{ label: 'fiasco/kernel/src/kern/jdb_object.cpp', license: 'GPL-2.0-only',
-       at: 'build/fiasco/inputs/fiasco/kernel/src/kern/jdb_object.cpp', kinds: %w[development] }]
-  end
-
   def gcc_header(outside, name) = File.join(outside, 'lib/gcc/aarch64-elf/16.2.0/include', name)
 
   # Seeded fault: a build accepts a license that is not permissive only from
   # LicenseCheck::TABLE, so a GPL input that the table does not name is refused in
-  # every build kind, as is one of the table's labels under another license or another
-  # status (Fiasco's debugger registered as a stopgap or as permanent, not as release),
-  # each at the place its row reads it from, and GCC's exception on any file: a header of
-  # a GCC include directory, a clang resource header, or a GCC runtime file of l4re-core
+  # every build kind, as is GCC's exception on any file: a header of a GCC include directory, a clang resource header, or a GCC runtime file of l4re-core
   # such as an old build linked.
   def test_a_gpl_input_outside_the_closed_table_is_refused
     Dir.mktmpdir('outside-toolchain-') do |outside|
-      jdb = 'build/fiasco/inputs/fiasco/kernel/src/kern/jdb_object.cpp'
       gcc = 'GPL-3.0-or-later WITH GCC-exception-3.1'
       refusals = [{ license: 'GPL-2.0-only', label: 'third_party/fixture/root.c', at: 'root.c' },
                   { license: 'GPL-2.0-only', label: 'fiasco/kernel/src/kern/fixture.cpp',
                     at: 'build/fiasco/inputs/fiasco/kernel/src/kern/fixture.cpp' },
-                  { license: 'GPL-2.0-only', label: 'fiasco/kernel/src/kern/arm/jdb_object.cpp',
-                    at: 'build/fiasco/inputs/fiasco/kernel/src/kern/arm/jdb_object.cpp' },
-                  { license: 'GPL-2.0-or-later', label: 'fiasco/kernel/src/kern/jdb_object.cpp', at: jdb },
-                  { license: 'GPL-2.0-only', label: 'fiasco/kernel/src/kern/jdb_object.cpp', status: 'permanent', at: jdb },
-                  { license: 'GPL-2.0-only', label: 'fiasco/kernel/src/kern/jdb_object.cpp', status: 'stopgap', at: jdb },
                   { license: 'GPL-3.0-or-later', label: 'toolchain/gcc-16.2.0/stdarg.h', at: gcc_header(outside, 'stdarg.h') },
                   { license: gcc, label: 'toolchain/gcc-16.2.0/stdarg.h', at: gcc_header(outside, 'stdarg.h') },
                   { license: gcc, label: 'toolchain/llvm/include/stdarg.h',
@@ -650,40 +633,6 @@ class PackProvenanceTest < Minitest::Test
           resolve_registered_at(input.fetch(:at), build_kind: kind, **{ status: 'release' }.merge(input.except(:at)))
         end
         assert_match(/no permitted grant/, error.message, [input, kind].inspect)
-      end
-    end
-  end
-
-  # Seeded fault: a row names its input by where the build reads it as well as by its
-  # label, so a registration under the row's label and license that names other bytes,
-  # such as the repository's copy of a Fiasco file the build compiles from its staged copy,
-  # is refused in every build kind.
-  def test_a_table_row_refuses_its_label_at_another_path
-    table_rows.product(%w[development release]).each do |row, kind|
-      ['root.c', 'fiasco/kernel/src/kern/jdb_object.cpp'].each do |at|
-        error = assert_raises(Erx::Error) do
-          resolve_registered_at(at, status: 'release', build_kind: kind, **row.slice(:label, :license))
-        end
-        assert_match(/no permitted grant/, error.message, [row.fetch(:label), at, kind].inspect)
-      end
-    end
-  end
-
-  # Each row of the table accepts its input under its exact license and the status of what
-  # it is a part of, release for Fiasco (docs/design.md's dependency table), at the place
-  # the build reads it, in the build kinds it names, and no other build kind admits it:
-  # Fiasco's debugger enters no release build.
-  def test_the_closed_table_admits_each_row_in_the_build_kinds_it_names
-    table_rows.product(%w[development release]).each do |row, kind|
-      label, license, at, kinds = row.values_at(:label, :license, :at, :kinds)
-      if kinds.include?(kind)
-        record = resolve_registered_at(at, license: license, label: label, status: 'release', build_kind: kind).first
-        assert_equal [label, license, 'release'], record.values_at('path', 'declared_license', 'status')
-      else
-        error = assert_raises(Erx::Error) do
-          resolve_registered_at(at, license: license, label: label, status: 'release', build_kind: kind)
-        end
-        assert_match(/no permitted grant/, error.message, [label, kind].inspect)
       end
     end
   end

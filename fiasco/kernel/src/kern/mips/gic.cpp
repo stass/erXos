@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include "irq_chip_generic.h"
@@ -345,9 +346,3 @@ Gic::set_cpu(Mword, Cpu_number) override
 { return false; }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-PUBLIC
-char const *
-Gic::chip_type() const override
-{ return "GIC"; }

@@ -1,14 +1,8 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 /*
  * Fiasco-ia32
  * Specific code for I/O port protection
  */
-INTERFACE[(ia32 || amd64) && io && debug]:
-
-#include "mapdb.h"
-#include "types.h"
-
-extern Static_object<Mapdb> mapdb_io;
-
 IMPLEMENTATION[(ia32 || amd64) && io]:
 
 #include "l4_types.h"

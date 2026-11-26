@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: lazy FP switching is deleted; FP state is switched
 // eagerly (docs/design-fiasco.md, "Eager FP switching").
 INTERFACE [svm]:
@@ -18,22 +19,6 @@ private:
   {
     return offset_cast<Vmcb *>(s, Config::Ext_vcpu_state_offset);
   }
-};
-
-// ------------------------------------------------------------------------
-INTERFACE [svm && debug]:
-
-#include "tb_entry.h"
-
-EXTENSION class Vm_svm
-{
-protected:
-  struct Log_vm_svm_exit : public Tb_entry
-  {
-    Mword exitcode, exitinfo1, exitinfo2, rip;
-    void print(String_buffer *buf) const;
-  };
-  static_assert(sizeof(Log_vm_svm_exit) <= Tb_entry::Tb_entry_size);
 };
 
 // ------------------------------------------------------------------------
@@ -737,14 +722,3 @@ register_factory()
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [svm && debug]:
-
-#include "string_buffer.h"
-
-IMPLEMENT
-void
-Vm_svm::Log_vm_svm_exit::print(String_buffer *buf) const
-{
-  buf->printf("ec=%lx ei1=%08lx ei2=%08lx rip=%08lx",
-              exitcode, exitinfo1, exitinfo2, rip);
-}

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && pf_s3c2410]:
 
 #include "initcalls.h"
@@ -243,10 +244,3 @@ void irq_handler()
 }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [debug && pf_s3c2410]:
-
-PUBLIC
-char const *
-S3c_chip::chip_type() const override
-{ return "HW S3C2410 IRQ"; }
-

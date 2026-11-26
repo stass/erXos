@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE:
 
 #include <auto_quota.h>
@@ -655,16 +656,3 @@ Kmem_alloc_reaper::morecore(bool desperate = false)
 }
 
 //----------------------------------------------------------------------------
-IMPLEMENTATION [debug || jdb_kmem_stats]:
-
-PUBLIC
-void
-Kmem_alloc::debug_dump()
-{
-  a->dump();
-
-  unsigned long free = a->avail();
-  printf("Used %llu%%, %lu KiB out of %lu KiB of Kmem\n",
-         100ULL * (_orig_free - free) / _orig_free,
-         (_orig_free - free + 1023) / 1024, (_orig_free + 1023) / 1024);
-}

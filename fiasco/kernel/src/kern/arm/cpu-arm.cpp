@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm]:
 
 #include "mem_unit.h"
@@ -110,16 +111,6 @@ private:
   // 32 bits: 24..31: Aff3 (0 for ARM32); 16..23: Aff2; 8..15: Aff1; 0..7: Aff0
   Cpu_phys_id _phys_id;
   Ids _cpu_id;
-};
-
-// ------------------------------------------------------------------------
-INTERFACE [debug && arm_v6plus]:
-
-#include "cpu_mask.h"
-
-EXTENSION class Cpu
-{
-  static Global_data<Cpu_mask_t<Config::Max_num_cpus>> _infos_shown;
 };
 
 // ------------------------------------------------------------------------
@@ -932,54 +923,3 @@ Cpu::init_ras(bool is_boot_cpu)
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [debug && arm_v6plus]:
-
-DEFINE_GLOBAL
-Global_data<Cpu_mask_t<Config::Max_num_cpus>> Cpu::_infos_shown;
-
-PRIVATE
-bool
-Cpu::cpu_infos_shown_with_same_ids(Cpu_number &cpu_with_same_ids) const
-{
-  for (Cpu_number n : _infos_shown)
-    if (cpus.cpu(n)._cpu_id == _cpu_id)
-      {
-        cpu_with_same_ids = n;
-        return true;
-      }
-
-  return false;
-}
-
-IMPLEMENT_OVERRIDE
-void
-Cpu::print_infos() const
-{
-  // Put in some effort to reduce logging with many CPUs.
-  int n = cxx::int_value<Cpu_number>(current_cpu());
-  Cpu_number cpu_with_same_ids;
-  if (cpu_infos_shown_with_same_ids(cpu_with_same_ids))
-    printf("CPU%u booted (same IDs as CPU%u).\n",
-           n, cxx::int_value<Cpu_number>(cpu_with_same_ids));
-  else
-    {
-      _infos_shown->atomic_set(id());
-      printf("CPU%u: ID_PFR[01]:  %08lx %08lx ID_[DA]FR0: %08lx %08lx\n"
-             "%*s ID_MMFR[04]: %08lx %08lx %08lx %08lx\n",
-             n, _cpu_id._pfr[0], _cpu_id._pfr[1], _cpu_id._dfr0, _cpu_id._afr0,
-             n > 9 ? 6 : 5, "",
-             _cpu_id._mmfr[0], _cpu_id._mmfr[1], _cpu_id._mmfr[2], _cpu_id._mmfr[3]);
-    }
-}
-
-// ------------------------------------------------------------------------
-IMPLEMENTATION [debug]:
-
-#include <cxx/conditionals>
-
-IMPLEMENT_OVERRIDE
-void
-Cpu::print_boot_infos()
-{
-  boot_cpu()->print_infos(); // all other CPUs in App_cpu_thread::bootstrap()
-}

@@ -1,3 +1,4 @@
+// Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 INTERFACE [arm && pf_omap3]:
 
 #include "initcalls.h"
@@ -162,9 +163,3 @@ Pic::set_pending_irq(unsigned group32num, Unsigned32 val)
 }
 
 //-------------------------------------------------------------------------
-IMPLEMENTATION [debug && pf_omap3]:
-
-PUBLIC
-char const *
-Irq_chip_arm_omap3::chip_type() const override
-{ return "HW OMAP3 IRQ"; }
