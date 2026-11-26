@@ -1819,6 +1819,12 @@ designed. It maps the format onto the file protocol as follows:
   4), so a chain is never shorter than its size; and a cluster is freed
   only once nothing reaches it (steps 3 and 4 before 5). Each FAT entry
   goes to every copy of the FAT in the same step, the first copy first.
+  The dirty flag alone goes to the copies in two steps each way: set in
+  the FAT the server reads, flushed, then in the others; cleared in the
+  others, flushed, then last in the FAT the server reads. So that FAT
+  reads dirty whenever the copies may differ, and a cut between copies
+  never leaves a volume that reads clean with FATs that disagree, which
+  fsimg's verify refuses ("mirrored FAT entries disagree").
 
   Every cluster a batch frees belongs to a chain that no name reaches: a
   removed file's, once no fid names the file ("Removing a file" below),

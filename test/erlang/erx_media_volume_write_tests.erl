@@ -12,7 +12,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% The RAM medium and fsimg's reading of an image, which erx_media_tree_tests shares.
--export([ram/2, ram_final/1, extracted/1]).
+-export([ram/2, ram_final/1, extracted/1, unreadable/1]).
 
 -define(SECTOR, 512).
 
@@ -20,7 +20,8 @@
 %% A RAM medium behind a window proxy
 %% ---------------------------------------------------------------------------
 
-%% A proxy over Medium that answers flush with ok, applies writes until Cut of them
+%% A proxy over Medium, a binary or erx_media_volume_tests's {synthesized, Sectors,
+%% Sector}, that answers flush with ok, applies writes until Cut of them
 %% have landed (infinity: all), and answers every later write `eio` unapplied. The
 %% sectors written are kept beside Medium, so a write copies one sector, not the
 %% image. It ends once ram_final/1 has its medium, when the test that made it ends,
@@ -29,34 +30,49 @@ ram(Medium, Cut) ->
     Test = self(),
     spawn_link(fun() ->
                        erlang:monitor(process, Test),
-                       ram_serve(#{medium => Medium, written => #{}, cut => Cut, writes => 0, log => []})
+                       ram_serve(#{medium => Medium, sectors => sectors(Medium), written => #{}, cut => Cut, writes => 0,
+                                    reads => 0, log => []})
                end).
 
-ram_serve(#{medium := Medium, written := Written, cut := Cut, writes := Writes, log := Log} = S) ->
+ram_serve(#{medium := Medium, sectors := Sectors, written := Written, cut := Cut, writes := Writes, reads := Reads,
+             log := Log} = S) ->
     receive
         {'DOWN', _, process, _Test, _} ->
             ok;
         {'$gen_call', From, info} ->
-            gen:reply(From, {ok, #{role => drive, sectors => byte_size(Medium) div ?SECTOR}}), ram_serve(S);
+            gen:reply(From, {ok, #{role => drive, sectors => Sectors}}), ram_serve(S);
         {'$gen_call', From, {read, _Lba, 1}} when is_map_key(fail_reads, S) ->
             gen:reply(From, {error, eio}), ram_serve(S);
         {fail_reads, Test} ->
             Test ! reads_failing, ram_serve(S#{fail_reads => true});
-        {'$gen_call', From, {read, Lba, 1}} when (Lba + 1) * ?SECTOR =< byte_size(Medium) ->
-            Sector = maps:get(Lba, Written, binary:part(Medium, Lba * ?SECTOR, ?SECTOR)),
-            gen:reply(From, {ok, binary:copy(Sector)}), ram_serve(S);
+        {'$gen_call', From, {read, Lba, 1}} when Lba < Sectors ->
+            Sector = case Written of #{Lba := Bytes} -> Bytes; #{} -> base(Medium, Lba) end,
+            gen:reply(From, {ok, binary:copy(Sector)}), ram_serve(S#{reads := Reads + 1});
         {'$gen_call', From, flush} ->
             gen:reply(From, ok), ram_serve(S#{log := [flush | Log]});
         {'$gen_call', From, {write, _Lba, _Bytes}} when Writes >= Cut ->
             gen:reply(From, {error, eio}), ram_serve(S);
-        {'$gen_call', From, {write, Lba, <<_:?SECTOR/binary>> = Bytes}} when (Lba + 1) * ?SECTOR =< byte_size(Medium) ->
+        {'$gen_call', From, {write, Lba, <<_:?SECTOR/binary>> = Bytes}} when Lba < Sectors ->
             gen:reply(From, ok),
             ram_serve(S#{written := Written#{Lba => Bytes}, writes := Writes + 1, log := [{write, Lba} | Log]});
         {'$gen_call', _From, Unserved} ->
             error({unserved, Unserved});
+        {counts, Test} ->
+            Test ! {counts, self(), Reads, Writes}, ram_serve(S);
         {final, Test} ->
             Test ! {ram, self(), applied(Medium, Written), Writes, lists:reverse(Log)}
     end.
+
+sectors({synthesized, Sectors, _Sector}) -> Sectors;
+sectors(Medium) -> byte_size(Medium) div ?SECTOR.
+
+base({synthesized, _Sectors, Sector}, Lba) -> Sector(Lba);
+base(Medium, Lba) -> binary:part(Medium, Lba * ?SECTOR, ?SECTOR).
+
+%% The reads and writes Proxy has answered so far.
+counts(Proxy) ->
+    Proxy ! {counts, self()},
+    receive {counts, Proxy, Reads, Writes} -> {Reads, Writes} end.
 
 %% Medium with each sector of Written in its place.
 applied(Medium, Written) ->
@@ -83,7 +99,7 @@ image(Name) ->
 volume(Proxy, Medium) ->
     ok = erx_media_volume:new_mounts(),
     process_flag(trap_exit, true),
-    {ok, Pid} = erx_media_volume:start_link(Proxy, #{number => 1, first => 0, length => byte_size(Medium) div ?SECTOR}),
+    {ok, Pid} = erx_media_volume:start_link(Proxy, #{number => 1, first => 0, length => sectors(Medium)}),
     Pid.
 
 %% The volume finished as its supervisor ends it.
@@ -190,8 +206,96 @@ cut(Base, Cut) ->
     Again = volume(Remounted, Medium),
     Outcome = erx_media_volume:outcome(Again),
     ?assert(lists:member(maps:get(mount, Outcome), [rw, {ro, dirty}])),
+    ?assertEqual({Cut, []}, {Cut, unreadable(Again)}),
     finish(Again),
     _ = ram_final(Remounted).
+
+%% The steps a stick took from rc on a board: a file written, then appended to, a
+%% directory made, the file moved into it and removed there, each through the calls
+%% the file server makes, each group committed as a batch of its own.
+removal(Pid) ->
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    {ok, file, Hello} = erx_media_volume:create(Pid, Root, <<"note.txt">>),
+    {ok, 6} = erx_media_volume:write(Pid, Hello, 0, <<"hello\n">>),
+    erx_media_volume:forget(Pid, Hello),
+    {ok, file, Again} = erx_media_volume:walk(Pid, Root, <<"note.txt">>),
+    {ok, 6, _} = erx_media_volume:append(Pid, Again, <<"again\n">>),
+    erx_media_volume:forget(Pid, Again),
+    ok = erx_media_volume:fsync(Pid),
+    {ok, dir, New} = erx_media_volume:mkdir(Pid, Root, <<"newdir">>),
+    ok = erx_media_volume:rename(Pid, Root, <<"note.txt">>, New, <<"moved.txt">>),
+    ok = erx_media_volume:fsync(Pid),
+    ok = erx_media_volume:remove(Pid, New, <<"moved.txt">>),
+    ok = erx_media_volume:fsync(Pid).
+
+%% Every write of the removal cut in turn: the medium left mounts writable, clean
+%% and passing fsimg's verify, or read-only as dirty, and either way every directory
+%% of its tree reads, the root first.
+every_cut_of_a_removal_leaves_a_tree_that_reads_test_() ->
+    [{Name, {timeout, 600, fun() -> removal_cuts(Name) end}} || Name <- ["fat16.img", "fat32.img"]].
+
+removal_cuts(Name) ->
+    Base = image(Name),
+    Whole = ram(Base, infinity),
+    Pid = volume(Whole, Base),
+    ok = removal(Pid),
+    finish(Pid),
+    {_, Total, _} = ram_final(Whole),
+    lists:foreach(fun(Cut) -> removal_cut(Base, Cut) end, lists:seq(0, Total)).
+
+removal_cut(Base, Cut) ->
+    Proxy = ram(Base, Cut),
+    Pid = volume(Proxy, Base),
+    _ = try removal(Pid) catch error:_Ended -> cut end,
+    receive {'EXIT', Pid, _} -> ok after 0 -> finish(Pid) end,
+    {Medium, _, _} = ram_final(Proxy),
+    Again = volume(ram(Medium, infinity), Medium),
+    ?assertEqual({Cut, []}, {Cut, unreadable(Again)}),
+    case maps:get(mount, erx_media_volume:outcome(Again)) of
+        rw -> ?assertMatch({Cut, {0, _}}, {Cut, erx_fat_alloc_tests:verify(Medium)});
+        Mount -> ?assertEqual({Cut, {ro, dirty}}, {Cut, Mount})
+    end,
+    finish(Again).
+
+%% The directories of the volume Pid that do not read, from the root down, each with
+%% its refusal: [] for a tree that reads whole.
+unreadable(Pid) ->
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    unreadable(Pid, Root, <<>>).
+
+unreadable(Pid, Dir, Name) ->
+    case erx_media_volume:list(Pid, Dir) of
+        {ok, Entries} ->
+            lists:append([case erx_media_volume:walk(Pid, Dir, Sub) of
+                              {ok, dir, Path} -> unreadable(Pid, Path, <<Name/binary, "/", Sub/binary>>);
+                              Refused -> [{<<Name/binary, "/", Sub/binary>>, Refused}]
+                          end || {Sub, dir, _} <- Entries]);
+        Refused ->
+            [{<<Name/binary, "/">>, Refused}]
+    end.
+
+%% The removal on a volume shaped as an 8 GB FAT32 stick, 1,953,534 clusters of 4 KiB
+%% and FATs of 15,263 sectors each: the remove and its batch read and write a
+%% handful of sectors, not the FAT, whose size never enters what a removal costs.
+a_removal_on_a_large_volume_costs_a_handful_of_sectors_test_() ->
+    {timeout, 300, fun() ->
+                           Medium = erx_media_volume_tests:fat32_shaped(15_628_288, 8, 4, 40),
+                           Proxy = ram(Medium, infinity),
+                           Pid = volume(Proxy, Medium),
+                           ?assertMatch(#{mount := rw}, erx_media_volume:outcome(Pid)),
+                           {ok, dir, Root} = erx_media_volume:root(Pid),
+                           {ok, file, F} = erx_media_volume:create(Pid, Root, <<"moved.txt">>),
+                           {ok, 6} = erx_media_volume:write(Pid, F, 0, <<"hello\n">>),
+                           erx_media_volume:forget(Pid, F),
+                           ok = erx_media_volume:fsync(Pid),
+                           {Reads, Writes} = counts(Proxy),
+                           ok = erx_media_volume:remove(Pid, Root, <<"moved.txt">>),
+                           ok = erx_media_volume:fsync(Pid),
+                           {ReadsAfter, WritesAfter} = counts(Proxy),
+                           ?assert(ReadsAfter - Reads =< 16),
+                           ?assert(WritesAfter - Writes =< 8),
+                           finish(Pid)
+                   end}.
 
 %% ---------------------------------------------------------------------------
 %% Files by fid
@@ -311,9 +415,17 @@ a_commit_that_cannot_read_ends_the_volume_test() ->
     {ok, 5000} = erx_media_volume:write(Pid, F, 0, pattern(5000, 3)),
     Proxy ! {fail_reads, self()},
     receive reads_failing -> ok end,
-    ?assertEqual({error, eio}, erx_media_volume:fsync(Pid)),
-    receive {'EXIT', Pid, Why} -> ?assertMatch({shutdown, {failed, _}}, Why)
-    after 5000 -> error(volume_lives_on)
+    %% The end, which the drive's status no longer shows, is logged with its reason.
+    ok = logger:add_handler(?MODULE, erx_media_volume_tests, #{config => #{test => self()}}),
+    try
+        ?assertEqual({error, eio}, erx_media_volume:fsync(Pid)),
+        receive {'EXIT', Pid, Why} -> ?assertMatch({shutdown, {failed, _}}, Why)
+        after 5000 -> error(volume_lives_on)
+        end,
+        ?assertEqual(<<"erx_media: volume s1 ended: its commit failed: read_failed">>,
+                     receive {logged, Line} -> Line after 0 -> none end)
+    after
+        logger:remove_handler(?MODULE)
     end.
 
 %% A volume whose names and chains do not form one tree mounts read-only, `tree`.

@@ -171,10 +171,12 @@ finish(B = #batch{alloc = Alloc}) ->
                     end
             end).
 
-%% The allocator's Plan with the batch's directory sectors in their steps.
+%% The allocator's Plan with the batch's directory sectors in their steps, the
+%% allocator's own steps past the batch's, the clean bit's, after them in its order.
 merged(#batch{images = Images}, Plan) ->
     Dir = [{Step, lists:sort([{Sector, Bytes} || Sector := #{Step := Bytes} <- Images])} || Step <- ?STEPS],
-    [{Step, Writes} || Step <- ?PLAN_STEPS ++ [clean],
+    Flags = [Step || {Step, _} <- Plan, not lists:member(Step, ?PLAN_STEPS)],
+    [{Step, Writes} || Step <- ?PLAN_STEPS ++ Flags,
                        Writes <- [proplists:get_value(Step, Dir, []) ++ proplists:get_value(Step, Plan, [])],
                        Writes =/= []].
 

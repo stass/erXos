@@ -61,6 +61,10 @@ class ErxFatAllocTest < Minitest::Test
     Fault.new(name: "FAT32's top bits dropped",
               from: 'encode(32, Old, Value) -> (Old band ?RESERVED_32) bor (Value band ?VALUE_32).',
               to: 'encode(32, _Old, Value) -> Value band ?VALUE_32.',
+              caught_by: 'the_dirty_and_clean_steps_keep_the_top_bits_and_set_the_hints_test'),
+    Fault.new(name: 'the dirty flag set in every FAT in one step',
+              from: '[{dirty, Read}, {dirty_mirrors, Mirrors ++ fsinfo_writes(Alloc, ?UNKNOWN)}]',
+              to: '[{dirty, Read ++ Mirrors ++ fsinfo_writes(Alloc, ?UNKNOWN)}]',
               caught_by: 'the_dirty_and_clean_steps_keep_the_top_bits_and_set_the_hints_test')
   ].freeze
 

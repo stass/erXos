@@ -405,10 +405,11 @@ effect(Change, State) ->
     end.
 
 %% A volume that ends without finish/1 finishes here (last_batch/1); a volume whose
-%% write failed, or that finish/1 already finished, writes nothing more.
+%% write failed, or that finish/1 already finished, writes nothing more. A failed
+%% volume says why in the log, since its end leaves the drive's status without it.
 -doc false.
-terminate({shutdown, {failed, _}}, _State) ->
-    ok;
+terminate({shutdown, {failed, Why}}, #{volume := #{number := Number}}) ->
+    logger:notice("erx_media: volume s~b ended: its commit failed: ~0P", [Number, Why, 8]);
 terminate(_Why, #{finished := false, batch := Batch} = State) when Batch =/= read_only ->
     try last_batch(State) catch throw:{?MODULE, _, _} -> ok end;
 terminate(_Why, _State) ->

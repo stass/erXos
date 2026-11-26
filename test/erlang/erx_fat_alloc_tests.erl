@@ -434,14 +434,17 @@ the_dirty_and_clean_steps_keep_the_top_bits_and_set_the_hints_test() ->
     L = synthetic(32, 300, 2, fun(C) -> C rem 16 end),
     Tops = tops(L),
     A = erx_fat_alloc:new(L),
-    {ok, [{dirty, Dirty}]} = erx_fat_alloc:dirty(A),
-    write(Dirty),
+    %% The FAT the server reads loses the clean bit first, alone, and gets it back last.
+    {ok, Dirty} = erx_fat_alloc:dirty(A),
+    ?assertMatch([{dirty, [{2, _}]}, {dirty_mirrors, [_, _]}], Dirty),
+    apply_plan(Dirty),
     ?assertEqual(#{clean => false, hard_error => false}, erx_fat_alloc:volume_flags(32, raw(L, 0, 1))),
     ?assertEqual({?UNKNOWN, ?UNKNOWN}, hints()),
     copies_equal(L),
     {ok, [2, 3, 4], A1} = erx_fat_alloc:grow(A, none, 3),
     {ok, Plan, _} = erx_fat_alloc:finish(A1),
-    ?assertEqual([preparation, release, clean], [Step || {Step, _} <- Plan]),
+    ?assertEqual([preparation, release, clean_mirrors, clean], [Step || {Step, _} <- Plan]),
+    ?assertMatch({clean, [{2, _}]}, lists:last(Plan)),
     apply_plan(Plan),
     ?assertEqual([2, 3, 4], walk(L, 2)),
     ?assertEqual(#{clean => true, hard_error => false}, erx_fat_alloc:volume_flags(32, raw(L, 0, 1))),
@@ -454,7 +457,7 @@ a_finish_without_an_allocation_leaves_the_hint_unknown_test() ->
     A = erx_fat_alloc:new(L),
     {ok, Dirty} = erx_fat_alloc:dirty(A),
     apply_plan(Dirty),
-    ?assertMatch({ok, [{clean, _}], _}, erx_fat_alloc:finish(A)),
+    ?assertMatch({ok, [{clean_mirrors, _}, {clean, _}], _}, erx_fat_alloc:finish(A)),
     ?assertEqual({?UNKNOWN, ?UNKNOWN}, hints()).
 
 the_hint_wraps_past_the_last_cluster_test() ->

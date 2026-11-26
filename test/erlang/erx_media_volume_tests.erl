@@ -13,7 +13,7 @@
 -include("erx_fs_waits.hrl").
 
 %% The fixtures the media tree's cases share (erx_media_tree_tests).
--export([image/1, proxy/2, mbr/2, sectors/1, facet/1]).
+-export([image/1, proxy/2, mbr/2, sectors/1, facet/1, fat32_shaped/4]).
 %% The logger handler a case adds.
 -export([log/2]).
 

@@ -48,7 +48,10 @@ and no chain reaches a free cluster.
   second entry and writes FAT32's FSInfo hints unknown; finish/1 commits batches
   until no chain waits, writes in the last one's release step a next-free hint,
   the cluster after the last one the mount allocated, when it allocated any, and
-  then sets the clean bit. The hard-error bit is written as it was read. An
+  then sets the clean bit. The FAT the server reads is the first copy to lose the
+  clean bit and the last to get it back, each in a step of its own, so it reads
+  dirty whenever its copies may disagree, and a cut between copies never leaves a
+  clean volume whose FATs differ. The hard-error bit is written as it was read. An
   FSInfo sector without its signatures is left as it is.
 * **Chains read from the medium** are untrusted: one is followed only through
   clusters of the data area, at most as many links as the volume has clusters,
@@ -99,7 +102,7 @@ allocator as it was.
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
 -type layout() :: #{read := read_sector(), type := 16 | 32, fat_start := pos_integer(), fats := pos_integer(),
                     fat_sectors := pos_integer(), clusters := pos_integer(), fsinfo := pos_integer() | none}.
--type step() :: dirty | preparation | linking | publication | cutting | release | clean.
+-type step() :: dirty | dirty_mirrors | preparation | linking | publication | cutting | release | clean_mirrors | clean.
 -type plan() :: [{step(), [{non_neg_integer(), binary()}]}].
 -type finding() :: does_not_read | read_failed | no_space.
 
@@ -367,21 +370,23 @@ commit(Alloc) ->
 
 -doc """
 The plan that marks the volume in use before its first change: the second entry's
-clean bit cleared in every FAT and FAT32's FSInfo hints unknown, one step.
+clean bit cleared in the FAT the server reads, then in the other copies with
+FAT32's FSInfo hints unknown.
 """.
 -spec dirty(alloc()) -> {ok, plan()} | {error, finding()}.
 dirty(Alloc) ->
     guarded(fun() ->
                     {Clean, _} = flag_bits(Alloc#alloc.type),
-                    [{dirty, flag_writes(Alloc, fun(Entry) -> Entry band bnot Clean end, [])
-                      ++ fsinfo_writes(Alloc, ?UNKNOWN)}]
+                    {Read, Mirrors} = flag_writes(Alloc, fun(Entry) -> Entry band bnot Clean end, []),
+                    written_steps([{dirty, Read}, {dirty_mirrors, Mirrors ++ fsinfo_writes(Alloc, ?UNKNOWN)}])
             end).
 
 -doc """
 One of the volume's last batches: commit/1's plan and the allocator, while a chain
 still waits after it, for the caller to finish again; or, once none waits, that
 plan with the next-free hint in its release step, when the mount allocated, then
-the clean bit set in every FAT, and `finished`.
+the clean bit set in the other copies and last in the FAT the server reads, and
+`finished`.
 """.
 -spec finish(alloc()) -> {ok, plan(), alloc() | finished} | {error, finding()}.
 finish(Alloc = #alloc{next = Next, allocated = Allocated}) ->
@@ -397,7 +402,8 @@ finish(Alloc = #alloc{next = Next, allocated = Allocated}) ->
                                                            {release, proplists:get_value(release, Plan, []) ++ Hint})
                                    end,
                             {Clean, _} = flag_bits(Alloc#alloc.type),
-                            {Last ++ [{clean, flag_writes(Alloc, fun(Entry) -> Entry bor Clean end, Last)}], finished}
+                            {Read, Mirrors} = flag_writes(Alloc, fun(Entry) -> Entry bor Clean end, Last),
+                            {Last ++ written_steps([{clean_mirrors, Mirrors}, {clean, Read}]), finished}
                     end
             end).
 
@@ -489,8 +495,11 @@ encode(32, Old, Value) -> (Old band ?RESERVED_32) bor (Value band ?VALUE_32).
 copies(#alloc{fat_start = FatStart, fats = Fats, fat_sectors = FatSectors}, Sectors) ->
     [{FatStart + Copy * FatSectors + Index, Bytes} || Copy <- lists:seq(0, Fats - 1), {Index, Bytes} <- Sectors].
 
+%% Steps without a write left out.
+written_steps(Steps) -> [Step || {_Name, [_ | _]} = Step <- Steps].
+
 %% The second entry, rewritten by Change, in every FAT, its sector as Plan last wrote
-%% it, or as the medium holds it.
+%% it, or as the medium holds it: {the FAT the server reads, the other copies}.
 flag_writes(Alloc = #alloc{type = Type, fat_start = FatStart}, Change, Plan) ->
     Sector = case [Bytes || {_Step, Writes} <- Plan, {Index, Bytes} <- Writes, Index =:= FatStart] of
                  [] -> fat_sector(Alloc, 0);
@@ -498,7 +507,8 @@ flag_writes(Alloc = #alloc{type = Type, fat_start = FatStart}, Change, Plan) ->
              end,
     Offset = Type div 8,
     <<First:Offset/binary, Entry:Type/little, After/binary>> = Sector,
-    copies(Alloc, [{0, <<First/binary, (Change(Entry)):Type/little, After/binary>>}]).
+    [Read | Mirrors] = copies(Alloc, [{0, <<First/binary, (Change(Entry)):Type/little, After/binary>>}]),
+    {[Read], Mirrors}.
 
 flag_bits(16) -> {?CLEAN_16, ?NO_ERROR_16};
 flag_bits(32) -> {?CLEAN_32, ?NO_ERROR_32}.
