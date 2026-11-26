@@ -647,6 +647,32 @@ module Erx
          '#endif /* ERX_CORE_ABI_STOP_H */', ''].join("\n")
       end
 
+      # What the kernel's trace rings' seam (include/erx/core/trace_kernel.h)
+      # needs of the ABI (docs/design-fiasco.md, "The kernel's trace rings"):
+      # the record's extent, the ring's capacity, the record's arg count, the
+      # events and record flags, and the number of rings, which is the CPU
+      # count the kernel is configured for, so a CPU number the glue passes
+      # always names a ring. Macros only, spelled as include/erx/abi.h spells
+      # each, so the glue's C++ includes it and a file that includes both
+      # redefines nothing differently.
+      def trace_seam(schema, rings:)
+        limit = schema.constants.fetch('cpu_limit').value
+        raise SchemaError, "the kernel's trace rings number #{rings}, not 1 to #{limit}" unless rings.between?(1, limit)
+
+        arg = schema.types.fetch('erx_trace_record').fields.find { |field| field.name == 'arg' } ||
+              raise(SchemaError, 'erx_trace_record has no arg field')
+        members = %w[trace_event trace_record_flags].flat_map do |name|
+          schema.types.fetch(name).members.keys.sort.map { |member| schema.constants.fetch("#{Model.constant_prefix(name)}_#{member}") }
+        end
+        [CEmitter::NOTICE, '#ifndef ERX_CORE_ABI_TRACE_H', '#define ERX_CORE_ABI_TRACE_H', '',
+         '#include <stdint.h>', '',
+         *CEmitter.layout_extent(schema.types.fetch('erx_trace_record')),
+         *[schema.constants.fetch('trace_ring_records'), *members].map { |item| CEmitter.constant_definition(item) },
+         "#define ERX_TRACE_ENTRY_ARGS #{arg.count}",
+         "#define ERX_TRACE_KERNEL_RINGS #{rings}",
+         '', '#endif /* ERX_CORE_ABI_TRACE_H */', ''].join("\n")
+      end
+
       def frame_index(register)
         raise SchemaError, "trap register #{register} has no frame index" unless (match = /\Ax([0-9]{1,2})\z/.match(register))
 

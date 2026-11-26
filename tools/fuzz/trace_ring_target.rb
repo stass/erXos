@@ -13,7 +13,7 @@ end
 exhausted = (0xffff_ffff_ffff_ffff - 3) / 2 + 1
 
 Erx::PackFuzz.declare_target(
-  sources: ['liberx/backend/core/trace_ring.c'],
+  sources: ['kernel/core/trace_ring.c'],
   includes: [*Erx::PackFuzz::INCLUDES, '.'],
   seeds: {
     'whole' => ring_input(head: 2, cursor: 0, max: 4, slots: [[0, 2, 7], [1, 4, 9]]),

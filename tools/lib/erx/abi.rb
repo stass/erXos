@@ -26,6 +26,7 @@ require_relative 'abi_emit_web'
 require_relative 'abi_emit_web_ts'
 require_relative 'abi_emit_theme'
 require_relative 'abi_emit_musl'
+require_relative 'fiasco_kernel_config'
 
 module Erx
   module ABI
@@ -53,6 +54,9 @@ module Erx
         files['include/erx/core/abi_crash.h'] = CallEmitter.crash_seam(schema)
         files['include/erx/core/abi_boot.h'] = CallEmitter.boot_seam(schema)
         files['include/erx/core/abi_stop.h'] = CallEmitter.stop_seam(schema)
+        # The kernel trace rings number one per CPU the Fiasco kernel is configured for.
+        defconfig = FiascoKernelConfig.read(root)
+        files['include/erx/core/abi_trace.h'] = CallEmitter.trace_seam(schema, rings: FiascoKernelConfig.max_cpus(defconfig))
         files.merge!(CallEmitter.outputs(schema))
         files.merge!(ErlangEmitter.outputs(schema))
         files.merge!(ProtocolEmitter.outputs(schema))
@@ -77,7 +81,7 @@ module Erx
           raise SchemaError, "generated output is not ASCII: #{path}" unless bytes.ascii_only?
         end
         result = OutputPlan.new(schema: schema, files: files.sort.to_h.freeze,
-                                reads: source.inputs.merge(hashed.to_h).transform_values { |bytes| Digest::SHA256.hexdigest(bytes) }).freeze
+                                reads: source.inputs.merge(hashed.to_h, FiascoKernelConfig::PATH => defconfig).transform_values { |bytes| Digest::SHA256.hexdigest(bytes) }).freeze
         Model.freeze_value(result)
       end
 

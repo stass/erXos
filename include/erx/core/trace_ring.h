@@ -1,0 +1,81 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#ifndef ERX_CORE_TRACE_RING_H
+#define ERX_CORE_TRACE_RING_H
+
+/*
+ * A trace ring and its lock-free reader (docs/design-fiasco.md, "The trace ring" and "The
+ * kernel's trace rings"): one ring of erx_trace_record records, the root's own and each of
+ * the kernel's per-CPU rings alike. A ring has one writer at a time: the root's ring its
+ * trace lock serialises, a kernel ring its CPU with interrupts masked. The reader takes no
+ * lock and keeps a record only if its sequence count, read before and after its fields, is
+ * the even count of the index it expected (docs/design-kernel.md, "Sequence-counted
+ * records").
+ *
+ * The ring and its reader are pure over the ring they are handed, so the host tests run
+ * them on rings of their own. The kernel links them through erx_cores.a and the root and
+ * the hosted process link the same file; the glue's C++ never includes this header, whose
+ * ring holds atomics, and reaches the kernel's rings through erx/core/trace_kernel.h.
+ */
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "erx/abi.h"
+#include "erx/core/trace_kernel.h"
+
+/*
+ * Index i's record holds sequence 2i + 1 while written and 2i + 2 after, so the last
+ * index a ring may write is the one whose even count is the last below the terminal
+ * value, and a head past it is an exhausted ring.
+ */
+#define ERX_TRACE_RING_INDEX_LAST	((ERX_TRACE_RECORD_SEQ_TERMINAL - 3u) / 2u)
+#define ERX_TRACE_RING_HEAD_EXHAUSTED	(ERX_TRACE_RING_INDEX_LAST + 1u)
+
+/*
+ * A record is one cache line and the head has a line of its own, so a writer's stores to
+ * the head never share a line with a record a reader loads.
+ */
+typedef struct erx_trace_ring {
+	_Alignas(64) erx_trace_record_t	records[ERX_TRACE_RING_RECORDS];
+	_Alignas(64) _Atomic uint64_t	head;	/* the next index to write */
+} erx_trace_ring_t;
+
+/*
+ * What one read did: where the next read starts, how many records it copied, and how
+ * many records between the cursor and next were overwritten before they were read.
+ */
+typedef struct erx_trace_read_result {
+	uint64_t	next;
+	uint64_t	kept;
+	uint64_t	overwritten;
+} erx_trace_read_result_t;
+
+/*
+ * Writes entry at the ring's head and moves the head on. The caller is the ring's one
+ * writer. Returns false, writing nothing, once the ring is exhausted.
+ */
+bool	erx_trace_ring_put(erx_trace_ring_t *ring, const erx_trace_entry_t *entry);
+
+/*
+ * The lock-free reader over ring: copies at most max of the whole records from cursor on
+ * into records[0 .. kept) and fills result. A cursor of UINT64_MAX copies nothing and
+ * answers the head as next. Any other cursor past the head, or max 0 or over
+ * ERX_TRACE_READ_MAX, is ERX_EINVAL; a cursor at the head of an exhausted ring is
+ * ERX_ELIMIT. A cursor more than ERX_TRACE_RING_RECORDS below the head starts that far
+ * below it, and the records it skips count as overwritten.
+ */
+int	erx_trace_ring_read(const erx_trace_ring_t *ring, uint64_t cursor, erx_trace_record_t *records,
+	    uint32_t max, erx_trace_read_result_t *result);
+
+#ifdef ERX_TRACE_RING_TEST_HOOKS
+/* Called by the reader between a record's field loads and its second sequence load. */
+void	erx_trace_ring_test_between(const erx_trace_record_t *record);
+/* Called by the writer between its first and second field stores. */
+void	erx_trace_ring_test_writing(const erx_trace_record_t *record);
+#endif
+
+#endif /* ERX_CORE_TRACE_RING_H */

@@ -16,10 +16,25 @@ require_relative '../fixtures/generated_tree'
 # each case, and each seed below must make its case name what it broke.
 class TraceRingTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  RING = 'liberx/backend/core/trace_ring.c'
+  RING = 'kernel/core/trace_ring.c'
+  ROOT_RING = 'liberx/backend/core/trace_ring.c'
+  RINGS = 'kernel/core/trace_rings.c'
   STUB = 'liberx/backend/fiasco/trace_stub.c'
   DRIVER = 'test/fixtures/trace_ring_driver.c'
+  RINGS_DRIVER = 'test/fixtures/trace_rings_driver.c'
   MODES = %w[basic refusals bounded lapped between writing exhausted race].freeze
+  RINGS_MODES = %w[cpus wrap pages].freeze
+
+  # The kernel's rings over the ring core: name => [file, original, replacement, mode, diagnostic].
+  # A write past the last ring lands in the padding, which the driver reports, or past the
+  # rings' pages, where it may fault before the driver prints: its diagnostic is nil.
+  RINGS_SEEDS = {
+    'the ring index not masked' => [RING, 'record = &ring->records[index % ERX_TRACE_RING_RECORDS];', 'record = &ring->records[index];',
+                                    'wrap', 'wrap: '],
+    'the cpu bound widened' => [RINGS, 'if (cpu < ERX_TRACE_KERNEL_RINGS)', 'if (cpu < ERX_TRACE_KERNEL_RINGS + 1)', 'cpus', nil],
+    'the cpu ignored' => [RINGS, 'erx_trace_ring_put(&erx_trace_rings.ring[cpu], entry)', 'erx_trace_ring_put(&erx_trace_rings.ring[0], entry)',
+                          'cpus', 'not hold exactly']
+  }.freeze
 
   # name => [original, replacement, mode, the driver's diagnostic].
   SEEDS = {
@@ -45,12 +60,12 @@ class TraceRingTest < Minitest::Test
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
 
-  def build(source, name:, flags: [])
+  def build(source, name:, flags: [], driver: DRIVER)
     output = File.join(@directory, name.tr(' ', '-'))
     log, status = Open3.capture2e(compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread',
                                   *@sanitizer_flags, *flags, *Erx::Generated.include_flags(root: ROOT),
                                   '-I', File.join(ROOT, 'include'), '-I', ROOT, source,
-                                  File.join(ROOT, DRIVER), '-o', output, stdin_data: '')
+                                  File.join(ROOT, driver), '-o', output, stdin_data: '')
     assert status.success?, log
     output
   end
@@ -75,13 +90,41 @@ class TraceRingTest < Minitest::Test
     assert_equal "stub: ok\n", log
   end
 
-# Only the root links the ring: a task's program links the stub in its place.
-def test_only_the_root_links_the_ring
-  assert_includes Erx::NativeRoot::SERVICE, RING
-  refute_includes Erx::NativeRoot::SERVICE, STUB
-  assert_includes Erx::NativeRoot::TASK, STUB
-  refute_includes Erx::NativeRoot::TASK, RING
-end
+  # Only the root links the ring: a task's program links the stub in its place. The kernel's
+  # rings are the kernel's alone.
+  def test_only_the_root_links_the_ring
+    assert_includes Erx::NativeRoot::SERVICE, RING
+    assert_includes Erx::NativeRoot::SERVICE, ROOT_RING
+    refute_includes Erx::NativeRoot::SERVICE, RINGS
+    refute_includes Erx::NativeRoot::SERVICE, STUB
+    assert_includes Erx::NativeRoot::TASK, STUB
+    refute_includes Erx::NativeRoot::TASK, RING
+  end
+
+  def rings_driver(ring: File.join(ROOT, RING), rings: File.join(ROOT, RINGS), name: 'rings')
+    build(ring, name: name, driver: RINGS_DRIVER, flags: [rings])
+  end
+
+  def test_the_kernel_rings_each_hold_their_cpu
+    driver = rings_driver
+    RINGS_MODES.each do |mode|
+      log, status = run_driver(driver, mode)
+      assert status.success?, log
+      assert_equal "#{mode}: ok\n", log
+    end
+  end
+
+  RINGS_SEEDS.each do |name, (file, original, replacement, mode, diagnostic)|
+    define_method("test_rings_seed_#{name.tr(' ', '_')}") do
+      source = File.read(File.join(ROOT, file))
+      assert_equal 1, source.scan(original).size, "the seed's text is not in #{file} once"
+      seeded = File.join(@directory, "#{name.tr(' ', '-')}.c")
+      File.write(seeded, source.sub(original, replacement))
+      log, status = run_driver(rings_driver(**(file == RING ? { ring: seeded } : { rings: seeded }), name: name), mode)
+      refute status.success?, "#{name}: #{mode} passed"
+      assert_includes log, diagnostic if diagnostic
+    end
+  end
 
   SEEDS.each do |name, (original, replacement, mode, diagnostic)|
     define_method("test_seed_#{name.tr(' ', '_')}") do

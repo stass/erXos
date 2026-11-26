@@ -11,6 +11,7 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
+#include "erx/core/trace_ring.h"
 
 /*
  * The function API of the kernel interface, as liberx's Phase 1 backends give it
@@ -313,16 +314,6 @@ int	erx_object_info(uint64_t object, uint32_t topic, uint64_t index, void *windo
  * erXos's kernel it is 0.
  */
 uint32_t	erx_info_partial(uint32_t topic);
-
-/*
- * What one trace read did: where the next read starts, how many records it copied, and how
- * many records between the cursor and next were overwritten before they were read.
- */
-typedef struct erx_trace_read_result {
-	uint64_t	next;
-	uint64_t	kept;
-	uint64_t	overwritten;
-} erx_trace_read_result_t;
 
 /*
  * The root's trace ring (docs/design-fiasco.md, "The trace ring"): copies at most max of the

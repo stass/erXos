@@ -4,7 +4,7 @@
  */
 
 /*
- * The trace ring's lock-free reader (liberx/backend/core/trace_ring.c) over a ring the
+ * The trace ring's lock-free reader (kernel/core/trace_ring.c) over a ring the
  * input writes freely: its head, a cursor, max, and the sequence and fields of any
  * slots, so the reader meets counts and heads no writer would leave. Whatever the
  * ring holds, the reader answers ERX_OK, ERX_EINVAL or ERX_ELIMIT, writes no record
@@ -21,7 +21,7 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
-#include "liberx/backend/core/trace_ring.h"
+#include "erx/core/trace_ring.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 

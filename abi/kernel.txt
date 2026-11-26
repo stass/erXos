@@ -761,11 +761,15 @@ enum trace_event u32
   value irq_deliver 3
   value space_start 4
   value space_end 5
+  value ipc_receive 6
+  value switch 7
   args park slot:u64 deadline:u64
   args wake slot:u64 result:status
   args irq_deliver label:u64
   args space_start target:u64
   args space_end target:u64 status:i64
+  args ipc_receive sender:u64 receiver:u64 tag:u64
+  args switch next:u64 next_space:u64
 flags trace_record_flags u16
   bit cpu_unknown 0
 layout erx_trace_record shared 8 64
