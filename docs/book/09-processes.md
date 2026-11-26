@@ -790,7 +790,12 @@ dispatcher deliver a doorbell, the executor wake, and the Erlang
 process that ran next. Only the root's own threads write the root's
 ring, so a park in another domain does not appear there, though that
 domain's process events do, and its IPC, faults and switches appear in
-the kernel's rows.
+the kernel's rows. The kernel names a thread or a task by its own
+object id, which no other object takes for the rest of the boot; a
+message's arrival names both its sender and its receiver, recorded at
+the copy, the one moment both are certain to exist. The trace adds the
+root service's name for an object only when it saw that object
+created, so an object older than the trace shows its id alone.
 
 ### 9.7.2 A worked example
 

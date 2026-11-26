@@ -356,8 +356,12 @@ its own reporter ([design-live.md, Tracing](../design-live.md#tracing)):
 The `backend` row is the 4,096-record **trace ring** of
 [chapter 9](09-processes.md#971-one-timeline)
 (`liberx/backend/fiasco/trace.c`). The `kernel` row reads the rings
-that Fiasco's kernel writes, one for each CPU, always on, in the same
-record format. The kernel maps them once, read-only, into the root, so
+that Fiasco's kernel writes, one for each CPU, in the same record
+format. They are always on, with no switch to turn them off, as long as
+they add no more than 5 % to a call from a task to the root service on
+the Raspberry Pi 4; if they cost more, their writer is made cheaper
+before any event is dropped, and the crash record's share of them is
+never dropped. The kernel maps them once, read-only, into the root, so
 a read never enters the kernel and can change nothing it reads
 ([design-fiasco.md, The kernel's trace rings](../design-fiasco.md#the-kernels-trace-rings)).
 The kernel's rings are **Designed**; until they are built, the kernel's
@@ -865,8 +869,11 @@ fixed layout of the ABI file
 It holds the cause, the program counter and fault address, the build
 identifier, the uptime, a short message, the faulting thread's
 registers and a backtrace; the layout also has room for the newest
-records of each CPU's kernel trace ring, eight each on four CPUs, so a
-record nobody was reading live still says what each CPU did last
+records of each CPU's kernel trace ring, 32 shared equally among the
+CPUs whose rings hold anything, eight each on a four-CPU board, so a
+record nobody was reading live still says what each CPU did last; a gap
+inside one CPU's records is shown with its size, but whether records
+were lost at either end of them is unknown
 ([design-debugger.md, The record's trace tail](../design-debugger.md#the-records-trace-tail);
 **Designed**). Of the four causes the layout
 names (fault, halt, missed watchdog pet, panic), the root writes a

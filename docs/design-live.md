@@ -2592,7 +2592,7 @@ records](#inspection-records)):
 | --- | --- | --- | --- |
 | `erts` | `runtime`, the system domain's included | OTP's trace events of the selection, its frames, and the adapter's events | OTP's `in` and `out` events of the selection, and its frames, which its funnel sees on Fiasco's lanes as on erXos's kernel; none of the adapter's events |
 | `backend` | `{backend, liberx_trace}`, labelled `liberx trace` | none: `erx_backend_trace_read` answers `ERX_ENOTSUP` and the row is left out | the root's ring ([design-fiasco.md](design-fiasco.md#the-trace-ring)) |
-| `kernel` | `kernel` | each CPU's ring, read with `erx_trace_read` | one `unsupported` line, from `erx_trace_read`'s `ERX_ENOTSUP` |
+| `kernel` | `kernel` | each CPU's ring, read with `erx_trace_read` | each CPU's ring of the fork's kernel, read with `erx_trace_read` through the root's read-only window ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)); one `unsupported` line, from `erx_trace_read`'s `ERX_ENOTSUP`, only in a boot whose root could not map the rings |
 
 A row whose call answers `ERX_ENOTSUP` is shown as `unsupported` when
 its reporter is `kernel`, and left out when its reporter is a backend's,
@@ -2714,7 +2714,7 @@ event, each field as `name=value` (`pid` and `domain` first, `cpu`,
 with `late` after a late one:
 
 ```
-   40.993000112 kernel unsupported [kernel]
+   41.207108412 kernel irq object=213 pin=79 cpu=0 thread=37 space=12 [kernel]
    41.207113520 backend irq_deliver label=1 cpu=unknown thread=6 space=1 [liberx trace]
    41.207119044 backend wake result=ok slot=2 cpu=unknown thread=4 space=1 [liberx trace]
    41.207131870 erts in pid=<0.91.0> domain=4 mfa=timer:sleep/1 [runtime]

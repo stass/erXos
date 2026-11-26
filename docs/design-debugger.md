@@ -494,12 +494,20 @@ declaration of the record.
 Fiasco, for the root's own crash record, the root's read-only window onto
 the same rings ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)).
 The root's own ring is not among them; the root's record carries its log.
-Each of the first `min(ntrace, crash_cpus)` rings gets an equal share of
-the 32 slots, 8 each on four CPUs and 2 each on sixteen. For each ring
-the writer reads the share's indices below the ring's head through the
-ring core's reader, keeps a record only if the reader keeps it and its
-`cpu` is the ring's, writes each ring's kept records together, in CPU
-order and oldest first, and leaves every other slot zero.
+`ntrace` is how many rings there are, not how many CPUs ran: Fiasco has
+eight rings however many CPUs start, and a board of four leaves four of
+them empty. The CPUs the tail covers follow from the rings themselves:
+the writer loads each ring's head once, with acquire order, and covers
+the first `crash_cpus` rings whose head is not zero: a ring never written
+has nothing to give, whether its CPU never started or has not yet written. The kernel's stop and the root, which writes its record before any
+census, apply the same rule to the same rings, so neither needs a count
+of CPUs. Each covered ring gets an equal share of the 32 slots, rounded
+down: 8 each for four CPUs, among eight rings or more, and 2 each for
+sixteen. For each covered ring the writer reads the share's indices below
+the head it loaded through the ring core's reader, keeps a record only
+if the reader keeps it and its `cpu` is the ring's, writes each ring's
+kept records together, in CPU order and oldest first, and leaves every
+other slot zero.
 
 An equal share, not the newest records by time, because the CPU a hang's
 reader needs is the one that stopped writing, stuck with interrupts
@@ -509,9 +517,16 @@ masked or idle, and a merge by time gives its slots to the busy CPUs.
 names its index and its `cpu` its ring, so a reader groups and orders the
 tail from the records alone. A gap between two indices of one CPU is a
 record that was half written or overwritten while it was read, and
-`trace` shows it as such. The newest record of a CPU that did not answer
-the census may be missing for the same reason; its entry says that it did
-not answer.
+`trace` shows it as such, with its count. What lies at either end of a
+CPU's records is not known from the tail: it stores neither the head
+the writer loaded nor how many records its reader refused there, so a
+refused newest or oldest record, or a covered CPU whose records were all
+refused, leaves no trace, and `trace` says that each CPU's ends in a
+tail are unknown, never that nothing was lost. The newest record of a
+CPU that did not answer the census is the likeliest such loss; its entry
+says that it did not answer. The ring's whole counts of overwritten and
+half-written records belong to the readers of whole rings, the live
+trace and the hold's `trace`.
 
 **Checks.** The writer cannot refuse, and what it writes passes the
 check by construction. `erx_crash_check`, `kernel/core/crash_read.c` and
@@ -904,7 +919,7 @@ the need named, never answered with a guess.
 | `bt [CPU \| thread ID]` | a backtrace by frame pointers, bounded; a thread's starts from the saved context its walker names | CPUs; memory for more than the record's frames |
 | `inspect PATH` | the record of an inspection path, as `tools/erx inspect` prints one; `*` in place of a variable segment gives every record of the listing | memory |
 | `export DIRECTORY` | every path the walkers answer, each record in a file named by its path, in `inspect`'s text | memory |
-| `log [N]`, `trace [N]` | the last lines of the kernel log; the last trace records of every CPU, merged by time, with a count wherever a ring's own reader rule says records were overwritten or half written | memory; the record's text serves `log` without it, and its trace tail serves `trace` ([The record's trace tail](#the-records-trace-tail)) |
+| `log [N]`, `trace [N]` | the last lines of the kernel log; the last trace records of every CPU, merged by time; from whole rings, with a count wherever a ring's own reader rule says records were overwritten or half written; from a record's trace tail, with a count for each gap between one CPU's records and each CPU's ends marked unknown | memory; the record's text serves `log` without it, and its trace tail serves `trace` ([The record's trace tail](#the-records-trace-tail)) |
 | `print TYPE ADDRESS`, `list TYPE ADDRESS FIELD [N]` | memory as a type of the bundle; a linked list of that type through that field, at most N nodes | memory |
 | `mem ADDRESS LENGTH` | a hex dump, printable ASCII beside it and a dot for every other byte | memory |
 | `whatis ADDRESS` | what an address is ([What an address is](#what-an-address-is)) | memory |
@@ -1506,7 +1521,7 @@ Each test is paired with the seeded fault that proves it ran.
 | the hold decision | over every development flag, word, boot value, lease and watchdog state: a hold is allowed only when all five allow it; and over both verdicts on the map: a stop in an allowed boot holds only with a map that was not refused | the trial's refusal removed; the map's verdict ignored |
 | the slot's publication, a litmus test at the milestone gate | a reader never sees a published state with stale registers | the state stored without release ordering |
 | the crash core and its readers | records with CPU entries round-trip through `crash.c`, `crash_read.c` and `crash_frame.rb`, which agree case by case; the brief form carries no entry whatever the stop hands the writer | an entry with a state outside the enum accepted by one reader; entries copied into the brief form |
-| the record's trace tail, on the host, and its readers under the crash records' fuzz targets | over rings of 1, 4, 16 and 17 CPUs that the test fills, with a ring younger than its share, a record left half written and an exhausted ring: each covered CPU's share, oldest first, without the half-written record; every tail written passes `erx_crash_check`, and `crash_read.c` and `crash_frame.rb` agree on mutated tails | the writer's check of a record's `cpu` against its ring dropped, with one record seeded with another CPU's number: the check refuses the record written; the share computed over all seventeen rings in place of the first sixteen: one slot each in place of two, and the case fails |
+| the record's trace tail, on the host, and its readers under the crash records' fuzz targets | over rings of 1, 4, 16 and 17 CPUs that the test fills, each set among more rings that were never written (four written of eight among them), with a ring younger than its share, a record left half written and an exhausted ring: each written ring's share, oldest first, 8 each for four written of eight, without the half-written record; every tail written passes `erx_crash_check`, and `crash_read.c` and `crash_frame.rb` agree on mutated tails | the writer's check of a record's `cpu` against its ring dropped, with one record seeded with another CPU's number: the check refuses the record written; the share computed over all seventeen rings in place of the first sixteen: one slot each in place of two, and the case fails; the share computed over `ntrace` in place of the written rings: 4 each for four written of eight, and the case fails |
 | the boot arguments' parser (`boot_args.c`) and the root's arming of the board's watchdog (`test/host/pm_wdt_test.rb`) | a release build refuses a boot whose command line carries `erx.hold=1`; the watchdog is armed in every boot but a deterministic one and one that may hold | the refusal removed; an attended boot armed |
 | `native_machine_stop`, a QEMU cell on a development test kernel with a seeded panic on CPU 2 of 4, under TCG and HVF | one crash frame of cause `panic`, CPU 2 `leader` and the others `stopped`; the image's `report` symbolizes the leader's backtrace to the seeded function; the record's trace tail holds 8 records of each CPU, none newer than the stop, and `tools/erx debug FRAME trace` prints them | the request's send removed: three `unanswered`; the tail's writer skipped: `trace` on the frame finds no records |
 | the same cell with CPU 1 waiting for a spinlock that CPU 3 holds, interrupts masked on both, CPU 3 spinning | CPU 1 `waiting` with the seeded lock's address, CPU 3 `unanswered`; the image shows CPU 3's program counter in the seeded loop, and `whatis` names the lock | the check removed from the wait loop: CPU 1 `unanswered` |
@@ -1671,6 +1686,11 @@ Each of these was a choice between designs, and is settled as stated.
    they read. They are kept in `~/erxos-history`, the repository for
    records and raw data, and not in this tree, and
    [References](#references) cites each by its path there.
+9. **The full record's trace tail is 32 records**, `crash_trace_records`
+   ([The record's trace tail](#the-records-trace-tail)): 2,048 bytes,
+   about a quarter of a second more at 115,200 baud, and 8 records for
+   each CPU of the four-CPU boards and QEMU cells erXos runs on. A longer
+   history is the hold's, which serves whole rings.
 
 ## Unverified facts
 
