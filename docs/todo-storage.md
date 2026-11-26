@@ -243,6 +243,17 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] storage, create-or-open's refused truncate (`erx_media_volume:emptied/3`): a refusal
+  after part of the truncate committed forgets the caller's hold of the file outright, though a
+  holder is counted once however many fids name the file, so a hold an earlier walk took goes too
+  and the grant and the volume disagree about the node. No medium is known to refuse a shrink to
+  0; keep the hold the walk took (rethrow `refused` when nothing committed, else count holds).
+* [Low] storage, the volume's finish and the usb suite: `finished/1` catches only `failed`, so a
+  `refused` from `released_all/1` crashes the finish call and `terminate/2` retries the last batch;
+  the suite's `RC_STEPS` and `TREE_AFTER` spell `hello.txt` rather than `Stick::FILE`, and
+  `Stick`'s doc names only the list and read; `Stick.check` passes fsimg no output limit, so the
+  extraction is bounded only by the 8 MiB volume; the host test's volume has no label where the
+  suite's has `ERXOS`.
 * [Medium] storage, the FAT volume's crash report (`erlang/apps/erx_media/src/erx_media_volume.erl`):
   a crash of the volume process logs its state, the batch's sector images among them (client file
   data), and formatting that report in the volume can pass its heap bound and kill it; a

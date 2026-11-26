@@ -93,7 +93,7 @@ goes to the document of the subsystem its component pointer names.
 * [Apps and the start service](docs/todo-apps.md#bugs-by-subsystem): applications and packages, the demo apps.
   15 items (1 High, 8 Medium, 6 Low).
 * [Storage](docs/todo-storage.md#bugs-by-subsystem): storage: file systems, the storage domain, file clients, the object store, the image tree.
-  59 items (3 High, 33 Medium, 23 Low).
+  61 items (3 High, 34 Medium, 24 Low).
 * [Display and desktop](docs/todo-display.md#bugs-by-subsystem): the display stack, the window system, the desktop and LVGL in apps.
   22 items (10 Medium, 12 Low).
 * [Inspection and logging](docs/todo-inspection.md#bugs-by-subsystem): the inspector, /proc, logging and the live tree.

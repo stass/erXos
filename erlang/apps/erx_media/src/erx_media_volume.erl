@@ -370,6 +370,9 @@ handle_call(Request, _From, State) ->
     end.
 
 -doc false.
+%% A finished volume changes nothing more, whatever the cast.
+handle_cast(_Cast, #{finished := true} = State) ->
+    {noreply, State};
 handle_cast({forget, Path, Holder}, State) ->
     effect(fun() -> forgotten(Path, Holder, State) end, State);
 handle_cast(_Other, State) ->

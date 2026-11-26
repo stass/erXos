@@ -449,3 +449,19 @@ finish_writes_the_clean_bit() ->
     ?assertMatch(#{mount := rw}, erx_media_volume:outcome(Again)),
     finish(Again),
     finish(Pid).
+
+%% A finished volume changes nothing more: a forget that reaches it after finish/1
+%% leaves its table as the finish left it, so nothing it does can write after the clean bit.
+a_finished_volume_ignores_a_forget_test_() ->
+    {timeout, 300, fun finished_ignores_forget/0}.
+
+finished_ignores_forget() ->
+    Base = image("fat16.img"),
+    Pid = volume(ram(Base, infinity), Base),
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    {ok, file, File} = erx_media_volume:create(Pid, Root, <<"kept.txt">>),
+    ?assertEqual(ok, erx_media_volume:finish(Pid)),
+    Before = sys:get_state(Pid),
+    ok = erx_media_volume:forget(Pid, File),
+    ?assertEqual(Before, sys:get_state(Pid)),
+    finish(Pid).
