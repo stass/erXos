@@ -372,26 +372,9 @@ class ErxFsTest < Minitest::Test
   def eunit(replaced, only: nil)
     Dir.mktmpdir('erx-fs-test') do |work|
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
-      # A grant a seeded fault crashes would print a crash report into the middle of
-      # EUnit's line for its test; the logger stays quiet so each verdict keeps its line.
       Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
-                      'logger:set_primary_config(level, none), ' \
-                      "halt(case eunit:test(#{eunit_spec(only)}, [verbose]) " \
-                      'of ok -> 0; _ -> 1 end)',
+                      ErlangBuild.eunit_eval(ErlangBuild.eunit_spec(TESTS, only)),
                       chdir: work, stdin_data: '')
     end
-  end
-
-  # What eunit runs: the five test modules, or the one case, from the module that defines it.
-  def eunit_spec(only)
-    return '[erx_fs_tests, erx_fs_core_model_tests, erx_fs_version_tests, erx_fs_waits_tests, erx_fs_mint_tests]' if only.nil?
-
-    source = TESTS.find { |path| File.read(File.join(ROOT, path)).match?(/^#{Regexp.escape(only)}\(/) }
-    raise ArgumentError, "no test module defines #{only}" if source.nil?
-
-    owner = File.basename(source, '.erl')
-    # eunit runs {Module, Name} as a plain test, which would take a generator's
-    # returned tests for the result, so a generator (a name ending in _) is named as one.
-    only.end_with?('_') ? "{generator, fun #{owner}:#{only}/0}" : "{#{owner}, #{only}}"
   end
 end
