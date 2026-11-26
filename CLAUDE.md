@@ -613,8 +613,21 @@ scripts live in `~/erxos-scratch/tools/`.
       image manifest marks for JIT get spaces that allow JIT objects, and
       the system domain's image is not one, so the trusted base makes no
       code (on Fiasco: FD8);
-    * no file grant carries write and execute together, so a program never
-      runs what it could rewrite;
+    * a program starts or maps a file as code only as a sealed copy, read
+      through a namespace entry that allows execution and only if the
+      file's execute bit is set; a files grant allows execution only
+      where the manifest marks it, and writes and runs together only as
+      a user's home the manifest marks so, never for an app, so no app's
+      program starts or maps a file it could write; what an interpreter
+      reads as data, and the code a session loads itself, are outside
+      this rule and held only by the session's grants;
+    * configuration only narrows: an app holds the services it requests
+      in its sealed declaration, within what the board's manifest offers
+      it, less what the machine's settings deny; no setting on a data
+      partition has a field that names a service, a grant or a user, so
+      tampered storage can withhold, enable, disable and choose among
+      packages a trusted key signed, but never gives an app more than
+      its declaration requests and the board offers;
     * a path never reaches a server the domain does not hold: a domain's
       namespace is a private table from paths to grants, and each file
       server roots a grant at its subtree;
