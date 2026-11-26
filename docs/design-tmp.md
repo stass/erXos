@@ -21,19 +21,22 @@ Decisions every reader needs:
   as it mounts any grant, and `prim_file` reaches it through
   `erx_file_remote`, the client every file server has. There is no
   local provider for it and no namespace kind of its own.
-* **One process owns the tree.** The tree is one value, held by one
-  process, the **tree process**; every callback `erx_fs` makes is one call
-  to it, and it answers each by one step of a pure function,
-  `erx_ramfs_core:step/4`. Nothing else reads or writes the tree, so every
-  request is atomic with respect to every other without a lock.
+* **The grant owns the tree.** The tree is one value, held by `/tmp`'s
+  one grant, the domain's own, as an own tree of `erx_fs`
+  ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)):
+  every callback `erx_fs` makes is one step of a pure function,
+  `erx_ramfs_core:step/4`, on that value, run in the grant's process.
+  Nothing else reads or writes the tree, so every request is atomic with
+  respect to every other without a lock, and a request costs the
+  client's message and its reply and nothing more.
 * **A walked fid keeps its node, as FreeBSD's tmpfs does.** A node lives
   while a name names it, an open holds it or a grant's fid names it. The
   walk takes the grant's hold in the step that finds the node, so no
   request between a walk and the next request through its fid can free
   the node it names: a `stat` that races a rename over its name finds the
   old file or the new one, never `ENOENT`. The grant forgets a node when
-  none of its fids names it any more, and the tree lets go of every node
-  a grant held when the grant ends. A fid names a node by its inode
+  none of its fids names it any more, and every hold ends with the
+  grant, whose tree ends with it. A fid names a node by its inode
   number, which is never given to a second node while the domain lives
   ([design-files.md](design-files.md#fid-owners)).
 * **Data is pages, holes are free.** A file's bytes are 4 KiB chunks in a
@@ -59,9 +62,10 @@ removes a namespace kind and a path of the session's export.
 * **(b) Erlang in the calling process**, as the EROFS reader serves its
   mounts: the NIF answers `{ram, Names}`, `prim_file` sends the operation
   to one tree process of the domain and returns what the NIF would have.
-* **(c) An `erx_fs` server**, the shape chosen: the tree process of (b)
-  behind `erx_fs`'s callbacks, reached through a grant like `/data` or
-  `/proc`. It runs in the domain itself, not in a service elsewhere: the
+* **(c) An `erx_fs` server**, the shape chosen: the core of (b) behind
+  `erx_fs`'s callbacks, held in the grant's own process, reached through
+  a grant like `/data` or `/proc`. It runs in the domain itself, not in
+  a service elsewhere: the
   contract puts `/tmp` in the domain's memory and budget, and a domain's
   memory depends on nothing outside it but the kernel; a server in
   another domain would hold each client's files on its own budget,
@@ -72,7 +76,7 @@ removes a namespace kind and a path of the session's export.
 
 | | (a) C in the NIF | (b) Erlang, own dispatch | (c) `erx_fs` server in the domain |
 | --- | --- | --- | --- |
-| Cost of one operation | one move to a dirty I/O scheduler and back, one mutex | one message round trip to the tree process; a path operation resolves its path in `erx_path` first | a request to the grant process, which calls the tree process: two local message round trips; a path operation resolves its path in `erx_path` first, an operation on an open file does not |
+| Cost of one operation | one move to a dirty I/O scheduler and back, one mutex | one message round trip to the tree process; a path operation resolves its path in `erx_path` first | one message round trip to the grant process, which steps the tree it holds; a path operation resolves its path in `erx_path` first, an operation on an open file does not |
 | Copies of data | one, in the caller | one, in the tree process (writes) or the caller (reads); binaries pass between processes by reference | the same as (b); payloads are cut into requests of at most 64 KiB, so a 32 MiB file, the default cap, is 512 reads |
 | Atomicity: rename, open after unlink, the cap under concurrent writers | from the mutex, for every call | from the one process, for every call | from the one process, for every request; a write over 64 KiB is several requests ([design-files.md](design-files.md#open-files-and-offsets)) |
 | POSIX's calls | each implemented directly | each implemented directly | through 9P2000.L, which needs rules of erXos's servers and client: create-or-open in `lcreate`, truncation by an open fid's access, an append's offset in `write`'s reply; every server shares them |
@@ -88,8 +92,8 @@ writable is a server; a session's programs reach `/tmp` through fids on
 the session's grant, as they reach `/data`, instead of through a second
 tree in the session's export; the identity, version, open-file and
 mapping rules of [design-files.md](design-files.md) apply to it unchanged;
-and it is Erlang, as system code is. (b) has the same core and one hop
-fewer, but keeps a provider kind and a dispatch that exist only for
+and it is Erlang, as system code is. (b) has the same core and the same
+one hop, but keeps a provider kind and a dispatch that exist only for
 `/tmp`. (a) is likely the fastest and refuses an allocation failure gracefully, but
 that refusal protects little, since the rest of the runtime meets the
 same exhausted budget a moment later, while a bug in it is a memory error
@@ -105,12 +109,20 @@ included, which must follow the same rules whatever `/tmp` does, and the
 second is shared with (b). They narrow (a)'s distance from (c) without
 changing the choice.
 
-The price of (c) is hops. Nothing has measured them; the work `/tmp`
-serves in Phase 1 is small files and line-sized log writes, where a few
-local round trips per write are expected to be of the order of the dirty-scheduler
-move of (a). The item is on the [performance watch
-list](todo-performance.md), and the core moves unchanged between (b) and
-(c) if a measurement ever asks for it.
+The price of (c) is hops, and the tree lives in the grant to keep them
+to one. Measured with `tools/erx bench posix` under HVF (Apple M3 Max,
+QEMU 11.1.3, Homebrew clang 23.1.3, landing profile;
+[research-file-call-path.md](research-file-call-path.md)), a program's
+`fstat` of a `/tmp` file spent 5.4 us of its 16.1 us in one request
+through a grant that called a tree process of its own: two local round
+trips, two monitors with aliases and the grammar checked on both sides
+of the grant. A tree process in front of the core buys nothing here:
+`/tmp`'s tree has one grant, so the grant already orders every request
+the tree takes, and a second process only adds its round trip. With
+the tree in the grant a request is one local round trip, as (b)'s is,
+and the remaining gap to (a) is that round trip and the grant's checks,
+which every server shares. The item stays on the [performance watch
+list](todo-performance.md) until the bench times the request again.
 
 **Prior art.** Plan 9's `ramfs(4)` is a user-level process that serves a
 tree in its memory over 9P and mounts itself, by default on `/tmp`: shape
@@ -149,11 +161,9 @@ the name of in between ([Fids and nodes](#fids-and-nodes)).
   |     request), clunk; the caller owns the fid                       |
   |         | local messages, to aliases                               |
   |         v                                                          |
-  |   G: erx_fs grant process                                          |
-  |         | erx_ramfs callbacks                                      |
-  |         v                                                          |
-  |   tree process (erx_ramfs): holds the whole tree                   |
-  |     each call: erx_ramfs_core:step(Request, Stamp, Now, Tree)      |
+  |   G: erx_fs grant process, holding the whole tree (an own tree)    |
+  |     each erx_ramfs callback, in G:                                 |
+  |       erx_ramfs_core:step(Request, Stamp, Now, Tree)               |
   |                -> {Reply, Tree1}                                   |
   +--------------------------------------------------------------------+
      a session domain also holds fids on its own G for its programs
@@ -173,24 +183,22 @@ the name of in between ([Fids and nodes](#fids-and-nodes)).
 3. `erx_fs` checks each request against the protocol's grammar and
    bounds, which local messages need as much as frames from another
    domain, since they pass no funnel, and calls `erx_ramfs`'s callbacks,
-   from the grant process. Each callback is one
-   `gen_server:call` to the tree process with no timeout: the tree never
-   waits, so a call waits only behind other steps, as a call on a local
-   file system waits for its medium, and ends with the tree process if
-   that ends.
-4. The tree process draws a stamp from the domain's file version counter
-   and reads the clock, then runs one pure step and replies.
+   from the grant process, one at a time.
+4. Each callback draws a stamp from the domain's file version counter
+   and reads the clock, then runs one pure step on the tree the grant
+   passes it and answers the reply and the next tree, which the grant
+   keeps. No callback sends a message or waits.
 
 ## Invariants
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **T1.** Every request is atomic with respect to every other | the tree is one value held by one process, and every callback is one call that runs one step to completion | a callback that reads or writes tree state outside the tree process; a step that waits for another process | a source check that only `erx_ramfs`'s server functions call `erx_ramfs_core:step/4`; concurrent rename and lookup tests (below) |
+| **T1.** Every request is atomic with respect to every other | the tree is one value held by `/tmp`'s one grant, which runs one callback at a time, and every callback runs one step to completion | a callback that reads or writes tree state outside its step; a step that waits for another process; a second grant made to share the tree | a source check that only `erx_ramfs`'s callbacks call `erx_ramfs_core:step/4`; concurrent rename and lookup tests (below) |
 | **T2.** `held` equals the sum of the charges of what the tree holds, and never passes `cap` | every step computes its charge change from the request and the tree before it builds anything, and is refused whole, with nothing changed, when `held` plus the change would pass `cap` | a step that adds a chunk, node or name without charging it, or frees one without returning its charge | `erx_ramfs_core:check/1` recomputes `held` from the tree; it runs after every step of the sequence tests |
-| **T3.** A node lives exactly while a directory entry names it, an open holds it or a grant holds it, and a fid reaches no node but the one it was walked to | `links` counts the entries naming a node, as tmpfs counts them (a directory also counts its own `.` and each subdirectory's `..`, and drops to 0 when its name is removed), `opens` its opens, and `holds` the grants that hold it, each at most once, which the tree's one map from holder to held nodes records; `walk` takes its grant's hold in the step that finds the node, so a fid never names a freed node; a step that brings all three to zero deletes the node and returns its charge; the grant forgets a node once no step of its fids' paths names it, and the tree drops every hold of a grant that ended; fids name nodes by inode number, never reused (T5) | a rename that replaces a name without lowering the old node's `links`; a clunk that skips the count; a walk that holds nothing; a grant that forgets a node a fid still names, or never forgets one; an inode number drawn twice | `check/1`: every node with `links` above 0 is reachable from the root, every other has `opens` or `holds` above 0, each `links` equals the entries naming it (a directory: 2 plus its subdirectories), and each `holds` the holders holding it; the stale-fid, rename-race, stopped-walk, `..`, clunk and two-grant tests (below) |
+| **T3.** A node lives exactly while a directory entry names it, an open holds it or a grant holds it, and a fid reaches no node but the one it was walked to | `links` counts the entries naming a node, as tmpfs counts them (a directory also counts its own `.` and each subdirectory's `..`, and drops to 0 when its name is removed), `opens` its opens, and `holds` the grants that hold it, each at most once, which the tree's one map from holder to held nodes records; `walk` takes its grant's hold in the step that finds the node, so a fid never names a freed node; a step that brings all three to zero deletes the node and returns its charge; the grant forgets a node once no step of its fids' paths names it, and the tree ends with its grant, so no hold outlives the grant that took it; fids name nodes by inode number, never reused (T5) | a rename that replaces a name without lowering the old node's `links`; a clunk that skips the count; a walk that holds nothing; a grant that forgets a node a fid still names, or never forgets one; an inode number drawn twice | `check/1`: every node with `links` above 0 is reachable from the root, every other has `opens` or `holds` above 0, each `links` equals the entries naming it (a directory: 2 plus its subdirectories), and each `holds` the holders holding it; the stale-fid, rename-race, stopped-walk, `..`, clunk and two-grant tests (below) |
 | **T4.** Directories with a name form a tree under the root | a directory's `parent` is set where it is made and moved only by `rename`, which refuses to move a directory below itself (`einval`); a hard link to a directory is refused (`eperm`); removing a directory's name, which needs it empty, sets its `parent` to `none`, and a directory with no name takes no new one (`enoent`) | a rename that skips the ancestor check; a name added to a removed directory | `check/1` walks every named directory's parent chain to the root and checks that a directory with no name is empty; a test renames a directory into its own subdirectory |
-| **T5.** No inode number or version is drawn twice while the domain lives | both come from the domain's file version counter ([design-files.md](design-files.md#identity-and-version)), which outlives the tree process | an inode number drawn from the tree's own state, which a restart would reset | the restart test (below) compares inode numbers before and after |
-| **T6.** No process on `/tmp`'s path loads code while it serves: the client in whatever process calls, and the grant and the tree process, the whole path, since `erx_path` resolves the path and the NIF draws the fids in the caller and no other process takes part | `erx_file_remote` is preloaded and calls only preloaded modules, `erx_path` and `prim_file`'s NIF included, and BIFs, as `prim_file` does; `erx_ramfs`'s start loads, before it mounts, the modules the serving processes can call, a list the build generates with `xref` from `erx_ramfs`, `erx_ramfs_core` and `erx_fs`, so no hand-kept list can miss one | a module loaded on first use on either side. The code server reads its path through `erl_prim_loader` in its own process (`code_server:mod_to_bin/3`, `with_cache/4`), and `erl_prim_loader:read_file/1` runs `prim_file` in its caller (`client_or_request/2`), so with a `/tmp` directory on the code path the code server is itself `/tmp`'s client: an unloaded client module there halts the node (`error_handler:ensure_loaded/1`: "The code server called the unloaded module"), and an unloaded serving module asks the code server, which is waiting on that very process | a build check fails when a module `erx_file_remote` calls is not preloaded; the cold-path test (below) |
+| **T5.** No inode number or version is drawn twice while the domain lives | both come from the domain's file version counter ([design-files.md](design-files.md#identity-and-version)), which outlives the grant | an inode number drawn from the tree's own state, which a restart would reset | the restart test (below) compares inode numbers before and after |
+| **T6.** No process on `/tmp`'s path loads code while it serves: the client in whatever process calls, and the grant, which holds the tree, the whole path, since `erx_path` resolves the path and the NIF draws the fids in the caller and no other process takes part | `erx_file_remote` is preloaded and calls only preloaded modules, `erx_path` and `prim_file`'s NIF included, and BIFs, as `prim_file` does; `erx_ramfs`'s start loads, before it mounts, the modules the serving processes can call, a list the build generates with `xref` from `erx_ramfs`, `erx_ramfs_core` and `erx_fs`, so no hand-kept list can miss one | a module loaded on first use on either side. The code server reads its path through `erl_prim_loader` in its own process (`code_server:mod_to_bin/3`, `with_cache/4`), and `erl_prim_loader:read_file/1` runs `prim_file` in its caller (`client_or_request/2`), so with a `/tmp` directory on the code path the code server is itself `/tmp`'s client: an unloaded client module there halts the node (`error_handler:ensure_loaded/1`: "The code server called the unloaded module"), and an unloaded serving module asks the code server, which is waiting on that very process | a build check fails when a module `erx_file_remote` calls is not preloaded; the cold-path test (below) |
 
 ## Data model
 
@@ -226,7 +234,7 @@ most `ceil(S / 4096)` chunks, each a binary of exactly 4,096 bytes; bytes
 past `S` inside the last chunk are zero. A directory's `Entries` finds a
 name, and `Order` lists them by the sequence number each received when it
 was made. Everything the tree keeps that came from a request, chunks,
-names and link texts, is a binary the tree process made at exactly its
+names and link texts, is a binary the grant's step made at exactly its
 size, never a part of a caller's binary, so nothing the tree keeps holds
 on to a larger binary it was not charged for. A chunk a write or a
 truncation rebuilds is joined from its parts once, by
@@ -241,19 +249,19 @@ report, and the fixed charges make empty files and names cost something,
 so the one cap also bounds how many there can be, as tmpfs's node limit
 does. They are not the runtime's memory. Each chunk and node also costs
 ERTS's own headers, map entries and records; what the tree drops stays
-allocated until the tree process's next collection; and a reader that
+allocated until the grant's next collection; and a reader that
 keeps a binary a read returned keeps the chunk it shares. So `/tmp`
 promises that filling it stops at the cap with `enospc` and nothing of
 the refused request done, and that its memory is what it stores plus
 ERTS's overhead on it, which the domain's `memory` must leave room for.
 It does not promise a figure for that overhead: an allocation failure
 past the domain's budget is fatal for the domain, as any ERTS
-allocation failure is, and the ratio of the tree process's memory to
+allocation failure is, and the ratio of the grant's memory to
 `held` is measured, not promised ([watch list](todo-performance.md)).
 The root costs nothing, so a `tmp` of 0 makes a `/tmp` that is empty and
 refuses every creation with `enospc`.
 
-**Stamps and time.** The tree process passes each step a **stamp**, a
+**Stamps and time.** Each callback passes its step a **stamp**, a
 fresh value of the domain's file version counter, and the time. A node
 made in the step takes the stamp as its inode number and its version; a
 node whose data, size or entries the step changes takes it as its
@@ -289,7 +297,7 @@ opens:
 | moved by `..`, walked in place past its node, or clunked | nothing until no step of the grant's fid paths names a node; then the grant's `forget` removes the grant from its holders and frees a node left with no links, no opens and no holders |
 | opened by `lopen`, or made and opened by `lcreate` | counts an open of the node, by `open` or by `make` of a file |
 | clunked while open, by its client, its `remove` or its owner's end | `clunk` drops the open, and the fid's end its steps, as for an unopened fid |
-| left by a grant that ends | the tree process, which monitors each grant from its first walk, drops all of the grant's holds |
+| left by a grant that ends | the tree ends with its grant, holds and all |
 
 Holding is idempotent: a grant is one holder of a node however many of
 its fids name it, and the grant keeps the count of its own steps naming
@@ -426,19 +434,21 @@ bytes.
 
 `erx_ramfs_sup`, a child of `kernel_safe_sup` added by an edit to
 `lib/kernel/src/kernel.erl`, starts in every domain that runs ERTS, the
-system domain included. It starts the tree process with
-the cap, read by `erx_ns:tmp_limit/0` from the `tmp` field of the
+system domain included. It passes the cap, read by `erx_ns:tmp_limit/0` from the `tmp` field of the
 runtime's startup limits ([design-runtime.md](design-runtime.md#starting-a-runtime)),
-then one `erx_fs` grant for the domain itself with rights `rw` and tree
-name `tmp`, mounted at `/tmp` with those rights, by
-`erx_fs:start_mounted(erx_ramfs, Name, rw, "/tmp")`. Before mounting, it loads every module the tree
-and the grant can call (T6).
+into the one `erx_fs` grant it starts for the domain itself, with rights
+`rw` and tree name `tmp`, mounted at `/tmp` with those rights, by
+`erx_fs:start_mounted(erx_ramfs, Cap, rw, "/tmp")`; the grant's
+`init/1` makes the empty tree and answers it as an own tree. Before
+mounting, it loads every module the grant can call (T6). The grant's
+`max_heap_size`, which bounds a grant's own state
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)),
+counts the tree here, so the supervisor sets it from the cap.
 
-The tree process, the grant and the lock table the grant starts, as a
-grant that is a tree of its own does
-([design-files.md](design-files.md#locks)), are one unit: each is linked
-to the tree process,
-and the supervisor is `one_for_all`, so when any of them ends, all end,
+The grant and the lock table the grant starts, as a grant that is a
+tree of its own does ([design-files.md](design-files.md#locks)), are one
+unit: they are linked,
+and the supervisor is `one_for_all`, so when either ends, both end,
 and `/tmp` restarts empty, its old entry unmounted and the new grant
 mounted at `/tmp`. No process of the old tree can reach the new one, and
 the old grant's fids end with it; a client's monitor on the old grant
@@ -455,10 +465,11 @@ mapper like any other ([design-files.md](design-files.md#shared-mappings)).
 
 ## Concurrency
 
-The tree process is the only place the tree exists, and it never waits
-for another process: a step reads its arguments and the tree and
-returns. Grant processes wait for the tree, never the other way, so no
-cycle can form. The tree orders everything, so each request is atomic,
+The grant is the only place the tree exists, and a step never waits
+for another process: it reads its arguments and the tree and returns.
+Nothing waits on the grant but its clients, and the grant waits on
+nothing, so no cycle can form. The grant orders everything, so each
+request is atomic,
 as POSIX asks of regular-file operations and as `erx_fs` leaves to each
 tree ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
 "Each tree makes its own requests atomic"), and `rename` over an
@@ -478,7 +489,7 @@ when it moves a directory (the new parent's, so the directory never
 lands below itself) and when its target is a directory (the source
 directory's, so a target that holds the source answers `ENOTEMPTY`, as
 Linux's does); and freeing a node drops its record, whose chunks ERTS
-frees at the tree process's next collection. None of them waits, but
+frees at the grant's next collection. None of them waits, but
 each delays the steps behind it. `check/1`, which grows with the tree,
 runs only in tests.
 
@@ -488,10 +499,9 @@ runs only in tests.
 | --- | --- | --- | --- | --- |
 | A write request, create or link would pass the cap | the step's charge check, before it builds anything | the tree as before the step; of a caller's write over 64 KiB, the requests before it | none | `{error, enospc}`, with an open file's offset past what was written; `ENOSPC` to a program |
 | The domain's budget is exhausted | ERTS's allocator | nothing: the domain ends | the domain library | as any ERTS allocation failure ([design-runtime.md](design-runtime.md#crash-handling)); the cap keeps `/tmp`'s charges to their share, ERTS's overhead on top ([Charges](#data-model)) |
-| A bug crashes the tree process, the grant or the lock table | the links, then the supervisor | nothing of `/tmp` | all of them end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log |
+| A bug crashes the grant or the lock table | the link, then the supervisor | nothing of `/tmp` | both end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log |
 | A caller ends during a request or with files open | the grant's monitor on the fid's owner ([design-files.md](design-files.md#fid-owners)) | the effects of the steps that ran | the grant clunks every fid the caller owned, after every request it sent; a removed file it held open is freed | nothing |
 | A request names a fid whose node lost its names | the node's `links`, 0 | the node, held by the fid | the grant forgets it when no fid names it | `getattr` answers with `nlink` 0; `lopen` of a file opens it; `lopen` of a directory and `walk` answer `{error, enoent}` |
-| A grant ends holding nodes | the tree process's monitor on the grant, taken at its first walk | the effects of the steps that ran | the tree drops every hold of the grant, freeing each node nothing else keeps | nothing |
 | The version counter is exhausted | the counter's refusal | the tree | none | `{error, eio}` and a report, as for every server |
 
 Nothing a caller sends can crash the tree: `erx_fs` checks every
@@ -571,10 +581,10 @@ the code under test ran.
   naming it is clunked, and its inode number is never given again; a
   rename between a walk and its `getattr` or `lopen` finds the old file;
   a walk that stops keeps nothing; `..` from a removed directory returns
-  to its parent; a file two grants hold needs both to let go, the second
-  by ending. Seeded: a freed inode number reused; a walk that holds
-  nothing; a grant that never forgets; a tree that keeps a dead grant's
-  holds.
+  to its parent; in the core, a file two holders hold needs both to let
+  go. Seeded: a freed inode number reused; a walk that holds nothing; a
+  grant that never forgets; a core that keeps a holder's holds after
+  its `forget_holder`.
 * **Open after unlink and rename, and killed openers.** `held` returns to
   where it started after a removed file's handle is closed and after its
   opener is killed. Seeded: a clunk that does not free a node with no
@@ -592,7 +602,13 @@ the code under test ran.
   eight others stat it: every stat finds `b`; writers filling the tree
   stop at the cap together and `check/1` holds. Seeded: a rename split
   into remove then add.
-* **Restart.** The tree process killed with files open: their operations
+* **One message each way.** A trace of `/tmp`'s grant while a process
+  reads a file's `#file_info{}`, opens it and reads it shows, for each
+  request, one message in and one reply out, and no monitor or message
+  to any other process; an open is one exchange of a walk from `NOFID`
+  and an `lopen`. Seeded: a callback that calls a process of its own,
+  as a tree process would be called; a client that sends `attach`.
+* **Restart.** The grant killed with files open: their operations
   answer `eio`, `/tmp` is mounted again and empty, and new inode numbers
   lie above every old one. Seeded: inode numbers drawn from a counter in
   the tree state.

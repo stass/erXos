@@ -1065,6 +1065,20 @@ writes go on. Open flags travel as 9P2000.L's fixed values, those of
 Linux's `9p.h`, not the architecture's own `O_*` values, and the
 handler's codec maps them.
 
+An open's requests go together, in one exchange with the grant: the
+walk from `NOFID`, the clone and the `lopen`, or with `O_CREAT` the
+walk to the directory, the clone, the `lcreate` and the walk of the
+name. The grant runs them in the order sent, so an open is one round
+trip to the grant whatever its kind; a request behind a walk that did
+not make its fid fails, since that fid was never made, and the
+description reads the walk's reply first, hands it to the resolution's
+resumption when the walk stopped short or ended on a link the open
+follows, and clunks, in one more exchange, only the fids the replies
+show made. The walks start at the grant's root, so no `attach` is sent
+and no root fid is clunked ([design-files.md](design-files.md#version-and-attach)).
+The description's close, at its last open's `clunk`, is one exchange
+of its fids' clunks, whose answer the program's `close` returns.
+
 9P2000.L walks only from an unopened fid, so every further fid on the
 file, for a re-open with other flags or for a mapping open, clones the
 unopened fid with a `walk` of no names and opens the clone with `lopen`.
@@ -4137,7 +4151,18 @@ file in `/tmp`, which the session's `erx_ramfs` tree serves
 read of 4 KiB, 20.0 us for one of 64 KiB and 5.2 ms for a sequential
 read of 16 MiB, about 3.2 GB/s, and 47 us for an `open` (one boot, one
 CPU, HVF on an Apple M3 Max at a one-minute load of 3, QEMU 11.1.3,
-Homebrew clang 23.1.3). The same read costs an Erlang process
+Homebrew clang 23.1.3). Of a 4 KiB read, 4.4 us were the description's
+one request through `/tmp`'s grant and a tree process of its own, and of
+an `fstat`'s 16.1 us, 5.4; an `open` spent 38 us of its 50.6 us in the
+description's open, one exchange of four requests that called the tree
+process four times
+([research-file-call-path.md](research-file-call-path.md),
+[design-files.md](design-files.md#performance)). With `/tmp`'s tree in
+its grant, no `attach`, the client's two refusals as its only request
+checks and the open's requests in one exchange, a 4 KiB read is
+expected at about 10.5 us, an `fstat` at 13.5 us, an `open` at 25 us and
+a `close` at 20 us, a close sending two clunks where it sends one now
+(estimates, until the bench measures them). The same read costs an Erlang process
 of the session one round trip, 3 to 10 us, and three copies. The handler's
 hop is the price of decision B, and experiment E-P2 below measures whether
 file-heavy programs pay it visibly.
@@ -4533,6 +4558,26 @@ user. Neither is designed, and nothing in erXos leaves room for them.
 **BusyBox, or sbase, as the toolbox.** BusyBox is GPL-2.0, a permanent
 copyleft dependency. sbase (MIT) has no awk; it is the fallback if toybox
 proves hard to adapt.
+
+**No open-file description process: the handler holds the fids.** The
+description's two messages, the handler's to it and its answer, cost
+about 1.7 us of a 16 us `fstat` and its spawn 1.2 us of an `open`
+([research-file-call-path.md](research-file-call-path.md)). A handler
+that owned each open's fids and sent its requests itself, taking the
+replies in its own loop through `erx_file_remote:send/2` and `take/2`,
+would save those. Rejected: the description is the one owner of what
+POSIX shares between processes, the offset and the status flags, for
+every program of the session that holds an open of it, and of the fids
+whose lifetime is its own; without a process, an open shared by two
+programs' handlers needs a second owner of that state, so an open
+would take two forms, one a handler owns and one shared, and a pass,
+a spawn or a `fork` would move an open from one form to the other
+while its requests are in flight. A handler that waits for nobody's
+server also keeps taking its program's other requests and its signals
+while a slow server answers, which the description gives for free.
+The two messages are a tenth of the call; the grant's own request,
+which the tree in the grant and the open's single exchange cut, was a
+third ([design-files.md](design-files.md#performance)).
 
 ## Risks and open questions
 

@@ -405,7 +405,7 @@ entries are in alphabetical order.
 * **OTP**: The Open Telecom Platform: the libraries that ship with Erlang, including the behaviours. [Chapter 3, section 3.4](03-erlang.md#34-otp-behaviours)
 * **outer budget**: The budget that pays for what another domain may still use after a domain is gone, such as a ring a peer reads. [Chapter 5, section 5.1.5](05-overview.md#515-budget)
 * **over a limit (frame)**: A frame too large or nested too deeply for the receiver's own policy; the funnel drops and counts it and keeps the connection. [Chapter 10, section 10.3.3](10-domains.md#1033-malformed-or-over-a-limit)
-* **overcommit**: Handing out more memory than the machine holds, betting that processes will not touch all they asked for. [Chapter 1, section 1.4.7](01-operating-systems.md#147-who-pays-for-memory)
+\1* **own tree**: A tree value an `erx_fs` grant's `init` made and keeps in the grant's own process, so each callback is a step of that value and costs no message; `/tmp`'s tree is one. [Chapter 14, section 14.4]
 * **overlay**: The manifest of the modules loaded into a domain from outside, which the code service keeps so that the domain loads them again when it restarts. Designed. [Chapter 21, section 21.4.6](21-live-machine.md#2146-other-domains-and-overlays)
 * **owed (frame)**: A frame the handler cannot yet write because the program's inbound lane is full; the handler keeps it and writes it when the program frees room. [Chapter 13, section 13.2.2](13-native-programs.md#1322-the-handler)
 * **own budget**: The budget that pays for what a domain alone uses, and ends with it. [Chapter 5, section 5.1.5](05-overview.md#515-budget)
@@ -622,7 +622,6 @@ entries are in alphabetical order.
 * **tracer**: The process that receives a trace session's messages. [Chapter 21, section 21.3](21-live-machine.md#213-tracing)
 * **translation lookaside buffer (TLB)**: A small cache of recent address translations inside the processor. [Chapter 1, section 1.4.3](01-operating-systems.md#143-the-tlb)
 * **trap**: The special instruction that switches the processor to kernel mode and jumps into the kernel. [Chapter 1, section 1.2.1](01-operating-systems.md#121-three-ways-into-the-kernel)
-* **tree process**: The one Erlang process that holds the whole value of `/tmp`'s tree and answers every callback by one step of a pure function. [Chapter 14, section 14.4](14-files.md#144-tmp-a-file-system-in-erlang)
 * **trial**: The one boot of the spare slot after an update; it becomes the committed slot only if the trial is healthy, and a trial writes nothing but the record. [Chapter 16, section 16.6](16-storage.md#166-updates-through-two-slots)
 * **trust placement**: For each security property, the short list of code it rests on. [Chapter 11, section 11.2.1](11-security.md#1121-two-things-keep-domains-apart)
 * **trusted base**: erXos's trusted computing base: Fiasco, the root service and the rest of the system domain. [Chapter 11, section 11.2.2](11-security.md#1122-the-trusted-base)

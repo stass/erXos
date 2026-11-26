@@ -2317,7 +2317,11 @@ writes in Erlang form the `erx_files` application
 (`erlang/apps/erx_files/`):
 
 ```erlang
--callback init(Args :: term()) -> {ok, Fs :: term()}.
+%% The grant's tree: {ok, Fs}, a handle to a tree kept elsewhere, the same for the
+%% grant's life; or {own, Tree}, a tree value init made, which only this grant holds.
+%% For an own tree every callback below takes the current Tree in Fs's place and
+%% answers {Answer, Tree1}, forget {ok, Tree1}, and the grant keeps Tree1.
+-callback init(Args :: term()) -> {ok, Fs :: term()} | {own, Tree :: term()}.
 %% A tree whose grants a facet row's `tree` (abi/services/files.txt) may root within it:
 %% the init Args of a grant rooted at the root Tree names for Grantee, the domain the
 %% grant is for and the principal its mint named, from which a root per principal, as
@@ -2453,8 +2457,9 @@ other client's request can come between its parts:
   file's is, stay two opens. The grant alone ends a fid ([Fid owners](#fid-owners)), and the
   module hears of an open fid's end through `clunk`.
 * **Waiting requests.** Nothing in a grant waits for an event. A
-  callback does bounded work: a step of its tree's process, a call that
-  process answers without waiting for an event, a call to another
+  callback does bounded work: a step of its own tree, a step of its
+  tree's process, a call that process answers without waiting for an
+  event, a call to another
   service whose design names its deadline as the bound when every
   holder of the grant could make that call itself, so a stalled grant
   holds only requests of parties who could ask for the same wait, or a
@@ -2629,8 +2634,9 @@ other client's request can come between its parts:
   atomic with respect to the requests of other grants, as POSIX asks of
   regular files ([Open files and offsets](#open-files-and-offsets)),
   because the tree makes it so, and each tree's design states how:
-  `/tmp`'s tree process runs every request as one step
-  ([design-tmp.md](design-tmp.md#concurrency)), littlefs's worker runs
+  `/tmp`'s grant, the one process its own tree lives in, runs every
+  request as one step ([design-tmp.md](design-tmp.md#concurrency)),
+  littlefs's worker runs
   one operation of the volume at a time
   (`erlang/apps/erx_storage/src/erx_lfs.erl`, its module documentation),
   and F2FS's volume runs one request at a time
@@ -2642,21 +2648,37 @@ other client's request can come between its parts:
   the file's, which every open reads, so a read through one open
   answered after a write through another sees that write, as OTP's
   `file_SUITE` checks through a reader opened before the writes.
-* **One handle per grant.** `init/1` answers the grant's handle, `Fs`,
-  once for each grant, and it never changes: every callback receives it
-  and answers only its result, never a next state. Every grant calls the
-  callbacks in its own process, so a tree that changes keeps its nodes
-  behind the handle, in a process of its own as `/tmp` does
-  ([design-tmp.md](design-tmp.md#concurrency)) or on its medium, where
-  every grant reaches the same tree; with no next state in any answer,
-  no callback can leave its grant a copy of the tree that the others do
-  not see. A tree may put a grant's own context in its handle, as the
-  window tree puts its client and its grant
+* **A handle, or a tree of the grant's own.** `init/1` answers once for
+  each grant, in one of two forms. `{ok, Fs}` is a handle to a tree
+  kept elsewhere, in a process of its own or on its medium, where
+  every grant of the tree reaches the same tree. It never changes:
+  every callback receives it and answers only its result, never a
+  next state, so no callback can leave its grant a copy of the tree
+  that the others do not see. A tree may put a grant's own context in
+  its handle, as the window tree puts its client and its grant
   ([design-display.md](design-display.md#the-window-tree)), and sees
-  each request with that context. An answer that is none of its
-  callback's shapes, a next state appended included, reaches the client
-  as `eio`. A callback keeps no state in the process that calls it, and
-  an answer turned into `eio` does not undo what the tree did.
+  each request with that context. `{own, Tree}` is a tree value that
+  `init/1` made from its arguments, so no process but the grant holds
+  it: every callback receives the current `Tree` in the handle's
+  place and answers `{Answer, Tree1}`, `forget` `{ok, Tree1}`, and the
+  grant keeps `Tree1` for its next callback. The grant is then the
+  tree's one process, so each request is atomic because the grant
+  runs one callback at a time, and a callback costs no message: a
+  request costs the client's message and the reply. An own tree is a
+  tree per grant, since each grant's `init/1` makes its own; it suits
+  a tree that has one grant by construction, as `/tmp` has, whose
+  one grant, the domain's own, serves every reader in the domain
+  ([design-tmp.md](design-tmp.md#where-tmp-runs)). A tree that several
+  grants reach keeps the handle form. An answer that is none of its
+  callback's shapes, a next state appended to a handle's answer
+  included, reaches the client as `eio`; an own tree's pair whose
+  `Answer` is none of its callback's shapes reaches the client as
+  `eio` and the grant keeps its `Tree1`, and an answer that is no pair
+  is a fault of the module, which ends the grant, as the crash of a
+  tree's process ends the grants linked to it. A callback keeps no
+  state in the process that calls it but an own tree, which the grant
+  holds and passes in, and an answer turned into `eio` does not undo
+  what the tree did.
 * **Checks before callbacks.** Every message a grant receives, but the
   `DOWN`s of its fid owners and keepers and its keepers' answers, passes
   one decoding funnel, which takes the frame and
@@ -4102,6 +4124,29 @@ round trip per server. `tools/erx bench fs` measures the round trip,
 sequential reads of 1 GiB from an Erlang process and from a program, and
 a `find` over 10,000 files on QEMU under HVF, against the same operations
 on a local mount, as the baseline.
+
+**A request inside the domain.** A request to a grant of the caller's
+own domain crosses no connection: it is one message to an alias of the
+grant and one reply to an alias of the caller, the grant's funnel and
+reply check, and the client's two refusals and reply check. A callback
+of a tree kept in a process of its own adds a round trip to that
+process with a monitor; a callback of an own tree adds none. An
+operation's requests go together, so each operation is one exchange
+whatever its count of requests, and the client sends no `attach` and
+clunks no root fid ([Version and attach](#version-and-attach)).
+Measured with `tools/erx bench posix` under HVF (Apple M3 Max, QEMU
+11.1.3, Homebrew clang 23.1.3, landing profile;
+[research-file-call-path.md](research-file-call-path.md)), the one
+request of a program's `fstat` of a `/tmp` file, the description's
+`getattr`, cost 5.4 us of the call's 16.1 us, with `/tmp`'s tree in a
+process of its own and the client checking each request against the
+grammar; and a program's `open` spent 38 us of its 50.6 us in the
+description's open, one exchange of four requests (`attach`, `walk`,
+`lopen` and the root fid's `clunk`) of which three called the tree's
+process four times. With `/tmp`'s tree in its grant and the client
+sending what this section states, a request is expected to cost about
+3 us and the open's exchange about 10 us (estimates; [design-programs.md](design-programs.md#performance)
+gives the program's calls), until the same bench measures them.
 
 Resolving a path costs one walk for each run of names the resolver asks
 for, and the last run is sent with the operation, so a path without `.`,

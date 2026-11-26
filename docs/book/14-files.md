@@ -526,12 +526,13 @@ grant at `/tmp`, and
 `prim_file` reaches it through `erx_file_remote`, as it reaches the
 storage domain.
 
-One process owns the tree. The tree is one Erlang value held by the
-**tree process**. Every callback the grant makes is one call to that
-process, which answers it by one step of a pure function,
-`erx_ramfs_core:step/4`. Nothing else reads or writes the tree, so
-each request is atomic against every other without a lock, and the
-step function can be tested and fuzzed on its own.
+The grant owns the tree. The tree is one Erlang value held by `/tmp`'s
+one grant, the domain's own, as an **own tree**: every callback the
+grant makes is one step of a pure function, `erx_ramfs_core:step/4`,
+on that value, in the grant's own process. Nothing else reads or
+writes the tree, so each request is atomic against every other without
+a lock, a request costs one message to the grant and its reply, and
+the step function can be tested and fuzzed on its own.
 
 Three choices, after FreeBSD's tmpfs, shape the tree.
 
@@ -549,7 +550,7 @@ Three choices, after FreeBSD's tmpfs, shape the tree.
 Take `echo hello > /tmp/hi` from root's shell. The client sends
 `lcreate` of `hi`, then `write`, then `clunk` to the domain's own
 `/tmp` grant. The grant checks each and calls `make`, `write` and
-`clunk` on `erx_ramfs`, each one call to the tree process. The step
+`clunk` on `erx_ramfs`, each one step of the tree it holds. The step
 for `write` checks the cap and puts one chunk in the new node's map.
 Nothing leaves the domain, yet every request passes the same protocol
 and grant that serve other domains.
@@ -721,7 +722,7 @@ What does the user see when a part dies?
   grant clunks its fids. A removed file it held open is freed.
 * **A client domain ends.** Its grants drain: they take no more frames,
   clunk every fid and end.
-* **`/tmp`'s tree process or grant crashes.** They are linked under a
+* **`/tmp`'s grant or its lock table crashes.** They are linked under a
   one-for-all supervisor that restarts them, at most once in five
   seconds. `/tmp`
   comes back empty and is mounted again, files open before answer
