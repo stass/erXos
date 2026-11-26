@@ -1942,7 +1942,7 @@ How each system's clock is known:
 | Linux | the same `config.txt`; the governor is not relied on | Linux's own report, where the set reads it, else none |
 
 A bench set's build record states the clock and the `total_mem` its
-`config.txt` sets (`BootPartition.card_settings`, from the same values
+`config.txt` sets (`BootPartition.card_settings`, `CardSettings`, from the same values
 `config.txt` is written from), and every board run's record keeps the
 clock as `arm_clock_hz` in its run's details and the memory as
 `memory_mib` in its environment: erXos's walk from the build records of

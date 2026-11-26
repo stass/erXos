@@ -10,7 +10,7 @@ require_relative 'bench_record'
 require_relative 'bench_session'
 require_relative 'bench_side_by_side'
 require_relative 'bench_suite'
-require_relative 'board_clock'
+require_relative 'card_settings'
 require_relative 'board_record'
 require_relative 'board_run'
 require_relative 'board_walk'
@@ -133,7 +133,7 @@ module Erx
 
     # The record of L4Re's board run of benchmark name from its console log and the build
     # record at subject, written under history; answers [the run directory, the record].
-    # What the set's config.txt set, the ARM clock and total_mem (BoardRecord::Card), comes
+    # What the set's config.txt set, the ARM clock and total_mem (CardSettings), comes
     # from the set's build record the run left beside log, whose SHA-256 the run's details
     # keep, and is unknown without it.
     # revision is the harness's (SourceRevision::Revision). A log in which Fiasco started
@@ -153,7 +153,7 @@ module Erx
                                                   details: { 'memory_mib' => card.memory_mib }.compact),
         subject: BenchRecord::Subject.new(revision: revision.commit, dirty: revision.dirty, details: subject_record(subject)),
         run: BenchRecord::Run.new(date: File.mtime(log).utc, started_by: 'manual', load: nil, host_cpus: nil, reused_from: nil,
-                                  details: { BoardClock::KEY => card.arm_clock_hz, 'set_record_sha256' => card_sha256,
+                                  details: { CardSettings::CLOCK_KEY => card.arm_clock_hz, 'set_record_sha256' => card_sha256,
                                              'refused' => answer.fetch(:refused) }),
         boots: [BenchRecord::Boot.new(position: 1, clock: nil, cells: answer.fetch(:cells), details: {})]
       )
@@ -164,10 +164,10 @@ module Erx
     # that record's SHA-256; an unknown card and nil without the record.
     def set_card(log)
       path = File.join(File.dirname(log), BootPartition::SET_RECORD)
-      return [BoardRecord::Card.new(arm_clock_hz: nil, memory_mib: nil), nil] unless File.file?(path)
+      return [CardSettings::UNKNOWN, nil] unless File.file?(path)
 
       bytes = BoundedFile.read(path, maximum: BootPartition::RECORD_BYTES)
-      [BoardRecord.card(JsonInput.parse(bytes, max_bytes: BootPartition::RECORD_BYTES, label: path), label: path),
+      [CardSettings.read(JsonInput.parse(bytes, max_bytes: BootPartition::RECORD_BYTES, label: path), label: path),
        Digest::SHA256.hexdigest(bytes)]
     end
 
@@ -239,7 +239,10 @@ module Erx
         directory = run_directory
         log = File.join(directory, LOG)
         # The set's build record goes beside the log, where the import reads what its card set.
-        FileUtils.cp(File.join(File.dirname(set.directory), BootPartition::SET_RECORD), directory)
+        record = File.join(File.dirname(set.directory), BootPartition::SET_RECORD)
+        raise Error, "bench: L4Re's set #{set.directory} has no build record beside it" unless File.file?(record)
+
+        FileUtils.cp(record, directory)
         console = @console.call(log: log, classify: L4ReBoard.method(:classify))
         begin
           Netboot.point(root: @link, target: queue)

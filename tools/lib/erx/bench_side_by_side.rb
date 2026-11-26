@@ -3,7 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'bench_record'
-require_relative 'board_clock'
+require_relative 'card_settings'
 require_relative 'bench_suite'
 
 module Erx
@@ -19,7 +19,7 @@ module Erx
   #
   # A number is converted to nanoseconds only by its own run's clocks: a clock with a
   # frequency by its run's clock group, and a cell in CPU cycles by the ARM clock its sets'
-  # build records state the cards were configured to hold (BoardClock), which the row then
+  # build records state the cards were configured to hold (CardSettings), which the row then
   # names; a cell in cycles from a run with no such clock, as under QEMU, stays in cycles
   # whatever another boot's CLOCK line measured, since a calibration describes only its own
   # boot. A ratio is set only between two histograms in nanoseconds, neither converted
@@ -95,7 +95,7 @@ module Erx
       return nil unless cell
 
       cycles = cell.conditions.clock == 'cycles'
-      hz = frequency(cell.conditions.clock, boot.clock, run.record.run.details)
+      hz = frequency(cell.conditions.clock, boot.clock, run)
       Entry.new(round: run.round, status: cell.status, reason: cell.reason, clock: cell.conditions.clock, form: cell.form,
                 values: values(cell, hz, cycles ? 'cycles' : 'ticks'), converted_hz: (hz if cycles), ratio: nil)
     end
@@ -103,9 +103,11 @@ module Erx
     # The frequency a cell counted on clock_name is converted to nanoseconds at, from its
     # own run: for cycles the ARM clock the run's details state, for a frequency clock the
     # positive frequency its clock group recorded; nil when there is none.
-    def frequency(clock_name, clock, details)
+    def frequency(clock_name, clock, run)
       case clock_name
-      when 'cycles' then BoardClock.stated_hz(details, label: 'bench: a board run')
+      when 'cycles'
+        CardSettings.clock_hz(run.record.run.details,
+                              label: "bench: the record of round #{run.round} in #{run.record.environment.name}")
       when *FREQUENCY_CLOCKS
         clock&.fetch('frequency_hz', nil).then { |hz| hz if hz.is_a?(Integer) && hz.positive? }
       end

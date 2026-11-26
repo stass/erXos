@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'board_clock'
+require_relative 'card_settings'
 require_relative 'error'
 require_relative 'pin_table'
 require_relative 'json_input'
@@ -22,7 +22,7 @@ module Erx
   # domain names, is refused when it is loaded, before any tool uses it. A board's header
   # map, the record's pins, is checked as the record loads too (PinTable); pins is the
   # checked map, nil for a board without one. A board whose cards hold one ARM clock names it
-  # in whole megahertz (arm_clock_hz, BoardClock).
+  # in whole megahertz (arm_clock_hz, CardSettings).
   Platform = Data.define(:name, :record, :pins)
   class Platform
     # The board the QEMU harnesses and `tools/erx` build for when no caller names another:
@@ -76,7 +76,8 @@ module Erx
       unknown = record.keys - KEYS
       raise Error, "#{self.class.record_path(name)}: unknown key #{unknown.first.inspect}" unless unknown.empty?
 
-      BoardClock.stated_hz(record, label: self.class.record_path(name))
+      # Read only to refuse a clock config.txt could not set.
+      CardSettings.clock_hz(record, label: self.class.record_path(name))
 
       MIB_FIELDS.each do |field, mib|
         bytes = record.fetch(field) { raise Error, "#{self.class.record_path(name)}: no #{field}" }

@@ -32,15 +32,15 @@ class BootPartitionTest < Minitest::Test
                  settings('development')
   end
 
-  # A release card leaves the firmware's log and the ARM's JTAG off the header: the jtag
-  # rows give neither enable_jtag_gpio nor gpio= lines. Any other build kind is refused.
   # A set's build record states what the card's config.txt sets that a run's record keeps,
   # from the values config_txt writes.
   def test_a_sets_record_states_the_cards_clock_and_memory
-    assert_equal({ 'arm_clock_hz' => 1_500_000_000, 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(PI))
-    assert_equal({ 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(record(arm_clock_hz: nil)))
+    assert_equal({ 'arm_clock_hz' => 1_500_000_000, 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(PI).to_record)
+    assert_equal({ 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(record(arm_clock_hz: nil)).to_record)
   end
 
+  # A release card leaves the firmware's log and the ARM's JTAG off the header: the jtag
+  # rows give neither enable_jtag_gpio nor gpio= lines. Any other build kind is refused.
   def test_only_a_development_card_has_jtag
     assert_equal settings('development') - %w[uart_2ndstage=1 enable_jtag_gpio=1], settings('release')
     assert_empty set_pins(settings('release')) & [*22..27]

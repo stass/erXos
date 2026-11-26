@@ -188,7 +188,8 @@ module Erx
       raise 'a board log read into another count of boots' unless read.boots.size == queue.entries.size
       raise "a board log's slices are not the log" unless read.boots.map(&:log).join == text.b
 
-      run = BoardRecord.run(queue: queue, walk: nil, read: read, readings: { 'before' => text, 'after' => nil }, started_by: 'manual')
+      run = BoardRecord.run(queue: queue, walk: nil, read: read, readings: { 'before' => text, 'after' => nil }, started_by: 'manual',
+                            arm_clock_hz: nil)
       made = BoardRecord.records(read, sets: [BOARD_SET], run: run)
       raise "a board log's record dropped a boot" unless made.sum { |recorded| recorded.record.boots.size } == queue.entries.size
 

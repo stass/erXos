@@ -11,7 +11,7 @@ require_relative 'fsimg'
 require_relative 'data_volume'
 require_relative 'pi_medium'
 require_relative 'bl31'
-require_relative 'board_clock'
+require_relative 'card_settings'
 require_relative 'board_tree'
 require_relative 'boot_partition_settings'
 require_relative 'build_kind'
@@ -100,9 +100,6 @@ module Erx
     # fiasco_reserve were measured. A larger board runs on that 1 GB.
     TOTAL_MEM_MIB = 1024
     GPU_MEM_MIB = 76
-    # The key under which a set's build record states the total_mem its config.txt sets
-    # (card_settings).
-    TOTAL_MEM_KEY = 'total_mem_mib'
 
     # What write left in the image's directory: path, the card's image (the medium, as
     # ReleaseMedium::Written#path is QEMU's); compressed, the image compressed (compress);
@@ -127,7 +124,7 @@ module Erx
     # * init_uart_clock: the PL011s' clock from the record, for UART3, the host link.
     # * core_freq, core_freq_fixed: the header map's core clock, which the I2C and SPI
     #   controllers divide, fixed so the rate their drivers divide holds (core_lines).
-    # * arm_freq, force_turbo: the record's ARM clock, held (BoardClock): no system run on
+    # * arm_freq, force_turbo: the record's ARM clock, held (CardSettings): no system run on
     #   the board asks the firmware for a clock, and without force_turbo the firmware's own
     #   scaling would choose one.
     # * total_mem, gpu_mem: the record's RAM.
@@ -191,9 +188,9 @@ module Erx
     end
 
     # The ARM clock lines for platform's record: arm_freq in MHz, the unit config.txt takes,
-    # held by force_turbo; none for a record that names no clock (BoardClock).
+    # held by force_turbo; none for a record that names no clock (CardSettings).
     def arm_clock_lines(platform)
-      hz = BoardClock.stated_hz(platform.record, label: platform.record_path) or return ''
+      hz = CardSettings.clock_hz(platform.record, label: platform.record_path) or return ''
 
       "arm_freq=#{hz / 1_000_000}\nforce_turbo=1\n"
     end
@@ -486,16 +483,15 @@ module Erx
       # A set has no card, so its record names no card's tool.
       record = record.merge('inputs' => record.fetch('inputs').except('card'))
       record = record.merge('board_tree_cpus' => 'boot CPU only') if boot_cpu_only
-      write_set(root: root, directory: directory, plan: plan, record: record.merge(card_settings(platform)))
+      write_set(root: root, directory: directory, plan: plan, record: record.merge(card_settings(platform).to_record))
     end
 
-    # What platform's config.txt sets that a board run's record keeps, as a set's build
-    # record states it: the ARM clock (BoardClock), when the platform's record names one,
-    # and total_mem, the memory the firmware reports, of which gpu_mem goes to the
-    # VideoCore. config_txt writes the same values.
+    # What platform's config.txt sets that a board run's record keeps (CardSettings::Card),
+    # from the values config_txt writes: the ARM clock, when the platform's record names
+    # one, and total_mem.
     def card_settings(platform)
-      { BoardClock::KEY => BoardClock.stated_hz(platform.record, label: platform.record_path),
-        TOTAL_MEM_KEY => total_mem_mib(platform) }.compact
+      CardSettings::Card.new(arm_clock_hz: CardSettings.clock_hz(platform.record, label: platform.record_path),
+                             memory_mib: total_mem_mib(platform))
     end
 
     # The plan and the build record of bootable's partition on platform: BL31 and the

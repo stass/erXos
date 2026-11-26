@@ -7,7 +7,7 @@ require 'time'
 require_relative 'bench_record'
 require_relative 'bench_suite'
 require_relative 'bench_system'
-require_relative 'board_clock'
+require_relative 'card_settings'
 require_relative 'board_files'
 require_relative 'board_log'
 require_relative 'boot_partition'
@@ -35,12 +35,8 @@ module Erx
     CPUS = 4
 
     # What a set's record holds of the set: its environment, its subject, and the ARM clock
-    # its config.txt set (BoardClock), nil when its build record states none.
+    # its config.txt set (CardSettings), nil when its build record states none.
     SetFacts = Data.define(:environment, :subject, :arm_clock_hz)
-    # What a set's config.txt set that its records keep, as its build record states them
-    # (BootPartition.card_settings): the ARM clock in hertz and total_mem in MiB, each nil
-    # when the record states none.
-    Card = Data.define(:arm_clock_hz, :memory_mib)
 
     module_function
 
@@ -63,7 +59,7 @@ module Erx
       files = BootPartition.listed_files(receipt)
       receipt.fetch('source').fetch_values('commit', 'dirty') => [String => commit, dirty]
       receipt.fetch('inputs').fetch('firmware') => Array => firmware
-      card = card(receipt, label: path)
+      card = CardSettings.read(receipt, label: path)
       SetFacts.new(
         environment: BenchRecord::Environment.new(
           kind: 'pi4', model: nil, cpus: CPUS, system: 'erxos',
@@ -82,19 +78,7 @@ module Erx
       raise Error, "board record: #{path} does not name the set's source, firmware and kernel"
     end
 
-    # What the set's build record receipt, which label names, states of its card (Card); a
-    # receipt that is not a JSON object, or a value that is not one of these, is refused.
-    def card(receipt, label:)
-      raise Error, "board record: #{label} is not a JSON object" unless receipt.is_a?(Hash)
-
-      memory = receipt[BootPartition::TOTAL_MEM_KEY]
-      raise Error, "board record: #{label}: #{BootPartition::TOTAL_MEM_KEY} is not a positive whole number" unless
-        memory.nil? || (memory.is_a?(Integer) && memory.positive?)
-
-      Card.new(arm_clock_hz: BoardClock.stated_hz(receipt, label: label), memory_mib: memory)
-    end
-
-    # The run's facts: the queue's date; the ARM clock its sets' config.txt set (BoardClock),
+    # The run's facts: the queue's date; the ARM clock its sets' config.txt set (CardSettings),
     # nil unless every set states the same one; the sensor readings, each named for when it was
     # read and nil when none was; how the walk ended and whether the link was restored,
     # nil without the walk; and what the board returned to (BoardLog's read).
@@ -102,7 +86,7 @@ module Erx
       returned = read.returned
       BenchRecord::Run.new(
         date: Time.iso8601(queue.date).utc, started_by: started_by, load: nil, host_cpus: nil, reused_from: nil,
-        details: { BoardClock::KEY => arm_clock_hz,
+        details: { CardSettings::CLOCK_KEY => arm_clock_hz,
                    'sensors' => readings.transform_values { |text| text&.each_line&.map { |line| LineEscape.escape(line.chomp) } },
                    'ending' => walk&.ending, 'restored' => walk&.restored,
                    'returned' => { 'status' => returned.status, 'identity' => returned.identity&.to_h&.transform_keys(&:to_s) } }
