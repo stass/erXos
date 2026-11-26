@@ -38,6 +38,7 @@ IMPLEMENTATION:
 #include <libc_backend.h>
 #include "erx/core/console_ring.h"
 #include "global_data.h"
+#include "kernel_console.h"
 #include "vlog.h"
 
 static_assert(Erx_console_ring::Reply_words == ERX_CONSOLE_RING_REPLY_WORDS,
@@ -148,6 +149,21 @@ Erx_console_ring::take(Mword (&words)[Reply_words])
   for (unsigned at = 0; at < reply.count; at++)
     words[at] = reply.words[at];
   return reply.count;
+}
+
+// The stop's own write (docs/design-debugger.md, "The stop"): straight to
+// the UART's polled write, past the ring and without the lock, so a line the
+// stop prints before the close, or after a fault inside it, reaches the
+// line. Before the wrap the kernel console is the UART's itself.
+PUBLIC static
+void
+Erx_console_ring::write_uart(char const *str, size_t len)
+{
+  Console *const uart = _uart;
+  if (!uart)
+    Kconsole::console()->write(str, len);
+  else if (uart->state() & Console::OUTENABLED)
+    uart->write(str, len);
 }
 
 // The close, and the head of every stop's report: the first close

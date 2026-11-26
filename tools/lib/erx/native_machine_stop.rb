@@ -23,6 +23,8 @@ module Erx
     CPUS = 4
     LEADER = 2
     DEFINES = ['-DERX_TEST_MACHINE_STOP'].freeze
+    # The seeded panic's message (fiasco/kernel/src/kern/app_cpu_thread.cpp).
+    REASON = 'machine stop seed on CPU 2'
 
     module_function
 
@@ -34,6 +36,15 @@ module Erx
     # The states the record must give each CPU, by number.
     def expected_states
       (0...CPUS).map { |cpu| cpu == LEADER ? 'leader' : 'stopped' }.freeze
+    end
+
+    # The report's first part, the text before the crash frame (docs/design-debugger.md,
+    # "The stop", step 6): the panic's message in every form, then one line for each CPU
+    # with its state.
+    def text_problems(serial)
+      lines = ["erx: kernel stop: #{REASON}",
+               *expected_states.each_with_index.map { |state, cpu| "erx: kernel stop: cpu #{cpu} #{state}" }]
+      lines.reject { |line| serial.match?(/^#{Regexp.escape(line)}\b/n) }.map { |line| "text #{line.inspect} missing" }
     end
 
     # Holds one run's serial log to the stop. Raises on the first disagreement.
@@ -50,6 +61,7 @@ module Erx
       problems << "ncpus #{record.fetch('ncpus', 0)}" unless record.fetch('ncpus', 0) == CPUS
       problems << "states #{states.join(',')}" unless states == expected_states
       problems << 'no reset' unless CrashFrame::RESET_LINE.match?(serial)
+      problems.concat(text_problems(serial))
       raise Error, "machine stop: the record's #{problems.join('; ')} disagree" unless problems.empty?
 
       record

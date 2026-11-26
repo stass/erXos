@@ -625,7 +625,7 @@ module Erx
       # What the stop core's seam (include/erx/core/machine_stop.h) needs of
       # the ABI: the CPU limit, the census bound, the readable-RAM map's
       # capacity and page size, the stop states and RAM classes with their
-      # types, which stop states carry registers, and the layouts of the stop
+      # types, which stop states carry registers and each state's name, and the layouts of the stop
       # slot and the debug anchor with everything they hold, the readable-RAM
       # map among them (CEmitter.seam_layout). Spelled as include/erx/abi.h spells each, so
       # a file that includes both redefines nothing differently, and valid C
@@ -642,6 +642,7 @@ module Erx
          '#include <stdbool.h>', '#include <stddef.h>', '#include <stdint.h>', '',
          *(constants + members).map { |item| CEmitter.constant_definition(item) },
          '', *CEmitter.seam_declarations(schema, 'abi_stop.h'), '',
+         *CEmitter.enum_name_lookup(state),
          *CEmitter.enum_attribute_predicate(state, 'registers', state.attributes.fetch('registers')),
          '#endif /* ERX_CORE_ABI_STOP_H */', ''].join("\n")
       end

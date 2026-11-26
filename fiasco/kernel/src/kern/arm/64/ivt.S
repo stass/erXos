@@ -381,6 +381,10 @@ sys_call_table:
 	.global __irq_handler_b_irq
 __irq_handler_b_irq:
 	bl	irq_handler
+	// The dispatch is over: no stop request reads its frame now.
+	mov	x0, xzr
+	mov	x1, xzr
+	bl	erx_machine_stop_irq_frame
 	b	.Lret_from_exception
 
 

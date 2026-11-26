@@ -52,7 +52,7 @@ IMPLEMENTATION:
 #include "entry_frame.h"
 #include "erx_console_ring.h"
 #include "ipi.h"
-#include "kernel_console.h"
+#include "mem.h"
 #include "platform_control.h"
 #include "processor.h"
 #include "timer.h"
@@ -73,6 +73,9 @@ namespace {
 // Each CPU's panic stack: two pages, which hold the formatted message, the
 // crash core's writer and the frame's printer below the leader's own frames.
 enum { Panic_stack_bytes = 2 * ERX_PAGE_SIZE, Message_bytes = 512 };
+
+// How long the census waits before it asks a silent CPU again.
+static constexpr uint64_t Ask_again_ns = 1000000;
 
 struct alignas(16) Panic_stack { unsigned char bytes[Panic_stack_bytes]; };
 
@@ -189,11 +192,25 @@ erx_stop_published(uint64_t asked)
   return published;
 }
 
+// The stop request to each CPU of cpus but the leader. The claim's store
+// must be visible before each request: on GICv3 the request is a write of a
+// system register, which a memory barrier does not order, so a dsb completes
+// the store first.
+static void
+erx_stop_ask(unsigned leader, uint64_t cpus)
+{
+  Mem::dsb();
+  for (unsigned other = 0; other < Config::Max_num_cpus; ++other)
+    if (other != leader && (cpus >> other) & 1)
+      Ipi::send(Ipi::Debug, Cpu_number(leader), Cpu_number(other));
+}
+
 // The leader's steps from its claim to the end of the census.
 static erx_stop_leader_t
 erx_stop_census(unsigned cpu)
 {
   erx_stop_leader_t leader = erx_machine_stop_leader_begin(cpu);
+  uint64_t asked_ns = 0;
   for (;;)
     {
       uint64_t loaded = 0;
@@ -207,17 +224,22 @@ erx_stop_census(unsigned cpu)
           loaded = __atomic_load_n(&erx_stop_admitted, __ATOMIC_RELAXED);
           break;
         case ERX_STOP_STEP_ASK:
-          // The claim's store is ordered before each interrupt by this
-          // barrier (docs/design-debugger.md, "Unverified facts", P7).
-          __atomic_thread_fence(__ATOMIC_SEQ_CST);
-          for (unsigned other = 0; other < Config::Max_num_cpus; ++other)
-            if ((leader.asked >> other) & 1)
-              Ipi::send(Ipi::Debug, Cpu_number(cpu), Cpu_number(other));
+          erx_stop_ask(cpu, leader.asked);
           now = erx_stop_clock_ns();
+          asked_ns = now;
           break;
         case ERX_STOP_STEP_LOOK:
           loaded = erx_stop_published(leader.asked);
           now = erx_stop_clock_ns();
+          // Ask again whoever has not answered, once a millisecond: a request
+          // that a CPU took before it could see the claim's store, or that
+          // its interrupt controller dropped, is not the census's last word
+          // (docs/design-debugger.md, "Unverified facts", P7).
+          if (now - asked_ns >= Ask_again_ns)
+            {
+              erx_stop_ask(cpu, leader.asked & ~loaded);
+              asked_ns = now;
+            }
           break;
         case ERX_STOP_STEP_RECORD:
           return leader;
@@ -280,6 +302,77 @@ erx_stop_walk(erx_stop_regs_t const &regs, uint64_t *frames)
   return n;
 }
 
+// One line of the report's first part, "erx: kernel stop: " and the text.
+__attribute__((format(printf, 1, 2))) static void
+erx_stop_say(char const *format, ...)
+{
+  static char const prefix[] = "erx: kernel stop: ";
+  char line[160];
+  va_list args;
+  va_start(args, format);
+  int const length = vsnprintf(line, sizeof(line) - 1, format, args);
+  va_end(args);
+  if (length < 0)
+    return;
+  size_t const used = size_t(length) < sizeof(line) - 1 ? size_t(length) : sizeof(line) - 2;
+  line[used] = '\n';
+  erx_effect_console_write(prefix, sizeof(prefix) - 1);
+  erx_effect_console_write(line, used + 1);
+}
+
+// The report's first part (docs/design-debugger.md, "The stop", step 6): the
+// record's own fields as text for the person at the console. The message in
+// every form, any control byte in it shown as '?'; in the full form the
+// leader's registers and frames; and one line for each CPU with its state,
+// and in the full form where it was.
+static void
+erx_stop_report(erx_crash_input_t const &input, erx_regs_t const &regs,
+                erx_stop_leader_t const &leader)
+{
+  using Ull = unsigned long long;
+  if (!leader.complete)
+    erx_stop_say("the census is incomplete: a CPU marked unanswered did not stop");
+  char message[Message_bytes];
+  for (size_t at = 0; at < input.message_length; ++at)
+    {
+      unsigned char const c = input.message[at];
+      message[at] = c >= 0x20 && c < 0x7f ? char(c) : '?';
+    }
+  message[input.message_length] = '\0';
+  erx_stop_say("%s", message);
+  bool const full = input.form == ERX_CRASH_FORM_FULL;
+  if (full)
+    {
+      for (unsigned r = 0; r < 31; r += 4)
+        {
+          unsigned const last = r + 3 < 31 ? r + 3 : 30;
+          char line[128];
+          size_t used = 0;
+          for (unsigned at = r; at <= last; ++at)
+            if (used < sizeof(line))
+              used += size_t(snprintf(line + used, sizeof(line) - used, "%sx%u 0x%016llx",
+                                    at == r ? "" : " ", at,
+                                    Ull(regs.gpr[at])));
+          erx_stop_say("%s", line);
+        }
+      erx_stop_say("sp 0x%016llx pc 0x%016llx state 0x%llx",
+                   Ull(regs.sp), Ull(regs.pc),
+                   Ull(regs.state));
+      for (unsigned at = 0; at < input.nframes; ++at)
+        erx_stop_say("frame %u 0x%016llx", at, Ull(input.frames[at]));
+    }
+  for (unsigned cpu = 0; cpu < input.ncpus && cpu < ERX_CRASH_CPUS; ++cpu)
+    {
+      erx_crash_cpu_t const &entry = input.cpus[cpu];
+      char const *const name = erx_stop_cpu_state_name(entry.state);
+      if (full && erx_stop_cpu_state_registers(entry.state))
+        erx_stop_say("cpu %u %s pc 0x%016llx sp 0x%016llx", cpu, name ? name : "unknown",
+                     Ull(entry.pc), Ull(entry.sp));
+      else
+        erx_stop_say("cpu %u %s", cpu, name ? name : "unknown");
+    }
+}
+
 // The leader, on its panic stack: the census, the record, its frame, the end.
 [[noreturn]] static void
 erx_stop_lead(void *arg)
@@ -322,6 +415,7 @@ erx_stop_lead(void *arg)
   input.message = erx_stop_message;
   input.message_length = length < 0 ? 0 : (size_t(length) < sizeof(erx_stop_message) ? size_t(length) : sizeof(erx_stop_message) - 1);
   (void)erx_crash_record_write(&input, erx_crash_buffer, erx_crash_scratch);
+  erx_stop_report(input, regs.regs, leader);
   erx_crash_frame_write(erx_crash_buffer, ERX_CRASH_END_FAULT);
   erx_stop_end(cpu);
 }
@@ -465,12 +559,19 @@ Erx_machine_stop::request()
   (void)erx_stop_deeper(cpu);
   Return_frame const *frame = erx_irq_frame[cpu];
   erx_stop_regs_t regs = {};
+  Mword space_root;
+  asm volatile("mrs %0, TTBR0_EL1" : "=r"(space_root));
+  regs.space_root = space_root;
   if (frame)
     {
       for (unsigned r = 0; r < 31; ++r)
         regs.regs.gpr[r] = frame->r[r];
-      // A frame from user mode (EL0t) holds the user's stack pointer.
-      regs.regs.sp = (frame->pstate & 0xf) == 0 ? frame->usp : erx_irq_sp[cpu];
+      // The interrupt entry does not save the user's stack pointer, which
+      // Fiasco keeps in SP_EL0 until a thread switch, so a CPU interrupted in
+      // user mode (EL0t) reads it live; the kernel runs on SP_EL1.
+      Mword user_sp;
+      asm volatile("mrs %0, SP_EL0" : "=r"(user_sp));
+      regs.regs.sp = (frame->pstate & 0xf) == 0 ? user_sp : erx_irq_sp[cpu];
       regs.regs.pc = frame->pc;
       regs.regs.state = frame->pstate;
     }
@@ -478,8 +579,9 @@ Erx_machine_stop::request()
   erx_stop_park();
 }
 
-// Called by the interrupt entry (kern/arm/64/ivt.S) before it dispatches:
-// the entry's frame and the stack pointer the interrupt found.
+// Called by the interrupt entry (kern/arm/64/ivt.S) before it dispatches,
+// with the entry's frame and the stack pointer the interrupt found, and
+// after the dispatch with a null frame, so no later request reads a stale one.
 extern "C" void
 erx_machine_stop_irq_frame(Return_frame *frame, Mword sp)
 {
@@ -502,8 +604,10 @@ erx_effect_clock_ns(void)
   return erx_stop_clock_ns();
 }
 
+// Every line of the stop's, the crash core's frame among them, takes the
+// UART's polled write (Erx_console_ring::write_uart).
 extern "C" void
 erx_effect_console_write(char const *line, size_t length)
 {
-  Kconsole::console()->write(line, length);
+  Erx_console_ring::write_uart(line, length);
 }
