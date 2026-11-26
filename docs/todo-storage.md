@@ -240,18 +240,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [Medium] files, a facet's tree (`erlang/apps/erx/src/erx_ns.erl`, `place/1`, `packages_place/0`,
-  `home_place/1` and the `{tree, Name}` option of a facet's mount): a facet's mount still names its
-  tree in an option, and `erx_ns`'s `app_tree/1`, `erx_facets:file_grant/2` (the facet's name) and
-  `file_grant/3`'s callers name it again, copies of the tree the grant's root answers, which must
-  match it for every operation beneath the entry; a mint's reply (`erx_facet:minted/2`,
-  `erx_fs_grants:grant/3,4`'s answer) and the registry (`erx_facets:files/2`) carry only
-  `{Pid, Rights}`. Carry the tree in the mint's reply, `{ok, Pid, Tree}` for a service served as a
-  tree, which the domain service admits as a plain name and installs as `{Pid, Tree, Rights}`
-  (design-system.md, "the mint's reply"; design-files.md, "The tree beneath an entry"); resolve a
-  facet's entry, `{facet, Name}`, on the registry's tree; and drop the option, `app_tree/1` and the
-  copies. A grant pid's mount already takes its tree from the handle its starter received.
-
+* [Low] files, a grant handle's opacity (`erlang/apps/erx_files/src/erx_fs.erl`, `grant_handle()`):
+  design-files.md ("A grant handle is built by its starter") rests a handle's tree on
+  `erx_fs:grant_handle()` being opaque, "so Dialyzer refuses any other construction", but no gate runs
+  Dialyzer, and `erx_ns:checked/2` and `erx_prog_handler_core:window_dev/2` take a handle apart outside
+  `erx_fs`. Run Dialyzer over the modules that take a handle, or have `erx_fs` own every reading of one,
+  as `erx_fs:handle_tree/1` does, with a build check that no other module destructures it, as the
+  `erx_ident` item of [todo-domains.md](todo-domains.md) has for identifiers.
 * [Medium] storage and images, the development boot image is 68 MB (`kernel8.img` on the Pi 4 boot
   partition, 68,202,496 bytes) and stays in RAM for the whole boot; it also weighs on the Pi 4 secure-boot
   check item below. Three shrinks are open: 12.2 MB are byte-identical OTP files in both `system/lib` and

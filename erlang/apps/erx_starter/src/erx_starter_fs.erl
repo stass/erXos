@@ -40,8 +40,8 @@ test stands in for, and the log line of a refused write.
 -export([init/1, root/1, walk/3, getattr/2, open/3, read/4, write/4, make/4, readdir/4,
          statfs/1, clunk/2]).
 
-%% The service's name in the manifest, and the tree's name, which a mount's
-%% {tree, Name} and attach's Aname name.
+%% The service's name in the manifest, and the tree's name, which root/1 answers, the
+%% mint's reply carries and attach's Aname names.
 -define(SERVICE, start).
 -define(TREE, <<"start">>).
 %% The one file's name.

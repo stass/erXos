@@ -669,6 +669,13 @@ module Erx
           end
           checkers = parameters.values.map { |parameter| parameter.fetch(:helper) }.uniq
           declaration.fail!('a service\'s parameters name one checked_by helper') if checkers.size > 1
+          # A grant of an interface files_grant checks is mounted on the tree its mint's
+          # reply names, which the domain service admits only from a service served as a
+          # tree (erx_domain_mints:admitted/4): served as message, its facet would install
+          # as a bare pid and every mount of it would answer eio.
+          if checkers.first == 'files_grant' && served_as != 'tree'
+            declaration.fail!('a service whose parameters files_grant checks is served as a tree')
+          end
           Model.unique_values(operations, label: 'operation', line: declaration.line)
           Model.unique_values(parameters.transform_values { |value| value.fetch(:number) }, label: 'parameter', line: declaration.line)
           { name: name, number: number,

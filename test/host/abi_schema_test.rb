@@ -560,6 +560,16 @@ class AbiSchemaTest < Minitest::Test
     assert_includes Erx::ABI::ErlangEmitter.header(model), "-define(ERX_FILES_GRANT_SERVICES, [#{numbers.sort.join(', ')}]).\n"
   end
 
+  # A grant of an interface files_grant checks is mounted on the tree its mint's reply
+  # names, which the domain service admits only from a service served as a tree, so such
+  # an interface served as message is refused.
+  def test_a_files_grant_interface_is_served_as_a_tree
+    text = "service carried 2\n  served_as %s\n  parameter rights 1 u64 optional range 1 2 checked_by files_grant\n"
+    assert_equal 'tree', schema(format(text, 'tree')).services.first.fetch(:served_as)
+    error = assert_raises(Erx::ABI::SchemaError) { schema(format(text, 'message')) }
+    assert_match(/files_grant checks is served as a tree/, error.message)
+  end
+
   # served_by session marks a session's line (docs/design-system.md, "A session's lines"):
   # it is served as message and states all five quantities a facet row carries, since no
   # row states its grant, and ?ERX_LINES maps each such interface's name to them.
