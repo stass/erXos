@@ -19,10 +19,12 @@ check(Spec) -> check(Spec, all).
 check(Spec, Scope) -> erx_trace:check(Spec, Scope, fun domain_of/1).
 
 defaults_test() ->
-    ?assertEqual({ok, #{select => [4], frames => false, kernel => false}}, check(#{select => [4]})),
-    ?assertEqual({ok, #{select => [], frames => false, kernel => true}}, check(#{kernel => true})),
+    ?assertEqual({ok, #{select => [4], frames => false, backend => false, kernel => false}}, check(#{select => [4]})),
+    ?assertEqual({ok, #{select => [], frames => false, backend => false, kernel => true}}, check(#{kernel => true})),
+    ?assertEqual({ok, #{select => [], frames => false, backend => true, kernel => false}},
+                 check(#{backend => true})),
     Self = self(),
-    ?assertEqual({ok, #{select => [Self], frames => true, kernel => true}},
+    ?assertEqual({ok, #{select => [Self], frames => true, backend => false, kernel => true}},
                  check(#{select => [Self], frames => true, kernel => true})).
 
 badarg_test() ->
@@ -32,6 +34,8 @@ badarg_test() ->
     ?assertEqual({error, badarg}, check(#{select => [4], colour => red})),
     ?assertEqual({error, badarg}, check(#{})),
     ?assertEqual({error, badarg}, check(#{select => [], kernel => false})),
+    ?assertEqual({error, badarg}, check(#{backend => false, kernel => false})),
+    ?assertEqual({error, badarg}, check(#{select => [4], backend => yes})),
     ?assertEqual({error, badarg}, check(#{frames => true, kernel => true})),
     ?assertEqual({error, badarg}, check([{select, [4]}])),
     ?assertEqual({error, badarg}, check(#{select => [4 | 4]})),
@@ -48,6 +52,7 @@ no_facet_test() ->
 
 scope_test() ->
     ?assertEqual({error, scope}, check(#{kernel => true}, [4])),
+    ?assertEqual({error, scope}, check(#{backend => true}, [4])),
     ?assertMatch({ok, _}, check(#{select => [4]}, [4])),
     ?assertEqual({error, scope}, check(#{select => [4]}, [5])),
     ?assertEqual({error, scope}, check(#{select => [self()]}, [5])),
@@ -211,6 +216,15 @@ buffer_test() ->
     ?assertMatch({4096, _}, Batch),
     ?assertEqual(4096, length(element(2, Batch))),
     ?assertMatch({_, [#{row := erts, event := dropped, fields := #{count := 4}}]}, reported(W, 5)).
+
+%% Each row reads only its own rings: the backend row the root's ring, the kernel row one
+%% ring per CPU, so a trace of the backend row alone reads no kernel ring.
+rings_test() ->
+    Request = fun(Backend, Kernel) -> #{select => [], frames => false, backend => Backend, kernel => Kernel} end,
+    ?assertEqual([backend], erx_trace:rings(Request(true, false), 4)),
+    ?assertEqual([{kernel, 0}, {kernel, 1}], erx_trace:rings(Request(false, true), 2)),
+    ?assertEqual([backend, {kernel, 0}], erx_trace:rings(Request(true, true), 1)),
+    ?assertEqual([], erx_trace:rings(Request(false, false), 4)).
 
 %% A ring moves to the next cursor and is read again after a full read; a refused ring
 %% is read no more, and the others go on.

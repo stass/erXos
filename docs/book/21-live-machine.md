@@ -371,11 +371,11 @@ trace call, `erx_trace_read`, is refused on Fiasco and the row shows one
 `erx:trace(Spec)` starts a trace from a map:
 
 ```erlang
-erx:trace(#{select => [whereis(erx_hostlink)], kernel => true}).
+erx:trace(#{select => [whereis(erx_hostlink)], backend => true, kernel => true}).
 ```
 
-`select` names up to 16 pids or domain ids; `kernel` adds the `backend`
-and `kernel` rows, which need a facet of scope `all`. Each entry prints
+`select` names up to 16 pids or domain ids; `backend` adds the `backend`
+row and `kernel` the `kernel` row, each of which needs a facet of scope `all`. Each entry prints
 as one escaped line, ordered by `erx_clock_ns`, the system clock.
 
 ### 21.3.2 The merger
@@ -428,7 +428,7 @@ sequenceDiagram
   participant T as tracer (system domain)
   participant R as trace relay (domain 7)
   participant G as root service ring
-  S->>T: erx:trace(#{select => [7], kernel => true})
+  S->>T: erx:trace(#{select => [7], backend => true})
   T->>R: start relay
   R-->>T: records: in, out (runtime)
   G-->>T: park, irq_deliver, wake (liberx trace)

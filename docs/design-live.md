@@ -2569,6 +2569,7 @@ a runtime report trusted or let a decoder bypass the output escaper
 ```erlang
 -type spec() :: #{select => [pid() | domain_id()],  % at most 16; default []
                   frames => boolean(),              % default false
+                  backend => boolean(),             % default false
                   kernel => boolean()}.             % default false
 -type domain_id() :: 0..16#ffffffff.
 ```
@@ -2576,15 +2577,19 @@ a runtime report trusted or let a decoder bypass the output escaper
 A pid traces that process and a domain id every process of the domain,
 each through OTP's trace session in its own runtime, with the flags
 `running` and `monotonic_timestamp`. `frames` adds the frames received by
-the selected domains and by the domains of the selected pids. `kernel`
-adds the `backend` and `kernel` rows below, unfiltered by `select`, so
-both need scope `all`. `erx:trace/1` returns
+the selected domains and by the domains of the selected pids. `backend`
+adds the `backend` row below and `kernel` the `kernel` row, each
+unfiltered by `select`, so each needs scope `all`. A shell that prints
+the kernel row records its own output in it, so the backend row can be
+traced alone.
+`erx:trace/1` returns
 `{error, badarg}` for anything but such a map, an unknown key, more than
-16 selections, no selection with `kernel` false, or `frames` with no
+16 selections, no selection with `backend` and `kernel` both false, or
+`frames` with no
 selection; `{error, no_facet}` without a trace facet; and `{error, scope}`
 for a selection outside the facet's scope, an unknown domain id included,
-so the answer does not tell which domains exist, or for `kernel` without
-scope `all`.
+so the answer does not tell which domains exist, or for `backend` or
+`kernel` without scope `all`.
 
 **Rows.** Each event belongs to a row, named by its source, and carries
 the reporter its collector assigns ([Inspection

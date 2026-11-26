@@ -1484,8 +1484,12 @@ module Erx
       # one summary, {kernel_trace, Switches, Receives, ZeroIds, IntraSpace}: whether the
       # rings hold switch and ipc_receive records, how many of their thread and space ids
       # are 0, and whether some message went between two threads of one space, as the root's
-      # own threads' calls of its service do. Then the person spawns a workload, which waits
-      # for a message or 20 ms and loops, and starts erx:trace over it; the shell prints
+      # own threads' calls of its service do. An ipc_receive record's thread and space are
+      # the thread the CPU ran, the sender on do_ipc's path and the receiver when it takes a
+      # queued sender; where that thread is one end, the record's space is that end's, and
+      # the other end's comes from a switch record naming it. Then the person spawns a
+      # workload, which waits for a message or 20 ms and loops, and starts erx:trace over it
+      # with the backend row, without the kernel's, whose printing would feed itself; the shell prints
       # {workload, Pid}; a message sent to the workload, then the workload's first erts in,
       # not late; then the trace is stopped. Each checkpointed trace line is checked whole; the shell's
       # line editor may redraw its prompt and pending input, ending in ESC [J, before a
@@ -1493,7 +1497,7 @@ module Erx
       # domain's id, 4, as every pid prints on erXos (docs/design-runtime.md,
       # "Connections in ERTS"). Run#trace checks the rest on the serial log (trace_problems).
       TRACE_START = 'W=spawn(fun F()->receive _->F() after 20->F() end end),' \
-                    "{ok,R}=erx:trace(\#{select=>[W]}),{workload,W}.\r"
+                    "{ok,R}=erx:trace(\#{select=>[W],backend=>true}),{workload,W}.\r"
       TRACE_SEND = "W!hello,sent.\r"
       TRACE_STOP = "erx:trace_stop(R),trace_stopped.\r"
       TRACE_REDRAW = '(?:[^\n]*\e\[J)?'
@@ -1507,8 +1511,9 @@ module Erx
       KERNEL_READ = "KR=lists:append([element(2,erx_trace_ring:read({kernel,C},0,512))||C<-lists:seq(0,#{TRACE_CPUS - 1})])," \
                     "KS=[{N,S}||{_,#{TRACE_SWITCH},_,_,_,_,{N,S,_}}<-KR],KM=maps:from_list(KS)," \
                     "KV=[{A,B}||{_,#{TRACE_RECEIVE},_,_,_,_,{A,B,_}}<-KR]," \
+                    "KI=[{if T=:=A->B;true->A end,S}||{_,#{TRACE_RECEIVE},_,_,T,S,{A,B,_}}<-KR,T=:=A orelse T=:=B]," \
                     '{kernel_trace,KS=/=[],KV=/=[],length([0||{X,Y}<-KS++KV,X*Y=:=0]),' \
-                    "lists:any(fun({A,B})->maps:get(A,KM,a)=:=maps:get(B,KM,b) end,KV)}.\r"
+                    "lists:any(fun({O,S})->maps:get(O,KM,none)=:=S end,KI)}.\r"
       # The summary a working window gives: both events, no id 0, and the root's own calls.
       KERNEL_SUMMARY = '{kernel_trace,true,true,0,true}'
       KERNEL_LINE = /\A#{TRACE_REDRAW}(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{kernel_trace,[a-z0-9,]+\}\r*\n\z/n

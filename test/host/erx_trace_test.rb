@@ -19,9 +19,14 @@ class ErxTraceTest < Minitest::Test
   Seed = Data.define(:original, :replacement, :test)
   SEEDS = {
     'bound' => Seed.new('selection([_ | _], 0) -> false;', 'selection([_ | _], 0) -> true;', 'badarg_test'),
-    'unknown key' => Seed.new('Valid = maps:size(maps:without([select, frames, kernel], Spec)) =:= 0 andalso',
+    'unknown key' => Seed.new('Valid = maps:size(maps:without([select, frames, backend, kernel], Spec)) =:= 0 andalso',
                               'Valid = true andalso', 'badarg_test'),
-    'no selection' => Seed.new('true when Select =:= [], not Kernel -> error;', '', 'badarg_test'),
+    'no selection' => Seed.new('true when Select =:= [], not Backend, not Kernel -> error;', '', 'badarg_test'),
+    'backend boolean' => Seed.new('is_boolean(Backend) andalso', '', 'badarg_test'),
+    'backend scope' => Seed.new("admit(\#{backend := true}, Scope, _DomainOf) when Scope =/= all ->\n    {error, scope};",
+                                '', 'scope_test'),
+    'backend reads kernel' => Seed.new('[{kernel, Cpu} || Kernel, Cpu', '[{kernel, Cpu} || Kernel orelse Backend, Cpu',
+                                       'rings_test'),
     'frames alone' => Seed.new('true when Select =:= [], Frames -> error;', '', 'badarg_test'),
     'no facet' => Seed.new("admit(_Request, none, _DomainOf) ->\n    {error, no_facet};", '', 'no_facet_test'),
     'kernel scope' => Seed.new("admit(\#{kernel := true}, Scope, _DomainOf) when Scope =/= all ->\n    {error, scope};",

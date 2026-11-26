@@ -135,7 +135,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)). Built: the rings, the `ipc_receive` and `switch`
   hooks, `map_trace` and the root's `erx_trace_read`, which `native_trace` reads directly. Remaining: the other
   ten events' hooks; `erx:trace`'s kernel row in `native_trace` as the Verification row states it, which also needs
-  the tracer to keep its own console output from feeding the kernel row it prints; the "window is read-only" test
+  the tracer to keep its own console output from feeding the kernel row it prints (the case selects
+  the backend row alone meanwhile); the "window is read-only" test
   root; the crash record's trace tail; and the before-and-after numbers of `tools/erx bench nullcall`, `wake` and
   `vm` ([todo-performance.md](todo-performance.md)).
 * [Medium] 0.2 on Fiasco, `fiasco/kernel`: Fiasco's map refuses a user mapping writable and executable at

@@ -23,11 +23,12 @@ In the Erlang shell (`erl` from `rc`, or the console's `1>` prompt):
 * `select`: a list of at most 16 pids or domain ids to trace, with OTP's
   trace session and the flags `running` and `monotonic_timestamp`; a pid
   gives its `in` and `out` scheduling events.
-* `kernel`: `true` adds the layer below ERTS, unfiltered by `select`.
-  On Fiasco that is the `backend` row, the root service's ring of parks,
-  wakes and interrupt deliveries, and one `unsupported` line for the
-  `kernel` row, because Fiasco has no trace ring of the kind erXos's own
-  kernel will have ([design-fiasco.md](../design-fiasco.md#the-trace-ring)).
+* `backend`: `true` adds the `backend` row, unfiltered by `select`: on
+  Fiasco the root service's ring of parks, wakes and interrupt
+  deliveries ([design-fiasco.md](../design-fiasco.md#the-trace-ring)).
+* `kernel`: `true` adds the `kernel` row, each CPU's ring of the
+  kernel's own events, unfiltered by `select`
+  ([design-fiasco.md](../design-fiasco.md#the-kernels-trace-rings)).
 * `frames`: accepted by the request check, so a typo in the map is refused
   at once, but `erlang/apps/erx/src/erx_trace.erl` opens only the `erts`
   session and the ring rows. Frame events are designed, not built.
@@ -53,9 +54,9 @@ that arrives after later ones went out is marked `late`, never lost.
 
 The trace's tests are `test/erlang/erx_trace_tests.erl` and
 `erx_tracer_tests.erl` on the host and the `native_trace` QEMU suite
-(`tools/erx check-qemu --suite native_trace`), which checks the `kernel`
-row's `unsupported` line, a backend park and wake of one slot, and a test
-workload's `in` event.
+(`tools/erx check-qemu --suite native_trace`), which reads the kernel's
+rings directly, then checks a backend park and wake of one slot and a
+test workload's `in` event in a trace of the `backend` row.
 
 Limits today:
 

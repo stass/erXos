@@ -46,7 +46,7 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
 
 -export([check/3, start/3, stop/1, handled/2, print/2, line/1]).
 %% The trace process's pure decisions, exported for test/erlang/erx_trace_tests.erl.
--export([classify/2, window/0, deliver/2, report/3, acked/1, buffer/3, cursor/3]).
+-export([classify/2, window/0, deliver/2, report/3, acked/1, buffer/3, cursor/3, rings/2]).
 %% The caller's wait for the trace process's answer, exported for the same tests.
 -export([await_start/3]).
 -export_type([spec/0, request/0, scope/0, domain_id/0, window/0]).
@@ -82,10 +82,12 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
                      {message_queue_data, on_heap} | ?OWN]).
 
 -type domain_id() :: 0..16#ffffffff.
--type spec() :: #{select => [pid() | domain_id()], frames => boolean(), kernel => boolean()}.
+-type spec() :: #{select => [pid() | domain_id()], frames => boolean(), backend => boolean(),
+                  kernel => boolean()}.
 %% The caller's trace facet: none, scope all, or the domains of a scoped facet.
 -type scope() :: none | all | [domain_id()].
--type request() :: #{select := [pid() | domain_id()], frames := boolean(), kernel := boolean()}.
+-type request() :: #{select := [pid() | domain_id()], frames := boolean(), backend := boolean(),
+                     kernel := boolean()}.
 -type reason() :: badarg | no_facet | scope.
 %% A trace process that ended before it answered, with its exit reason.
 -type failure() :: {failed, term()}.
@@ -113,10 +115,10 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
 
 -doc """
 The request for Spec under Scope, or the refusal: `badarg` for anything but a spec()
-map, an unknown key, more than 16 selections, no selection with `kernel` false, or
-`frames` with no selection; `no_facet` without a trace facet; `scope` for a selection
-outside the scope, an unknown domain id or a pid that names no live process included,
-or `kernel` without scope `all`. DomainOf answers the domain of a live pid, or error.
+map, an unknown key, more than 16 selections, no selection with `backend` and `kernel`
+both false, or `frames` with no selection; `no_facet` without a trace facet; `scope` for
+a selection outside the scope, an unknown domain id or a pid that names no live process
+included, or `backend` or `kernel` without scope `all`. DomainOf answers the domain of a live pid, or error.
 """.
 -spec check(term(), scope(), fun((pid()) -> {ok, domain_id()} | error)) ->
           {ok, request()} | {error, reason()}.
@@ -287,13 +289,15 @@ drop(Row, Count, #window{dropped = Dropped} = Window) ->
 parse(Spec) when is_map(Spec) ->
     Select = maps:get(select, Spec, []),
     Frames = maps:get(frames, Spec, false),
+    Backend = maps:get(backend, Spec, false),
     Kernel = maps:get(kernel, Spec, false),
-    Valid = maps:size(maps:without([select, frames, kernel], Spec)) =:= 0 andalso
-        selection(Select, ?MAX_SELECT) andalso is_boolean(Frames) andalso is_boolean(Kernel),
+    Valid = maps:size(maps:without([select, frames, backend, kernel], Spec)) =:= 0 andalso
+        selection(Select, ?MAX_SELECT) andalso is_boolean(Frames) andalso
+        is_boolean(Backend) andalso is_boolean(Kernel),
     case Valid of
-        true when Select =:= [], not Kernel -> error;
+        true when Select =:= [], not Backend, not Kernel -> error;
         true when Select =:= [], Frames -> error;
-        true -> {ok, #{select => Select, frames => Frames, kernel => Kernel}};
+        true -> {ok, #{select => Select, frames => Frames, backend => Backend, kernel => Kernel}};
         false -> error
     end;
 parse(_Spec) ->
@@ -308,6 +312,8 @@ selection(_Other, _Left) -> false.
 
 admit(_Request, none, _DomainOf) ->
     {error, no_facet};
+admit(#{backend := true}, Scope, _DomainOf) when Scope =/= all ->
+    {error, scope};
 admit(#{kernel := true}, Scope, _DomainOf) when Scope =/= all ->
     {error, scope};
 admit(#{select := Select} = Request, Scope, DomainOf) ->
@@ -388,16 +394,13 @@ await_start(Pid, Monitor, Tag) ->
 %% somewhere to go, and a receiver already ended answers its monitor at once, which ends
 %% the trace. The caller is watched until it has taken the reply: a caller that dies
 %% during the start would leave a trace nobody can stop, so the trace closes instead.
-trace_init(#{select := Select, kernel := Kernel}, Target, Caller, Tag) ->
+trace_init(#{select := Select} = Request, Target, Caller, Tag) ->
     CallerMonitor = erlang:monitor(process, Caller),
     case open_session(Select) of
         {ok, Session} ->
             Ref = alias(),
             Receiver = receiver(Target, Ref),
-            Rings = case Kernel of
-                        true -> [backend | [{kernel, Cpu} || Cpu <- lists:seq(0, cpus() - 1)]];
-                        false -> []
-                    end,
+            Rings = rings(Request, cpus()),
             Erts = [{erts, ?ERX_SYSTEM_DOMAIN_ID} || Select =/= []],
             Expect = #{ref => Ref, timer => none, receiver => erlang:monitor(process, Receiver),
                        session => Session =/= none},
@@ -442,6 +445,12 @@ open_session(Select) ->
 
 select(Session, Pid) when is_pid(Pid) -> trace:process(Session, Pid, true, ?FLAGS);
 select(Session, ?ERX_SYSTEM_DOMAIN_ID) -> trace:process(Session, all, true, ?FLAGS).
+
+%% The rings Request reads: the root's ring for `backend`, and for `kernel` one ring of
+%% each of the kernel's Cpus.
+-spec rings(request(), pos_integer()) -> [erx_trace_ring:source()].
+rings(#{backend := Backend, kernel := Kernel}, Cpus) ->
+    [backend || Backend] ++ [{kernel, Cpu} || Kernel, Cpu <- lists:seq(0, Cpus - 1)].
 
 %% The kernel's CPUs, one ring each, as ERTS counts them.
 cpus() ->

@@ -287,7 +287,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       '{erx:trace(#{}), erx:trace(#{select => lists:duplicate(17, 4)}), erx:trace(#{select => [5]}), ' \
       'erx:trace(#{select => [4], colour => red}), erx:trace(#{frames => true, kernel => true})}.' =>
         /^\{\{error,badarg\},\s*\{error,badarg\},\s*\{error,scope\},\s*\{error,badarg\},\s*\{error,badarg\}\}$/,
-      '{ok, K} = erx:trace(#{kernel => true}), timer:sleep(300), erx:trace_stop(K), timer:sleep(100), kernel_done.' =>
+      '{ok, K} = erx:trace(#{backend => true, kernel => true}), timer:sleep(300), erx:trace_stop(K), timer:sleep(100), kernel_done.' =>
         /^ *\d+\.\d{9} kernel unsupported \[kernel\]$.*^ *\d+\.\d{9} backend (?:park|wake) \S+=\S+ slot=\d+ cpu=unknown thread=\d+ space=\d+ \[liberx trace\]$.*^kernel_done$/m,
       '{ok, S} = erx:trace(#{select => [self()]}), timer:sleep(50), erx:trace_stop(S), timer:sleep(100), self_done.' =>
         /^ *\d+\.\d{9} erts (?:in|out) pid=<[0-9.]+> domain=4 mfa=.* \[runtime\]$.*^self_done$/m,
