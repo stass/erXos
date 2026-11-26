@@ -240,6 +240,20 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] files, the windows facet's tree (`erlang/apps/erx_win/src/erx_win.erl:134`, `:326`): `erx_win`
+  builds its display handle as `{Grant, ?ERX_WINDOWS_TREE_BYTES, rw}`, a second source of the tree and
+  rights the registry holds with the facet, from the mint's reply and the facet row (design-files.md, "The
+  tree beneath an entry"). A display server whose `root` names another tree would be installed on it and
+  every attach of `erx_win` refused. Give `erx_facets` one reader that answers a tree facet's own
+  `{Pid, Tree, Rights}` (`file_grant/2` answers only `ro` handles) and have `erx_win` use it.
+* [Low] files, tree names a server chooses (`erlang/apps/erx_shell/src/erx_cmd_mount.erl:115`): a facet's
+  tree comes from its server's mint reply, admitted as any 9P name, up to 255 bytes with spaces, and
+  `mount` prints it as `PID:/TREE` through `erx_text:escape_field/1`, which keeps spaces, so a files
+  server can name its tree like the rest of a mount line (`x on /etc (local)`). Narrow tree names to an
+  identifier in the ABI, as every tree the ABI declares is, or escape spaces in that field.
+* [Low] files, the names `erx_facets:files/3` and `erx_fs_grants:facet/3`: both build the facet of any
+  service served as a tree (windows, line, input and media too), and `erx_fs_grants:rights/1`'s `rw`
+  default cites only `abi/services/files.txt`; rename to say tree.
 * [Low] files, a grant handle's opacity (`erlang/apps/erx_files/src/erx_fs.erl`, `grant_handle()`):
   design-files.md ("A grant handle is built by its starter") rests a handle's tree on
   `erx_fs:grant_handle()` being opaque, "so Dialyzer refuses any other construction", but no gate runs

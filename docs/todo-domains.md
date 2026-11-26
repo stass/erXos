@@ -55,7 +55,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] `erx_connections`: only the agent opens an `erx_lane` port over a connection's side, but no build check
   enforces it as `area-mappers` (tools/lib/erx/area_mappers.rb) does for `erx_area:map/4`; a side another process
   maps is not counted by the agent, which then answers unmapped while that mapping lives.
-* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_mints.erl` (`grant_limits/2`, `installed_facet/3`):
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_mints.erl` (`grant_limits/2`):
   a grant is told a files or an input grant by its service name alone (`files`, `inputs`), though names are
   unique only per server, so a files grant of one server named like another server's input service is minted and
   held read-only; the interface would better come from one `{Server, Name} => Interface` map, which

@@ -416,7 +416,7 @@ server_settled(Name, Starting, #{declared := Declared}) ->
 %% {error, unprovided}: nothing will ever be installed for it. An idle grant's Id the core
 %% has not heard of, once its server row is not starting, is {error, ended}: nothing
 %% comes for it, so no query waits past the row's boot timeout.
-system_grant(Name, Id, Starting, #{grants := Grants, rows := Rows} = State) ->
+system_grant(Name, Id, Starting, #{grants := Grants, rows := Rows}) ->
     Key = {system, Name},
     case Grants of
         #{Key := #{state := {installed, {Id, _}, Facet}}} -> {ok, Facet};
@@ -742,18 +742,26 @@ is_owned(Pid, {Id, Node}, #{owner := Owner}) ->
 %% service it is {ok, Pid}, installed as the pid. Either way Pid is owned by the ready
 %% server ServerId, and any other reply is refused.
 admitted(Reply, ServerId, Key, State) ->
-    case {lists:member(interface(Key, State), ?ERX_TREE_SERVICES), Reply} of
-        {true, {ok, Pid, Tree}} when is_pid(Pid) ->
-            owned_facet(is_owned_by(Pid, ServerId, State) andalso erx_9p_grammar:is_name(Tree),
-                        fun() -> erx_fs_grants:facet(Pid, Tree, grant_limits(Key, State)) end);
-        {false, {ok, Pid}} when is_pid(Pid) ->
-            owned_facet(is_owned_by(Pid, ServerId, State), fun() -> Pid end);
-        {_Tree, _Reply} ->
-            refused
+    case lists:member(interface(Key, State), ?ERX_TREE_SERVICES) of
+        true -> admitted_tree(Reply, ServerId, Key, State);
+        false -> admitted_message(Reply, ServerId, State)
     end.
 
-owned_facet(true, Facet) -> {ok, Facet()};
-owned_facet(false, _Facet) -> refused.
+admitted_tree({ok, Pid, Tree}, ServerId, Key, State) when is_pid(Pid) ->
+    case is_owned_by(Pid, ServerId, State) andalso erx_9p_grammar:is_name(Tree) of
+        true -> {ok, erx_fs_grants:facet(Pid, Tree, grant_limits(Key, State))};
+        false -> refused
+    end;
+admitted_tree(_Reply, _ServerId, _Key, _State) ->
+    refused.
+
+admitted_message({ok, Pid}, ServerId, State) when is_pid(Pid) ->
+    case is_owned_by(Pid, ServerId, State) of
+        true -> {ok, Pid};
+        false -> refused
+    end;
+admitted_message(_Reply, _ServerId, _State) ->
+    refused.
 
 %% Whether the ready server ServerId owns Pid.
 is_owned_by(Pid, ServerId, #{rows := Rows} = State) ->
