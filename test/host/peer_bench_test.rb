@@ -83,6 +83,16 @@ class PeerBenchTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::LinuxGuest::Guest.new(root: root, runner: nil, boot: 'xdomain') }
   end
 
+  # A system whose placement call is refused runs posix unpinned: the program is told so
+  # after its CPU count, and the run calibrates no pair, so its CLOCK line asks for none.
+  def test_an_unpinned_posix_run_is_told_so_and_calibrates_no_pair
+    assert_equal %w[posix 4 unpinned], Erx::PeerBench.arguments('posix', cpus: 4, pinned: false)
+    assert_equal %w[posix 4], Erx::PeerBench.arguments('posix', cpus: 4)
+    assert_equal [], Erx::PeerBench.asked('posix', cpus: 4, clock: 'counter', pinned: false).pairs
+    assert_equal [[0, 3]], Erx::PeerBench.asked('posix', cpus: 4, clock: 'counter').pairs
+    assert_raises(Erx::Error) { Erx::PeerBench.arguments('wake', cpus: 4, pinned: false) }
+  end
+
   # Both builds of the file generate code from one list of flags, NativeRoot's without its target.
   def test_linux_compiles_with_the_erxos_programs_code_generation_flags
     assert_equal Erx::NativeRoot::CODE_FLAGS.grep_v(/\A--target=/), Erx::LinuxGuest::CODE_FLAGS

@@ -371,6 +371,7 @@ module Erx
 
       def system = 'erxos'
       def boot = 'native'
+      def accelerators = %w[hvf]
       def forms(cpus) = [1, cpus].uniq
       def refusal(profile) = ("erxos's native bench image is built with the landing profiles only" unless profile == 'landing')
 

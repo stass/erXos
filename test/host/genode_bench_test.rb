@@ -20,6 +20,18 @@ class GenodeBenchTest < Minitest::Test
     assert Erx::GenodeBench.checkpoints.last.fetch(:pattern).match?('[init -> erx_peer_bench] erx: bench: done')
   end
 
+  # What base-hw on QEMU's virt allows at the pinned release is one declaration: it boots
+  # under TCG alone, entered at the hypervisor's level, always on four CPUs, and its C
+  # library refuses to pin, so the guest, the build and the program's arguments all follow
+  # it and no caller passes any of it.
+  def test_the_guest_boots_as_the_machine_declaration_allows
+    machine = Erx::GenodeBuild::MACHINE
+    assert_equal [%w[tcg], 4, true, false], [machine.accelerators, machine.cpus, machine.virtualization, machine.pinned]
+    guest = Erx::GenodeBench::Guest.new(root: Dir.pwd, runner: nil, platform: nil)
+    assert_equal [%w[tcg], [4], [4]], [guest.accelerators, guest.forms(1), guest.forms(4)]
+    assert_equal %w[posix 4 unpinned], Erx::GenodeBuild.arguments
+  end
+
   # The record must name the image beside it; a rebuilt image refuses the stale record.
   def test_the_record_names_its_image
     Dir.mktmpdir do |root|

@@ -18,12 +18,15 @@ class BenchSessionTest < Minitest::Test
   class Guest
     attr_reader :system, :boot, :calls
 
-    def initialize(system, boot: 'native', one_cpu: false, profiles: %w[landing full], fail: false)
-      @system, @boot, @one_cpu, @profiles, @fail = system, boot, one_cpu, profiles, fail
+    attr_reader :accelerators
+
+    def initialize(system, boot: 'native', one_cpu: false, profiles: %w[landing full], fail: false, accelerators: %w[hvf tcg],
+                   fixed: nil)
+      @system, @boot, @one_cpu, @profiles, @fail, @accelerators, @fixed = system, boot, one_cpu, profiles, fail, accelerators, fixed
       @calls = []
     end
 
-    def forms(cpus) = @one_cpu ? [1] : [1, cpus]
+    def forms(cpus) = @fixed || (@one_cpu ? [1] : [1, cpus])
     def refusal(profile) = ("#{system} offers no #{profile} profile" unless @profiles.include?(profile))
 
     def call(benchmark, cells:, cpus:, accel:)
@@ -46,7 +49,31 @@ class BenchSessionTest < Minitest::Test
 
   def wake = Erx::BenchSuite.benchmark('wake')
 
-  def host = Erx::BenchSystem::Host.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 12, revision: 'a' * 40, dirty: false)
+  def host = ->(kind) { Erx::BenchSystem::Host.new(kind: kind, model: 'Mac16,10', cpus: 12, revision: 'a' * 40, dirty: false) }
+
+  # A system whose guest boots only under TCG, at one fixed CPU count (Genode's), makes
+  # the whole session TCG at that count: every system boots there, so its rows are set
+  # beside erXos's own TCG rows of the same CPUs and never beside an HVF run.
+  def test_a_tcg_only_guest_makes_the_session_tcg_at_its_cpu_count
+    posix = Erx::BenchSuite.benchmark('posix')
+    genode = Guest.new('genode-hw', boot: 'posix', accelerators: %w[tcg], fixed: [4])
+    erxos = Guest.new('erxos', boot: 'posix')
+    plan = Session.plan(posix, systems: %w[erxos genode-hw], profile: 'landing', guests: [erxos, genode])
+    assert_equal ['tcg', [%w[erxos 4], %w[genode-hw 4]]], [plan.accel, plan.steps.map { |step| [step.system, step.cpus.to_s] }]
+    alone = Session.plan(posix, systems: %w[erxos], profile: 'landing', guests: [erxos, genode])
+    assert_equal ['hvf', [1, 4]], [alone.accel, alone.steps.map(&:cpus)]
+    linux = Guest.new('linux', boot: 'posix', accelerators: %w[hvf])
+    error = assert_raises(Erx::Error) do
+      Session.plan(posix, systems: %w[linux genode-hw], profile: 'landing', guests: [linux, genode])
+    end
+    assert_match(/no accelerator boots every listed system: linux hvf; genode-hw tcg/, error.message)
+    written = []
+    result = Session::Run.new(guests: [erxos, genode], host: host, write: ->(record, _) { written << record.environment.name },
+                              load: -> {}).call(posix, systems: %w[erxos genode-hw], profile: 'landing')
+    assert_equal %w[qemu-tcg-Mac16,10-4cpu-erxos qemu-tcg-Mac16,10-4cpu-genode-hw], written
+    assert_equal [[4, 'tcg']], genode.calls.map { |_, cpus, accel| [cpus, accel] }
+    assert_empty result.fetch(:failed)
+  end
 
   def test_each_round_turns_the_order_by_one_system
     systems = %w[erxos l4re linux]
@@ -87,7 +114,7 @@ class BenchSessionTest < Minitest::Test
   def test_systems_are_refused_before_any_boot
     guests = [Guest.new('erxos')]
     refusal = ->(systems, profile: 'landing') { assert_raises(Erx::Error) { Session.plan(wake, systems: systems, profile: profile, guests: guests) }.message }
-    assert_match(/freebsd has no guest under HVF/, refusal.call(%w[erxos freebsd]))
+    assert_match(/freebsd has no guest in QEMU/, refusal.call(%w[erxos freebsd]))
     assert_match(/plan9 is not a system/, refusal.call(%w[plan9]))
     assert_match(/linux has no guest/, refusal.call(%w[erxos linux]))
     assert_match(/twice/, refusal.call(%w[erxos erxos]))

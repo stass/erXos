@@ -190,6 +190,7 @@ module Erx
 
       def system = 'erxos'
       def boot = BOOT
+      def accelerators = %w[hvf]
       def forms(cpus) = [1, cpus].uniq
       def refusal(profile) = ("erxos's xdomain bench image is built with the landing profiles only" unless profile == 'landing')
 

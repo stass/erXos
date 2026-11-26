@@ -179,6 +179,7 @@ module Erx
       attr_reader :boot
 
       def system = 'linux'
+      def accelerators = %w[hvf]
       def forms(cpus) = [1, cpus].uniq
 
       def refusal(profile)

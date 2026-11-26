@@ -38,7 +38,10 @@
  * wake handshake, which reads B's state from Linux's /proc, are where the file differs by
  * system. The main thread of a native-set or posix
  * benchmark runs on CPU 0, the service's CPU, and the pair its CLOCK line calibrates is
- * CPU 0 and the last, as a native boot's is; an xdomain run is not pinned.
+ * CPU 0 and the last, as a native boot's is; an xdomain run is not pinned. A posix run
+ * given "unpinned" after its CPU count pins nothing, for a system whose placement call
+ * is refused (Genode's): its same-CPU cells run wherever the system puts their threads,
+ * its cross-CPU cells are unsupported, and its CLOCK line calibrates no pair.
  *
  * An operation the design's counterparts table names no counterpart for, or whose
  * counterpart the system or the machine cannot run, is reported unsupported with the
@@ -134,6 +137,7 @@
 #define TRIP_BYTES_MAX	(PART_BYTES > ERX_PEER_XDOMAIN_BYTES ? PART_BYTES : ERX_PEER_XDOMAIN_BYTES)
 #define NO_COUNTERPART	"no counterpart named in the design"
 #define ONE_CPU		"the machine has one CPU"
+#define UNPINNED	"threads are not pinned on this system"
 #define WAKE_UNREADABLE	"B's blocked state is not readable on this system"
 #define WRONG_RESULT	"wrong result"
 #define MOST_SAMPLES_2(a, b)	((a) > (b) ? (a) : (b))
@@ -146,6 +150,8 @@ static uint64_t clock_hz;
 static uint64_t (*clock_read)(void);
 
 static unsigned cpus;
+/* Set by a posix run given "unpinned": no thread is pinned and no cell spans two CPUs. */
+static bool unpinned;
 static const char *benchmark;
 static size_t page_bytes;
 
@@ -328,6 +334,8 @@ pthread_ok(const char *call, int error)
 static void
 pin_to(unsigned cpu)
 {
+	if (unpinned)
+		return;
 #if defined(__linux__) || defined(ERX_PEER_ERXOS)
 	cpu_set_t set;
 
@@ -2456,9 +2464,9 @@ posix_cell_run(const posix_cell_t *spec)
 	cell.params = spec->params;
 	cell.nparams = spec->nparams;
 	cell.raw = spec->expensive ? samples : NULL;
-	if (strcmp(spec->placement, "cross-cpu") == 0 && cpus == 1) {
+	if (strcmp(spec->placement, "cross-cpu") == 0 && (cpus == 1 || unpinned)) {
 		cell.status = "unsupported";
-		cell.reason = ONE_CPU;
+		cell.reason = unpinned ? UNPINNED : ONE_CPU;
 		peer_print(cell, samples, 0);
 		return;
 	}
@@ -2489,8 +2497,8 @@ posix_run(void)
 	(void)unlink(POSIX_FILE);
 	(void)unlink(POSIX_BIG);
 	(void)unlink(POSIX_COPY);
-	if (cpus == 1) {
-		peer_print_unsupported("mutex-handoff", "cross-cpu", ONE_CPU);
+	if (cpus == 1 || unpinned) {
+		peer_print_unsupported("mutex-handoff", "cross-cpu", unpinned ? UNPINNED : ONE_CPU);
 		print_clock(NULL, 0);
 		return;
 	}
@@ -2504,7 +2512,7 @@ static void vm_run(void) { calibrated(vm_cells); }
 static void sched_run(void) { calibrated(share_equal); }
 #endif
 
-/* The benchmarks; posix is given the CPU count, the others ask the system. */
+/* The benchmarks; posix is given the CPU count, and may be told to pin nothing; the others ask the system. */
 static const struct {
 	const char *name;
 	void (*run)(void);
@@ -2551,13 +2559,15 @@ main(int argc, char **argv)
 	for (size_t at = 0; argc >= 2 && at < count; at++)
 		if (strcmp(argv[1], benchmarks[at].name) == 0)
 			chosen = at;
-	if (chosen < count && argc == (benchmarks[chosen].given_cpus ? 3 : 2))
+	if (chosen < count && benchmarks[chosen].given_cpus && argc == 4 && strcmp(argv[3], "unpinned") == 0)
+		unpinned = true;
+	if (chosen < count && argc == (benchmarks[chosen].given_cpus ? (unpinned ? 4 : 3) : 2))
 		online = benchmarks[chosen].given_cpus ? cpus_given(argv[2]) : 1;
 	if (online == 0) {
 #if !defined(ERX_PEER_ERXOS)
 		fputs("usage: erx_peer_bench nullcall|vm|wake|sched|xdomain\n", stderr);
 #endif
-		fputs("usage: erx_peer_bench posix CPUS, CPUS from 1 to 256\n", stderr);
+		fputs("usage: erx_peer_bench posix CPUS [unpinned], CPUS from 1 to 256\n", stderr);
 		return (2);
 	}
 	if (!benchmarks[chosen].given_cpus)

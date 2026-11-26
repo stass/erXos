@@ -54,9 +54,9 @@ class BenchSideBySideTest < Minitest::Test
                      detail: { 'count' => 10_000, 'total' => total, 'mean' => printed })
   end
 
-  def boot(system, cpus, cells, clock:, round: 0)
+  def boot(system, cpus, cells, clock:, round: 0, kind: 'qemu-hvf', details: {})
     record = Record::Record.new(
-      environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: cpus, system: system, details: {}),
+      environment: Record::Environment.new(kind: kind, model: 'Mac16,10', cpus: cpus, system: system, details: details),
       subject: Record::Subject.new(revision: 'a' * 40, dirty: false, details: {}),
       run: Record::Run.new(date: Time.utc(2026, 11, 24), started_by: 'manual', load: [0.5, 0.5], host_cpus: 12,
                            reused_from: nil, details: {}),
@@ -109,6 +109,27 @@ class BenchSideBySideTest < Minitest::Test
     broken = broken.with(record: broken.record.with(run: broken.record.run.with(details: { 'arm_clock_hz' => 1_500_500_000 })))
     error = assert_raises(Erx::Error) { Tables.tables(BENCHMARK, [runs.first, broken], systems: %w[erxos l4re], forms: false) }
     assert_match(/\Abench: the record of round 2 in #{broken.record.environment.name}: arm_clock_hz/, error.message)
+  end
+
+  # TCG numbers describe the emulator, so a TCG run is never set beside an HVF or board
+  # run: the tables refuse runs of more than one environment kind or host model.
+  def test_tcg_runs_are_never_set_beside_hvf_runs
+    tcg = boot('linux', 1, [histogram('same', 'monotonic', 1500)], clock: LINUX_CLOCK, kind: 'qemu-tcg')
+    error = assert_raises(Erx::Error) { Tables.tables(BENCHMARK, [runs.first, tcg], systems: %w[erxos linux]) }
+    assert_match(/qemu-hvf.*qemu-tcg|qemu-tcg.*qemu-hvf/, error.message)
+  end
+
+  # A session whose systems all booted only at four CPUs reads its same-CPU cells there;
+  # a run made without pinning says so on each of its entries.
+  def test_a_session_booted_only_at_four_cpus_reads_same_cpu_cells_there
+    tcg = [boot('erxos', 4, [histogram('same', 'counter', 30), histogram('cross', 'counter', 48)], clock: ERXOS_CLOCK,
+                                                                                                   kind: 'qemu-tcg'),
+           boot('linux', 4, [histogram('same', 'monotonic', 1500), unsupported('cross')], clock: LINUX_CLOCK, kind: 'qemu-tcg',
+                                                                                          details: { 'threads' => 'unpinned' })]
+    same, = Tables.tables(BENCHMARK, tcg, systems: %w[erxos linux]).first.rows
+    assert_equal 4, same.cpus
+    assert_equal [[false], [true]], %w[erxos linux].map { |system| column(same, system).entries.map(&:unpinned) }
+    assert(Tables.render(Tables.tables(BENCHMARK, tcg, systems: %w[erxos linux])).any? { |line| line.include?('unpinned, measured') })
   end
 
   def test_a_cross_cpu_cell_is_read_from_the_four_cpu_form

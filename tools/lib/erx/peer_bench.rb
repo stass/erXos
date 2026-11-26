@@ -36,15 +36,22 @@ module Erx
 
     # The program's arguments for a run of benchmark name on cpus CPUs: a posix run is given
     # the count, which on erXos the program cannot ask the system for (docs/design-bench.md,
-    # "The program's clock and placement"); a native-set or xdomain run asks.
-    def arguments(name, cpus:) = BOOTS.fetch(name) == 'posix' ? [name, cpus.to_s] : [name]
+    # "The program's clock and placement"); a native-set or xdomain run asks. A posix run
+    # on a system whose placement call is refused (pinned false, Genode's) is also told
+    # "unpinned": it pins nothing and reports its cross-CPU cells unsupported.
+    def arguments(name, cpus:, pinned: true)
+      return [name, cpus.to_s, *(pinned ? [] : ['unpinned'])] if BOOTS.fetch(name) == 'posix'
+      raise Error, "bench: only a posix run is ever unpinned, not #{name}" unless pinned
+
+      [name]
+    end
 
     # What a run of benchmark name on a machine of cpus CPUs, reading clock, asks: the
     # benchmark's cells in its boot, and the pair a native-set or posix run calibrates,
-    # CPU 0 and the last, on more than one CPU.
-    def asked(name, cpus:, clock:)
+    # CPU 0 and the last, on more than one CPU when its threads are pinned.
+    def asked(name, cpus:, clock:, pinned: true)
       boot = BOOTS.fetch(name) { raise Error, "bench: #{name} has no peer counterpart" }
-      pairs = CALIBRATED.include?(boot) && cpus > 1 ? [[0, cpus - 1]] : []
+      pairs = CALIBRATED.include?(boot) && cpus > 1 && pinned ? [[0, cpus - 1]] : []
       BenchMeasurement::Asked.new(benchmarks: [NativeBench.wanted(BenchSuite.benchmark(name), boot: boot)],
                                   clock: clock, pairs: pairs)
     end

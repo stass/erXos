@@ -42,6 +42,15 @@ module Erx
     TARGET = 'bench/genode/target.mk'
     KERNEL = 'hw'
     BOARD = 'virt_qemu_arm_v8a'
+    # What base-hw on BOARD needs of QEMU and gives a program at the pinned release, as
+    # the guest's boots showed (docs/design-bench.md, "Genode's guest"): its image prints
+    # only when QEMU enters it at the hypervisor's level (virtualization), which under
+    # HVF it does not, so it boots under TCG alone; its bootstrap starts four CPUs
+    # whatever QEMU offers, so every boot has four; and its C library answers
+    # pthread_setaffinity_np "not implemented", so its program runs unpinned. The guest,
+    # its build and the session read these, and no caller passes any of them.
+    Machine = Data.define(:accelerators, :cpus, :virtualization, :pinned)
+    MACHINE = Machine.new(accelerators: %w[tcg].freeze, cpus: 4, virtualization: true, pinned: false)
     # The component's name: its target, its start node and its run script's.
     PROGRAM = 'erx_peer_bench'
     # What of erXos's tree the component's one C file includes, staged at its tree paths
@@ -69,6 +78,9 @@ module Erx
 
     # Where the build for a boot of cpus CPUs is published, relative to the root.
     def output(cpus) = File.join(OUTPUT, "#{cpus}cpu")
+
+    # The program's arguments in the image: a posix run on MACHINE's CPUs, pinned as it allows.
+    def arguments = PeerBench.arguments('posix', cpus: MACHINE.cpus, pinned: MACHINE.pinned)
 
     # Genode's run script for erx_peer_bench given arguments: the depot's archives the
     # probe of Genode's tools built, the component built from erXos's target description,
@@ -170,13 +182,14 @@ module Erx
       }
     end
 
-    # Builds Genode's guest for a posix run on cpus CPUs on the engine of the docker
+    # Builds Genode's guest for a posix run on MACHINE's CPUs on the engine of the docker
     # context, leaving image.elf and the build record in build/genode/<cpus>cpu.
     # Returns image.elf's path.
-    def build(root:, runner:, context:, jobs:, cpus: 1)
+    def build(root:, runner:, context:, jobs:)
       raise Error, 'Genode build jobs must be 1 to 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
 
-      arguments = PeerBench.arguments('posix', cpus: cpus)
+      cpus = MACHINE.cpus
+      arguments = self.arguments
       script = run_script(arguments: arguments, cpus: cpus)
       dependencies = Dependencies.new(root: root, runner: runner, docker_context: context)
       endpoint = dependencies.local_docker_connection.fetch('endpoint')

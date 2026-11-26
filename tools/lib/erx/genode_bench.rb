@@ -17,10 +17,11 @@ require_relative 'posix_bench'
 require_relative 'qemu'
 
 module Erx
-  # Genode's guest under HVF (docs/design-bench.md, "Genode's guest"): base-hw with
-  # erx_peer_bench as a component, built out of the tree by Genode's own tools in the
-  # oracle's offline container (GenodeBuild) for one CPU count, boots as image.elf
-  # through the shared QEMU plan. Genode prints the component's log behind its label;
+  # Genode's guest (docs/design-bench.md, "Genode's guest"): base-hw with erx_peer_bench
+  # as a component, built out of the tree by Genode's own tools in the oracle's offline
+  # container (GenodeBuild), boots as image.elf through the shared QEMU plan as its
+  # machine declaration (GenodeBuild::MACHINE) allows: under TCG, entered at the
+  # hypervisor's level, on four CPUs, and with its program unpinned. Genode prints the component's log behind its label;
   # the importer drops that label and nothing else, and the lines are judged by
   # BenchMeasurement.boot as Linux's guest's are. Nothing of Genode runs on the host.
   module GenodeBench
@@ -68,10 +69,11 @@ module Erx
          seconds: PeerBench::RUN_DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS }]
     end
 
-    # Genode's guest for the posix boot (BenchSystem): one boot of the image built for the
-    # session's CPU count, with no command line and no host link; the program's
-    # arguments are in the image's init configuration. It is built with the landing
-    # profiles only (PeerBench.flags).
+    # Genode's guest for the posix boot (BenchSystem): one boot of the image built for its
+    # machine's CPUs, with no command line and no host link; the program's arguments are in
+    # the image's init configuration. It is built with the landing profiles only
+    # (PeerBench.flags). A run of an unpinned machine says so in its environment, so each
+    # of its rows shows it.
     class Guest
       def initialize(root:, runner:, platform: Platform.development(root))
         @root = File.expand_path(root)
@@ -81,26 +83,31 @@ module Erx
 
       def system = SYSTEM
       def boot = 'posix'
-      def forms(cpus) = [1, cpus].uniq
+      def accelerators = GenodeBuild::MACHINE.accelerators
+      def forms(_cpus) = [GenodeBuild::MACHINE.cpus]
 
       def refusal(profile)
         "genode's guest is built with the landing profiles only" unless profile == 'landing'
       end
 
       def call(benchmark, cells:, cpus:, accel:)
+        machine = GenodeBuild::MACHINE
+        raise Error, "genode's guest boots on #{machine.cpus} CPUs under #{machine.accelerators.join(' or ')}, not #{cpus} under #{accel}" unless
+          cpus == machine.cpus && machine.accelerators.include?(accel)
+
         build = GenodeBench.build(root: @root, cpus: cpus)
-        raise Error, "genode's guest has no image for #{cpus} CPUs: run `tools/erx build genode --cpus #{cpus}`" unless
-          build.built?
+        raise Error, "genode's guest has no image: run `tools/erx build genode`" unless build.built?
 
         subject = build.record
-        raise Error, "#{build.record_path} runs #{subject['arguments'].inspect}, not #{benchmark.name} on #{cpus} CPUs" unless
-          subject['arguments'] == PeerBench.arguments(benchmark.name, cpus: cpus) && subject['cpus'] == cpus
+        raise Error, "#{build.record_path} runs #{subject['arguments'].inspect}, not #{GenodeBuild.arguments.inspect}" unless
+          benchmark.name == 'posix' && subject['arguments'] == GenodeBuild.arguments && subject['cpus'] == cpus
 
         directory = File.join(@root, 'build/qemu', "genode-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
         memory = PosixBench.machine(@platform).memory_mib
         report = Qemu.new(root: @root, runner: @runner).run(
           platform: @platform, accel: accel, cpus: cpus, memory_mib: memory, image: build.image,
-          hostlink: QemuPlan::NO_HOSTLINK, checkpoints: GenodeBench.checkpoints, machine_end: true, directory: directory
+          hostlink: QemuPlan::NO_HOSTLINK, checkpoints: GenodeBench.checkpoints, machine_end: true, directory: directory,
+          virtualization: machine.virtualization
         )
         # The image QEMU booted is the one the record names, even if it was rebuilt meanwhile.
         raise Error, "#{build.image} changed during its boot; its record does not describe the boot" unless
@@ -108,10 +115,11 @@ module Erx
 
         serial = report.fetch('serial_log')
         answer = BenchMeasurement.boot(GenodeBench.lines(File.binread(serial)),
-                                       PeerBench.asked(benchmark.name, cpus: cpus, clock: 'counter'))
+                                       PeerBench.asked(benchmark.name, cpus: cpus, clock: 'counter', pinned: machine.pinned))
         BenchSystem::Booted.new(
           clock: answer.fetch(:clock) || {}, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
-          environment: { 'memory_mib' => memory, 'machine' => 'virt', 'qemu' => report['qemu_version'] }.compact,
+          environment: { 'memory_mib' => memory, 'machine' => 'virt', 'virtualization' => machine.virtualization,
+                         'threads' => machine.pinned ? 'pinned' : 'unpinned', 'qemu' => report['qemu_version'] }.compact,
           subject: subject, logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from']
         )
       end

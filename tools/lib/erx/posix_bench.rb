@@ -102,7 +102,8 @@ module Erx
                                                        memory_mib: machine.memory_mib, test_image: true)
       Qemu.new(root: root, runner: runner)
           .run(platform: machine.platform, accel: accel, cpus: cpus, image: image.single, memory_mib: machine.memory_mib,
-               checkpoints: checkpoints(points, cpus: cpus), directory: directory)
+               checkpoints: checkpoints(points, cpus: cpus), directory: directory,
+               command_line: ProductionImage::Run::COMMAND_LINES[accel])
     end
 
     # erXos's posix guest for a comparison session (BenchSystem): one boot of the image,
@@ -122,6 +123,7 @@ module Erx
 
       def system = 'erxos'
       def boot = 'posix'
+      def accelerators = %w[hvf tcg]
       def forms(cpus) = [1, cpus].uniq
       def refusal(profile) = ("erxos's posix image is built with the landing profiles only" unless profile == 'landing')
 

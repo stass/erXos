@@ -39,6 +39,10 @@ class QemuTest < Minitest::Test
     assert_includes tcg, '-no-reboot'
     assert_equal 'none', tcg.fetch(tcg.index('-nic') + 1)
     assert_equal 'none', tcg.fetch(tcg.index('-monitor') + 1)
+    # A guest that must be entered at the hypervisor's level asks for it; no other does.
+    entered = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', virtualization: true)
+    assert_includes entered, 'virt-11.1,gic-version=3,msi=gicv2m,virtualization=on'
+    refute(tcg.any? { |word| word.include?('virtualization') })
   end
 
   # The Raspberry Pi 4's model boots as its firmware would (docs/design-platforms.md,

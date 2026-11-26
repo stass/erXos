@@ -351,6 +351,7 @@ module Erx
 
       def system = 'linux'
       def boot = XdomainBench::BOOT
+      def accelerators = %w[hvf]
       def forms(cpus) = [1, cpus].uniq
 
       def refusal(profile)

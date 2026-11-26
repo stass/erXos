@@ -972,18 +972,15 @@ module Erx
       jobs = 4
       docker_context = nil
       l4re_platform = nil
-      cpus = nil
       parser = OptionParser.new do |options|
         options.on('--jobs N', Integer, 'Parallel inherited build jobs') { |value| jobs = value }
         options.on('--docker-context NAME', "Docker context of a guest's container build (build l4re and genode only)") { |value| docker_context = value }
         options.on('--platform NAME', %w[virt raspi4b], "L4Re's guest's board: virt, the default, or raspi4b (build l4re only)") { |value| l4re_platform = value }
-        options.on('--cpus N', Integer, "CPUs of the boot Genode's guest is built for (build genode only)") { |value| cpus = value }
       end
       parser.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       raise OptionParser::InvalidArgument, "build #{component} needs --docker-context NAME" if %w[l4re genode].include?(component) != !docker_context.nil?
       raise OptionParser::InvalidArgument, '--platform applies only to build l4re' if l4re_platform && component != 'l4re'
-      raise OptionParser::InvalidArgument, '--cpus is for build genode only' if cpus && component != 'genode'
       path = case component
              when 'runtime' then build_runtime(jobs)
              when 'jit-runtime' then build_jit_runtime(jobs)
@@ -996,7 +993,7 @@ module Erx
              when 'release-kernel' then Fiasco.new(root: ROOT).build_release_kernel(jobs: jobs)
              when 'web' then WebBuild.build(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
              when 'l4re' then build_l4re(jobs, docker_context, l4re_platform || 'virt')
-             when 'genode' then build_genode(jobs, docker_context, cpus || 1)
+             when 'genode' then build_genode(jobs, docker_context)
              else Fiasco.new(root: ROOT).build(jobs: jobs)
              end
       Terminal.puts("built #{path}")
@@ -1013,12 +1010,12 @@ module Erx
     end
 
     # Genode's guest (GenodeBuild): built in the oracle's amd64 image on the Docker context of
-    # the x86-64 host for a boot of cpus CPUs, leaving image.elf and its build record in
-    # build/genode.
-    def self.build_genode(jobs, context, cpus)
+    # the x86-64 host for a boot of the CPUs its machine declares (GenodeBuild::MACHINE),
+    # leaving image.elf and its build record in build/genode.
+    def self.build_genode(jobs, context)
       require_relative 'lib/erx/genode_build'
       GenodeBuild.build(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')),
-                        context: context, jobs: jobs, cpus: cpus)
+                        context: context, jobs: jobs)
     end
 
     # The development boot image in QEMU with its serial line on this terminal,
@@ -1722,7 +1719,7 @@ module Erx
     end
 
     # A comparison session (docs/design-bench.md, "A comparison session"): each listed
-    # system's guest booted under HVF in rounds, each boot one run in the history, then
+    # system's guest booted under HVF, or wholly under TCG when a guest boots only there, in rounds, each boot one run in the history, then
     # the side-by-side tables of the runs. The history root is checked before any boot.
     # The exit status is nonzero if any boot failed.
     def self.bench_session(name, options)
@@ -1745,7 +1742,7 @@ module Erx
                 LinuxErlangGuest::Guest.new(root: ROOT, runner: runner),
                 GenodeBench::Guest.new(root: ROOT, runner: runner)]
       write = ->(record, logs) { BenchRecord.write(record, history: history, erxos_root: ROOT, logs: logs) }
-      session = BenchSession::Run.new(guests: guests, host: BenchSystem.host(kind: BenchSession::KIND, root: ROOT, runner: runner),
+      session = BenchSession::Run.new(guests: guests, host: ->(kind) { BenchSystem.host(kind: kind, root: ROOT, runner: runner) },
                                       write: write, load: -> { QemuGate.one_minute_load })
       result = session.call(benchmark, systems: systems, profile: options.fetch(:profile, 'landing'))
       result.fetch(:written).each { |run| Terminal.puts("bench: recorded #{run}") }

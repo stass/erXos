@@ -74,6 +74,7 @@ module Erx
 
       def system = 'l4re'
       def boot = 'native'
+      def accelerators = %w[hvf]
       def forms(_cpus) = [1]
 
       def refusal(_profile)

@@ -334,13 +334,16 @@ module Erx
 
     def argv(platform:, accel:, image:, serial:, cpus: 1, memory_mib: memory_of(platform),
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
-             disks: [], hostlink: nil, nic: nil, stub: nil, firmware: nil, display: nil, pcie: nil, line: nil)
+             disks: [], hostlink: nil, nic: nil, stub: nil, firmware: nil, display: nil, pcie: nil, line: nil,
+             virtualization: false)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
+      raise Error, 'virtualization is true or false' unless [true, false].include?(virtualization)
       board = machine_of(platform)
       raise Error, 'PCIe functions are a QemuPlan::Pcie' unless pcie.nil? || pcie.is_a?(Pcie)
       raise Error, 'a plan takes a display or PCIe functions, not both' if display && pcie
       if board.loads
         raise Error, "#{board.base} takes no PCIe functions" if pcie
+        raise Error, "#{board.base} is not entered at the hypervisor's level" if virtualization
 
         return loaded_argv(board, accel: accel, image: image, serial: serial, serial_input: serial_input, cpus: cpus, program: program,
                                   stub: stub, firmware: firmware, dtb: dtb, disks: disks, display: display, refused: { initrd: initrd, command_line: command_line, nic: nic, line: line,
@@ -376,7 +379,7 @@ module Erx
         raise Error, 'invalid QEMU path' unless value.is_a?(String) && !value.empty? && !value.include?("\0")
       end
 
-      machine = machine_line(platform, accel: accel, deterministic: deterministic)
+      machine = machine_line(platform, accel: accel, deterministic: deterministic, virtualization: virtualization)
       # `-monitor none` turns off only QEMU's default monitor; CONSOLE's
       # `mon:stdio` brings its own, multiplexed onto the serial line.
       [program, '-machine', machine, '-accel', accel,
@@ -392,10 +395,13 @@ module Erx
        *(dtb ? ['-dtb', dtb] : [])].freeze
     end
 
-    # The -machine value for platform's board under accel, in deterministic mode or not.
-    def machine_line(platform, accel:, deterministic:)
+    # The -machine value for platform's board under accel, in deterministic mode or not,
+    # and with the guest entered at the hypervisor's level (QEMU's virtualization=on) for a
+    # guest that needs it (GenodeBuild::MACHINE).
+    def machine_line(platform, accel:, deterministic:, virtualization: false)
       machine = machine_of(platform)
-      [machine.base, *(accel == 'tcg' ? machine.tcg_options : []), *(deterministic ? machine.deterministic_options : [])].join(',')
+      [machine.base, *(accel == 'tcg' ? machine.tcg_options : []), *(deterministic ? machine.deterministic_options : []),
+       *(virtualization ? ['virtualization=on'] : [])].join(',')
     end
 
     def machine_of(platform)
@@ -862,7 +868,7 @@ module Erx
     # during the boot raises QemuRemote::Unreachable.
     def run(platform:, accel:, image:, cpus: 1, memory_mib: QemuPlan.memory_of(platform), checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
             dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil, stub: nil, firmware: nil, display: nil,
-            pcie: nil, line: nil)
+            pcie: nil, line: nil, virtualization: false)
       # Every input of this run by its parameter's name, from this class's own signature,
       # read before the body reassigns any.
       inputs = Qemu.instance_method(:run).parameters.to_h { |_, name| [name, binding.local_variable_get(name)] }
@@ -889,7 +895,7 @@ module Erx
                                                  directory: directory)
       remote_boot = remote_run&.boot
       plan = { platform: platform, accel: accel, cpus: cpus, memory_mib: memory_mib, program: remote_boot ? remote.program : @program,
-               command_line: command_line }
+               command_line: command_line, virtualization: virtualization }
       argv = if remote_boot
                QemuPlan.argv(**plan, image: remote_boot.path('image'), serial: remote_boot.serial, serial_input: remote_boot.keyboard,
                                      initrd: initrd && remote_boot.path('initrd'), dtb: dtb && remote_boot.path('dtb'), hostlink: hostlink)
@@ -978,6 +984,7 @@ module Erx
     DETERMINED_INPUTS = {
       platform: :any, accel: :any, image: :any, cpus: :any, memory_mib: :any, checkpoints: :any, initrd: :any,
       machine_end: :any, directory: :any, command_line: :any, dtb: :any, link_seconds: :any, remote: :any, stub: :any,
+      virtualization: :any,
       hostlink: [QemuPlan::NO_HOSTLINK]
     }.freeze
 
