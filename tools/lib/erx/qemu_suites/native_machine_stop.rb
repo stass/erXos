@@ -6,7 +6,8 @@ require_relative '../native_machine_stop'
 require_relative '../qemu_gate'
 
 # A panic on CPU 2 of four stops the machine: the crash record names CPU 2 as
-# the leader and the other three as stopped (tools/lib/erx/native_machine_stop.rb).
+# the leader, and the others as stopped, or CPU 3 as unanswered while it holds
+# the printf lock (tools/lib/erx/native_machine_stop.rb).
 # The test kernel is built here, beside the real one check_qemu builds first.
 cpus = [Erx::NativeMachineStop::CPUS]
 Erx::QemuGate.declare_suite(

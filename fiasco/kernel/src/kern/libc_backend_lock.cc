@@ -1,3 +1,5 @@
+// Modified by erXos: the stop's bounded take of the printf lock
+// (docs/design-debugger.md, "The console's lock on Fiasco").
 #include <libc_backend.h>
 
 #include <atomic.h>
@@ -37,6 +39,27 @@ extern "C" unsigned int __libc_backend_printf_lock()
       if (cas(&__libc_backend_printf_spinlock, ~0UL, pid))
         return r;
     }
+}
+
+// The stop's take (docs/design-debugger.md, "The stop", step 6): the same
+// compare-and-swap at most tries times, with interrupts already masked.
+// Nonzero if this CPU holds the lock, already or now. The stop never gives it
+// back, and a failed take is the stop's best-effort output, never a wait.
+extern "C" int __libc_backend_printf_take_bounded(unsigned tries)
+{
+  Mword pid = cxx::int_value<Cpu_phys_id>(Proc::cpu_id());
+
+  if (access_once(&__libc_backend_printf_spinlock) == pid)
+    return 1;
+
+  for (unsigned i = 0; i < tries; ++i)
+    {
+      if (access_once(&__libc_backend_printf_spinlock) == ~0UL
+          && cas(&__libc_backend_printf_spinlock, ~0UL, pid))
+        return 1;
+      Proc::pause();
+    }
+  return 0;
 }
 
 extern "C" void __libc_backend_printf_unlock(unsigned int state)

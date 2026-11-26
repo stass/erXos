@@ -101,6 +101,7 @@ typedef struct erx_stop_leader {
 	erx_stop_step_t		step;
 	uint64_t		asked;		/* the CPUs asked, once the admitted set is loaded */
 	uint64_t		since_ns;	/* the time of the request */
+	uint64_t		published;	/* the CPUs asked that had published at the last look */
 	bool			complete;	/* at RECORD: every CPU asked had published */
 } erx_stop_leader_t;
 
@@ -157,8 +158,9 @@ bool	erx_machine_stop_published(erx_stop_cpu_state_t state);
 /*
  * A CPU's state in the record, once the leader has reached RECORD, given the state its
  * slot held when the leader looked: the leader is `leader`; a CPU outside the census is
- * `offline`, whatever it published later; an asked CPU is the state it published, or
- * `unanswered`: unpublished when the census ended.
+ * `offline`, whatever it published later; an asked CPU is the state it published, if
+ * the census's last look saw it published, or else `unanswered`, whatever it
+ * published after.
  */
 erx_stop_cpu_state_t	erx_machine_stop_final(const erx_stop_leader_t *leader, uint32_t cpu,
 			    erx_stop_cpu_state_t published);

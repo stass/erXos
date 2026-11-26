@@ -175,8 +175,8 @@ check_record(const world_t *w, const cpu_t *lead)
 		if ((lead->leader.asked & bit(j)) == 0) {
 			if (final != ERX_STOP_CPU_STATE_OFFLINE)
 				fail("a CPU outside the census is not `offline`");
-		} else if (erx_machine_stop_published(w->slot[j]) ? final != w->slot[j] : final != ERX_STOP_CPU_STATE_UNANSWERED) {
-			fail("an asked CPU's final state is not its published one, or `unanswered`");
+		} else if ((lead->leader.published & bit(j)) != 0 ? final != w->slot[j] : final != ERX_STOP_CPU_STATE_UNANSWERED) {
+			fail("an asked CPU's final state is not the one the census last saw, or `unanswered`");
 		}
 		if (lead->leader.complete && (lead->leader.asked & bit(j)) != 0 && !erx_machine_stop_published(final))
 			fail("a complete census with a CPU that did not publish");
@@ -571,6 +571,10 @@ check_census_clock(void)
 	end = erx_machine_stop_leader_next(l, 0x2, 999);
 	if (end.step != ERX_STOP_STEP_RECORD || end.complete)
 		why = "a clock read before the request keeps the census waiting, or calls it complete";
+	/* A CPU that publishes after the census's last look is `unanswered`, as the census saw it. */
+	if (erx_machine_stop_final(&end, 2, ERX_STOP_CPU_STATE_STOPPED) != ERX_STOP_CPU_STATE_UNANSWERED ||
+	    erx_machine_stop_final(&end, 1, ERX_STOP_CPU_STATE_STOPPED) != ERX_STOP_CPU_STATE_STOPPED)
+		why = "a final state is not what the census last saw";
 	end = erx_machine_stop_leader_next(l, 0x6, 999);
 	if (end.step != ERX_STOP_STEP_RECORD || !end.complete)
 		why = "a full census read with a clock before the request is not complete";

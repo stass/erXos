@@ -10,7 +10,7 @@ _Z14platform_resetv machine-stop erx_machine_stop.cpp
 _ZN12Per_cpu_data8_offsetsE machine-stop erx_machine_stop.cpp
 _ZN16Cpu_pm_callbacks5_listE machine-stop erx_machine_stop.cpp
 _ZN16Erx_console_ring10write_uartEPKcm machine-stop erx_machine_stop.cpp
-_ZN16Erx_console_ring5closeEv machine-stop erx_machine_stop.cpp
+_ZN16Erx_console_ring13close_at_stopEv machine-stop erx_machine_stop.cpp
 _ZN16Erx_machine_stop4bootEbPKh boot-handoff erx_handoff.cpp
 _ZN3Cpu12_online_maskE machine-stop erx_machine_stop.cpp
 _ZN3Kip10global_kipE boot-handoff erx_handoff.cpp
@@ -21,6 +21,7 @@ _ZN8Kconsole2_cE console-ring erx_console_ring.cpp
 _ZN8Koptions1oEv boot-handoff erx_handoff.cpp
 _ZdlPv console-ring erx_console_ring.cpp
 __libc_backend_printf_lock console-ring erx_console_ring.cpp
+__libc_backend_printf_take_bounded machine-stop erx_machine_stop.cpp
 __libc_backend_printf_unlock console-ring erx_console_ring.cpp
 memcpy machine-stop erx_machine_stop.cpp
 panic boot-handoff erx_handoff.cpp

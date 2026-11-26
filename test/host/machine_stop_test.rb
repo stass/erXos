@@ -53,8 +53,12 @@ class MachineStopTest < Minitest::Test
     'a virtual descriptor read as RAM' =>
       [KIP, "if ((lo & KIP_VIRTUAL) != 0)\n\t\treturn (ERX_RAM_CLASS_IGNORED);\n", '', 'kip table'],
     'the census keeps published states only when complete' =>
-      [STOP, "\tif (erx_machine_stop_published(published))\n", "\tif (leader->complete && erx_machine_stop_published(published))\n",
+      [STOP, "\tif ((leader->published & cpu_bit(cpu)) != 0 && erx_machine_stop_published(published))\n",
+       "\tif (leader->complete && (leader->published & cpu_bit(cpu)) != 0 && erx_machine_stop_published(published))\n",
        'stop 3 cpus'],
+    'a final state from a slot published after the census' =>
+      [STOP, '(leader->published & cpu_bit(cpu)) != 0 && erx_machine_stop_published(published)',
+       'erx_machine_stop_published(published)', 'census clock'],
     'a census asked at the last clock reading never runs out' =>
       [STOP, 'return (now_ns < since_ns || now_ns - since_ns >= CENSUS_NS);',
        'return (since_ns < 2 * CENSUS_NS && (now_ns < since_ns || now_ns - since_ns >= CENSUS_NS));', 'stop 2 cpus'],

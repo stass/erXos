@@ -1,6 +1,7 @@
 // Modified by erXos: a CPU's start ends in its admission to the stop of the
 // machine (docs/design-debugger.md, "Stopping every CPU"); and a test kernel's
 // seeded panic on CPU 2 (ERX_TEST_MACHINE_STOP, tools/lib/erx/native_machine_stop.rb),
+// with CPU 3 holding the printf lock under ERX_TEST_MACHINE_STOP_LOCK_HELD,
 // which no other kernel builds.
 INTERFACE [mp]:
 
@@ -18,6 +19,7 @@ IMPLEMENTATION [mp]:
 #include "erx_machine_stop.h"
 #include "panic.h"
 #include "timer.h"
+#include <libc_backend.h>
 
 #include <cstdlib>
 #include <cstdio>
@@ -126,6 +128,18 @@ App_cpu_thread::bootstrap(Mword resume)
         Proc::pause();
       panic("machine stop seed on CPU 2");
     }
+#ifdef ERX_TEST_MACHINE_STOP_LOCK_HELD
+  // And CPU 3 takes the printf lock just before that panic and never lets go,
+  // with interrupts masked, so the stop's take of the lock fails.
+  if (!resume && ccpu == Cpu_number(3))
+    {
+      while (Timer::system_clock() < 2900000)
+        Proc::pause();
+      (void)__libc_backend_printf_lock();
+      for (;;)
+        Proc::pause();
+    }
+#endif
 #endif
 
   if (!resume)

@@ -1226,8 +1226,15 @@ them. The interrupted registers of a CPU that takes the stop request are
 the interrupt entry's saved frame, which Fiasco's `irq_handler` takes no arguments, so one call
 in the interrupt entry (`kern/arm/64/ivt.S`) hands the frame and the
 stack pointer the interrupt found to the glue before the dispatch, and a
-second clears them after it; the glue keeps them per CPU. Each CPU's
-panic stack is two pages the glue reserves for it, which hold the
+second clears them after it, and a request outside that entry returns
+and answers the leader's next ask; the glue keeps them per CPU. Each
+CPU's panic stack is one thread block the glue reserves for it, two
+pages at least and aligned to its size, whose first bytes are a header
+shaped as Fiasco's `Context` with only its CPU number set, written when
+the glue is set up beside the boot CPU's hardware identifier, so Fiasco's
+lookup of the current thread through the stack pointer finds that CPU
+and no thread. The leader publishes its own slot too, which the census
+does not count. The stack holds the
 formatted message, the crash core's writer and the report's printer
 below the leader's own frames, until the kernel stack proof measures the
 stop's depth. Every line the stop prints takes the UART console's

@@ -121,6 +121,7 @@ erx_machine_stop_leader_next(erx_stop_leader_t leader, uint64_t loaded, uint64_t
 		leader.step = ERX_STOP_STEP_LOOK;
 		break;
 	case ERX_STOP_STEP_LOOK:
+		leader.published = loaded & leader.asked;
 		if ((leader.asked & ~loaded) == 0) {
 			leader.complete = true;
 			leader.step = ERX_STOP_STEP_RECORD;
@@ -148,7 +149,7 @@ erx_machine_stop_final(const erx_stop_leader_t *leader, uint32_t cpu, erx_stop_c
 		return (ERX_STOP_CPU_STATE_LEADER);
 	if ((leader->asked & cpu_bit(cpu)) == 0)
 		return (ERX_STOP_CPU_STATE_OFFLINE);
-	if (erx_machine_stop_published(published))
+	if ((leader->published & cpu_bit(cpu)) != 0 && erx_machine_stop_published(published))
 		return (published);
 	return (ERX_STOP_CPU_STATE_UNANSWERED);
 }

@@ -183,9 +183,22 @@ PUBLIC static
 void
 Erx_console_ring::close()
 {
+  Erx_printf_locked locked;
+  close_at_stop();
+}
+
+// The close, and the head of every stop's report: the first close writes
+// the ring out to the UART before anything else the kernel prints. The stop
+// calls it without taking the lock: it holds the lock by its bounded take,
+// or prints best effort when a CPU that never answered holds it, so the
+// leader's report never waits on the lock (docs/design-debugger.md, "The
+// stop", step 6); a kernel trap's report still closes through close().
+PUBLIC static
+void
+Erx_console_ring::close_at_stop()
+{
   erx_console_drain_t piece;
   size_t length;
-  Erx_printf_locked locked;
   Console *const uart = _uart;
 
   if (!erx_console_ring_close(&_ring))

@@ -20,7 +20,8 @@
 //    release ordering, and read by the leader, state first with acquire;
 //  - each CPU's depth and its hardware identifier are written by that CPU
 //    alone: the depth at each entry into a stop path, the identifier at its
-//    admission. A CPU finds its own number by its hardware identifier in
+//    admission and, for the boot CPU, at the glue's setup. A CPU finds its
+//    own number by its hardware identifier in
 //    that table, so the stop trusts no per-CPU pointer of the failing state.
 INTERFACE:
 
@@ -43,6 +44,7 @@ public:
 IMPLEMENTATION:
 
 #include <cstdio>
+#include <libc_backend.h>
 #include "erx/core/crash.h"
 #include "erx/core/effects.h"
 #include "erx/core/machine_stop.h"
@@ -83,14 +85,24 @@ static_assert(sizeof(Mword) == sizeof(uint64_t), "a register is a slot's word");
 
 namespace {
 
-// Each CPU's panic stack: two pages, which hold the formatted message, the
-// crash core's writer and the frame's printer below the leader's own frames.
-enum { Panic_stack_bytes = 2 * ERX_PAGE_SIZE, Message_bytes = 512 };
+// Each CPU's panic stack is one thread block, aligned as Fiasco's own, so
+// Fiasco's lookup of the current thread through the stack pointer lands on its
+// first bytes: a header shaped as Fiasco's Context_base, its CPU number set at
+// the glue's setup and every other word zero, so the lookup finds that CPU and
+// no thread, never the stack's bytes read as one. Above the header it holds
+// the formatted message, the crash core's writer and the frame's printer below
+// the leader's own frames.
+enum { Panic_stack_bytes = Context_base::Size, Message_bytes = 512 };
+static_assert(Panic_stack_bytes >= 2 * ERX_PAGE_SIZE, "a panic stack is two pages at least");
+
+// How many times the leader tries to take the printf lock before it prints
+// without it (docs/design-debugger.md, "The stop", step 6).
+enum { Lock_tries = 100000 };
 
 // How long the census waits before it asks a silent CPU again.
 static constexpr uint64_t Ask_again_ns = 1000000;
 
-struct alignas(16) Panic_stack { unsigned char bytes[Panic_stack_bytes]; };
+struct alignas(Panic_stack_bytes) Panic_stack { unsigned char bytes[Panic_stack_bytes]; };
 
 // What a stop's entry hands the leader on its panic stack.
 struct Entry
@@ -336,17 +348,27 @@ erx_stop_say(char const *format, ...)
 }
 
 // The report's first part (docs/design-debugger.md, "The stop", step 6): the
-// record's own fields as text for the person at the console. The message in
+// record's own fields as text for the person at the console. After an
+// incomplete census its first line names the CPUs that did not answer and
+// whether the console's lock was taken. The message in
 // every form, any control byte in it shown as '?'; in the full form the
 // leader's registers and frames; and one line for each CPU with its state,
 // and in the full form where it was.
 static void
 erx_stop_report(erx_crash_input_t const &input, erx_regs_t const &regs,
-                erx_stop_leader_t const &leader)
+                erx_stop_leader_t const &leader, bool locked)
 {
   using Ull = unsigned long long;
   if (!leader.complete)
-    erx_stop_say("the census is incomplete: a CPU marked unanswered did not stop");
+    {
+      char line[128];
+      size_t used = size_t(snprintf(line, sizeof(line), "census %s",
+                                    leader.complete ? "complete" : "incomplete: unanswered"));
+      for (unsigned cpu = 0; cpu < input.ncpus && cpu < ERX_CRASH_CPUS; ++cpu)
+        if (input.cpus[cpu].state == ERX_STOP_CPU_STATE_UNANSWERED && used < sizeof(line))
+          used += size_t(snprintf(line + used, sizeof(line) - used, " %u", cpu));
+      erx_stop_say("%s; console lock %s", line, locked ? "taken" : "not taken");
+    }
   char message[Message_bytes];
   for (size_t at = 0; at < input.message_length; ++at)
     {
@@ -395,17 +417,28 @@ erx_stop_lead(void *arg)
   Entry *const entry = static_cast<Entry *>(arg);
   unsigned const cpu = entry->cpu;
   erx_stop_regs_t const &regs = entry->regs;
+  // The leader's own slot, for a reader of the slots; the census counts none
+  // of the leader's.
+  erx_stop_publish(cpu, ERX_STOP_CPU_STATE_LEADER, regs, 0);
   erx_stop_leader_t const leader = erx_stop_census(cpu);
+  // The console's lock, a bounded number of tries, kept to the machine's
+  // end; a leader that failed while it held the lock holds it already. A
+  // CPU that did not answer may hold it for good, so a failed take prints
+  // without it, best effort, and never waits. It is taken before the
+  // message is formatted, so a trap there finds the lock its own.
+  bool const locked = __libc_backend_printf_take_bounded(Lock_tries) != 0;
   // The message is formatted once every CPU is asked, so an argument that
   // faults is a nested stop after the census, not before it.
   int const length = vsnprintf(erx_stop_message, sizeof(erx_stop_message),
                                entry->format, *entry->args);
-  Erx_console_ring::close();
+  Erx_console_ring::close_at_stop();
 
   static erx_crash_cpu_t cpus[ERX_CRASH_CPUS];
   uint32_t const ncpus = erx_stop_ncpus(cpu);
   for (unsigned other = 0; other < ncpus && other < ERX_CRASH_CPUS; ++other)
     {
+      // The census's last look decides who answered; a slot published since
+      // stays out, so the record agrees with the census.
       erx_machine_stop_slot_t const *slot = &erx_stop_slots[other];
       erx_stop_cpu_state_t const published = __atomic_load_n(&slot->state, __ATOMIC_ACQUIRE);
       erx_stop_cpu_state_t const state = erx_machine_stop_final(&leader, other, published);
@@ -431,7 +464,7 @@ erx_stop_lead(void *arg)
   input.message = erx_stop_message;
   input.message_length = length < 0 ? 0 : (size_t(length) < sizeof(erx_stop_message) ? size_t(length) : sizeof(erx_stop_message) - 1);
   (void)erx_crash_record_write(&input, erx_crash_buffer, erx_crash_scratch);
-  erx_stop_report(input, regs.regs, leader);
+  erx_stop_report(input, regs.regs, leader, locked);
   erx_crash_frame_write(erx_crash_buffer, ERX_CRASH_END_FAULT);
   erx_stop_end(cpu);
 }
@@ -497,8 +530,9 @@ Erx_machine_stop::panic(char const *format, va_list args)
     }
 }
 
-// The handoff's facts the record carries: its form and the build's identifier,
-// ERX_BUILD_ID_SIZE bytes.
+// The glue's setup, from the boot handoff: the record's form and the build's
+// identifier, ERX_BUILD_ID_SIZE bytes, the panic stacks' headers and the
+// boot CPU's hardware identifier.
 PUBLIC static
 void
 Erx_machine_stop::boot(bool development, uint8_t const *build_id)
@@ -506,6 +540,15 @@ Erx_machine_stop::boot(bool development, uint8_t const *build_id)
   erx_stop_form = development ? ERX_CRASH_FORM_FULL : ERX_CRASH_FORM_BRIEF;
   for (unsigned at = 0; at < ERX_BUILD_ID_SIZE; ++at)
     erx_stop_build_id[at] = build_id[at];
+  // Each panic stack's header names its CPU, as Fiasco's Context does, and
+  // stays zero otherwise; Fiasco reads a context's header the same way.
+  for (unsigned cpu = 0; cpu < Config::Max_num_cpus; ++cpu)
+    reinterpret_cast<Context_base *>(erx_panic_stacks[cpu].bytes)
+      ->set_current_cpu(Cpu_number(cpu));
+  // The boot CPU's identifier, so a stop before its admission finds its
+  // number in the table and not through the stack pointer.
+  __atomic_store_n(&erx_stop_hwid[cxx::int_value<Cpu_number>(Cpu_number::boot_cpu())],
+                   Cpu::mpidr() + 1, __ATOMIC_RELAXED);
 }
 
 // The admission (docs/design-debugger.md, "Stopping every CPU"): the last
@@ -560,7 +603,7 @@ Erx_machine_stop::admit()
 
 // The stop request, from the debug interrupt's handler: the CPU publishes
 // the registers the interrupt interrupted as `stopped` and parks. A request
-// that finds no stop word returns.
+// that finds no stop word, or no interrupt frame, returns.
 PUBLIC static
 void
 Erx_machine_stop::request()
@@ -570,25 +613,25 @@ Erx_machine_stop::request()
     return;
   uint32_t const word = __atomic_load_n(&erx_debug_anchor.stop, __ATOMIC_ACQUIRE);
   erx_stop_cpu_state_t const state = erx_machine_stop_check(ERX_STOP_AT_REQUEST, word, cpu);
-  if (!state)
+  Return_frame const *frame = erx_irq_frame[cpu];
+  // A request outside the interrupt entry has no registers to publish, and
+  // `stopped` always carries them: the CPU runs on, and answers the leader's
+  // next ask from an interrupt.
+  if (!state || !frame)
     return;
   (void)erx_stop_deeper(cpu);
-  Return_frame const *frame = erx_irq_frame[cpu];
   erx_stop_regs_t regs = {};
   Erx_stop_live live;
   erx_machine_stop_live(&live);
   regs.space_root = live.space_root;
-  if (frame)
-    {
-      for (unsigned r = 0; r < 31; ++r)
-        regs.regs.gpr[r] = frame->r[r];
-      // The interrupt entry does not save the user's stack pointer, which
-      // Fiasco keeps in SP_EL0 until a thread switch, so a CPU interrupted in
-      // user mode (EL0t) reads it live; the kernel runs on SP_EL1.
-      regs.regs.sp = (frame->pstate & 0xf) == 0 ? live.user_sp : erx_irq_sp[cpu];
-      regs.regs.pc = frame->pc;
-      regs.regs.state = frame->pstate;
-    }
+  for (unsigned r = 0; r < 31; ++r)
+    regs.regs.gpr[r] = frame->r[r];
+  // The interrupt entry does not save the user's stack pointer, which
+  // Fiasco keeps in SP_EL0 until a thread switch, so a CPU interrupted in
+  // user mode (EL0t) reads it live; the kernel runs on SP_EL1.
+  regs.regs.sp = (frame->pstate & 0xf) == 0 ? live.user_sp : erx_irq_sp[cpu];
+  regs.regs.pc = frame->pc;
+  regs.regs.state = frame->pstate;
   erx_stop_publish(cpu, state, regs, 0);
   erx_stop_park();
 }

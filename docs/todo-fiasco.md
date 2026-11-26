@@ -99,18 +99,15 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   in parts that each stand alone:
   1. the rest of the stop (the glue `fiasco/kernel/src/erx/erx_machine_stop.cpp`, its routes from `panic`,
      `assert_fail` and `kdb_ke`, the park in the debug inter-processor interrupt's handler, the admission, the
-     census and the report are in the tree, checked by the `native_machine_stop` cell): the route from a kernel
-     trap and the three trap reports that panic, the check in the spinlock's wait, the bounded take of the
-     printf lock held to the machine's end, the platform control object's shutdown that names the root's
-     cause, and panic stacks shaped as Fiasco's `Context`, so a lookup of the current thread through the
-     stack pointer finds no thread instead of reading the stack's bytes as one, with the boot CPU's hardware
-     identifier written when the glue is set up, so a stop before its admission does not find its number
-     through the stack pointer either; the leader's own slot published and its final states taken from what
-     the census last saw; a request with no interrupt frame publishing no registers; the report's first line
-     naming the CPUs that did not answer and the lock's take, through the console's one escaping function;
-     cells for an unanswered CPU, a nested stop and the brief form's report; every development boot is one
-     of a kernel without the object, and a boot checks that `sigma0` ignores its object-naming calls failing
-     (P9);
+     census, the bounded take of the printf lock, the panic stacks shaped as Fiasco's `Context` and the
+     report are in the tree, checked by the `native_machine_stop` cell's `stopped` and `lock-held` runs): the
+     route from a kernel trap and the three trap reports that panic, whose `Trap_state::dump` still takes
+     the printf lock without bound through `Erx_console_ring::close`, the check in the spinlock's wait, a
+     drain of the ring at the stop bounded by construction (an unanswered writer racing the unlocked
+     close can move `open` behind the drain's tail, so the drain runs until the index wraps), the
+     platform control object's shutdown that names the root's cause; the report's message through the console's one escaping function (`erx_log_escape`, whose `include/erx/log.h` the kernel's glue does not see); one routine for the depth that each stop path now counts on its own; cells for a
+     nested stop and the brief form's report; every development boot is one of a kernel without the
+     object, and a boot checks that `sigma0` ignores its object-naming calls failing (P9);
   2. `tools/erx debug` over crash records and memory images, the debug bundle with its layout table and
      walkers, and the harness's image and report on a failing QEMU run;
   3. the hold and `erx.hold=1`, in the kernel, with the anchor's remaining fields and its crc, its readable-RAM map, the
