@@ -121,7 +121,7 @@ read_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	buffers = enif_alloc(sizeof(*buffers));
 	if (buffers == NULL)
 		return (error_status(env, ERX_ENOMEM));
-	status = erx_log_read(0, cursor, buffers->window, sizeof(buffers->window), &read);
+	status = erx_log_read(ERX_ROOT_SLOT_ROOT_RESOURCE, cursor, buffers->window, sizeof(buffers->window), &read);
 	return (read_lines(env, buffers, status, &read));
 }
 
@@ -139,7 +139,7 @@ take_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	buffers = enif_alloc(sizeof(*buffers));
 	if (buffers == NULL)
 		return (error_status(env, ERX_ENOMEM));
-	status = erx_log_take(0, buffers->window, sizeof(buffers->window), &read);
+	status = erx_log_take(ERX_ROOT_SLOT_ROOT_RESOURCE, buffers->window, sizeof(buffers->window), &read);
 	return (read_lines(env, buffers, status, &read));
 }
 

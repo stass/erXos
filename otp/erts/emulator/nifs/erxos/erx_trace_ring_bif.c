@@ -199,7 +199,7 @@ erx_trace_ring_read_3(BIF_ALIST_3)
 		BIF_ERROR(BIF_P, BADARG);
 	records = erts_alloc(ERTS_ALC_T_TMP, (Uint)max * sizeof(*records));
 	if (source.kernel)
-		status = erx_trace_read(0, source.cpu, cursor, records, max, &result);
+		status = erx_trace_read(ERX_ROOT_SLOT_ROOT_RESOURCE, source.cpu, cursor, records, max, &result);
 	else
 		status = erx_backend_trace_read(cursor, records, max, &result);
 	if (status != ERX_OK) {
