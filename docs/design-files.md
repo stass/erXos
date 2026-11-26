@@ -1002,9 +1002,11 @@ neither empty nor `.` nor `..`; a walk holds at most 16
 names, a symbolic link's text at most 4,095 bytes, an extended attribute's
 value at most 65,536 bytes. No bound limits a fid's depth, because
 nothing the grant keeps for a fid grows with it ([Serving](#serving-the-erx_fs-behaviour),
-"What a fid denotes"): what a grant holds for its fids is its pool times
-one fid at its largest, its record with a 255-byte name and two per-node
-counts, and `erx_fs` derives a grant's heap reserve from that. A session's handlers draw their programs'
+"What a fid denotes"): what a grant keeps for its fids is its pool times
+one fid at its largest, its record with a name of at most 255 bytes that
+owns exactly its bytes and two per-node counts, and `erx_fs` derives a
+grant's heap reserve from that. The node term each fid holds is its
+tree's, and its size is part of that server's per-fid bound. A session's handlers draw their programs'
 fids from the session's grants, at most 256 for each program, and leave a
 quarter of each grant's pool to the session's own processes, so the
 programs a session starts cannot spend the fids the session needs to go
@@ -2439,10 +2441,11 @@ other client's request can come between its parts:
   it answers for the calling grant in the same step as its lookup, so a
   fid never names a node the tree has freed, whatever another client
   renames or removes between two requests through it. The grant counts,
-  per node, the steps of its fid paths that name it; one function
-  replaces a fid's path, for a new fid, a walk in place, `..`, a clunk or
-  a fid owner's end, and a node no step names any more, or one a walk that
-  stopped passed, is forgotten once, at the end of the request. For a
+  per node, the fids that name it as their node or as their entry's
+  directory, at most two nodes for a fid; one function replaces what a
+  fid names, for a new fid, a walk in place, a clunk or a fid owner's
+  end, and a node no fid names any more, or one a walk passed on its way,
+  is forgotten once, at the end of the request. For a
   tree kept in a process of its own, `forget` answers nothing (an own
   tree's answers only its next tree, in the grant's process): the grant
   sends it and goes on, and since one
@@ -2775,7 +2778,12 @@ other client's request can come between its parts:
   parent that a rename may have moved outside the grant's subtree. A
   host's 9P client relayed by the host link's bridge
   ([design-live.md](design-live.md#files-between-the-host-and-the-machine))
-  meets the same refusal. A walk from a fid whose qid is a
+  meets the same refusal: the host link's codec refuses the name as it
+  decodes the walk, and the bridge answers its tag `einval`, changing no
+  fid and asking no grant. The bridge keeps no parents to answer `..`
+  for the host, which would bring back the record this rule deletes, so
+  a host client that sends `..` rather than resolving it sees that
+  error. A walk from a fid whose qid is a
   `symlink` fails, and an `lopen` of one fails with `eloop`, so no request
   sent along with a walk acts on a link the client has not yet seen. A
   walk, an `lopen` or an `lcreate` from an opened fid fails with
@@ -2792,7 +2800,21 @@ other client's request can come between its parts:
   state is bounded by its pool and a walk costs the grant the same at
   any depth; a tree that offers `forget` holds for a fid exactly its
   node and its entry's directory, and the grant counts, per node, the
-  fids that name it so. After the fid's
+  fids that name it so. The entry's name is copied as it enters the
+  record, at a walk's step or an `lcreate`, so it owns exactly its
+  bytes: a name carved from a larger binary, which a client in the
+  server's own domain can send, pins none of the rest. The grant's
+  bookkeeping for a fid is thus fixed; the node term is the tree's, and
+  what it costs is part of its server's per-fid bound. `/tmp`'s node is
+  an inode number, fixed in size, so its fids cost the same at any depth;
+  a tree whose node is its path, as the system partition's tree builds a
+  list of names and littlefs's grant a path binary, holds a node that
+  grows with depth within that tree's own bound on a path, and its
+  server's bound counts it. A fid keeps its node when another grant
+  renames it, even out of this grant's subtree: F2 is that no walk
+  goes up, so the client keeps what it had reached, that node and what
+  lies below it, and never reaches its new parent or siblings; it is
+  not a continuous check that the node still lies under the root. After the fid's
   node is removed, the requests that reach it answer what the module
   answers for a node with no name, which `/tmp` keeps while a fid names
   it: `getattr` answers with `nlink` 0; `lopen` of a file opens it, so
@@ -3979,7 +4001,12 @@ request function.
   fid of any other request, refused with `einval` before the grant's
   dispatch, making no fid; a host's walk from `NOFID` at the host link's
   bridge answered `ebadf`, while the host's ordinary walk from a fid it
-  attached is renamed and relayed and answers the grant's qids, and the
+  attached is renamed and relayed and answers the grant's qids; a host's
+  walk naming `..`, alone and after a plain name, sent as raw bytes
+  since the codec's encoder refuses to build it, answered `einval` on its
+  tag with no fid made, no grant asked and the session still serving
+  (seeded: the bridge dropping a message the codec refuses, which leaves
+  the tag unanswered); and the
   host-tree bridge's relay of an erXos client's walk from `NOFID` reaching
   QEMU's server as a walk from the bridge's root fid; an Erlang `open`
   and `close` of a file on a grant sending exactly a walk, an `lopen` and
@@ -4027,7 +4054,10 @@ request function.
   the grant serves without being killed (seeded: a fid that keeps the
   chain of directories it was walked through, which kills the grant;
   `/tmp`'s case of [design-tmp.md](design-tmp.md#verification) runs it
-  against a tree of the grant's own).
+  against a tree of the grant's own), and fids walked by legal names
+  each carved from a binary of its own of 1 MiB, more of them together
+  than the reserve, which leave the grant under it (seeded: the name kept as the request carried
+  it, which pins every larger binary and kills the grant).
 * F5 and F6: every writing operation through an `ro` and an `rx` grant,
   refused before its callback by a refusal test generated from the
   operation table; running a file through an `ro` or `rw` mount, through
@@ -4096,7 +4126,7 @@ request function.
   requests' window; a server that runs every grant's callbacks in one
   process, or each waiting read in a process of its own; a walk from
   `NOFID` started at the tree's top rather than the grant's root (the
-  home grant's walk of `..`); a profile that gives a walk's `NewFid` the
+  home grant's walk of no names, whose qid is the home's); a profile that gives a walk's `NewFid` the
   source's role (the walk whose `NewFid` is `NOFID`); a walk's source
   declared a plain `u32` rather than a fid of role `start` (the host's
   ordinary walk, which the bridge then answers `einval`); a host link

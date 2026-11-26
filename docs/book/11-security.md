@@ -518,7 +518,10 @@ file system code sees a request.
   envelope whose `D` is its client's domain id.
 * **That the request is well formed**, against the grammar and bounds
   of the file protocol, 9P2000.L.
-* **The root.** A walk of `..` at the grant's root stays there, a name
+* **The root.** A walk only descends: a walk naming `..` is refused,
+  since erXos's clients resolve `..` against their own place, and a
+  fid keeps only its node and the entry it was walked by, never a chain
+  of directories back to the root. A name
   holding `/` is refused, and the server follows no symbolic link
   during a walk; the client resolves a link's text through its own
   namespace. No request reaches above the root.

@@ -273,8 +273,10 @@ every server.
 ## Operations
 
 Each callback of `erx_fs` is one step. Walking is `erx_fs`'s: it calls
-`walk` for one plain name at a time, handles `..` itself for a client
-from outside erXos (erXos's own send none), never asks the tree to
+`walk` for one plain name at a time, refuses a walk naming `..` before
+any step, as the grammar does for every client (erXos's own send none,
+and a host client's reaches the host link's bridge, which answers it
+`einval`), never asks the tree to
 follow a link, and stops at a `symlink`, which `erx_file_remote`
 reads and resolves through the caller's namespace, following or not
 following a path's last link as the operation asks
@@ -458,8 +460,10 @@ sum of three parts:
   with no tree at all: its root, its pool of fids, its owners' monitors
   and its 64 requests in flight with up to 64 KiB of payload each
   ([design-files.md](design-files.md#bounds)). A fid's part is fixed:
-  a fid holds its node, its qid and its entry, one directory and one
-  name of at most 255 bytes, and two per-node counts, whatever its
+  a fid holds its node, an inode number, its qid and its entry, one
+  directory and one name of at most 255 bytes that owns exactly its
+  bytes, copied as it enters the fid so that no larger binary it was
+  carved from stays pinned, and two per-node counts, whatever its
   depth, since the grant keeps no chain of directories for it
   ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
   "What a fid denotes"). So the reserve is the grant's own state plus
@@ -626,11 +630,15 @@ the code under test ran.
   (`getattr` answers `nlink` 0, `lopen` opens it) until the last fid
   naming it is clunked, and its inode number is never given again; a
   rename between a walk and its `getattr` or `lopen` finds the old file;
-  a walk that stops keeps nothing; `..` from a removed directory returns
-  to its parent; in the core, an unlinked file a fid walked to is freed,
-  and its charge returned, at the `forget` of its last fid. Seeded: a
-  freed inode number reused; a walk that holds nothing; a grant that
-  never forgets; a `forget` that leaves the node in `walked`.
+  a walk that stops keeps nothing; a fid on a directory removed after
+  its walk keeps the directory, whose walk answers `enoent`, and its
+  parent held until the fid is clunked, and a walk of `..` from it is
+  refused with `einval`; a `remove` through a fid whose name another
+  node has taken since removes nothing; in the core, an unlinked file a
+  fid walked to is freed, and its charge returned, at the `forget` of
+  its last fid. Seeded: a freed inode number reused; a walk that holds
+  nothing; a grant that never forgets; a `forget` that leaves the node
+  in `walked`.
 * **Open after unlink and rename, and killed openers.** `held` returns to
   where it started after a removed file's handle is closed and after its
   opener is killed. Seeded: a clunk that does not free a node with no
@@ -661,12 +669,17 @@ Seeded: a callback that calls a process of its own, as a tree process
   emulator, each grant started with the bound the supervisor computes
   and no other change: at a `tmp` of 0, every creation answers `enospc`
   while the grant holds its whole pool of fids on the root and its 64
-  requests in flight each carry a 64 KiB write; at a `tmp` of 64 KiB
-  and of 32 MiB, the same full pool, each fid walked to a directory of
-  its own whose name has 255 bytes, and the tree filled to its cap
+  requests in flight each carry a 64 KiB write; at a `tmp` of 64 KiB,
+  the same full pool, its fids walked to a few directories they share,
+  since 4,096 directories of 255-byte names would pass that cap, and at
+  32 MiB the full pool, each fid walked to a directory of its own whose
+  name has 255 bytes; at both, the tree filled to its cap
   with 4 KiB files and then with one file, then every chunk
   overwritten a hundred times, then everything removed and filled
-  again. At 32 MiB also the walks of the deep-fid case: the full pool,
+  again. At 64 KiB also 64 fids, each walked by a 255-byte name carved
+  from a binary of its own of 1 MiB, which together pass the reserve
+  unless the grant keeps only the name's own bytes.
+  At 32 MiB also the walks of the deep-fid case: the full pool,
   each fid walked on its own from `NOFID` and then in place, 16 names
   at a time, about 400 directories down a chain of 1-byte names, and
   one fid walked in place one directory at a time down the deepest
@@ -677,7 +690,9 @@ Seeded: a callback that calls a process of its own, as a tree process
   tree's part alone, without the reserve, which the 64 KiB run's full
   pool and requests in flight pass, killing the grant; and a fid that
   keeps the chain of directories it was walked through, which the
-  deep-fid case passes, killing the grant.
+  deep-fid case passes, killing the grant; and a fid's name kept as
+  the request carried it, which the carved names pass, killing the
+  grant.
 * **Restart.** The grant killed with files open: their operations
   answer `eio`, `/tmp` is mounted again and empty, and new inode numbers
   lie above every old one. Seeded: inode numbers drawn from a counter in

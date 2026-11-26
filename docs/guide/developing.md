@@ -64,6 +64,10 @@ The first boots the development image with the serial console on your
 terminal and the Erlang shell's `1>` prompt; quit with Ctrl-A then X. The
 second also opens the host link, a UNIX socket that `tools/erx load`,
 `files` and `web` use. On a board, see [Raspberry Pi 4](raspberry-pi-4.md).
+A 9P2000.L client on the host mounts `tools/erx files`'s socket; the
+machine refuses a walk that names `..` with `EINVAL`, as it does for
+its own clients, which resolve `..` themselves, so a host client that
+sends `..` instead sees that error.
 
 ## 4. Change Erlang code and load it
 

@@ -4096,7 +4096,16 @@ clunks them all ([design-files.md](design-files.md#fid-owners)). It
 answers some messages without a grant: `version`, with the smaller
 `msize`; anything but `version` before a session is open, and an
 `attach` whose `Afid` is not `NOFID`, with `einval`; `auth` with
-`enotsup`; a request on a fid it does not hold with `ebadf`, a walk from
+`enotsup`; once a session is open, a message the codec refuses whose
+tag is free with `einval` on that tag, changing no fid and asking no
+grant, so a walk naming `..`, which the grammar refuses for every
+client ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
+"Walking"), fails at the host as `EINVAL` rather than going unanswered:
+the bridge keeps no parents to walk `..` itself, so a host client that
+sends `..` rather than resolving it sees that error, and a message
+whose size field is wrong, or one the codec refuses before a session
+or on a tag in use, is discarded and counted; a request on a fid it
+does not hold with `ebadf`, a walk from
 `NOFID` among them, since a host's fid names a tree only once an
 `attach` has made it and the walk from a grant's root is a difference
 inside the machine alone: the codec's `fids/1` lists a walk's source,
