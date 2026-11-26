@@ -53,12 +53,17 @@ class BenchCompareTest < Minitest::Test
     assert_raises(Erx::Error) { verdict([side, side, side], [side(system: 'linux')]) }
   end
 
-  # A run booted with erx.trace=0 (bench --kernel-words) shares its environment's name with
-  # one booted without; the kernel lines in their details keep them apart.
+  # A run booted with the kernel's trace rings off (erx.trace=0, every benchmark boot's
+  # default) shares its environment's name with one booted with them on, by
+  # bench --kernel-words erx.trace=1, or one whose record keeps a line without the word or
+  # none; the kernel lines in their details keep them apart.
   def test_runs_booted_with_different_kernel_lines_are_never_compared
     off = side(details: { 'command_line' => 'erx.arg=0 erx.trace=0' })
-    error = assert_raises(Erx::Error) { Compare.comparable!(off, side(details: { 'command_line' => 'erx.arg=0' })) }
-    assert_match(/kernel command lines differ/, error.message)
+    [{ 'command_line' => 'erx.arg=0' }, { 'command_line' => 'erx.arg=0 erx.trace=1' }, {}].each do |details|
+      error = assert_raises(Erx::Error) { Compare.comparable!(off, side(details: details)) }
+      assert_match(/kernel command lines differ/, error.message)
+      assert_raises(Erx::Error) { Compare.comparable!(side(details: details), off) }
+    end
     Compare.comparable!(off, side(details: { 'command_line' => 'erx.arg=0 erx.trace=0' }))
   end
 

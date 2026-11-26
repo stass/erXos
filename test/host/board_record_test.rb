@@ -32,11 +32,15 @@ class BoardRecordTest < Minitest::Test
   # A set's directory holding its build record as BootPartition writes one: the
   # partition's files with their SHA-256, the source, the inputs the record reads and
   # what the card's config.txt set; linux, when given, is Linux's facts as LinuxBoard's
-  # set records them.
-  def set_directory(name, kernel:, clock: 1_500_000_000, linux: nil)
+  # set records them; line, when given, is the set's cmdline.txt, written under boot/.
+  def set_directory(name, kernel:, clock: 1_500_000_000, linux: nil, line: nil)
     directory = File.join(@scratch, name)
-    FileUtils.mkdir_p(directory)
+    FileUtils.mkdir_p(File.join(directory, 'boot'))
     files = { 'kernel8.img' => kernel, 'start4.elf' => '22' * 32, 'fixup4.dat' => '33' * 32 }
+    if line
+      File.write(File.join(directory, 'boot/cmdline.txt'), line)
+      files['cmdline.txt'] = Digest::SHA256.hexdigest(line)
+    end
     receipt = { 'version' => 1, 'kind' => 'assembled',
                 'components' => files.map { |file, sha256| { 'path' => "boot/#{file}", 'sha256' => sha256 } },
                 'source' => { 'commit' => COMMIT, 'dirty' => false },
@@ -86,8 +90,8 @@ class BoardRecordTest < Minitest::Test
     assert_equal [%w[ended done]] * 3, record.boots.map { |boot| boot.details.values_at('outcome', 'ended') }
     assert(record.boots.all? { |boot| boot.cells.all? { |cell| cell.status == 'measured' } })
     assert_equal 'pi4-4gb-erxos', record.environment.name
-    assert_equal({ 'memory_mib' => 1024, 'firmware' => { 'start4.elf' => '22' * 32, 'fixup4.dat' => '33' * 32 } },
-                 record.environment.details)
+    assert_equal({ 'memory_mib' => 1024, 'firmware' => { 'start4.elf' => '22' * 32, 'fixup4.dat' => '33' * 32 },
+                   'command_line' => '' }, record.environment.details)
     assert_equal COMMIT, record.subject.revision
     assert_equal({ 'kernel8_sha256' => '11' * 32, 'record_sha256' => one.record_sha256,
                    'root_flags' => ['-DERX_BENCH_DEADLINE_S=60u'], 'compiler' => COMPILER }, record.subject.details)
@@ -149,6 +153,26 @@ class BoardRecordTest < Minitest::Test
   end
 
   LINUX = { 'kernel' => { 'id' => 'rpi-kernel8', 'version' => '6.18.50', 'sha256' => '44' * 32 }, 'init_sha256' => '55' * 32 }.freeze
+
+  # An erXos set's record keeps the set's kernel command line, its cmdline.txt (the kernel's
+  # trace rings off, NativeBench::BoardSets), in the environment's details, as a QEMU run's
+  # record keeps its line, so a board run with the rings on is never compared with one with
+  # them off; a cmdline.txt that is not the one the build record lists is refused.
+  def test_an_erxos_sets_record_keeps_its_kernel_command_line
+    line = 'erx.hostlink=1 erx.trace=0'
+    set = Erx::BoardRecord.set(set_directory('erxos', kernel: '11' * 32, line: line), benchmark: 'wake')
+    assert_equal line, set.environment.details.fetch('command_line')
+    changed = set_directory('changed', kernel: '11' * 32, line: line)
+    File.write(File.join(changed.directory, 'boot/cmdline.txt'), 'erx.hostlink=1')
+    error = assert_raises(Erx::Error) { Erx::BoardRecord.set(changed, benchmark: 'wake') }
+    assert_match(/cmdline\.txt/, error.message)
+    ["erx.trace=0\terx.det=1", "erx.trace=0\n", "erx.trace=\xC3\xA9"].each do |odd|
+      error = assert_raises(Erx::Error) { Erx::BoardRecord.set(set_directory('odd', kernel: '11' * 32, line: odd), benchmark: 'wake') }
+      assert_match(/kernel words/, error.message)
+    end
+    linux = Erx::BoardRecord.set(set_directory('linux', kernel: '11' * 32, linux: LINUX, line: 'console=ttyAMA0'), benchmark: 'wake')
+    refute linux.environment.details.key?('command_line'), "Linux's line is its subject's"
+  end
 
   # A set whose build record names Linux (LinuxBoard) is Linux's: the record's
   # environment is pi4-4gb-linux, its subject holds Linux's facts, and its boots ask

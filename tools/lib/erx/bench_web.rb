@@ -13,6 +13,7 @@ require_relative 'error'
 require_relative 'fiasco'
 require_relative 'hostlink_guest'
 require_relative 'hostlink_pacer'
+require_relative 'kernel_words'
 require_relative 'medium_boot'
 require_relative 'output_directory'
 require_relative 'production_image'
@@ -105,6 +106,7 @@ module Erx
       links = qemu&.fetch('link', nil) || {}
       { 'benchmark' => 'web', 'host' => host, 'accelerator' => 'hvf', 'cpus' => 1, 'measured_at' => now.iso8601,
         'qemu_version' => qemu&.fetch('qemu_version', nil), 'image_sha256' => qemu&.fetch('image_sha256', nil),
+        'qemu_argv' => qemu&.fetch('argv', nil),
         'error' => failure&.message, 'host_load' => load, 'opens' => OPENS, 'idle_processes' => WebGuest::IDLE_PROCESSES,
         'uart_bytes_per_second' => UART_BYTES_PER_SECOND,
         'links' => links.transform_values { |targets| targets.transform_values { |samples| summary(samples) } },
@@ -148,7 +150,7 @@ module Erx
       qemu = Qemu.new(root: @root, runner: @runner)
                  .run(platform: @machine.platform, accel: 'hvf', cpus: 1, image: built.single, memory_mib: memory,
                       disks: [QemuPlan::Disk.new(path: medium)], checkpoints: self.class.checkpoints(points),
-                      directory: File.join(@root, 'build/qemu', "bw-#{Process.pid}"),
+                      directory: File.join(@root, 'build/qemu', "bw-#{Process.pid}"), command_line: KernelWords.bench_line,
                       link: ->(socket) { measure(socket, built.build_id, hash) }, link_seconds: LINK_SECONDS)
       [qemu, nil]
     rescue Error => e

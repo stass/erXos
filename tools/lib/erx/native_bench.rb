@@ -12,6 +12,7 @@ require_relative 'boot_partition'
 require_relative 'build_kind'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'kernel_words'
 require_relative 'native_root'
 require_relative 'native_task'
 require_relative 'output_directory'
@@ -119,9 +120,9 @@ module Erx
     QEMU_BOOT_NAME = '0' * 32
     QEMU_COMMAND_LINE = "#{NAME_WORD}#{QEMU_BOOT_NAME}".freeze
 
-    # A QEMU boot's kernel command line: the boot name, then the words the caller adds
-    # (bench --kernel-words, such as erx.trace=0), which the run's record keeps.
-    def self.command_line(words) = [QEMU_COMMAND_LINE, *words].join(' ').freeze
+    # A QEMU boot's kernel command line: the boot name, then every benchmark boot's words
+    # with the caller's (KernelWords.bench, bench --kernel-words), which the run's record keeps.
+    def self.command_line(words) = KernelWords.bench_line(QEMU_COMMAND_LINE, words)
     # The root's naming line at its end, done or deadline, as one line of the serial log,
     # with or without its line end: QEMU's bench-done checkpoint and timed_out's one pattern.
     END_LINE = /\Aerx: bench: boot [0-9a-f]{32} (?<form>done|deadline)\r*$/n
@@ -327,7 +328,9 @@ module Erx
     # The board's sets (docs/design-bench.md, "The bench image's boot set"): each distinct
     # benchmark's native bench image built for platform, a board whose medium is a boot
     # partition, and laid out once as that partition's files and their build record in
-    # build/bench-board/<benchmark>/, which every entry of the set is made from.
+    # build/bench-board/<benchmark>/, which every entry of the set is made from. The set's
+    # cmdline.txt carries every benchmark boot's words with the caller's
+    # (KernelWords.bench, bench --kernel-words), which the set's build record lists.
     class BoardSets
       DIRECTORY = 'build/bench-board'
       # A laid-out set: its files and record (BootPartition::WrittenSet), its image
@@ -336,7 +339,7 @@ module Erx
       Laid = Data.define(:set, :image, :deadline_seconds, :root_flags)
 
       def initialize(root:, platform:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), kernel_words: [])
         raise Error, "bench: #{platform.name} boots no boot partition" unless BootPartition.boot_partition_medium?(platform)
 
         @root = File.expand_path(root)
@@ -344,6 +347,7 @@ module Erx
         @runner = runner
         @compiler = compiler
         @linker = linker
+        @words = KernelWords.bench(kernel_words)
         @run = Run.new(root: @root, runner: runner, compiler: compiler, linker: linker, platform: platform)
       end
 
@@ -365,7 +369,8 @@ module Erx
         directory = OutputDirectory.fresh(root: @root, path: File.join(@root, DIRECTORY,
                                                                       [benchmark, *(seed && ['seeded', seed.name.tr(' ', '-')])].join('-')))
         set = BootPartition.lay_out_set(root: @root, runner: @runner, platform: @platform, build_kind: BuildKind::DEVELOPMENT,
-                                        bootable: image.single, directory: directory, compiler: @compiler, linker: @linker)
+                                        bootable: image.single, directory: directory, compiler: @compiler, linker: @linker,
+                                        kernel_words: @words)
         Laid.new(set: set, image: image, deadline_seconds: deadline, root_flags: flags)
       end
     end

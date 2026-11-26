@@ -596,6 +596,39 @@ its numbers describe the model. Under HVF, a guest's CPU affinity does not
 pin the host thread that runs it, and macOS has no way to; the record
 keeps the host's load average before and after.
 
+### The kernel's trace rings
+
+Every erXos benchmark boot runs with the kernel's trace rings off: its
+kernel command line carries `erx.trace=0` (`KernelWords::BENCH`,
+`tools/lib/erx/kernel_words.rb`), the one default every boot path
+takes, the comparison session's native, `xdomain` and `posix` boots,
+the landing gate's `bench` suite, the single benchmarks (`boot`, `g3`,
+`g5`, `bytes`, `web`) and the board's sets alike. A development build
+turns the rings on by default, and on they write a record on every IPC,
+switch and fault: under HVF at one CPU they add 20 % to
+`nullcall.root-cross-space`
+([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings),
+"Cost"), so a benchmark booted with them would measure tracing as the
+system's own cost. Measuring that cost stays one option away:
+`--kernel-words`, with `--systems` or with `--env pi4-4gb-erxos` for a set
+the run builds, adds the caller's words after the default, and a word
+naming the same option replaces it, so `--kernel-words erx.trace=1`
+boots with the rings on and the line says `erx.trace` once. A word that
+is not printable ASCII without a space is refused, since the line
+splits on spaces and a board's `cmdline.txt` stays one line.
+
+The line is part of where a run happened. A session's or the landing
+gate's record keeps it in its environment's details as `command_line`,
+which every erXos guest must give (`BenchLanding.booted` takes none without it),
+and a board run's record keeps its set's `cmdline.txt`, read from the
+set and refused unless its SHA-256 is the one the set's build record
+lists ([The record of a board run](#the-record-of-a-board-run)); the
+single benchmarks' reports keep QEMU's argument vector, whose `-append`
+is the line. [Comparison](#comparison) refuses two records whose lines
+differ, so a run with the rings on, by `--kernel-words erx.trace=1`, or
+a record whose line lacks `erx.trace=0` or that has no line, is never
+compared with one with them off.
+
 ### The record
 
 One run is the record of one subject's boots in one environment by one
@@ -713,10 +746,12 @@ ran other cells, and is refused.
   side-by-side table, which sets `qemu-hvf` beside `host` for G3, and
   beside each other the systems of environments that differ only in their
   system, and gives no verdict. Everything that depends on the system
-  (its kernel, its command line, its configuration, its pins) is in the
-  run's `subject`, so the environment fields of one host, accelerator,
-  QEMU, machine type, CPU count and memory are the ones that must be
-  equal, and the subjects are shown beside the numbers, not matched.
+  (its kernel, its configuration, its pins) is in the run's `subject`, so
+  the environment fields of one host, accelerator, QEMU, machine type,
+  CPU count, memory and erXos's kernel command line
+  ([The kernel's trace rings](#the-kernels-trace-rings)) are the ones
+  that must be equal, and the subjects are shown beside the numbers, not
+  matched.
 * **The noise band.** The band of a statistic is the range of its values
   across the baseline's boots, widened by one histogram bucket.
 * **The verdict.** `same` when every candidate boot lies within the band;
@@ -1085,8 +1120,9 @@ checkpoint (`NativeBench.checkpoints`) takes those last two. Every line the
 root prints for a person, the cycle probe's among them, so falls between
 two naming lines. A boot with no such word prints
 `erx: bench: no boot name` and ends before any cell. An
-entry's `cmdline.txt` is its set's line followed by ` erx.arg=NAME`, or
-that word alone when the set has none, with no newline after it
+entry's `cmdline.txt` is its set's line (the host link's word and every
+benchmark boot's words, [The kernel's trace rings](#the-kernels-trace-rings))
+followed by ` erx.arg=NAME`, or that word alone when the set has none, with no newline after it
 ([design-fiasco.md, The command line](design-fiasco.md#the-command-line)).
 Under QEMU, where each boot has a console of its own and reuse keys a
 boot by its command line ([design-build.md](design-build.md#reusing-passing-boots)),
@@ -1335,8 +1371,11 @@ of its record and makes the comparison inconclusive:
 * **environment**: kind `pi4`, system `erxos`, four CPUs, the memory
   the set's `config.txt` makes the firmware report (`total_mem`, 1,024
   MiB on every board, of which `gpu_mem` goes to the VideoCore) as
-  `memory_mib`, and the SHA-256 of every firmware file, all from the
-  build record of the set the record is of;
+  `memory_mib`, the SHA-256 of every firmware file, all from the
+  build record of the set the record is of, and the set's kernel command
+  line as `command_line`, its `cmdline.txt` as that record lists it, or
+  empty for a set without one,
+  ([The kernel's trace rings](#the-kernels-trace-rings));
 * **subject**: the source revision, the SHA-256 of the set's
   `kernel8.img` and of its build record, the root's flags as the queue
   names them (absent for a set handed to the walk with `--set`, whose

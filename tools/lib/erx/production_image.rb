@@ -33,6 +33,7 @@ require_relative 'hostlink_guest'
 require_relative 'reload_guest'
 require_relative 'code_watch'
 require_relative 'json_input'
+require_relative 'kernel_words'
 require_relative 'lvgl'
 require_relative 'manifest'
 require_relative 'manifest_edit'
@@ -1219,7 +1220,7 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         built = image(fiasco, directory: 'build/production-image/trace')
-        line = [COMMAND_LINES[accel], TRACE_OFF_WORD].compact.join(' ')
+        line = [COMMAND_LINES[accel], KernelWords::TRACE_OFF].compact.join(' ')
         run = boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: false,
                                         points: Run.trace_off_checkpoints(machine: @machine), command_line: line)
         problems = Run.trace_off_problems(File.binread(run.fetch('serial_log')))
@@ -1574,9 +1575,8 @@ module Erx
       TRACE_LIVE_CPUS = 1
       KERNEL_SUMMARY = "{kernel_trace,true,true,0,true,#{TRACE_LIVE_CPUS}}".freeze
       KERNEL_LINE = /\A#{TRACE_REDRAW}(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{kernel_trace,[a-z0-9,]+\}\r*\n\z/n
-      # The rings-off boot (trace_off): the word that turns the kernel's rings off, the
+      # The rings-off boot (trace_off, KernelWords::TRACE_OFF): the
       # shell's read of CPU 0's kernel ring, and the answer a boot with no rings gives.
-      TRACE_OFF_WORD = 'erx.trace=0'
       TRACE_OFF_READ = "{trace_off,erx_trace_ring:read({kernel,0},0,1)}.\r"
       TRACE_OFF_SUMMARY = '{trace_off,{error,unsupported}}'
       TRACE_OFF_LINE = /\A#{TRACE_REDRAW}(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{trace_off,[a-z{},0-9]+\}\r*\n\z/n

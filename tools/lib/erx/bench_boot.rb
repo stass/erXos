@@ -10,6 +10,7 @@ require_relative 'bench'
 require_relative 'bench_g3'
 require_relative 'error'
 require_relative 'interactive_boot'
+require_relative 'kernel_words'
 require_relative 'output_directory'
 require_relative 'platform'
 require_relative 'process_group'
@@ -274,7 +275,7 @@ module Erx
                                             compiler: compiler, linker: linker)
       image = File.expand_path(image)
       image_sha256 = Digest::SHA256.file(image).hexdigest
-      line = ProductionImage::Run::COMMAND_LINES[plan.accel]
+      line = KernelWords.bench_line(ProductionImage::Run::COMMAND_LINES[plan.accel])
       argv = QemuPlan.argv(platform: platform, accel: plan.accel, cpus: 1, image: image,
                            serial: QemuPlan::STDIO, memory_mib: ProductionImage::Machine.development(platform).memory_mib,
                            command_line: line)

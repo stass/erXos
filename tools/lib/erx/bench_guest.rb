@@ -8,6 +8,7 @@ require_relative 'bench_guest_log'
 require_relative 'fiasco'
 require_relative 'interactive_boot'
 require_relative 'json_input'
+require_relative 'kernel_words'
 require_relative 'production_image'
 require_relative 'qemu'
 
@@ -160,7 +161,7 @@ module Erx
       Qemu.new(root: root, runner: runner)
           .run(platform: platform, accel: plan.accel, cpus: 1, image: image,
                memory_mib: ProductionImage::Machine.development(platform).memory_mib,
-               checkpoints: points, command_line: ProductionImage::Run::COMMAND_LINES[plan.accel],
+               checkpoints: points, command_line: KernelWords.bench_line(ProductionImage::Run::COMMAND_LINES[plan.accel]),
                directory: directory)
       nil
     rescue Error => error

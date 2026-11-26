@@ -7,6 +7,7 @@ require 'rbconfig'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/boot_partition'
+require_relative '../../tools/lib/erx/kernel_words'
 require_relative '../../tools/lib/erx/runner'
 
 # The Raspberry Pi 4's boot partition (Erx::BootPartition): config.txt from the platform
@@ -137,6 +138,23 @@ class BootPartitionTest < Minitest::Test
   def test_a_platform_without_a_host_link_asks_for_none
     platform = Struct.new(:record).new(PI.record.except('hostlink'))
     assert_empty Erx::BootPartition.command_line_entry(platform, 'development')
+  end
+
+  # A bench set's words (NativeBench::BoardSets: the kernel's trace rings off) follow the
+  # host link's word on one line with no newline, and a platform without the host link
+  # gets them alone.
+  def test_a_bench_sets_words_follow_the_host_links_word
+    words = %w[erx.trace=0 erx.det=1]
+    entry = Erx::BootPartition.command_line_entry(PI, 'development', words: words)
+    assert_equal "#{Erx::QemuPlan::HOSTLINK_WORD} erx.trace=0 erx.det=1", entry.fetch('cmdline.txt').bytes
+    platform = Struct.new(:record).new(PI.record.except('hostlink'))
+    assert_equal 'erx.trace=0 erx.det=1', Erx::BootPartition.command_line_entry(platform, 'development', words: words)
+                                                            .fetch('cmdline.txt').bytes
+    Dir.mktmpdir do |root|
+      bench = plan(root, kernel_words: Erx::KernelWords.bench)
+      assert_equal "#{Erx::QemuPlan::HOSTLINK_WORD} erx.trace=0", bench.fetch('cmdline.txt').bytes, 'the plan carries the words'
+      assert_equal Erx::QemuPlan::HOSTLINK_WORD, plan(root).fetch('cmdline.txt').bytes, "a card's line has the host link's word alone"
+    end
   end
 
   def test_writes_the_layout_beside_the_image_alone
@@ -496,7 +514,7 @@ end
 
   # A plan over stand-in files in root/in.
   # kernel_bytes makes the bootable file a sparse file of that length.
-  def plan(root, kernel_bytes: nil, build_kind: 'development')
+  def plan(root, kernel_bytes: nil, build_kind: 'development', kernel_words: [])
     sources = File.join(root, 'in')
     FileUtils.mkdir_p(sources)
     stand_in = lambda do |name, text = name|
@@ -509,6 +527,6 @@ end
     File.truncate(bootable, kernel_bytes) if kernel_bytes
     Erx::BootPartition.plan(platform: PI, build_kind: build_kind, bootable: bootable, bl31: stand_in.('bl31'),
                             bl31_license: stand_in.('license'),
-                            tree: tree, firmware: firmware)
+                            tree: tree, firmware: firmware, kernel_words: kernel_words)
   end
 end

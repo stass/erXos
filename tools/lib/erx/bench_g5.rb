@@ -9,6 +9,7 @@ require_relative 'bench'
 require_relative 'bench_g3'
 require_relative 'fiasco'
 require_relative 'json_input'
+require_relative 'kernel_words'
 require_relative 'medium_boot'
 require_relative 'native_root'
 require_relative 'output_directory'
@@ -233,7 +234,7 @@ module Erx
                memory_mib: @machine.memory_mib,
                checkpoints: self.class.checkpoints(points: points, plan: plan, domain: domain,
                                                            grant: MediumBoot.created_grant(manifest)),
-               command_line: ProductionImage::Run::COMMAND_LINES[plan.accel], directory: directory)
+               command_line: KernelWords.bench_line(ProductionImage::Run::COMMAND_LINES[plan.accel]), directory: directory)
       nil
     rescue Error => error
       error

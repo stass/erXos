@@ -162,7 +162,7 @@ class BenchSuiteTest < Minitest::Test
                                                                    'parameters' => { 'bytes' => 64, 'encoded' => 78 },
                                                                    'clock' => 'counter', 'batch' => 1 })
       { serial: @serial, seconds: nil, lines: [Erx::BenchLineFuzz.clock_line(pairs: []), rtt], image_sha256: 'a' * 64,
-        workloads: {}, compiler: '', qemu_version: nil, reused_from: nil,
+        workloads: {}, compiler: '', qemu_version: nil, command_line: 'erx.trace=0', reused_from: nil,
         timed_out: "QEMU checkpoint timed out: cells\e]8;;x" }
     end
   end

@@ -109,7 +109,7 @@ class XdomainBenchTest < Minitest::Test
       bytes = ['boot', *lines].map { |line| "#{line}\r\n" }.join.b
       File.binwrite(serial, bytes)
       run = FakeRun.new({ serial: serial, lines: lines, image_sha256: 'ab' * 32, workloads: {}, compiler: 'clang',
-                          qemu_version: '10.1.0', reused_from: nil, timed_out: 'QEMU checkpoint timed out: bench-done' })
+                          qemu_version: '10.1.0', command_line: 'erx.trace=0', reused_from: nil, timed_out: 'QEMU checkpoint timed out: bench-done' })
       guest = Bench::Guest.new(run: run)
       assert_equal %w[erxos xdomain], [guest.system, guest.boot]
       assert_equal [1, 4], guest.forms(4)

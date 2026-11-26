@@ -11,6 +11,7 @@ require_relative 'bench_guest'
 require_relative 'error'
 require_relative 'interactive_boot'
 require_relative 'json_input'
+require_relative 'kernel_words'
 require_relative 'production_image'
 require_relative 'qemu'
 
@@ -66,7 +67,7 @@ module Erx
         [name, BenchG3.median(entry.fetch('ns_per_call'))] if entry.fetch('status') == 'measured'
       end.to_h
       { 'benchmark' => 'bytes', 'host' => host, 'accelerator' => 'hvf', 'measured_at' => now.iso8601,
-        'qemu_version' => qemu['qemu_version'], 'image_sha256' => qemu['image_sha256'],
+        'qemu_version' => qemu['qemu_version'], 'image_sha256' => qemu['image_sha256'], 'qemu_argv' => qemu['argv'],
         'qemu_state' => qemu.fetch('state', 'failed'), 'error' => failure&.message, 'serial_log' => serial,
         'build' => build, 'beam_sha256' => beam.sha256, 'host_load' => load,
         'plan' => { 'iterations' => plan.iterations, 'samples' => plan.samples },
@@ -96,7 +97,8 @@ module Erx
       Qemu.new(root: @root, runner: @runner)
           .run(platform: @platform, accel: 'hvf', cpus: 1, image: image,
                memory_mib: ProductionImage::Machine.development(@platform).memory_mib,
-               checkpoints: BenchGuest.transcript(steps, platform: @platform), directory: directory)
+               checkpoints: BenchGuest.transcript(steps, platform: @platform), directory: directory,
+               command_line: KernelWords.bench_line)
       nil
     rescue Error => error
       error

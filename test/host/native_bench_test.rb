@@ -164,12 +164,18 @@ class NativeBenchTest < Minitest::Test
     assert_nil Erx::NativeBench.timed_out("erx: bench: boot #{name}\nerx: bench: boot #{name} done\r\n")
   end
 
-  # bench --systems --kernel-words adds words to the native boot's line after its name, and
-  # the run's record keeps the line, so a run with erx.trace=0 is told from one without.
-  def test_the_callers_kernel_words_follow_the_boot_name_and_reach_the_record
-    line = Erx::NativeBench.command_line(['erx.trace=0'])
-    assert_equal Erx::NativeBench::QEMU_COMMAND_LINE, Erx::NativeBench.command_line([])
+  # Every benchmark boot runs with the kernel's trace rings off: the native boot's line is
+  # its name, then erx.trace=0, then the caller's words (bench --kernel-words), a word for
+  # the same option replacing the default, and the run's record keeps the line, so a run
+  # with the rings off is told from one with them on.
+  def test_the_native_boot_runs_with_the_rings_off_unless_the_caller_turns_them_on
+    line = Erx::NativeBench.command_line([])
     assert_equal "erx.arg=#{'0' * 32} erx.trace=0", line
+    assert_equal "erx.arg=#{'0' * 32} erx.trace=1", Erx::NativeBench.command_line(['erx.trace=1'])
+    assert_equal "erx.arg=#{'0' * 32} erx.trace=0 erx.det=1", Erx::NativeBench.command_line(['erx.det=1'])
+    ['erx.trace=1 erx.det=1', "erx.trace=1\nerx.det=1", ''].each do |word|
+      assert_raises(Erx::Error) { Erx::NativeBench.command_line([word]) }
+    end
     Dir.mktmpdir('erx-native-bench-') do |directory|
       serial = File.join(directory, 'serial.log').tap { |path| File.write(path, "erx: bench: boot\n") }
       measured = { qemu_version: 'QEMU 0', command_line: line, image_sha256: '0' * 64, flags: [], compiler: 'clang',

@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'tmpdir'
 require_relative '../../tools/lib/erx/posix_bench'
 
 # erXos's posix guest (docs/design-bench.md, "How erXos runs the program"): the image's
@@ -73,5 +74,37 @@ class PosixBenchTest < Minitest::Test
     assert_equal [1], guest.forms(1)
     assert_nil guest.refusal('landing')
     assert_match(/landing profiles only/, guest.refusal('full'))
+  end
+
+  # Runs the block with PosixBench's functions named in replacements replaced, restoring them after.
+  def replacing(**replacements)
+    originals = replacements.to_h { |name, _| [name, Erx::PosixBench.method(name)] }
+    replacements.each { |name, replacement| Erx::PosixBench.define_singleton_method(name, &replacement) }
+    yield
+  ensure
+    originals.each { |name, original| Erx::PosixBench.define_singleton_method(name, original) }
+  end
+
+  # The posix guest boots with every benchmark boot's words, the kernel's trace rings off,
+  # after the accelerator's own line, or with the caller's (bench --kernel-words) in their
+  # place, and its record keeps the line.
+  def test_guest_boots_with_the_rings_off_unless_asked_and_its_record_keeps_the_line
+    benchmark = Erx::BenchSuite.benchmark('posix')
+    tcg = Erx::ProductionImage::Run::COMMAND_LINES.fetch('tcg')
+    Dir.mktmpdir('erx-posix-bench-') do |directory|
+      serial = File.join(directory, 'serial.log').tap { |path| File.write(path, '') }
+      built = { flags: [], compiler: 'clang', program_sha256: '0' * 64, machine: Struct.new(:memory_mib).new(512) }
+      [[[], 'hvf', 'erx.trace=0'], [[], 'tcg', "#{tcg} erx.trace=0"], [['erx.trace=1'], 'hvf', 'erx.trace=1']].each do |words, accel, line|
+        lines = []
+        boot = lambda do |command_line:, **|
+          lines << command_line
+          { 'serial_log' => serial, 'image_sha256' => '1' * 64, 'qemu_version' => 'QEMU 0', 'reused_from' => nil }
+        end
+        guest = Erx::PosixBench::Guest.new(root: ROOT, runner: nil, kernel_words: words)
+        booted = replacing(build: ->(**) { built }, boot: boot) { guest.call(benchmark, cells: [], cpus: 1, accel: accel) }
+        assert_equal [line], lines
+        assert_equal line, booted.environment.fetch('command_line')
+      end
+    end
   end
 end

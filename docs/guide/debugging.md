@@ -79,8 +79,10 @@ crash dump's buffer, are refused as usage errors.
 The kernel's trace rows record when the boot line's `erx.trace` is on: on
 by default in a development build, off in a release build, and
 `erx.trace=1` turns them on in either, at some cost to IPC and switches,
-which a line at boot says. With the rings off the rows read as
-unsupported
+which a line at boot says. Benchmark boots (`tools/erx bench`) turn them
+off unless `--kernel-words erx.trace=1` asks for them
+([design-bench.md](../design-bench.md#the-kernels-trace-rings)). With the
+rings off the rows read as unsupported
 ([design-fiasco.md](../design-fiasco.md#the-kernels-trace-rings)).
 
 ## Erlang crash reports

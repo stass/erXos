@@ -7,6 +7,7 @@ require_relative 'bench_landing'
 require_relative 'bench_measurement'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'kernel_words'
 require_relative 'manifest_edit'
 require_relative 'medium_boot'
 require_relative 'native_bench'
@@ -93,9 +94,9 @@ module Erx
         compiler: named }.freeze
     end
 
-    # One boot of the built image (build's answer) at cpus CPUs under accel, its serial
-    # log in directory: QEMU's report.
-    def boot(root:, runner:, built:, cpus:, accel:, directory:)
+    # One boot of the built image (build's answer) at cpus CPUs under accel with the kernel
+    # command line command_line, its serial log in directory: QEMU's report.
+    def boot(root:, runner:, built:, cpus:, accel:, directory:, command_line:)
       machine = built.fetch(:machine)
       image = built.fetch(:built)
       points = ProductionImage::Run.checkpoints(image, root: root, watchdog: MediumBoot::Run::WATCHDOG, cpus: cpus,
@@ -104,7 +105,7 @@ module Erx
       Qemu.new(root: root, runner: runner)
           .run(platform: machine.platform, accel: accel, cpus: cpus, image: image.single, memory_mib: machine.memory_mib,
                checkpoints: checkpoints(points, cpus: cpus, accel: accel), directory: directory,
-               command_line: ProductionImage::Run::COMMAND_LINES[accel])
+               command_line: command_line)
     end
 
     # erXos's posix guest for a comparison session (BenchSystem): one boot of the image,
@@ -114,12 +115,13 @@ module Erx
     # its first boot.
     class Guest
       def initialize(root:, runner:, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
-                     platform: Platform.development(root))
+                     platform: Platform.development(root), kernel_words: [])
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
         @platform = platform
+        @kernel_words = kernel_words
       end
 
       def system = 'erxos'
@@ -134,13 +136,16 @@ module Erx
         @built ||= PosixBench.build(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
                                     accel: accel)
         directory = File.join(@root, 'build/qemu', "posix-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
-        report = PosixBench.boot(root: @root, runner: @runner, built: @built, cpus: cpus, accel: accel, directory: directory)
+        # Every benchmark boot's words with the caller's (bench --kernel-words), which the run's record keeps.
+        line = KernelWords.bench_line(ProductionImage::Run::COMMAND_LINES[accel], @kernel_words)
+        report = PosixBench.boot(root: @root, runner: @runner, built: @built, cpus: cpus, accel: accel, directory: directory,
+                                 command_line: line)
         serial = report.fetch('serial_log')
         answer = BenchMeasurement.boot(NativeBench.guest_lines(File.binread(serial)),
                                        PeerBench.asked(benchmark.name, cpus: cpus, clock: 'counter'))
         measured = { serial: serial, image_sha256: report.fetch('image_sha256'), flags: @built.fetch(:flags),
                      compiler: @built.fetch(:compiler), workloads: { PROGRAM => @built.fetch(:program_sha256) },
-                     qemu_version: report['qemu_version'], reused_from: report['reused_from'] }
+                     qemu_version: report['qemu_version'], command_line: line, reused_from: report['reused_from'] }
         BenchLanding.booted(measured, answer, memory_mib: @built.fetch(:machine).memory_mib, pinned: PeerBench.pins?(benchmark.name))
       end
     end

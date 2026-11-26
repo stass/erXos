@@ -2959,7 +2959,9 @@ properties follow, and the rest of this section is their detail:
   the root reports, never a leak.
 
 **On and off.** The boot line's `erx.trace=0` or `erx.trace=1` decides, once a boot, whether the kernel's rings record. A
-development build's default is on and a release build's is off, and `erx.trace=1` is honoured in either. The kernel reads
+development build's default is on and a release build's is off, and `erx.trace=1` is honoured in either. Every benchmark
+boot carries `erx.trace=0`, so no benchmark measures the rings' cost as the system's, and an explicit `erx.trace=1`
+measures that cost ([design-bench.md](design-bench.md#the-kernels-trace-rings)). The kernel reads
 the option from the boot line its handoff carries, with the root's own reader of that line (`erx_boot_args_parse` and
 `erx_boot_args_trace`, `kernel/core/boot_args.c`), as it prints the banner (`Erx_handoff::banner`), before any other CPU
 runs; nothing after the handoff writes the decision, so no domain can turn the rings on or off, and a line the reader

@@ -14,8 +14,10 @@ require_relative 'boot_partition'
 require_relative 'bounded_file'
 require_relative 'error'
 require_relative 'json_input'
+require_relative 'kernel_words'
 require_relative 'line_escape'
 require_relative 'native_bench'
+require_relative 'netboot_entry'
 require_relative 'peer_bench'
 
 module Erx
@@ -50,7 +52,9 @@ module Erx
     # import runs. A set whose record names Linux among its inputs is Linux's
     # (LinuxBoard): its environment's system is linux, its subject holds Linux's facts
     # under linux, and its boots ask erx_peer_bench's counterparts of benchmark rather than erXos's
-    # native cells.
+    # native cells. An erXos set's environment keeps the set's kernel command line
+    # (command_line), as a QEMU run's keeps its own, so runs with the kernel's trace rings on
+    # and off are never compared (BenchCompare).
     def set(boot_set, benchmark:)
       raise Error, "board record: the set #{boot_set.directory} is not named by an absolute directory" unless
         File.absolute_path?(boot_set.directory)
@@ -71,7 +75,8 @@ module Erx
         environment: BenchRecord::Environment.new(
           kind: 'pi4', model: nil, cpus: CPUS, system: linux ? 'linux' : 'erxos',
           details: { 'memory_mib' => card.memory_mib,
-                     'firmware' => firmware.to_h { |source| [source.fetch('filename'), files.fetch(source.fetch('filename'))] } }
+                     'firmware' => firmware.to_h { |source| [source.fetch('filename'), files.fetch(source.fetch('filename'))] },
+                     'command_line' => (command_line(boot_set, files) unless linux) }
             .compact
         ),
         subject: BenchRecord::Subject.new(
@@ -85,6 +90,20 @@ module Erx
       )
     rescue NoMatchingPatternError, KeyError, TypeError, NoMethodError
       raise Error, "board record: #{path} does not name the set's source, firmware and kernel"
+    end
+
+    # The set's line, its cmdline.txt, which must be the one its build record lists; empty
+    # when the set has none, so its entries' lines are their boot names alone.
+    def command_line(boot_set, files)
+      listed = files[BootPartition::CMDLINE]
+      return '' unless listed
+
+      path = File.join(boot_set.directory, BootPartition::PARTITION, BootPartition::CMDLINE)
+      line = BoundedFile.read(path, maximum: NetbootEntry::MAX_CMDLINE)
+      raise Error, "board record: #{path} is not the cmdline.txt the set's build record lists" unless
+        Digest::SHA256.hexdigest(line) == listed
+
+      KernelWords.check_line(line, label: "board record: #{path}")
     end
 
     # The run's facts: the queue's date; the ARM clock its sets' config.txt set (CardSettings),
@@ -157,5 +176,7 @@ module Erx
 
       write(made, history: history, root: root)
     end
+
+    private_class_method :command_line
   end
 end

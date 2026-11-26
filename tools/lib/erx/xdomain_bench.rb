@@ -9,6 +9,7 @@ require_relative 'bench_landing'
 require_relative 'bench_measurement'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'kernel_words'
 require_relative 'medium_boot'
 require_relative 'native_bench'
 require_relative 'production_image'
@@ -144,12 +145,14 @@ module Erx
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
-                     platform: Platform.development(root))
+                     platform: Platform.development(root), kernel_words: [])
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
         @machine = SystemDomain.machine(platform)
+        # Every benchmark boot's words with the caller's (bench --kernel-words), which the run's record keeps.
+        @command_line = KernelWords.bench_line(nil, kernel_words)
         @manifest = XdomainBench.manifest(platform.site_manifest_source(@root))
       end
 
@@ -168,7 +171,7 @@ module Erx
         report, timed_out = begin
           [Qemu.new(root: @root, runner: @runner)
                .run(platform: @machine.platform, accel: accel, cpus: cpus, image: built.single, memory_mib: memory_mib,
-                    checkpoints: checkpoints, directory: directory), nil]
+                    checkpoints: checkpoints, directory: directory, command_line: @command_line), nil]
         rescue TranscriptTimeout => e
           # Qemu#run's report of the boot, which it writes however the boot ended.
           [JsonInput.parse(File.binread(File.join(directory, 'report.json'), 1024 * 1024 + 1), max_bytes: 1024 * 1024, label: 'QEMU report'), e.message]
@@ -176,7 +179,8 @@ module Erx
         serial = File.expand_path(report.fetch('serial_log'), @root)
         { serial: serial, seconds: report['elapsed_seconds'], lines: XdomainBench.lines(File.binread(serial), timed_out: timed_out),
           image_sha256: report.fetch('image_sha256'), workloads: beams.transform_values(&:sha256), compiler: @compiler,
-          qemu_version: report['qemu_version'], reused_from: report['reused_from'], timed_out: timed_out }.freeze
+          qemu_version: report['qemu_version'], command_line: @command_line, reused_from: report['reused_from'],
+          timed_out: timed_out }.freeze
       end
     end
 

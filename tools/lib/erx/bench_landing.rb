@@ -30,7 +30,7 @@ module Erx
       BenchSystem::Booted.new(
         clock: answer.fetch(:clock) || {}, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
         environment: { 'memory_mib' => memory_mib, 'machine' => 'virt', 'qemu' => measured.fetch(:qemu_version),
-                       'command_line' => measured[:command_line] }.compact,
+                       'command_line' => measured.fetch(:command_line) }.compact,
         subject: measured.slice(:image_sha256, :flags, :compiler, :workloads).transform_keys(&:to_s),
         logs: [{ serial: BenchRecord.boot_log(measured.fetch(:serial)) }], reused_from: measured.fetch(:reused_from),
         pinned: pinned

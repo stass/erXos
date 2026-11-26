@@ -834,7 +834,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe|install | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR]... | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench NAME --env pi4-4gb-l4re --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] | bench import NAME --env pi4-4gb-l4re --subject FILE LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe|install | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] [--kernel-words LIST] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR... | --kernel-words LIST] | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench NAME --env pi4-4gb-l4re --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] | bench import NAME --env pi4-4gb-l4re --subject FILE LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
       0
     end
 
@@ -1508,14 +1508,15 @@ module Erx
         flags.on('--accel NAME', %w[tcg hvf], 'boot, g3, g5, bytes and web only: the guest accelerator') { |value| options[:accel] = value }
         flags.on('--systems LIST', Array, 'a declared benchmark only: the systems booted side by side under HVF') { |value| options[:systems] = value }
         flags.on('--profile NAME', 'with --systems only: landing, one round, or full, three') { |value| options[:profile] = value }
-        flags.on('--kernel-words LIST', Array, "with --systems only: words added to erxos's native boot's kernel command line") do |value|
+        flags.on('--kernel-words LIST', Array, "with --systems or --env only: words for erXos's boots' kernel command line, " \
+                                               'in place of the default of the same option (erx.trace=0)') do |value|
           options[:kernel_words] = value
         end
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       return bench_session(name, options) if options.key?(:systems)
       raise OptionParser::InvalidArgument, '--profile applies only with --systems' if options.key?(:profile)
-      raise OptionParser::InvalidArgument, '--kernel-words applies only with --systems' if options.key?(:kernel_words)
+      raise OptionParser::InvalidArgument, '--kernel-words applies only with --systems or --env' if options.key?(:kernel_words)
 
       inapplicable = { 'boot' => %i[iterations samples flavour], 'g3' => %i[iterations samples runs],
                        'g5' => %i[iterations samples image flavour runs],
@@ -1539,12 +1540,13 @@ module Erx
     end
 
     # tools/erx bench NAME --env pi4-4gb-erxos|pi4-4gb-linux --console DEVICE|tcp:HOST:PORT --ssh DEST
-    # --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR ...]
+    # --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR ...] [--kernel-words LIST]
     # (docs/design-bench.md, "The walk"): every refusal before anything is built, then the
     # default set built (or each --set read) and the walk (BoardRun). The environment is
     # erXos's on the board for a benchmark with a native bench guest, whose set BoardSets
     # lays out, and Linux's for one with an erx_peer_bench counterpart, whose set LinuxBoard
-    # lays out ("Linux on the same board").
+    # lays out ("Linux on the same board"). --kernel-words goes on the line of erXos's set
+    # this run builds ("The kernel's trace rings"), so it is refused with --set or for Linux.
     def self.bench_board(name, arguments)
       require_relative 'lib/erx/l4re_board'
       return bench_board_l4re(name, arguments) if arguments.each_cons(2).include?(['--env', L4ReBoard::ENVIRONMENT]) ||
@@ -1553,7 +1555,7 @@ module Erx
       require_relative 'lib/erx/bench_suite'
       require_relative 'lib/erx/board_run'
       require_relative 'lib/erx/fsimg'
-      options = { runs: 1, sets: [], http: Netboot::DEFAULT_HTTP_ROOT }
+      options = { runs: 1, sets: [], http: Netboot::DEFAULT_HTTP_ROOT, kernel_words: [] }
       OptionParser.new do |flags|
         flags.on('--env NAME') { |value| options[:env] = value }
         flags.on('--console DEVICE|tcp:HOST:PORT') { |value| options[:console] = value }
@@ -1563,6 +1565,7 @@ module Erx
         flags.on('--runs N', Integer) { |value| options[:runs] = value }
         flags.on('--profile NAME', %w[landing full]) { |value| options[:profile] = value }
         flags.on('--set DIR') { |value| options[:sets] << File.expand_path(value) }
+        flags.on('--kernel-words LIST', Array) { |value| options[:kernel_words] = value }
       end.parse!(arguments)
       no_arguments(arguments)
       require_relative 'lib/erx/linux_board'
@@ -1575,6 +1578,10 @@ module Erx
       raise Error, "bench --env #{options[:env]} needs #{missing.map { |option| "--#{option}" }.join(', ')}" unless missing.empty?
       raise Error, 'bench: --runs is below 1' unless options[:runs].positive?
       raise Error, 'bench: --profile full: the board sets are built only in the landing form' if options[:profile] == 'full'
+      unless options[:kernel_words].empty? || (options[:env] == BoardRun::ENVIRONMENT && options[:sets].empty?)
+        raise Error, "bench: --kernel-words applies only to erXos's sets this run builds, not with --set or --env #{LinuxBoard::ENVIRONMENT}"
+      end
+      KernelWords.bench(options[:kernel_words])
 
       history = BenchRecord.history
       BenchRecord::Destination.new(history: history, erxos_root: ROOT)
@@ -1582,7 +1589,7 @@ module Erx
       NetbootEntry.signing_key(options[:key])
       subjects = options[:sets].map { |directory| BoardRun.directory_subject(directory) }
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      subjects = [bench_board_subject(name, options[:env], runner)] if subjects.empty?
+      subjects = [bench_board_subject(name, options[:env], runner, kernel_words: options[:kernel_words])] if subjects.empty?
 
       clock = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
       fsimg = Fsimg.locate(root: ROOT)
@@ -1598,13 +1605,16 @@ module Erx
 
     # The walk's subject of benchmark name's default set for the board environment env:
     # erXos's bench images (NativeBench::BoardSets), or Linux's set (LinuxBoard), each laid
-    # out under the tree's build directory.
-    def self.bench_board_subject(name, env, runner)
+    # out under the tree's build directory; erXos's set's line carries kernel_words
+    # (KernelWords.bench).
+    def self.bench_board_subject(name, env, runner, kernel_words:)
       require_relative 'lib/erx/source_revision'
       require 'tmpdir'
       platform = Platform.load(root: ROOT, name: Netboot::PLATFORM)
-      return BoardRun.laid_subject(NativeBench::BoardSets.new(root: ROOT, platform: platform, runner: runner).call([name]).fetch(name)) if
-        env == BoardRun::ENVIRONMENT
+      if env == BoardRun::ENVIRONMENT
+        sets = NativeBench::BoardSets.new(root: ROOT, platform: platform, runner: runner, kernel_words: kernel_words)
+        return BoardRun.laid_subject(sets.call([name]).fetch(name))
+      end
 
       LinuxBoard.lay_out(root: ROOT, runner: runner, platform: platform, name: name,
                          directory: Dir.mktmpdir("#{name}-", OutputDirectory.prepare(root: ROOT, path: File.join(ROOT, LinuxBoard::OUTPUT))),
@@ -1738,14 +1748,17 @@ module Erx
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       history = BenchRecord.history
       BenchRecord::Destination.new(history: history, erxos_root: ROOT)
-      guests = [NativeBench::Guest.new(run: NativeBench::Run.new(root: ROOT, runner: runner,
-                                                                 kernel_words: options.fetch(:kernel_words, []))),
-                XdomainBench::Guest.new(run: XdomainBench::Run.new(root: ROOT, runner: runner)),
+      words = options.fetch(:kernel_words, [])
+      KernelWords.bench(words)
+      raise Error, "bench: --kernel-words applies only to erXos's boots, and --systems names no erxos" unless
+        words.empty? || systems.include?('erxos')
+      guests = [NativeBench::Guest.new(run: NativeBench::Run.new(root: ROOT, runner: runner, kernel_words: words)),
+                XdomainBench::Guest.new(run: XdomainBench::Run.new(root: ROOT, runner: runner, kernel_words: words)),
                 L4ReBench::Guest.new(build: L4ReBench::Build.new(directory: File.join(ROOT, 'build/l4re')),
                                      qemu: Qemu.new(root: ROOT, runner: runner), platform: Platform.development(ROOT)),
                 LinuxGuest::Guest.new(root: ROOT, runner: runner),
                 LinuxGuest::Guest.new(root: ROOT, runner: runner, boot: 'posix'),
-                PosixBench::Guest.new(root: ROOT, runner: runner),
+                PosixBench::Guest.new(root: ROOT, runner: runner, kernel_words: words),
                 LinuxErlangGuest::Guest.new(root: ROOT, runner: runner),
                 GenodeBench::Guest.new(root: ROOT, runner: runner)]
       write = ->(record, logs) { BenchRecord.write(record, history: history, erxos_root: ROOT, logs: logs) }

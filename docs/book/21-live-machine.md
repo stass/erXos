@@ -365,7 +365,9 @@ default as long as they add no more than 5 % to a call from a task to
 the root service on the Raspberry Pi 4. Under QEMU with HVF they add
 about a fifth to that call
 ([design-fiasco.md](../design-fiasco.md#the-kernels-trace-rings), "Cost"), which only indicates the board's cost; turned off,
-they cost nothing measurable. If on the board they cost more, their
+they cost nothing measurable. Every benchmark boots with them off, so
+what it measures is the system and not its tracing, and turning them on
+for one run measures what they cost. If on the board they cost more, their
 writer is made cheaper
 before any event is dropped, and the crash record's share of them is
 never dropped. The kernel maps them once, read-only, into the root, so

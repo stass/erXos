@@ -185,11 +185,12 @@ module Erx
     # release card has no command line and so no host link (docs/design-live.md, "The host
     # link from a board"). The word ends the file with no newline: the root's parser splits on
     # spaces alone, so a newline the firmware kept in the line would make "erx.hostlink=1\n" a
-    # malformed word and refuse the boot.
-    def command_line_entry(platform, build_kind)
-      return {} unless BuildKind.development?(build_kind) && platform.record['hostlink']
-
-      { CMDLINE => Text.new(QemuPlan::HOSTLINK_WORD) }
+    # malformed word and refuse the boot. A bench set's words (NativeBench::BoardSets)
+    # follow the host link's word on the same line.
+    def command_line_entry(platform, build_kind, words: [])
+      hostlink = QemuPlan::HOSTLINK_WORD if BuildKind.development?(build_kind) && platform.record['hostlink']
+      line = [hostlink, *words].compact
+      line.empty? ? {} : { CMDLINE => Text.new(line.join(' ')) }
     end
 
     # total_mem, once the record's ram_bytes is what it leaves the ARM; a record measured
@@ -270,11 +271,11 @@ module Erx
     # The layout as a map from each file's name in the partition to its source path,
     # or to its Text for config.txt and cmdline.txt; firmware maps each firmware file's name to its path.
     # Pure.
-    def plan(platform:, build_kind:, bootable:, bl31:, bl31_license:, tree:, firmware:)
+    def plan(platform:, build_kind:, bootable:, bl31:, bl31_license:, tree:, firmware:, kernel_words: [])
       board = BoardTree.board(platform)
       own = { KERNEL => bootable, ARMSTUB => bl31, ARMSTUB_LICENSE => bl31_license,
               CONFIG => ConfigPlan.new(platform: platform, overlays: tree.overlays.keys, build_kind: build_kind, initramfs: nil),
-              **command_line_entry(platform, build_kind),
+              **command_line_entry(platform, build_kind, words: kernel_words),
               board.file => tree.board, BoardTree.source_file(board) => tree.source,
               BoardTree::LICENSE_FILE => tree.license,
               **tree.overlays.to_h { |name, path| ["overlays/#{name}.dtbo", path] } }
@@ -505,11 +506,12 @@ module Erx
     # Lays the partition's files for bootable out into directory with their build record,
     # as lay_out does, without the card: a bench set (write_set). With boot_cpu_only, the
     # board's tree keeps only the boot CPU (BoardTree.boot_cpu_only), and the record says so.
+    # kernel_words go on the set's line (command_line_entry), whose cmdline.txt the record lists.
     def lay_out_set(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:,
-                    revision: SourceRevision.read(root: root, runner: runner), boot_cpu_only: false)
+                    revision: SourceRevision.read(root: root, runner: runner), boot_cpu_only: false, kernel_words: [])
       plan, record = layout(root: root, runner: runner, platform: platform, build_kind: build_kind, bootable: bootable,
                             compiler: compiler, linker: linker, revision: revision, bootable_record: nil,
-                            boot_cpu_only: boot_cpu_only)
+                            boot_cpu_only: boot_cpu_only, kernel_words: kernel_words)
       # A set has no card, so its record names no card's tool.
       record = record.merge('inputs' => record.fetch('inputs').except('card'))
       record = record.merge('board_tree_cpus' => 'boot CPU only') if boot_cpu_only
@@ -528,10 +530,10 @@ module Erx
     # board's tree built, the firmware as deps.lock pins it, verified against its pinned
     # hashes.
     def layout(root:, runner:, platform:, build_kind:, bootable:, compiler:, linker:, revision:, bootable_record:,
-               boot_cpu_only: false)
+               boot_cpu_only: false, kernel_words: [])
       dependencies = Dependencies.new(root: root, runner: runner)
       pinned = FIRMWARE.map { |id| dependencies.archive_for(id) }
-      plan = plan(platform: platform, build_kind: build_kind, bootable: bootable,
+      plan = plan(platform: platform, build_kind: build_kind, bootable: bootable, kernel_words: kernel_words,
                   firmware: pinned.to_h { |source, archive| [source.fetch('filename'), archive] },
                   bl31_license: Bl31.license(root: root, runner: runner),
                   bl31: Bl31.ensure(root: root, runner: runner, compiler: compiler, linker: linker),
