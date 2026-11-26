@@ -160,12 +160,14 @@ erx_stop_publish(unsigned cpu, erx_stop_cpu_state_t state,
 // The last line names the end, unless the end is a nested stop's silent one,
 // whose print may be what faulted.
 [[noreturn]] static void
-erx_stop_end(bool say = true)
+erx_stop_end(unsigned cpu, bool say = true)
 {
   static char const line[] = "erx: end reset\n";
   if (say)
     erx_effect_console_write(line, sizeof(line) - 1);
-  Platform_control::system_reboot();
+  // Fiasco finds the current CPU through the stack pointer, which on a panic
+  // stack names no thread, so the reset is told the stop's own number.
+  Platform_control::system_reboot_from(Cpu_number(cpu));
 }
 
 static uint64_t
@@ -221,7 +223,7 @@ erx_stop_census(unsigned cpu)
           return leader;
         default:
           // No other step follows a claim that led.
-          erx_stop_end();
+          erx_stop_end(cpu);
         }
       leader = erx_machine_stop_leader_next(leader, loaded, now);
     }
@@ -321,7 +323,7 @@ erx_stop_lead(void *arg)
   input.message_length = length < 0 ? 0 : (size_t(length) < sizeof(erx_stop_message) ? size_t(length) : sizeof(erx_stop_message) - 1);
   (void)erx_crash_record_write(&input, erx_crash_buffer, erx_crash_scratch);
   erx_crash_frame_write(erx_crash_buffer, ERX_CRASH_END_FAULT);
-  erx_stop_end();
+  erx_stop_end(cpu);
 }
 
 IMPLEMENT
@@ -348,7 +350,7 @@ Erx_machine_stop::panic(char const *format, va_list args)
   static Entry entries[Config::Max_num_cpus];
   unsigned const cpu = erx_stop_cpu();
   if (cpu >= Config::Max_num_cpus)
-    erx_stop_end(false);
+    erx_stop_end(cpu, false);
   uint32_t const depth = erx_stop_deeper(cpu);
   uint32_t observed = 0;
   (void)__atomic_compare_exchange_n(&erx_debug_anchor.stop, &observed,
@@ -376,9 +378,9 @@ Erx_machine_stop::panic(char const *format, va_list args)
                                 }, entry);
     case ERX_STOP_NESTED:
       erx_stop_nested_line();
-      erx_stop_end();
+      erx_stop_end(cpu);
     case ERX_STOP_NESTED_SILENT:
-      erx_stop_end(false);
+      erx_stop_end(cpu, false);
     case ERX_STOP_FOLLOW_SILENT:
     default:
       erx_stop_park();
@@ -403,6 +405,8 @@ PUBLIC static
 void
 Erx_machine_stop::admit()
 {
+  // The admission runs with interrupts masked; the boot CPU has unmasked them.
+  auto const irqs = Proc::cli_save();
   unsigned const cpu = cxx::int_value<Cpu_number>(current_cpu());
   __atomic_store_n(&erx_stop_hwid[cpu], Cpu::mpidr() + 1, __ATOMIC_RELAXED);
   erx_stop_admission_t admission = erx_machine_stop_admission_begin(cpu);
@@ -421,6 +425,7 @@ Erx_machine_stop::admit()
           word = __atomic_load_n(&erx_debug_anchor.stop, __ATOMIC_ACQUIRE);
           break;
         case ERX_STOP_STEP_RUN:
+          Proc::sti_restore(irqs);
           return;
         default:
           {
