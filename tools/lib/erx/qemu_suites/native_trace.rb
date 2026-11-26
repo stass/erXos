@@ -6,9 +6,10 @@ require_relative '../production_image'
 require_relative '../qemu_gate'
 
 # erx:trace on the production image at four CPUs under HVF (docs/design-fiasco.md,
-# Verification, "Trace on four CPUs"; Erx::ProductionImage::Run#trace): the kernel row
-# unsupported, a backend park and a wake of the same slot, and a test workload's erts in
-# not late, with every erts line naming the workload (trace_problems). Run raises on the
+# Verification, "Trace on four CPUs"; Erx::ProductionImage::Run#trace): the kernel's rings
+# read through the root's window, with switch and ipc_receive records, no id 0 and a call
+# between two root threads; a backend park and a wake of the same slot, and a test
+# workload's erts in not late, with every erts line naming the workload (trace_problems). Run raises on the
 # first disagreement, which the gate reports as this suite failing. check_qemu builds the
 # kernel before any suite runs, so this suite does not.
 count = 4

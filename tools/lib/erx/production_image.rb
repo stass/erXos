@@ -1479,32 +1479,48 @@ module Erx
       private_class_method :console_point
 
       # The tracer's case on four CPUs (docs/design-fiasco.md, Verification, "Trace on four
-      # CPUs"). At the Erlang shell the person spawns a workload, which waits for a message
-      # or 20 ms and loops, and starts erx:trace over it with the kernel's rows; the shell
-      # prints {workload, Pid}. The kernel row is one unsupported line reported by kernel;
-      # a message sent to the workload, then the workload's first erts in, not late; then
-      # the trace is stopped. Each checkpointed trace line is checked whole; the shell's
+      # CPUs"). At the Erlang shell the person first reads every CPU's kernel ring through
+      # the root's window (KERNEL_READ, the BIF over erx_trace_read) and the shell prints
+      # one summary, {kernel_trace, Switches, Receives, ZeroIds, IntraSpace}: whether the
+      # rings hold switch and ipc_receive records, how many of their thread and space ids
+      # are 0, and whether some message went between two threads of one space, as the root's
+      # own threads' calls of its service do. Then the person spawns a workload, which waits
+      # for a message or 20 ms and loops, and starts erx:trace over it; the shell prints
+      # {workload, Pid}; a message sent to the workload, then the workload's first erts in,
+      # not late; then the trace is stopped. Each checkpointed trace line is checked whole; the shell's
       # line editor may redraw its prompt and pending input, ending in ESC [J, before a
       # line another process writes. The workload's pid prints as <D.N.S> with the system
       # domain's id, 4, as every pid prints on erXos (docs/design-runtime.md,
       # "Connections in ERTS"). Run#trace checks the rest on the serial log (trace_problems).
       TRACE_START = 'W=spawn(fun F()->receive _->F() after 20->F() end end),' \
-                    "{ok,R}=erx:trace(\#{select=>[W],kernel=>true}),{workload,W}.\r"
+                    "{ok,R}=erx:trace(\#{select=>[W]}),{workload,W}.\r"
       TRACE_SEND = "W!hello,sent.\r"
       TRACE_STOP = "erx:trace_stop(R),trace_stopped.\r"
       TRACE_REDRAW = '(?:[^\n]*\e\[J)?'
       TRACE_TIME = "\\A#{TRACE_REDRAW} *[0-9]+\\.[0-9]{9}".freeze
       TRACE_DOMAIN = ABI::Generated.constant('system_domain_id')
       TRACE_PID = "<#{TRACE_DOMAIN}\\.[0-9]+\\.0>".freeze
+      # The summary of the kernel's rings on TRACE_CPUS CPUs, with the ABI's event numbers.
+      TRACE_CPUS = 4
+      TRACE_SWITCH = ABI::Generated::CODEC.member('trace_event', 'switch')
+      TRACE_RECEIVE = ABI::Generated::CODEC.member('trace_event', 'ipc_receive')
+      KERNEL_READ = "KR=lists:append([element(2,erx_trace_ring:read({kernel,C},0,512))||C<-lists:seq(0,#{TRACE_CPUS - 1})])," \
+                    "KS=[{N,S}||{_,#{TRACE_SWITCH},_,_,_,_,{N,S,_}}<-KR],KM=maps:from_list(KS)," \
+                    "KV=[{A,B}||{_,#{TRACE_RECEIVE},_,_,_,_,{A,B,_}}<-KR]," \
+                    '{kernel_trace,KS=/=[],KV=/=[],length([0||{X,Y}<-KS++KV,X*Y=:=0]),' \
+                    "lists:any(fun({A,B})->maps:get(A,KM,a)=:=maps:get(B,KM,b) end,KV)}.\r"
+      # The summary a working window gives: both events, no id 0, and the root's own calls.
+      KERNEL_SUMMARY = '{kernel_trace,true,true,0,true}'
+      KERNEL_LINE = /\A#{TRACE_REDRAW}(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{kernel_trace,[a-z0-9,]+\}\r*\n\z/n
       def self.trace_checkpoints(machine:)
         boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
         end
         [*boot, SLOGAN,
          console_point('release-shell', RELEASE_SHELL.fetch(:pattern)),
-         console_point('shell', ERLANG_SHELL.fetch(:pattern), type: TRACE_START),
-         console_point('trace-unsupported', / kernel unsupported /n,
-                       whole: /#{TRACE_TIME} kernel unsupported \[kernel\]\r*\n\z/n, type: TRACE_SEND),
+         console_point('shell', ERLANG_SHELL.fetch(:pattern), type: KERNEL_READ),
+         console_point('kernel-trace', /\{kernel_trace,(?:true|false),/n, whole: KERNEL_LINE, type: TRACE_START),
+         console_point('trace-started', /\{workload,</n, type: TRACE_SEND),
          console_point('trace-workload-in', / erts in /n,
                        whole: %r{#{TRACE_TIME} erts in pid=#{TRACE_PID} domain=#{TRACE_DOMAIN} mfa=[^ ]+ \[runtime\]\r*\n\z}n,
                        type: TRACE_STOP),
@@ -1512,16 +1528,16 @@ module Erx
       end
 
       # What the tracer's case got wrong on its serial log, beyond the checkpoints: the
-      # kernel row's unsupported line exactly once; a backend park followed by a wake of the
-      # same slot; and the workload's pid, as the shell printed it, on an erts in that is not
-      # late, and on every erts line, since the trace selects the workload alone.
+      # kernel rings' summary other than KERNEL_SUMMARY; a backend park followed by a wake of
+      # the same slot; and the workload's pid, as the shell printed it, on an erts in that is
+      # not late, and on every erts line, since the trace selects the workload alone.
       def self.trace_problems(serial)
         lines = serial.b.lines
-        unsupported = lines.count { |line| line.include?(' kernel unsupported [kernel]') }
+        summary = serial.b[/\{kernel_trace,[a-z0-9,]+\}/n]
         workload = serial.b[/\{workload,(#{TRACE_PID})\}/n, 1]
         traced = lines.filter_map { |line| line[/ erts [a-z_]+ pid=(<[0-9.]+>) /n, 1] }.uniq
         on_time_in = / erts in pid=#{Regexp.escape(workload.to_s)} .*\[runtime\]\r*$/n
-        [("#{unsupported} unsupported lines, not one" unless unsupported == 1),
+        [("the kernel rings' summary is #{summary.inspect}, not #{KERNEL_SUMMARY}" unless summary == KERNEL_SUMMARY),
          ('no backend park followed by a wake of the same slot' unless park_then_wake?(lines)),
          ('the shell printed no {workload, Pid}' unless workload),
          ("erts lines name #{traced.join(' ')}, not the workload alone" unless traced == [workload]),

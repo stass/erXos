@@ -131,6 +131,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   needs the fork's kernel trace rings ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)), and the
   brief form's new fields change `abi/kernel.txt` as design-debugger.md says. What waits is its unverified
   facts, each with the probe that settles it, P10 and P11 with parts 1 and 3.
+* [Medium] 0.2 on Fiasco, `fiasco/kernel/src/erx/erx_trace.cpp`: the rest of the kernel's trace rings
+  ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)). Built: the rings, the `ipc_receive` and `switch`
+  hooks, `map_trace` and the root's `erx_trace_read`, which `native_trace` reads directly. Remaining: the other
+  ten events' hooks; `erx:trace`'s kernel row in `native_trace` as the Verification row states it, which also needs
+  the tracer to keep its own console output from feeding the kernel row it prints; the "window is read-only" test
+  root; the crash record's trace tail; and the before-and-after numbers of `tools/erx bench nullcall`, `wake` and
+  `vm` ([todo-performance.md](todo-performance.md)).
 * [Medium] 0.2 on Fiasco, `fiasco/kernel`: Fiasco's map refuses a user mapping writable and executable at
   once, with a test whose seeded failure removes the check; an estimate of tens of lines, unverified
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).

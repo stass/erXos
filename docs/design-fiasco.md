@@ -3044,16 +3044,22 @@ rings. The kernel maps the rings' pages at the window's base with read rights al
 kernel-user memory with (`Task::map_ku_mem_chunk`, `kern/task.cpp:160`), and answers the number of rings it mapped. It refuses
 a window smaller than the rings or outside user space with `-L4_EINVAL`, and every call after one that succeeded with
 `-L4_EEXIST`, so the operation makes the kernel write the page-table entries of the root's window once in a boot and nothing
-else. The decision is a pure core function, `erx_fiasco_trace_window`, over the window and the ring count, so host tests drive
-each refusal, and the system-call fuzz campaign covers the operation's decoding. A refused map leaves the root without the
+else. The decision is a pure core function, `erx_fiasco_trace_window` (`kernel/core/trace_window.c`), over the
+call's words, the window and the rings' size, so host tests (`trace_window_test`) drive each refusal and a fuzz target
+(`trace_window_fuzz`) covers the operation's decoding; the system-call fuzz campaign reaches the operation only as an
+empty slot, since its test domain holds no platform control object. Two calls at once cannot both map: the first claims
+the mapping before it maps (`erx_trace_kernel_window_claim`), and a refused or failed map gives the claim back. The root's
+window is `ERX_FIASCO_TRACE_WINDOW`, a flexpage of 32 MiB below the kernel information page's window. A refused map leaves the root without the
 rings: it prints one line saying so, `erx_trace_read` answers `ERX_ENOTSUP` for that boot, and the root's crash records carry
 no trace tail.
 
 **Reading.** `erx_trace_read(res, cpu, cursor, window)` is answered in the root: for a `cpu` below the number of rings mapped
 it runs `erx_trace_ring_read` on that CPU's ring in the window, with that reader's cursor rule and refusals
 ([The trace ring](#the-trace-ring), "Reading"), and for any other `cpu` it answers `ERX_EINVAL`. A task links the refused
-stub and answers `ERX_ENOTSUP`, as for `erx_backend_trace_read`. `res` is not checked, as for the root's other machine calls
-answered in the root: on Fiasco, holding `TRACE` is being the root. The BIF `erx_trace_ring:read/3` reads `{kernel, Cpu}`
+stub and answers `ERX_ENOTSUP`, as for `erx_backend_trace_read`. On Fiasco, holding `TRACE` is being the root, and the
+root's one slot that holds it is `ERX_ROOT_SLOT_ROOT_RESOURCE`: `erx_trace_read`, `erx_log_read` and `erx_log_take`
+answer `ERX_ERIGHTS` for any other `res`, as erXos's kernel answers a slot without `TRACE`, so a caller that names
+another slot fails on Fiasco as it would on erXos's kernel. The BIF `erx_trace_ring:read/3` reads `{kernel, Cpu}`
 through this call unchanged. A CPU that never started has an empty ring.
 
 **Who may read.** The rings show other domains' timing, the user addresses of their faults and the tags of their messages.
