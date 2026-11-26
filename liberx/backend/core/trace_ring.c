@@ -19,8 +19,7 @@ erx_trace_ring_t erx_trace_ring;
 void
 erx_trace_ring_touch(void)
 {
-	for (uint32_t index = 0; index < ERX_TRACE_RING_RECORDS; index++)
-		(void)erx_trace_record_seq_store(&erx_trace_ring.records[index], 0);
+	erx_trace_ring_clear(&erx_trace_ring);
 }
 
 int

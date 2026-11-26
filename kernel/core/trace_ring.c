@@ -13,7 +13,6 @@
  * both sequence loads are the even count of that index, and writes only records[0 .. max).
  */
 
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -27,12 +26,21 @@ trace_slot(const erx_trace_ring_t *ring, uint64_t index)
 	return (&ring->records[index % ERX_TRACE_RING_RECORDS]);
 }
 
+void
+erx_trace_ring_clear(erx_trace_ring_t *ring)
+{
+	for (uint32_t index = 0; index < ERX_TRACE_RING_RECORDS; index++)
+		(void)erx_trace_record_seq_store(&ring->records[index], 0);
+	(void)erx_trace_ring_head_store(ring, 0);
+}
+
 bool
 erx_trace_ring_put(erx_trace_ring_t *ring, const erx_trace_entry_t *entry)
 {
-	const uint64_t index = atomic_load_explicit(&ring->head, memory_order_relaxed);
+	uint64_t index = 0;
 	erx_trace_record_t *record;
 
+	(void)erx_trace_ring_head_load(ring, &index);
 	if (index > ERX_TRACE_RING_INDEX_LAST)
 		return (false);
 	record = &ring->records[index % ERX_TRACE_RING_RECORDS];
@@ -49,7 +57,7 @@ erx_trace_ring_put(erx_trace_ring_t *ring, const erx_trace_entry_t *entry)
 	for (size_t arg = 0; arg < ERX_TRACE_ENTRY_ARGS; arg++)
 		(void)erx_trace_record_arg_store(record, arg, entry->arg[arg]);
 	(void)erx_trace_record_seq_store(record, 2 * index + 2);
-	atomic_store_explicit(&ring->head, index + 1, memory_order_release);
+	(void)erx_trace_ring_head_store(ring, index + 1);
 	return (true);
 }
 
@@ -99,9 +107,10 @@ int
 erx_trace_ring_read(const erx_trace_ring_t *ring, uint64_t cursor, erx_trace_record_t *records,
     uint32_t max, erx_trace_read_result_t *result)
 {
-	uint64_t head = atomic_load_explicit(&ring->head, memory_order_acquire);
-	uint64_t count, kept = 0, lost = 0;
+	uint64_t head = 0, count, kept = 0, lost = 0;
 	erx_trace_entry_t entry;
+
+	(void)erx_trace_ring_head_load(ring, &head);
 
 	if (records == NULL || result == NULL || max == 0 || max > ERX_TRACE_READ_MAX)
 		return (ERX_EINVAL);

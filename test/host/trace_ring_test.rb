@@ -22,7 +22,7 @@ class TraceRingTest < Minitest::Test
   STUB = 'liberx/backend/fiasco/trace_stub.c'
   DRIVER = 'test/fixtures/trace_ring_driver.c'
   RINGS_DRIVER = 'test/fixtures/trace_rings_driver.c'
-  MODES = %w[basic refusals bounded lapped between writing exhausted race].freeze
+  MODES = %w[basic refusals bounded lapped between writing exhausted clear race].freeze
   RINGS_MODES = %w[cpus wrap pages].freeze
 
   # The kernel's rings over the ring core: name => [file, original, replacement, mode, diagnostic].
@@ -31,9 +31,10 @@ class TraceRingTest < Minitest::Test
   RINGS_SEEDS = {
     'the ring index not masked' => [RING, 'record = &ring->records[index % ERX_TRACE_RING_RECORDS];', 'record = &ring->records[index];',
                                     'wrap', 'wrap: '],
-    'the cpu bound widened' => [RINGS, 'if (cpu < ERX_TRACE_KERNEL_RINGS)', 'if (cpu < ERX_TRACE_KERNEL_RINGS + 1)', 'cpus', nil],
-    'the cpu ignored' => [RINGS, 'erx_trace_ring_put(&erx_trace_rings.ring[cpu], entry)', 'erx_trace_ring_put(&erx_trace_rings.ring[0], entry)',
-                          'cpus', 'not hold exactly']
+    'the cpu bound widened' => [RINGS, 'if (cpu >= ERX_TRACE_KERNEL_RINGS)', 'if (cpu >= ERX_TRACE_KERNEL_RINGS + 1)', 'cpus', nil],
+    'the cpu ignored' => [RINGS, 'erx_trace_ring_put(&erx_trace_rings.ring[cpu], &written)', 'erx_trace_ring_put(&erx_trace_rings.ring[0], &written)',
+                          'cpus', 'not hold exactly'],
+    "the entry's cpu kept" => [RINGS, "\twritten.cpu = (uint16_t)cpu;\n", '', 'cpus', 'holds another CPU']
   }.freeze
 
   # name => [original, replacement, mode, the driver's diagnostic].
@@ -47,7 +48,8 @@ class TraceRingTest < Minitest::Test
     'the terminal check removed' => ["if (index > ERX_TRACE_RING_INDEX_LAST)\n\t\treturn (false);\n", '', 'exhausted', 'past the last index was accepted'],
     'the exhausted head not refused' => ["\tif (cursor == head && head == ERX_TRACE_RING_HEAD_EXHAUSTED)\n\t\treturn (ERX_ELIMIT);\n", '', 'exhausted', 'was not ERX_ELIMIT'],
     'the odd store moved after the fields' => ["\t(void)erx_trace_record_seq_store(record, 2 * index + 1);\n\t(void)erx_trace_record_time_ns_store(record, entry->time_ns);\n",
-                                               "\t(void)erx_trace_record_time_ns_store(record, entry->time_ns);\n", 'writing', 'read while written was kept']
+                                               "\t(void)erx_trace_record_time_ns_store(record, entry->time_ns);\n", 'writing', 'read while written was kept'],
+    'the head not cleared' => ["\t(void)erx_trace_ring_head_store(ring, 0);\n", '', 'clear', 'the head was not cleared']
   }.freeze
 
   def setup

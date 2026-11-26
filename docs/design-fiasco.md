@@ -2939,9 +2939,10 @@ build, in the layout of the root's ring above, written by the same core and read
 the ABI's enum and no format.
 
 **The construction.** Each CPU writes only its own ring, with interrupts masked, and nothing reads a ring by entering the
-kernel. The rings are one static array of the kernel's image, `erx_trace_rings`, of `ERX_TRACE_KERNEL_RINGS` (8) rings, at least
-one for each CPU number below `CONFIG_MP_MAX_CPUS` (8 in `config/fiasco/kernel.defconfig`), so 2 MiB, page-aligned and
-alone on its pages. The kernel maps
+kernel. The rings are one static array of the kernel's image, `erx_trace_rings`, of `ERX_TRACE_KERNEL_RINGS` rings, one for each
+CPU number below `CONFIG_MP_MAX_CPUS`; the ABI generator derives the count from `config/fiasco/kernel.defconfig`, where it
+is 8, so it is never written twice. Each ring is the `erx_trace_ring` layout of `abi/kernel.txt`, 262,208 bytes, so the 8
+rings are 513 pages, page-aligned and alone on their pages. The kernel maps
 those pages once, read-only, into the root's address space, where the root reads them with the reader it already has. Three
 properties follow, and the rest of this section is their detail:
 
@@ -3014,7 +3015,9 @@ no ring is ever a C++ object and no C++ file includes the ring's header. Three f
 
 * `kernel/core/trace_ring.c` and its header in `include/erx/core/`, the ring core moved from `liberx/backend/core/`, so
   `erx_cores.a` and the root link one implementation; the root's own ring and its writers stay in `liberx`. The ring's type
-  gains 64-byte alignment, so a record is one cache line and the head shares a line with no record.
+  is the `erx_trace_ring` layout of `abi/kernel.txt`: 4,096 records of one cache line each, then the head on a line of its
+  own, so the head shares a line with no record. The generator emits it, with offsets it checks, for the C core, the root's
+  reader of its window and the host's Ruby reader alike, so a ring's stride, 262,208 bytes, is stated once.
 * `kernel/core/trace_rings.c`, the kernel's rings, linked into the kernel and never into the root: the array
   `erx_trace_rings` of `ERX_TRACE_KERNEL_RINGS` (8) rings, page-aligned and padded to whole pages, and the two functions
   the glue calls. It is a C translation unit, so the atomic storage and every access to it are C17's, and the same file

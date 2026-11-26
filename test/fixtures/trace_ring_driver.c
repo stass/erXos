@@ -222,6 +222,29 @@ mode_exhausted(void)
 	return (0);
 }
 
+/*
+ * Clearing stores to every page of the ring, the head's line among them: over a ring of
+ * all-ones bytes it leaves every record's sequence and the head 0, so the ring is empty.
+ */
+static int
+mode_clear(void)
+{
+	erx_trace_read_result_t result;
+	uint64_t seq;
+
+	memset(&ring, 0xff, sizeof(ring));
+	erx_trace_ring_clear(&ring);
+	if (atomic_load_explicit(&ring.head, memory_order_relaxed) != 0)
+		return (fail("clear", "the head was not cleared"));
+	for (uint32_t index = 0; index < ERX_TRACE_RING_RECORDS; index++) {
+		if (!erx_trace_record_seq_load(&ring.records[index], &seq) || seq != 0)
+			return (fail("clear", "a record's sequence was not cleared"));
+	}
+	if (erx_trace_ring_read(&ring, 0, out, 4, &result) != ERX_OK || result.next != 0 || result.kept != 0)
+		return (fail("clear", "the cleared ring was not empty"));
+	return (0);
+}
+
 static pthread_mutex_t race_lock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic bool race_done;
 
@@ -304,7 +327,7 @@ main(int argc, char **argv)
 #ifndef TRACE_RING_STUB
 	    { "basic", mode_basic }, { "refusals", mode_refusals }, { "bounded", mode_bounded },
 	    { "lapped", mode_lapped }, { "between", mode_between }, { "writing", mode_writing },
-	    { "exhausted", mode_exhausted },
+	    { "exhausted", mode_exhausted }, { "clear", mode_clear },
 	    { "race", mode_race },
 #else
 	    { "stub", mode_stub },

@@ -11,7 +11,7 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
-#include "erx/core/trace_ring.h"
+#include "erx/core/trace_read.h"
 
 /*
  * The function API of the kernel interface, as liberx's Phase 1 backends give it

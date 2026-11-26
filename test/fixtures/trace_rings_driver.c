@@ -28,10 +28,11 @@ fail(const char *mode, const char *what)
 	return (1);
 }
 
+/* An entry whose cpu is not its ring's: the ring writes its own CPU in its place. */
 static erx_trace_entry_t
 entry_for(uint32_t cpu, uint64_t n)
 {
-	return ((erx_trace_entry_t){ .time_ns = n, .event = ERX_TRACE_EVENT_SWITCH, .cpu = (uint16_t)cpu,
+	return ((erx_trace_entry_t){ .time_ns = n, .event = ERX_TRACE_EVENT_SWITCH, .cpu = (uint16_t)(cpu + 1),
 	    .thread = n + 1, .space = 2, .arg = { n, cpu, 0 } });
 }
 

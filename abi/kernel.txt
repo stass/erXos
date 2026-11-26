@@ -817,6 +817,20 @@ layout erx_trace_record shared 8 64
   visibility arg[] release
   sequence seq terminal 0xffffffffffffffff exhaustion @limit recovery none
 
+# A trace ring: its records, and head, the index of the next record to
+# write, on a cache line of its own, so the writer's stores to the head
+# share no line with a record a reader loads. The kernel's per-CPU rings
+# are an array of these, one after another, so a reader of the kernel's
+# window finds CPU n's ring at n times this layout's size.
+layout erx_trace_ring shared 64 262208
+  field records erx_trace_record 0 count @trace_ring_records
+  field head u64 262144
+  padding 262152 56
+  atomic head load acquire store release
+  writer head trace_writer
+  owner head kernel all
+  visibility head release
+
 # What bootstrap tells the kernel (docs/design-fiasco.md, "Boot handoff").
 # boot_value and boot_slot are the pair bootstrap derives from /chosen/bootloader,
 # under the machine page's rule for pairs. cpu_id holds the boot CPU's identification

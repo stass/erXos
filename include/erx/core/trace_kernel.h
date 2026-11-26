@@ -22,11 +22,16 @@
 extern "C" {
 #endif
 
-/* What one write records: everything but the sequence, which the ring assigns. */
+/*
+ * What one write records: everything but the sequence, which the ring assigns. A writer
+ * value-initialises its entry (`erx_trace_entry_t entry{}` in C++, `= { 0 }` in C) and sets
+ * the fields its event uses, so an argument it does not use is 0, as the ABI's args lines
+ * promise, and no byte of the writer's stack reaches a record.
+ */
 typedef struct erx_trace_entry {
 	uint64_t	time_ns;
 	uint32_t	event;	/* a trace_event */
-	uint16_t	cpu;
+	uint16_t	cpu;	/* the root's ring only: a kernel ring writes its own CPU */
 	uint16_t	flags;	/* trace_record_flags */
 	uint64_t	thread;	/* the writer's thread, as its ring names threads, or 0 */
 	uint64_t	space;	/* its space, the same way, or 0 */
@@ -34,14 +39,17 @@ typedef struct erx_trace_entry {
 } erx_trace_entry_t;
 
 /*
- * Writes entry on CPU cpu's ring. Its caller is that CPU, with interrupts masked, the
- * ring's one writer. A cpu at or past ERX_TRACE_KERNEL_RINGS writes nothing.
+ * Writes entry on CPU cpu's ring, with cpu as the record's cpu. Its caller is that CPU,
+ * with interrupts masked, the ring's one writer. A cpu at or past ERX_TRACE_KERNEL_RINGS
+ * writes nothing.
  */
 void		erx_trace_kernel_put(uint32_t cpu, const erx_trace_entry_t *entry);
 
 /*
- * The rings' first page, and in *bytes their size, a whole number of pages that holds
- * nothing but the rings: what map_trace maps read-only into the root.
+ * The rings' first page, and in *bytes their size: ERX_TRACE_KERNEL_RINGS rings of
+ * ERX_TRACE_RING_SIZE bytes each, records and head line alike, one after another, rounded up
+ * to a whole number of pages that holds nothing but the rings. What map_trace maps
+ * read-only into the root.
  */
 const void	*erx_trace_kernel_pages(size_t *bytes);
 

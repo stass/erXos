@@ -149,8 +149,8 @@ class FiascoConfigTest < Minitest::Test
 
   def test_non_ascii_and_oversized_input_is_refused
     assert_raises(Erx::Error) { violations(RESOLVED + "# \xC3\xA9\n") }
-    assert_raises(Erx::Error) { violations("#\n" * (Erx::FiascoConfig::MAX_LINES + 1)) }
-    assert_raises(Erx::Error) { violations('#' * (Erx::FiascoConfig::MAX_BYTES + 1)) }
+    assert_raises(Erx::Error) { violations("#\n" * (Erx::Kconfig::MAX_LINES + 1)) }
+    assert_raises(Erx::Error) { violations('#' * (Erx::Kconfig::MAX_BYTES + 1)) }
   end
 
   def test_check_names_the_file_and_every_violation

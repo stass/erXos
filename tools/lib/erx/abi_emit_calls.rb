@@ -649,7 +649,7 @@ module Erx
 
       # What the kernel's trace rings' seam (include/erx/core/trace_kernel.h)
       # needs of the ABI (docs/design-fiasco.md, "The kernel's trace rings"):
-      # the record's extent, the ring's capacity, the record's arg count, the
+      # the record's and the ring's extents, the ring's capacity, the record's arg count, the
       # events and record flags, and the number of rings, which is the CPU
       # count the kernel is configured for, so a CPU number the glue passes
       # always names a ring. Macros only, spelled as include/erx/abi.h spells
@@ -667,6 +667,7 @@ module Erx
         [CEmitter::NOTICE, '#ifndef ERX_CORE_ABI_TRACE_H', '#define ERX_CORE_ABI_TRACE_H', '',
          '#include <stdint.h>', '',
          *CEmitter.layout_extent(schema.types.fetch('erx_trace_record')),
+         *CEmitter.layout_extent(schema.types.fetch('erx_trace_ring')),
          *[schema.constants.fetch('trace_ring_records'), *members].map { |item| CEmitter.constant_definition(item) },
          "#define ERX_TRACE_ENTRY_ARGS #{arg.count}",
          "#define ERX_TRACE_KERNEL_RINGS #{rings}",

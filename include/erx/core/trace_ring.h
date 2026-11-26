@@ -26,6 +26,7 @@
 
 #include "erx/abi.h"
 #include "erx/core/trace_kernel.h"
+#include "erx/core/trace_read.h"
 
 /*
  * Index i's record holds sequence 2i + 1 while written and 2i + 2 after, so the last
@@ -36,23 +37,17 @@
 #define ERX_TRACE_RING_HEAD_EXHAUSTED	(ERX_TRACE_RING_INDEX_LAST + 1u)
 
 /*
- * A record is one cache line and the head has a line of its own, so a writer's stores to
- * the head never share a line with a record a reader loads.
+ * The ring is abi/kernel.txt's erx_trace_ring layout, erx_trace_ring_t in erx/abi.h: its
+ * records, each one cache line, and its head, the next index to write, on a line of its
+ * own.
  */
-typedef struct erx_trace_ring {
-	_Alignas(64) erx_trace_record_t	records[ERX_TRACE_RING_RECORDS];
-	_Alignas(64) _Atomic uint64_t	head;	/* the next index to write */
-} erx_trace_ring_t;
 
 /*
- * What one read did: where the next read starts, how many records it copied, and how
- * many records between the cursor and next were overwritten before they were read.
+ * Empties ring by storing to every one of its pages: each record's sequence 0 and the head
+ * 0. Its caller is the ring's one writer, before its first write, so the pages are faulted
+ * in before any write under the writer's lock or mask.
  */
-typedef struct erx_trace_read_result {
-	uint64_t	next;
-	uint64_t	kept;
-	uint64_t	overwritten;
-} erx_trace_read_result_t;
+void	erx_trace_ring_clear(erx_trace_ring_t *ring);
 
 /*
  * Writes entry at the ring's head and moves the head on. The caller is the ring's one
