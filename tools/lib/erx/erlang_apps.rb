@@ -22,7 +22,7 @@ module Erx
   class ErlangApps
     # In dependency order, as the release file lists them. A directory of erlang/apps/
     # missing here fails the build, so none is left out of the release unseen.
-    APPLICATIONS = %w[erx erx_files erx_net_client erx_blk erx_fat erx_storage erx_f2fs erx_media erx_memdraw erx_display erx_fb erx_usb erx_win erx_ui erx_desk erx_web erx_net erx_wifi erx_code erx_uart erx_rtc erx_pins erx_domain erx_starter erx_shell erx_web_line erx_tty_line erx_session erx_app erx_bt erx_bt_client erx_bleuart erx_ntpd erx_pcie].freeze
+    APPLICATIONS = %w[erx erx_files erx_net_client erx_blk erx_fat erx_storage erx_f2fs erx_media erx_memdraw erx_display erx_fb erx_usb erx_win erx_ui erx_desk erx_web erx_net erx_wifi erx_code erx_uart erx_rtc erx_pins erx_domain erx_starter erx_shell erx_web_line erx_tty_line erx_session erx_app erx_bt_client erx_bt erx_bleuart erx_ntpd erx_pcie].freeze
     SOURCE = 'erlang/apps'
     # Test-only applications, in test/erlang/apps: the runtime build compiles them into the
     # OTP copy beside the others, so a test image's domain boot script can take one

@@ -24,6 +24,6 @@
              erx_gatt_gate, erx_gatt_registry, erx_gatt_server, erx_gatt_srv, erx_h4, erx_hci, erx_l2cap, erx_smp, erx_smp_core, erx_smp_crypto]},
   {registered, [erx_bt_fs, erx_bt_hci, erx_bt_host_sup, erx_bt_line_rx, erx_bt_line_tx, erx_bt_link_sup,
                 erx_bt_store, erx_bt_sup, erx_bt_top, erx_gatt_srv]},
-  {applications, [kernel, stdlib, crypto, erx, erx_files]},
+  {applications, [kernel, stdlib, crypto, erx, erx_files, erx_bt_client]},
   {mod, {erx_bt_top, []}},
   {env, []}]}.

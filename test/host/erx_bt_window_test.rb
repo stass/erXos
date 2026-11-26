@@ -57,7 +57,11 @@ class ErxBtWindowTest < Minitest::Test
     Seed.new(fault: "a confirmed forget leaving the store's refusal since its start",
              anchor: '    {[], Core#core{refusing = false}};',
              replacement: '    {[], Core};',
-             catching_case: 'a_confirmed_forget_ends_the_refusal_test')
+             catching_case: 'a_confirmed_forget_ends_the_refusal_test'),
+    Seed.new(fault: "a failure's line composed before the window is checked, so a pairing withdrawn at a close raises",
+             anchor: '     ended({failed, Octets, Reason}, wait_from(Now, Core))}.',
+             replacement: '     begin _ = text({failed, Octets, Reason}), ended({failed, Octets, Reason}, wait_from(Now, Core)) end}.',
+             catching_case: 'an_interrupted_pairing_writes_no_line_test')
   ].freeze
 
   def test_window_cases_pass_under_eunit

@@ -7,7 +7,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../fixtures/erlang_build'
 
-# Runs test/erlang/erx_bt_fs_tests.erl, the control tree's `pair` and `ctl` files
+# Runs test/erlang/erx_bt_fs_tests.erl, the control tree's `pair`, `bonds` and `ctl` files
 # (erx_bt_fs_tree) served by a real erx_fs grant over the file service erx_bt_fs, with
 # stand-in links and store or the real store (docs/design-bluetooth.md, "The pairing
 # window", "Bonds and the store"), on stock's emulator (ERX_ERL and ERX_ERLC), against
@@ -24,6 +24,7 @@ class ErxBtFsTest < Minitest::Test
   DEADLINE_SECONDS = '120'
   FS = 'erlang/apps/erx_bt/src/erx_bt_fs.erl'
   TREE = 'erlang/apps/erx_bt/src/erx_bt_fs_tree.erl'
+  STORE = 'erlang/apps/erx_bt/src/erx_bt_store.erl'
 
   # A seed's file is the service's unless it names another.
   Seed = Data.define(:fault, :anchor, :replacement, :catching_case, :file) do
@@ -56,16 +57,21 @@ class ErxBtFsTest < Minitest::Test
              anchor: '        ok = gen_server:call(Fs, {store, read}),',
              replacement: '',
              catching_case: 'forget_all_ends_the_refusal_of_a_store_unknown_since_its_start_test'),
-    Seed.new(fault: "ctl's address read least significant octet first, so it names another bond",
+    Seed.new(fault: 'forget matching a prefix of the id, so the bond whose id differs in its last digit goes too',
+             file: STORE,
+             anchor: 'case [Bond || #{id := Other} = Bond <- Bonds, Other =/= Id] of',
+             replacement: 'case [Bond || #{id := Other} = Bond <- Bonds, binary:part(Other, 0, 31) =/= binary:part(Id, 0, 31)] of',
+             catching_case: 'ctl_forgets_a_bond_by_its_id_and_refuses_the_rest_test'),
+    Seed.new(fault: 'bonds read as empty for a store unknown since its start',
+             file: STORE,
+             anchor: "call(bonds, _From, #store{known = {unknown, start}} = Store) ->\n    {reply, {error, eio}, Store};\n",
+             replacement: '',
+             catching_case: 'bonds_answers_eio_while_the_store_is_unknown_since_its_start_test'),
+    Seed.new(fault: 'a read-only open of pair admitted, so the open after it answers ebusy',
              file: TREE,
-             anchor: '|| Pair <- Pairs >>}}};',
-             replacement: '|| Pair <- lists:reverse(Pairs) >>}}};',
-             catching_case: 'ctl_forgets_a_bond_and_refuses_the_rest_test'),
-    Seed.new(fault: "ctl's address pairs taken by length alone, so a sign reads as a digit",
-             file: TREE,
-             anchor: 'lists:all(fun hex_pair/1, Pairs)',
-             replacement: 'lists:all(fun(Pair) -> byte_size(Pair) =:= 2 end, Pairs)',
-             catching_case: 'ctl_forgets_a_bond_and_refuses_the_rest_test')
+             anchor: "        ?ERX_P9_O_RDWR ->\n            case gen_server:call(Fs, {open, self()}) of",
+             replacement: "        _ ->\n            case gen_server:call(Fs, {open, self()}) of",
+             catching_case: 'pair_refuses_an_open_not_for_reading_and_writing_test')
   ].freeze
 
   def test_pair_cases_pass_under_eunit

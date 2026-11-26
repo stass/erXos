@@ -90,6 +90,23 @@ parse_bond_answers_invalid_for_anything_else_test() ->
                <<?ID/binary, " C0:01:02:AB:CD:EF public encrypted">>],
     [?assertEqual({Text, invalid}, {Text, erx_bt_pair:parse_bond(Text)}) || Text <- Invalid].
 
+%% An id is its 32 lower-case hexadecimal digits, the whole and nothing less.
+id_takes_32_lower_case_digits_alone_test() ->
+    ?assertEqual(?ID, erx_bt_pair:id(?ID)),
+    [?assertEqual({Text, invalid}, {Text, erx_bt_pair:id(Text)})
+     || Text <- [<<>>, binary:part(?ID, 0, 31), <<?ID/binary, "0">>, <<?ID/binary, "\n">>,
+                 <<"0123456789ABCDEF0123456789abcdef">>, <<"0123456789abcdeg0123456789abcdef">>,
+                 <<" 123456789abcdef0123456789abcdef">>]].
+
+%% A failure's reason on a `failed` line: the phone's Pairing Failed is `peer` whatever its
+%% code, every listed reason is itself, and `withdrawn`, which no line gives, raises.
+reason_maps_a_failure_to_the_lines_word_test() ->
+    ?assertEqual(peer, erx_bt_pair:reason({peer, 16#05})),
+    [?assertEqual(Reason, erx_bt_pair:reason(Reason))
+     || Reason <- [secure_connections_required, key_size, method, confirm, dhkey, bonding, invalid,
+                   unexpected, peer, timeout, already_bonded, bonds_full, unavailable, disconnected]],
+    ?assertError(_, erx_bt_pair:reason(withdrawn)).
+
 %% Bounded reading ----------------------------------------------------------------
 
 a_stream_reads_the_same_at_every_split_test() ->

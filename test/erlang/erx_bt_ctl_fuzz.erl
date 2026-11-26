@@ -6,23 +6,21 @@
 %% ctl write. A round takes one of the commands a write may hold, or one the design
 %% refuses, as it is, with newlines, blanks or bytes added, mutated, or replaced by random
 %% bytes. Whatever arrives, parse/1 makes no atom and never raises, and it agrees with a
-%% writer of its own, a regular expression: `forget all` and `forget` with six colon-split
-%% pairs of hex digits, one space and `public` or `random`, each with at most one
-%% trailing newline, the address's octets in the order written. The seed comes from make
-%% check-fuzz.
+%% writer of its own, a regular expression: `forget all` and `forget` with a bond's id, 32
+%% lower-case hexadecimal digits, each with at most one trailing newline, the id as
+%% written. The seed comes from make check-fuzz.
 
 -module(erx_bt_ctl_fuzz).
 -export([run/1]).
 
 -define(ROUNDS, 20000).
--define(HEX, "([0-9A-Fa-f]{2})").
--define(GRAMMAR, "\\Aforget (?:all|" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX
-                  " (public|random))\\n?\\z").
+-define(GRAMMAR, "\\Aforget (?:all|([0-9a-f]{32}))\\n?\\z").
 -define(COMMANDS, [<<"forget all">>, <<"forget ALL">>, <<"forget">>, <<"reset">>, <<>>,
-                   <<"forget +0:1B:DC:0A:0B:0C public">>, <<"forget -1:1B:DC:0A:0B:0C public">>,
-                   <<"forget 00:1B:DC:0A:0B public">>, <<"forget 00-1B-DC-0A-0B-0C public">>,
-                   <<"forget 00:1B:DC:0A:0B:0C">>, <<"forget 00:1B:DC:0A:0B:0C PUBLIC">>,
-                   <<"forget 00:1B:DC:0A:0B:0C  random">>, <<"forget 00:1B:DC:0A:0B:0C static">>]).
+                   <<"forget 0123456789abcdef0123456789abcde">>,
+                   <<"forget 0123456789abcdef0123456789abcdef0">>,
+                   <<"forget 0123456789ABCDEF0123456789ABCDEF">>,
+                   <<"forget  0123456789abcdef0123456789abcdef">>,
+                   <<"forget 00:1B:DC:0A:0B:0C public">>, <<"forget 00:1B:DC:0A:0B:0C random\n">>]).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 27, list_to_integer(Seed)}),
@@ -49,9 +47,7 @@ round_of(Write, Grammar) ->
 written(Write, Grammar) ->
     case re:run(Write, Grammar, [{capture, all_but_first, binary}]) of
         {match, []} -> {forget, all};
-        {match, Captured} ->
-            {Pairs, [Type]} = lists:split(6, Captured),
-            {forget, {binary_to_existing_atom(Type), << <<(binary_to_integer(Pair, 16))>> || Pair <- Pairs >>}};
+        {match, [Id]} -> {forget, Id};
         nomatch -> refused
     end.
 
@@ -63,28 +59,30 @@ write() ->
         3 -> <<Command/binary, (suffix())/binary>>;
         4 -> <<(suffix())/binary, Command/binary>>;
         5 -> mutated(<<Command/binary, $\n>>);
-        6 -> rand:bytes(rand:uniform(32) - 1)
+        6 -> rand:bytes(rand:uniform(48) - 1)
     end.
 
-%% A refused command, or `forget` of a random address in random case with its type, which
-%% most rounds take.
+%% A refused command, or `forget` of a random id, now and then with one digit upper-case,
+%% which most rounds take.
 command() ->
     case rand:uniform(3) of
         1 -> lists:nth(rand:uniform(length(?COMMANDS)), ?COMMANDS);
-        _ -> iolist_to_binary(["forget ", lists:join($:, [pair() || _ <- lists:seq(1, 6)]), $\s, type()])
+        _ -> <<"forget ", (id())/binary>>
     end.
 
-type() -> lists:nth(rand:uniform(2), [<<"public">>, <<"random">>]).
-
-pair() ->
-    Pair = io_lib:format("~2.16.0B", [rand:uniform(256) - 1]),
-    case rand:uniform(2) of
-        1 -> Pair;
-        2 -> string:lowercase(Pair)
+id() ->
+    Id = binary:encode_hex(rand:bytes(16), lowercase),
+    case rand:uniform(8) of
+        1 ->
+            At = rand:uniform(32) - 1,
+            <<Before:At/binary, Digit, After/binary>> = Id,
+            <<Before/binary, (string:to_upper(Digit)), After/binary>>;
+        _ ->
+            Id
     end.
 
 suffix() ->
-    lists:nth(rand:uniform(6), [<<"\n\n">>, <<" ">>, <<"\r\n">>, <<0>>, <<":0D">>, rand:bytes(rand:uniform(4))]).
+    lists:nth(rand:uniform(6), [<<"\n\n">>, <<" ">>, <<"\r\n">>, <<0>>, <<"0">>, rand:bytes(rand:uniform(4))]).
 
 mutated(<<>>) ->
     <<>>;

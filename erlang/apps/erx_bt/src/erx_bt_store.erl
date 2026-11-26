@@ -59,7 +59,7 @@ alone, so neither the raise's terms nor a queued `keep` reach a crash report.
 -include("generated/erx_abi.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/0, start_link/1, address/0, known/0, resolve/1, forget/1, facts/0, static_address/1]).
+-export([start_link/0, start_link/1, address/0, known/0, resolve/1, forget/1, bonds/0, facts/0, static_address/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
 -export_type([backend/0, known/0]).
 
@@ -133,13 +133,24 @@ resolve(Address) ->
     gen_server:call(?MODULE, {resolve, Address}).
 
 -doc """
-Forgets the bond with that id, the bond with that identity, its type with its address,
-or every bond (the control tree's `forget`): `enoent` when no bond has it, `eio` when the store stays `unknown` or the
-`put` is unconfirmed. The store bounds the wait itself, by a read and a put.
+Forgets the bond with that id, the whole id and nothing less, or every bond (the control
+tree's `forget`): `enoent` when no bond has it, `eio` when the store stays `unknown` or
+the `put` is unconfirmed. The store bounds the wait itself, by a read and a put.
 """.
--spec forget(id() | identity() | all) -> ok | {error, enoent | eio}.
+-spec forget(id() | all) -> ok | {error, enoent | eio}.
 forget(Target) ->
     gen_server:call(?MODULE, {forget, Target}, infinity).
+
+-doc """
+Every kept bond's record, without a key, in the order of their ids (the control tree's
+`bonds`): from the state last read or confirmed, so after an unconfirmed put the bonds the
+store holds, and `eio` while the store is `unknown` since its start, which holds none it
+could name. The store answers after the requests queued before it, each within a read
+and a put.
+""".
+-spec bonds() -> {ok, [erx_bt_pair:bond()]} | {error, eio}.
+bonds() ->
+    gen_server:call(?MODULE, bonds, infinity).
 
 -doc "What the store shows (docs/design-bluetooth.md, \"Inspection\"): never a key.".
 -spec facts() -> map().
@@ -208,10 +219,9 @@ call({resolve, Address}, {Link, _}, #store{bonds = Bonds} = Store) ->
 call({forget, all}, _From, Store) ->
     {Answer, Next} = forget_all(Store),
     {reply, Answer, Next};
-call({forget, Target}, _From, Store) ->
-    Key = named_by(Target),
+call({forget, <<_:256>> = Id}, _From, Store) ->
     Edit = fun(Bonds) ->
-                   case [Bond || #{Key := Other} = Bond <- Bonds, Other =/= Target] of
+                   case [Bond || #{id := Other} = Bond <- Bonds, Other =/= Id] of
                        Bonds -> {error, enoent};
                        Kept -> {ok, Kept}
                    end
@@ -221,13 +231,17 @@ call({forget, Target}, _From, Store) ->
         {error, enoent, Next} -> {reply, {error, enoent}, Next};
         {error, _, Next} -> {reply, {error, eio}, Next}
     end;
+call(bonds, _From, #store{known = {unknown, start}} = Store) ->
+    {reply, {error, eio}, Store};
+call(bonds, _From, #store{bonds = Bonds} = Store) ->
+    {reply, {ok, [record(Bond) || Bond <- lists:sort(fun(#{id := A}, #{id := B}) -> A =< B end, Bonds)]}, Store};
 call(facts, _From, Store) ->
     {reply, facts(Store), Store}.
 
-%% What `forget` names a bond by: its id, or its identity, the control tree's address
-%% grammar.
-named_by(<<_:256>>) -> id;
-named_by({_, <<_:48>>}) -> identity.
+%% A bond as the control tree names it (erx_bt_pair:bond()): its id, identity and level,
+%% and no key.
+record(#{id := Id, identity := {Type, Address}, level := Level}) ->
+    #{id => Id, address => Address, type => Type, level => Level}.
 
 %% A pairing's `keep`, its one ordering point (docs/design-bluetooth.md, "The link's
 %% messages"): answered to the link, and its outcome told to the window, whatever became
@@ -240,8 +254,8 @@ info({erx_bt_link, Link, {keep, Tag, #{identity := Identity, level := Level, irk
     Edit = fun(Bonds) -> admit(Bond#{id => fresh_id(Draw, Bonds)}, Bonds) end,
     {Answer, Outcome, Next} = case change(Edit, Store) of
                                   {ok, Kept} ->
-                                      Id = id_of(Identity, Kept),
-                                      {{ok, Id}, {bonded, Id, Identity, Level}, watch(Link, Id, Kept)};
+                                      #{id := Id} = Bonded = kept_bond(Identity, Kept),
+                                      {{ok, Id}, {bonded, record(Bonded)}, watch(Link, Id, Kept)};
                                   {error, Reason, Failed} -> {{error, Reason}, {failed, Reason}, Failed}
                               end,
     Link ! {store, {kept, Answer}},
@@ -301,9 +315,9 @@ bond_edit(Link, Update, #store{links = Links} = Store) ->
             {error, forgotten, Store}
     end.
 
-%% The id `admit/2` drew for the bond with that identity, which it keeps unique.
-id_of(Identity, #store{bonds = Bonds}) ->
-    hd([Id || #{identity := Other, id := Id} <- Bonds, Other =:= Identity]).
+%% The bond with that identity, which `admit/2` keeps unique, under the id it drew.
+kept_bond(Identity, #store{bonds = Bonds}) ->
+    hd([Bond || #{identity := Other} = Bond <- Bonds, Other =:= Identity]).
 
 %% The one route of every change but `forget all`: from the state last read or
 %% confirmed, the edit, one put of the whole result, and the new bonds only at `ok`. An

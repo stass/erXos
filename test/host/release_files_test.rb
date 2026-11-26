@@ -138,7 +138,7 @@ class ReleaseFilesTest < Minitest::Test
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
     only = %w[asn1 crypto public_key ssh ssl inets erx_blk erx_fat erx_storage erx_f2fs erx_media erx_memdraw erx_display erx_fb erx_usb erx_win erx_ui
-              erx_desk erx_web erx_net erx_wifi erx_web_line erx_tty_line erx_app erx_bt erx_bt_client erx_bleuart erx_ntpd erx_pcie]
+              erx_desk erx_web erx_net erx_wifi erx_web_line erx_tty_line erx_app erx_bt_client erx_bt erx_bleuart erx_ntpd erx_pcie]
     assert_equal Erx::ReleaseFiles::APPLICATIONS - Erx::ReleaseFiles::SYSTEM_APPLICATIONS, only
     only.each do |application|
       refute_includes release, "{#{application},"
@@ -170,10 +170,14 @@ class ReleaseFilesTest < Minitest::Test
   end
 
   # The bt script starts erx_bt, so that its mint of ble is named before init's ready
-  # report (docs/design-bluetooth.md, "The Bluetooth domain"), and crypto, which erx_bt
+  # report (docs/design-bluetooth.md, "The Bluetooth domain"), and crypto and
+  # erx_bt_client, whose erx_bt_pair composes the control tree's lines, which erx_bt
   # requires; every other script that holds crypto only loads it.
-  def test_the_bt_script_starts_erx_bt_and_crypto
-    assert(%w[crypto erx_bt].all? { |application| Erx::ReleaseFiles.started?(application, script: 'bt') })
+  def test_the_bt_script_starts_erx_bt_and_what_it_requires
+    bt = Erx::ReleaseFiles::RELEASE_SCRIPTS.fetch('bt')
+    assert(%w[crypto erx_bt_client erx_bt].all? do |application|
+      bt.include?(application) && Erx::ReleaseFiles.started?(application, script: 'bt')
+    end)
     others = Erx::ReleaseFiles::RELEASE_SCRIPTS.select { |name, applications| name != 'bt' && applications.include?('crypto') }
     refute_empty others
     others.each_key { |name| refute Erx::ReleaseFiles.started?('crypto', script: name), "the #{name} script starts crypto" }

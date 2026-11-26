@@ -333,7 +333,7 @@ start_unread(Get, Reason) ->
     keep(Link, 2),
     ?assertEqual({error, unavailable}, kept(Link)),
     ?assertEqual({failed, unavailable}, outcome(Link)),
-    ?assertEqual({error, eio}, erx_bt_store:forget(identity(1))),
+    ?assertEqual({error, eio}, erx_bt_store:forget(id(1))),
     ?assertEqual([{public, <<0, 0, 0, 0, 0, 1>>}], identities(medium(Script))),
     ?assertEqual(ok, erx_bt_store:forget(all)),
     ?assertEqual(#{address => Address, bonds => []}, medium(Script)),
@@ -361,13 +361,16 @@ unconfirmed_put_reads_before_the_next_change_test() ->
 
 identity(N) -> maps:get(identity, bond(N)).
 
+%% Bond N's record, as the control tree names it, under Id.
+record(Id, N) -> #{id => Id, address => <<0, 0, 0, 0, 0, N>>, type => public, level => authenticated}.
+
 keep_of_a_dead_link_still_reaches_the_window_test() ->
     {Store, Script} = start(none, [], []),
     Link = spawn(fun() -> ok end),
     Monitor = monitor(process, Link),
     receive {'DOWN', Monitor, _, _, _} -> ok end,
     keep(Link, 1),
-    ?assertMatch({bonded, <<_:256>>, {public, <<0, 0, 0, 0, 0, 1>>}, authenticated}, outcome(Link)),
+    ?assertMatch({bonded, #{id := <<_:256>>, address := <<0, 0, 0, 0, 0, 1>>, type := public, level := authenticated}}, outcome(Link)),
     ?assertEqual([identity(1)], identities(medium(Script))),
     ?assertMatch(#{links := 0}, erx_bt_store:facts()),
     stop(Store).
@@ -414,8 +417,8 @@ forget_ends_the_links_of_that_bond_test() ->
     One = Resolver(1),
     Two = Resolver(2),
     wait_links(2),
-    ?assertEqual({error, enoent}, erx_bt_store:forget(identity(9))),
-    ?assertEqual(ok, erx_bt_store:forget(identity(1))),
+    ?assertEqual({error, enoent}, erx_bt_store:forget(id(9))),
+    ?assertEqual(ok, erx_bt_store:forget(id(1))),
     receive {link, One, {store, forgotten}} -> ok after 2000 -> error(not_forgotten) end,
     receive {link, Two, {store, forgotten}} -> error(other_forgotten) after 100 -> ok end,
     ?assertEqual([identity(2)], identities(medium(Script))),
@@ -424,18 +427,22 @@ forget_ends_the_links_of_that_bond_test() ->
     wait_links(0),
     stop(Store).
 
-%% A bond's identity is its type with its octets: forgetting the public address leaves
-%% the random one of the same octets, and a type no bond has is `enoent`.
-forget_matches_the_whole_identity_test() ->
-    Octets = <<16#C0, 0, 0, 0, 0, 1>>,
-    Public = (bond(1))#{identity := {public, Octets}},
-    Random = (bond(2))#{identity := {random, Octets}},
-    {Store, Script} = start(blob([Random, Public]), [], []),
-    ?assertEqual({error, enoent}, erx_bt_store:forget({random, <<16#C0, 0, 0, 0, 0, 2>>})),
-    ?assertEqual(ok, erx_bt_store:forget({public, Octets})),
-    ?assertEqual([{random, Octets}], identities(medium(Script))),
-    ?assertEqual({error, enoent}, erx_bt_store:forget({public, Octets})),
-    stop(Store).
+%% `bonds/0` gives each kept bond's record, no key, in the order of their ids whatever
+%% the state's order or their addresses' (bond 1's address is below bond 2's, its id
+%% above); after an unconfirmed put, the bonds the store holds; and `eio` while the
+%% store is unknown since its start.
+bonds_are_records_in_the_order_of_their_ids_test() ->
+    {Store, _} = start(blob([(bond(1))#{id := id(9)}, bond(2)]), [], [lost]),
+    ?assertEqual({ok, [record(id(2), 2), record(id(9), 1)]}, erx_bt_store:bonds()),
+    Link = fake_link(),
+    keep(Link, 3),
+    ?assertEqual({error, unavailable}, kept(Link)),
+    ?assertEqual({unknown, put}, erx_bt_store:known()),
+    ?assertEqual({ok, [record(id(2), 2), record(id(9), 1)]}, erx_bt_store:bonds()),
+    stop(Store),
+    {Unread, _} = start(blob([bond(1)]), [unavailable], []),
+    ?assertEqual({error, eio}, erx_bt_store:bonds()),
+    stop(Unread).
 
 %% A kept bond's id (docs/design-bluetooth.md, "A bond's name is made with its key"): 32
 %% lower-case hexadecimal digits, given alike by the link's `kept`,
@@ -447,7 +454,7 @@ bond_id_is_drawn_at_keep_test() ->
                    Link = fake_link(),
                    keep(Link, 1),
                    {ok, Id} = kept(Link),
-                   ?assertEqual({bonded, Id, identity(1), authenticated}, outcome(Link)),
+                   ?assertEqual({bonded, record(Id, 1)}, outcome(Link)),
                    Id
            end,
     First = Pair(),
@@ -607,13 +614,13 @@ explore(Known, Request, Put, Reread) ->
 
 request(keep_new) -> L = fake_link(), keep(L, 2), unnamed(kept(L), outcome(L));
 request(keep_kept) -> L = fake_link(), keep(L, 1), unnamed(kept(L), outcome(L));
-request(forget_one) -> erx_bt_store:forget(identity(1));
-request(forget_missing) -> erx_bt_store:forget(identity(5));
+request(forget_one) -> erx_bt_store:forget(id(1));
+request(forget_missing) -> erx_bt_store:forget(id(5));
 request(forget_all) -> erx_bt_store:forget(all).
 
 %% A keep's answers with the bond's drawn id taken out, once the link's and the window's
 %% are seen to give the same one.
-unnamed({ok, <<_:256>> = Id}, {bonded, Id, Identity, Level}) -> {ok, {bonded, Identity, Level}};
+unnamed({ok, <<_:256>> = Id}, {bonded, #{id := Id} = Bond}) -> {ok, {bonded, maps:remove(id, Bond)}};
 unnamed(Kept, Outcome) -> {Kept, Outcome}.
 
 %% The model of "Bonds and the store": whether the change may start, its edit, then its put.
@@ -642,7 +649,7 @@ model(Known, Request, Put, Reread) ->
         _ -> forget_answer(Result)
     end.
 
-outcome(ok, N) -> {bonded, identity(N), authenticated};
+outcome(ok, N) -> {bonded, maps:remove(id, record(none, N))};
 outcome({error, Reason}, _) -> {failed, Reason}.
 
 forget_answer({error, unavailable}) -> {error, eio};
@@ -694,7 +701,7 @@ late_put_never_brings_back_a_forgotten_bond_test_() ->
         Link = fake_link(),
         keep(Link, 2),
         ?assertEqual({error, unavailable}, kept(Link)),
-        ?assertEqual(ok, erx_bt_store:forget(identity(1))),
+        ?assertEqual(ok, erx_bt_store:forget(id(1))),
         Storage ! release,
         ?assertEqual(ok, receive {landed, Late} -> Late after 5000 -> not_landed end),
         exit(Storage, kill),

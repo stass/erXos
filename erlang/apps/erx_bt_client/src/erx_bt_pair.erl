@@ -36,7 +36,7 @@ keeps them out of what its crash reports and logs show, as the window does.
 
 -include("generated/erx_abi.hrl").
 
--export([format_bond/1, parse_bond/1, format/1, parse/1, reader/1, next/1, bonds/1]).
+-export([format_bond/1, parse_bond/1, id/1, format/1, parse/1, reason/1, reader/1, next/1, bonds/1]).
 -export_type([address/0, bond/0, bond_id/0, line/0, reason/0, reader/0]).
 
 %% An address as erx_hci decodes it, most significant octet first.
@@ -73,6 +73,13 @@ format_bond(#{id := <<_:256>> = Id, address := Address, type := Type, level := L
     iolist_to_binary([Id, $\s, address_text(Address), $\s, atom_to_binary(Type), $\s,
                       atom_to_binary(Level)]).
 
+-doc "The bond id Text is, its 32 lower-case hexadecimal digits, or `invalid`.".
+-spec id(binary()) -> bond_id() | invalid.
+id(<<_:256>> = Text) ->
+    try bond_id(Text) catch throw:invalid -> invalid end;
+id(Text) when is_binary(Text) ->
+    invalid.
+
 -doc "The bond a record names, or `invalid` for any text `format_bond/1` does not make.".
 -spec parse_bond(binary()) -> bond() | invalid.
 parse_bond(Text) when is_binary(Text) ->
@@ -94,6 +101,16 @@ format({failed, Address, Reason}) ->
     true = lists:member(Reason, ?REASONS),
     iolist_to_binary(["failed ", address_text(Address), $\s, atom_to_binary(Reason)]);
 format({closed, timeout}) -> <<"closed timeout">>.
+
+-doc """
+The reason a `failed` line gives for a pairing's failure Failure: the phone's own Pairing
+Failed, `{peer, Code}` from the Security Manager, is `peer` whatever its code; every other
+reason of the list is itself. Any other failure, `withdrawn` among them, which only a
+window its opener closed meets and so never writes, is not a line's reason and raises.
+""".
+-spec reason({peer, byte()} | reason()) -> reason().
+reason({peer, Code}) when is_integer(Code) -> peer;
+reason(Reason) when is_atom(Reason) -> true = lists:member(Reason, ?REASONS), Reason.
 
 -doc "The term a window's line holds, or `invalid` for any line `format/1` does not make.".
 -spec parse(binary()) -> line() | invalid.

@@ -2687,7 +2687,7 @@ takes it and forwards nothing.
 | link, store | `{keep, Tag, Bond, Subscriptions}` | the pairing's third phase ended | the store keeps the bond, tells the window the outcome and, at `ok`, monitors the link ([Bonds and the store](#bonds-and-the-store)) |
 | | `{subscriptions, Subscriptions}` | a link encrypted with a kept bond's key changed a configuration | GATT 3.3.3.3: the Write Response waits for the store's answer |
 | | `{served, Hash}` | a link encrypted with a kept bond's key had Service Changed confirmed | the bond's table hash; not answered, since a hash not kept costs one more Service Changed |
-| store, window | `{outcome, Link, Tag, {bonded, Bond, Identity, Level} \| {failed, Reason}}` | the store answered the `keep` of `Link`, the pid it came from | the `bonded` or `failed` line and the pairing wait |
+| store, window | `{outcome, Link, Tag, {bonded, Bond} \| {failed, Reason}}`, `Bond` the kept bond's record as `bonds` lists it | the store answered the `keep` of `Link`, the pid it came from | the `bonded` or `failed` line and the pairing wait |
 | store, link | `{kept, {ok, Bond} \| {error, Reason}}` | the store answered `keep` or `subscriptions` | for `keep`, at `{ok, Bond}` the key is the kept bond's, whose id the link's next `security` carries, otherwise the link ends; the configuration write's response or Unlikely Error |
 | | `forgotten` | the link's bond is forgotten, or missing from the state read after a `put` left unconfirmed | the link ends ([Bonds and the store](#bonds-and-the-store)) |
 

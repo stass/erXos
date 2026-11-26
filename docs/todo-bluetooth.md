@@ -5,6 +5,15 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] Bluetooth pairing window, `erx_bt_window` (erlang/apps/erx_bt/src/erx_bt_window.erl): it stays up only
+  because two lists agree. A failure's reason becomes its `failed` line through `erx_bt_pair:reason/1` and
+  `format/1`, which raise on a reason outside `erx_bt_pair`'s `?REASONS`; a raise ends `erx_bt_fs` and restarts the
+  pairing wait. So every reason `erx_smp_core:reason()` and the store's `keep` can give must be in that list, kept by
+  hand, and `withdrawn`, which no line gives, must reach only a window its opener closed, which holds by the order of
+  `close/2` and the `ebusy` answer, not by construction (the explorer offers it only then). Derive the reason set from
+  one source (the SMP core's type written as `erx_bt_pair:reason() | withdrawn | {peer, byte()}`, or a table both
+  read), and give a withdrawn pairing a stage of its own so that its outcome composes no line by construction.
+
 * [Low] Bluetooth tests, `erx_bt_group_test.rb` (test/erlang/erx_bt_group_tests.erl): the seeded fault for
   `a_link_held_at_its_start_is_cut_at_its_backlog_test` once passed instead of failing under a host loaded by parallel
   QEMU runs, then failed as expected when rerun alone, so the case depends on timing.

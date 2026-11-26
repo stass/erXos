@@ -47,11 +47,14 @@ failure imposed, halved for each whole `bt_pair_wait_decay_s` since that failure
 between `bt_pair_wait_min_s` and `bt_pair_wait_max_s`. The core keeps the last failure's
 instant and its wait, so it needs no timer of its own. A success leaves the wait as it is.
 
-**The lines** each open reads are ASCII the core composes from numbers and addresses
-alone, so nothing a radio peer sends reaches them as text and they need no escaping:
-`wait N`, `waiting`, `passkey NNNNNN ADDR`, `bonded ADDR TYPE LEVEL`, `failed ADDR REASON`
-and `closed timeout`. After the last three the open's lines end; `take/3` gives what is
-left, then `eof`. A closed window's open keeps its unread lines until its clunk.
+**The lines** each open reads are ASCII that `erx_bt_pair:format/1` composes from numbers,
+addresses and words of closed sets alone, so nothing a radio peer sends reaches them as
+text and they need no escaping: `wait N`, `waiting`, `passkey NNNNNN ADDR`, `bonded BOND
+ADDR TYPE LEVEL`, `failed ADDR REASON` and `closed timeout`. A line is composed only for
+an open whose lines go on, so a pairing withdrawn by its window's close, whose
+`withdrawn` no line gives, writes none. After the last three the open's lines end;
+`take/3` gives what is left, then `eof`. A closed window's open keeps its unread lines
+until its clunk.
 
 The state holds a passkey while its line is unread; `facts/1` shows the core without it.
 """.
@@ -73,9 +76,7 @@ deadline is due.
 """.
 -type input() :: {open, id()} | {write, id(), mode()} | {clunk, id()}
                | {link, link(), erx_bt_link_core:to_window()}
-               | {store, {outcome, link(), tag(), {bonded, erx_bt_state:id(), erx_smp_crypto:address(),
-                                                           authenticated | unauthenticated}
-                                                | {failed, atom()}}}
+               | {store, {outcome, link(), tag(), {bonded, erx_bt_pair:bond()} | {failed, atom()}}}
                | {store, read}
                | {down, link()}
                | expired.
@@ -83,13 +84,16 @@ deadline is due.
 What the process does, in order: answer the file request it stepped; send a link an
 `open` verdict in this mode, to which the process adds the pairing's fresh values, or
 another verdict, a withdrawal or the wait; take or drop a monitor of a link; log a
-pairing's outcome.
+pairing's outcome: its address, the phone's identity for a bond, and the bond's id and
+level or the failure's reason.
 """.
 -type action() :: {answer, ok | {error, ebusy | eio | einval}}
                 | {open, link(), tag(), mode()}
                 | {send, link(), erx_bt_link_core:from_window()}
                 | {monitor, link()} | {demonitor, link()}
-                | {log, #{address := erx_smp_crypto:address(), outcome := term()}}.
+                | {log, #{address := erx_smp_crypto:address(),
+                          outcome := {bonded, erx_bt_pair:bond_id(), authenticated | unauthenticated}
+                                   | {failed, erx_smp_core:reason() | atom()}}}.
 
 -type phase() :: none | {reserved, id()} | {admitting, id(), mode(), integer(), boolean()} | {pairing, id()}.
 -type pairing() :: none | {link(), tag(), erx_smp_crypto:address(), running | keeping}.
@@ -171,10 +175,10 @@ facts(#core{refusing = Refusing, window = Window, pairing = Pairing, last_failur
 %% ---------------------------------------------------------------------------
 
 tick(Now, #core{window = {admitting, Id, _, Deadline, _}} = Core) when Now >= Deadline ->
-    finish(Id, <<"closed timeout\n">>, Core#core{window = none});
+    finish(Id, {closed, timeout}, Core#core{window = none});
 tick(Now, #core{window = {admitting, Id, Mode, Deadline, false}} = Core) ->
     case left(Now, Core) of
-        0 -> write(Id, <<"waiting\n">>, Core#core{window = {admitting, Id, Mode, Deadline, true}});
+        0 -> write(Id, waiting, Core#core{window = {admitting, Id, Mode, Deadline, true}});
         _ -> Core
     end;
 tick(_Now, Core) ->
@@ -212,9 +216,9 @@ input({link, Link, {admit, Tag, Address}}, Now, #core{window = {admitting, Id, M
 input({link, Link, {admit, Tag, _Address}}, _Now, Core) ->
     {[{send, Link, {admission, Tag, closed}}], Core};
 input({link, Link, {passkey, Tag, Passkey}}, _Now,
-      #core{window = {pairing, Id}, pairing = {Link, Tag, Address, running}} = Core) ->
-    Line = iolist_to_binary(io_lib:format("passkey ~6..0B ~s~n", [Passkey, address(Address)])),
-    {[], write(Id, Line, Core)};
+      #core{window = {pairing, Id}, pairing = {Link, Tag, {_Type, Octets}, running}} = Core) ->
+    Digits = iolist_to_binary(io_lib:format("~6..0B", [Passkey])),
+    {[], write(Id, {passkey, Digits, Octets}, Core)};
 input({link, Link, {outcome, Tag, {failed, Reason}}}, Now, #core{pairing = {Link, Tag, Address, running}} = Core) ->
     {Actions, Failed} = failure(Address, Reason, Now, Core),
     {[{demonitor, Link} | Actions], Failed};
@@ -234,10 +238,9 @@ input({down, _Link}, _Now, Core) ->
 input({store, {outcome, Link, Tag, Outcome}}, Now, #core{pairing = {Link, Tag, Address, Stage}} = Core) ->
     Demonitor = [{demonitor, Link} || Stage =:= running],
     case Outcome of
-        {bonded, _Id, {Type, _} = Identity, Level} ->
-            Line = iolist_to_binary(["bonded ", address(Identity), $\s, atom_to_binary(Type), $\s,
-                                    atom_to_binary(Level), $\n]),
-            {Demonitor ++ [{log, #{address => Identity, outcome => Outcome}}], ended(Line, Core)};
+        {bonded, #{id := Id, address := Octets, type := Type, level := Level}} ->
+            Log = #{address => {Type, Octets}, outcome => {bonded, Id, Level}},
+            {Demonitor ++ [{log, Log}], ended(Outcome, Core)};
         {failed, Reason} ->
             {Actions, Failed} = failure(Address, Reason, Now, Core),
             {Demonitor ++ Actions, Failed}
@@ -255,7 +258,7 @@ input(expired, _Now, Core) ->
 announce(Id, Now, Core) ->
     case left(Now, Core) of
         0 -> tick(Now, Core);
-        Left -> write(Id, iolist_to_binary(io_lib:format("wait ~B~n", [(Left + 999) div 1000])), Core)
+        Left -> write(Id, {wait, (Left + 999) div 1000}, Core)
     end.
 
 %% The milliseconds the pairing wait has left to run at Now, 0 once it has passed, and
@@ -287,9 +290,9 @@ ended(_Line, Core) ->
 
 %% The awaited pairing failed: its log record, its `failed` line if the window still has
 %% its opener, and the pairing wait it starts.
-failure(Address, Reason, Now, Core) ->
-    Line = iolist_to_binary(["failed ", address(Address), $\s, reason(Reason), $\n]),
-    {[{log, #{address => Address, outcome => {failed, Reason}}}], ended(Line, wait_from(Now, Core))}.
+failure({_Type, Octets} = Address, Reason, Now, Core) ->
+    {[{log, #{address => Address, outcome => {failed, Reason}}}],
+     ended({failed, Octets, Reason}, wait_from(Now, Core))}.
 
 %% A failure at Now starts the wait it imposes: the minimum for the first, else twice the
 %% last failure's wait halved for each whole decay period since it, within the minimum
@@ -303,11 +306,16 @@ imposed(Now, {At, Wait}) ->
     Halvings = (Now - At) div (?ERX_BT_PAIR_WAIT_DECAY_S * 1000),
     max(?ERX_BT_PAIR_WAIT_MIN_S * 1000, min(?ERX_BT_PAIR_WAIT_MAX_S * 1000, (2 * Wait) bsr Halvings)).
 
+%% Line, an erx_bt_pair:line() but for a failure's reason as the link or the store gives
+%% it, joins the lines of open Id while they go on, and only then is it composed.
 write(Id, Line, #core{lines = Lines} = Core) ->
     case Lines of
-        #{Id := {Text, open}} -> Core#core{lines = Lines#{Id := {<<Text/binary, Line/binary>>, open}}};
+        #{Id := {Text, open}} -> Core#core{lines = Lines#{Id := {<<Text/binary, (text(Line))/binary>>, open}}};
         #{} -> Core
     end.
+
+text({failed, Octets, Reason}) -> <<(erx_bt_pair:format({failed, Octets, erx_bt_pair:reason(Reason)}))/binary, $\n>>;
+text(Line) -> <<(erx_bt_pair:format(Line))/binary, $\n>>.
 
 finish(Id, Line, Core) ->
     #core{lines = Lines} = Written = write(Id, Line, Core),
@@ -315,10 +323,3 @@ finish(Id, Line, Core) ->
         #{Id := {Text, open}} -> Written#core{lines = Lines#{Id := {Text, ended}}};
         #{} -> Written
     end.
-
-%% An address most significant octet first, as erx_hci decodes it, in the usual form.
-address({_Type, <<_:48>> = Octets}) ->
-    lists:join($:, [io_lib:format("~2.16.0B", [Octet]) || <<Octet>> <= Octets]).
-
-reason({peer, _Code}) -> <<"peer">>;
-reason(Reason) when is_atom(Reason) -> atom_to_binary(Reason).

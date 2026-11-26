@@ -16,6 +16,9 @@
 -define(PHONE, {random, <<16#C0, 1, 2, 3, 4, 5>>}).
 -define(IDENTITY, {public, <<16#00, 16#1B, 16#DC, 16#0A, 16#0B, 16#0C>>}).
 -define(DEPTH, 16).
+-define(ID, <<"0123456789abcdef0123456789abcdef">>).
+-define(BOND(Level), #{id => ?ID, address => <<16#00, 16#1B, 16#DC, 16#0A, 16#0B, 16#0C>>, type => public,
+                       level => Level}).
 
 %% Exploration -----------------------------------------------------------------
 
@@ -28,7 +31,7 @@ alphabet() ->
      {link, ?L1, {passkey, 1, 123}}, {link, ?L1, {outcome, 1, {failed, confirm}}},
      {link, ?L1, {outcome, 2, {failed, withdrawn}}}, {link, ?L1, {keeping, 1}}, {link, ?L2, {keeping, 1}},
      {link, ?L1, wait}, {down, ?L1}, {down, ?L2},
-     {store, {outcome, ?L1, 1, {bonded, <<"00000000000000000000000000000001">>, ?IDENTITY, authenticated}}}, {store, {outcome, ?L1, 1, {failed, unavailable}}},
+     {store, {outcome, ?L1, 1, {bonded, ?BOND(authenticated)}}}, {store, {outcome, ?L1, 1, {failed, unavailable}}},
      {store, {outcome, ?L2, 1, {failed, bonds_full}}}, deadline, later].
 
 %% The explorer's state: the core, the clock, the links the process would monitor, and
@@ -75,6 +78,13 @@ transition(deadline, #x{core = Core, now = Now} = X) ->
     end;
 transition(later, #x{now = Now} = X) ->
     transition(expired, X#x{now = Now + 64001});
+%% A link reports `withdrawn` only for a pairing its window withdrew at a clunk, so the
+%% exploration offers it only while the awaited pairing has no window.
+transition({link, _, {outcome, _, {failed, withdrawn}}} = Input, #x{core = Core} = X) ->
+    case erx_bt_window:facts(Core) of
+        #{window := {pairing, _}} -> X;
+        #{} -> step(Input, X)
+    end;
 transition({open, Id} = Input, #x{core = Core} = X) ->
     case lists:member(Id, erx_bt_window:opens(Core)) of
         true -> X;   % an open names a fid, which the grant never reuses while open
@@ -177,11 +187,10 @@ terminal(<<"failed ", _/binary>>) -> true;
 terminal(<<"closed ", _/binary>>) -> true;
 terminal(_) -> false.
 
+%% Every line the core writes is one that erx_bt_pair:parse/1, a reader in another
+%% domain, takes.
 well_formed(Line) ->
-    lists:any(fun(Pattern) -> re:run(Line, Pattern, [{capture, none}]) =:= match end,
-              ["^wait [0-9]+$", "^waiting$", "^passkey [0-9]{6} ([0-9A-F]{2}:){5}[0-9A-F]{2}$",
-               "^bonded ([0-9A-F]{2}:){5}[0-9A-F]{2} (public|random) (authenticated|unauthenticated)$",
-               "^failed ([0-9A-F]{2}:){5}[0-9A-F]{2} [a-z_]+$", "^closed timeout$"]).
+    erx_bt_pair:parse(Line) =/= invalid.
 
 %% Cases -----------------------------------------------------------------------
 
@@ -259,16 +268,40 @@ keeping_then_down_leaves_the_store_to_decide_test() ->
     {Actions, W1} = run([{link, ?L1, {admit, 1, ?PHONE}}, {link, ?L1, {keeping, 1}}, {clunk, a}, {down, ?L1}], 10, W),
     ?assertEqual([], [A || {send, _, {withdraw, _}} = A <- Actions]),
     ?assertEqual({[{answer, {error, ebusy}}], W1}, erx_bt_window:step({open, b}, 20, W1)),
-    {_, W2} = erx_bt_window:step({store, {outcome, ?L1, 1, {bonded, <<"00000000000000000000000000000001">>, ?IDENTITY, authenticated}}}, 30, W1),
+    {_, W2} = erx_bt_window:step({store, {outcome, ?L1, 1, {bonded, ?BOND(authenticated)}}}, 30, W1),
     ?assertMatch(#{wait_until := none, pairing := none}, erx_bt_window:facts(W2)),
     ?assertMatch({[{answer, ok}], _}, erx_bt_window:step({open, b}, 40, W2)).
 
-a_bond_is_written_with_the_identity_and_level_test() ->
+%% The `bonded` line is the word and the bond's record, its id first; the log's record
+%% names the bond by its id in hexadecimal.
+a_bond_is_written_with_its_id_identity_and_level_test() ->
     W = window(a, nodisplay, 0, new()),
-    {_, W1} = run([{link, ?L1, {admit, 1, ?PHONE}}, {link, ?L1, {keeping, 1}},
-                   {store, {outcome, ?L1, 1, {bonded, <<"00000000000000000000000000000001">>, ?IDENTITY, unauthenticated}}}], 10, W),
-    ?assertEqual(<<"waiting\nbonded 00:1B:DC:0A:0B:0C public unauthenticated\n">>, lines(a, W1)),
+    {Actions, W1} = run([{link, ?L1, {admit, 1, ?PHONE}}, {link, ?L1, {keeping, 1}},
+                         {store, {outcome, ?L1, 1, {bonded, ?BOND(unauthenticated)}}}], 10, W),
+    ?assertEqual(<<"waiting\nbonded 0123456789abcdef0123456789abcdef 00:1B:DC:0A:0B:0C public unauthenticated\n">>, lines(a, W1)),
+    ?assertEqual([#{address => ?IDENTITY, outcome => {bonded, ?ID, unauthenticated}}], [Log || {log, Log} <- Actions]),
     {eof, _} = erx_bt_window:take(a, 10, element(2, erx_bt_window:take(a, 4096, W1))).
+
+%% The phone's own Pairing Failed, whatever its code, is the line's `peer`.
+a_peers_failure_is_written_as_peer_test() ->
+    W = window(a, display, 0, new()),
+    {Actions, W1} = run([{link, ?L1, {admit, 1, ?PHONE}}, {link, ?L1, {outcome, 1, {failed, {peer, 16#05}}}}], 10, W),
+    ?assertEqual(<<"waiting\nfailed C0:01:02:03:04:05 peer\n">>, lines(a, W1)),
+    ?assertMatch([#{outcome := {failed, {peer, 16#05}}}], [Log || {log, Log} <- Actions]).
+
+%% A window closed mid-pairing, after its passkey line: the withdrawal's `withdrawn`,
+%% which no line carries, is logged and counted, and writes nothing, since the opener has
+%% gone (docs/design-bluetooth.md, "Closing a window withdraws its pairing").
+an_interrupted_pairing_writes_no_line_test() ->
+    W = window(a, display, 0, new()),
+    {_, W1} = run([{link, ?L1, {admit, 2, ?PHONE}}, {link, ?L1, {passkey, 2, 123456}}], 10, W),
+    ?assertEqual(<<"waiting\npasskey 123456 C0:01:02:03:04:05\n">>, lines(a, W1)),
+    {[{send, Link, {withdraw, 2}}], W2} = erx_bt_window:step({clunk, a}, 20, W1),
+    ?assertEqual(?L1, Link),
+    {Actions, W3} = erx_bt_window:step({link, ?L1, {outcome, 2, {failed, withdrawn}}}, 30, W2),
+    ?assertMatch([{demonitor, Link}, {log, #{outcome := {failed, withdrawn}}}], Actions),
+    ?assertMatch(#{window := none, pairing := none, wait_until := 2030}, erx_bt_window:facts(W3)),
+    ?assertMatch({[{answer, ok}], _}, erx_bt_window:step({open, b}, 2030, W3)).
 
 closing_withdraws_a_running_pairing_test() ->
     W = window(a, display, 0, new()),

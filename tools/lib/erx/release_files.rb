@@ -233,7 +233,7 @@ module Erx
                           [*SESSION_BASE, 'compiler', 'asn1', 'crypto', 'public_key', 'ssl', 'inets', *DomainStartup::DISPLAY_CLIENT,
                            'erx_ui', 'erx_app', 'erx_bt_client'].freeze,
                         'usb' => [*DOMAIN_BASE, 'erx_blk', 'erx_usb'].freeze,
-                        'bt' => [*DOMAIN_BASE, 'crypto', 'erx_bt'].freeze,
+                        'bt' => [*DOMAIN_BASE, 'crypto', 'erx_bt_client', 'erx_bt'].freeze,
                         'pcie' => [*DOMAIN_BASE, 'erx_pcie'].freeze,
                         'ntpd' => [*DOMAIN_BASE, 'erx_ntpd'].freeze,
                         'bleuart' => [*DOMAIN_BASE, 'erx_bt_client', 'erx_bleuart'].freeze,

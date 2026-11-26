@@ -51,7 +51,7 @@ never converted, and the store that cannot read one starts without its bonds.
 -doc "A characteristic's key by name: the service's and the characteristic's names.".
 -type name_key() :: {binary(), binary()}.
 -doc "A bond's id: the 128 bits the store drew when it kept the bond, as 32 lower-case hexadecimal digits.".
--type id() :: <<_:256>>.
+-type id() :: erx_bt_pair:bond_id().
 -doc """
 A kept bond: its id, the phone's identity address and IRK, the LTK and its level, the table hash
 it was last served (`<<>>` before any), and its subscriptions.
