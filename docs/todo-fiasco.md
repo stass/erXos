@@ -107,7 +107,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      platform control object's shutdown that names the root's cause; the report's message through the console's one escaping function (`erx_log_escape`, whose `include/erx/log.h` the kernel's glue does not see); one routine for the depth that each stop path now counts on its own; cells for a
      nested stop and the brief form's report, a kernel trap's among them; the census's clock read in program
      order as the binding asks (an ISB around `CNTVCT_EL0`, which the glue cannot write while only listed
-     functions hold inline assembly); `ivt.S`'s stop offsets from the generated layout rather than held to it by
+     functions hold inline assembly); a trap's fault address for a kept class whose `ESR_EL1.FnV` is set, which
+     `get_fault_pfa` makes all ones where the ABI says the address or zero, and the class set's two facts not
+     checked against the Arm ARM's own `FAR_EL1` text (Arm's open register data has no descriptions): that
+     `FAR_EL1` holds a watchpoint's address, and that `ELR_EL1` holds a misaligned pc, as
+     [design-arch-aarch64.md](design-arch-aarch64.md)'s SError row, which names `FAR_EL1`, needs checking too;
+     `ivt.S`'s stop offsets (`kern/arm/64/erx_stop_offsets.h`) generated from the layout rather than held to it by
      `erx_machine_stop.cpp`'s assertion, which needs the seam's offsets in a header that `ivt.S`, an inherited
      module, may include (`Makeconf` gives the core's include directory to the glue's modules alone); every development boot is one of a kernel without the
      object, and a boot checks that `sigma0` ignores its object-naming calls failing (P9);

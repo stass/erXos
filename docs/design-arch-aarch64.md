@@ -253,9 +253,11 @@ the record's user registers as they are, so the record always holds the
 state the thread last left EL0 with. The entries then call the generated
 dispatch, the fault classifier or the interrupt handler, and handlers
 never nest. Every exit is an `eret`. A synchronous exception's class and
-syndrome come from `ESR_EL1`, its address from `FAR_EL1` and the faulting
-instruction from `ELR_EL1`; these fill the fault record's `cause`, `addr`
-and `pc` ([design-kernel.md](design-kernel.md#threads-and-faults)). A data
+syndrome come from `ESR_EL1` and the faulting instruction from `ELR_EL1`;
+its address comes from `FAR_EL1` only for the classes whose `FAR_EL1` is the
+fault's address, instruction and data aborts and watchpoints, and is zero
+for every other class, whose `FAR_EL1` may hold an address another domain's
+fault left. These fill the fault record's `cause`, `addr` and `pc` ([design-kernel.md](design-kernel.md#threads-and-faults)). A data
 or instruction abort from EL0 is a memory fault when its fault status code
 (`ESR_EL1`'s `DFSC` or `IFSC`) is a translation fault or a permission
 fault at any level, with the access from `ESR_EL1.WnR` for a data abort
@@ -511,8 +513,10 @@ the CPU's stop slot, whose registers are `erx_stop_regs` of
 `abi/arch/aarch64.txt`: `x0` to `x30`, the interrupted stack pointer,
 `ELR_EL1` as the program counter, `SPSR_EL1` as the state, `TTBR0_EL1`,
 by which a reader translates addresses of the space the CPU was in, and
-`ESR_EL1` and `FAR_EL1` for a CPU that came to the stop by an exception,
-zero otherwise. It stores the slot's state last, with `stlr`, sets every
+`ESR_EL1` and the fault's address, taken from `FAR_EL1` by the class rule of
+[the entry paths](#exception-and-interrupt-entry), for a CPU that came to the stop by an
+exception, zero otherwise. It stores the slot's state last, with `stlr`,
+sets every
 `DAIF` bit and loops on `wfi`, never ending the interrupt. The stop's
 leader loads each slot's state with `ldar`. A litmus test of `make check-litmus`
 checks, under the architecture's memory model, that a reader never finds a

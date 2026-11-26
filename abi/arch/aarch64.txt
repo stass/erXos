@@ -27,8 +27,9 @@ layout erx_regs wire_le 8 272
   field state u64 264
 # A stopped CPU's registers in its stop slot (design-arch-aarch64.md, "Stopping
 # every CPU"): x0 to x30, the interrupted SP, ELR_EL1 as the pc and SPSR_EL1 as
-# the state; TTBR0_EL1, the root of the space the CPU was in; and ESR_EL1 and
-# FAR_EL1 for a CPU that came to the stop by an exception, zero otherwise.
+# the state; TTBR0_EL1, the root of the space the CPU was in; and ESR_EL1 for a
+# CPU that came to the stop by an exception, with FAR_EL1 when the exception's
+# class makes it the fault's address (an abort or a watchpoint), zero otherwise.
 layout erx_stop_regs wire_le 8 296
   field regs erx_regs 0
   field space_root u64 272

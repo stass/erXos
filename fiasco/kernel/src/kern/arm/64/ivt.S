@@ -281,15 +281,9 @@ resume_trigger_exception_after_pf_trampoline:
 	b	.Lret_from_exception
 #endif
 
-// The offsets of erx_stop_regs (abi/arch/aarch64.txt) that the stop's switch
-// stores at; erx_machine_stop.cpp asserts each against the generated layout.
-#define STOP_GPR(n) ((n) * 8)
-#define STOP_SP 248
-#define STOP_PC 256
-#define STOP_STATE 264
-#define STOP_SPACE_ROOT 272
-#define STOP_CAUSE 280
-#define STOP_ADDR 288
+// The offsets of erx_stop_regs that the stop's switch stores at, which
+// erx_machine_stop.cpp holds to the generated layout.
+#include "erx_stop_offsets.h"
 
 // erx_machine_stop_switch(regs, stack_top, body, arg): saves the call site's
 // registers into regs (an erx_stop_regs_t: x0 to x30, sp, the return address

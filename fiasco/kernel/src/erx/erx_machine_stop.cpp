@@ -58,6 +58,7 @@ IMPLEMENTATION:
 #include "cpu.h"
 #include "entry_frame.h"
 #include "erx_console_ring.h"
+#include "erx_stop_offsets.h"
 #include "ipi.h"
 #include "mem.h"
 #include "platform_control.h"
@@ -71,12 +72,13 @@ IMPLEMENTATION:
 extern "C" [[noreturn]] void
 erx_machine_stop_switch(erx_stop_regs_t *regs, void *stack_top,
                         void (*body)(void *), void *arg);
-// The offsets kern/arm/64/ivt.S names STOP_* and stores at, which assembly
-// cannot take from the generated layout, held to it here.
-static_assert(offsetof(erx_stop_regs_t, regs) == 0 && ERX_REGS_OFF_GPR == 0
-              && ERX_REGS_OFF_SP == 248 && ERX_REGS_OFF_PC == 256 && ERX_REGS_OFF_STATE == 264
-              && ERX_STOP_REGS_OFF_SPACE_ROOT == 272 && ERX_STOP_REGS_OFF_CAUSE == 280
-              && ERX_STOP_REGS_OFF_ADDR == 288,
+// The offsets kern/arm/64/ivt.S stores at, from kern/arm/64/erx_stop_offsets.h,
+// which assembly cannot take from the generated layout, held to it here.
+static_assert(offsetof(erx_stop_regs_t, regs) == 0 && ERX_REGS_OFF_GPR == STOP_GPR(0)
+              && STOP_GPR(1) == 8 && ERX_REGS_OFF_SP == STOP_SP && ERX_REGS_OFF_PC == STOP_PC
+              && ERX_REGS_OFF_STATE == STOP_STATE
+              && ERX_STOP_REGS_OFF_SPACE_ROOT == STOP_SPACE_ROOT
+              && ERX_STOP_REGS_OFF_CAUSE == STOP_CAUSE && ERX_STOP_REGS_OFF_ADDR == STOP_ADDR,
               "ivt.S stores a stopped CPU's registers at the ABI's offsets");
 
 // The two system registers a stop request reads live: the space's translation
@@ -589,6 +591,30 @@ erx_stop_trapped(erx_stop_regs_t const &regs, erx_fault_t const &fault,
 static_assert(sizeof(Trap_state) == sizeof(Return_frame),
               "a trap's frame is the entry's Return_frame and nothing more");
 
+// A trap's fault address, kept only for the exception classes (ESR_EL1.EC)
+// whose FAR_EL1 is the fault's: instruction and data aborts from either level
+// and watchpoints, the classes FreeBSD's sys/arm64/arm64/trap.c reads it for
+// (release/14.3.0, do_el1h_sync and do_el0_sync). Any other class gets zero:
+// its frame's pf_address is a stale stack word (BRK) or a FAR_EL1 another
+// domain's fault may have left, and the record leaves the machine. PC
+// alignment's address is the pc and SP alignment's the stack pointer, both
+// in the record already.
+enum Erx_stop_ec : unsigned
+{
+  Ec_unknown = 0x00, Ec_iabt_lower = 0x20, Ec_iabt_same = 0x21, Ec_pc_align = 0x22,
+  Ec_dabt_lower = 0x24, Ec_dabt_same = 0x25, Ec_sp_align = 0x26,
+  Ec_watch_lower = 0x34, Ec_watch_same = 0x35, Ec_brk = 0x3c,
+};
+
+static constexpr Mword
+stop_fault_addr(unsigned ec, Mword pf_address)
+{
+  bool far_is_fault = ec == Ec_iabt_lower || ec == Ec_iabt_same
+                      || ec == Ec_dabt_lower || ec == Ec_dabt_same
+                      || ec == Ec_watch_lower || ec == Ec_watch_same;
+  return far_is_fault ? pf_address : 0;
+}
+
 // The trap's frame is the leader's registers, the exception's syndrome and
 // fault address are their cause and address and, with its program counter,
 // the record's fault field; nothing is printed before the stop's report.
@@ -596,6 +622,16 @@ IMPLEMENT
 void
 Erx_machine_stop::trap(Trap_state const *ts, char const *what)
 {
+  // Here, not beside stop_fault_addr: Fiasco's preprocessor places a free
+  // function's definition after the file-scope code that follows it.
+  static_assert(stop_fault_addr(Ec_dabt_same, 0x1000) == 0x1000
+                && stop_fault_addr(Ec_iabt_lower, 0x1000) == 0x1000
+                && stop_fault_addr(Ec_watch_same, 0x1000) == 0x1000,
+                "an abort or a watchpoint keeps its fault address");
+  static_assert(stop_fault_addr(Ec_brk, 0x1000) == 0 && stop_fault_addr(Ec_unknown, 0x1000) == 0
+                && stop_fault_addr(Ec_pc_align, 0x1000) == 0
+                && stop_fault_addr(Ec_sp_align, 0x1000) == 0,
+                "a BRK, an unknown class or an alignment fault records no fault address");
   Proc::cli();
   erx_stop_regs_t regs = {};
   for (unsigned r = 0; r < 31; ++r)
@@ -610,14 +646,14 @@ Erx_machine_stop::trap(Trap_state const *ts, char const *what)
   Erx_stop_live live;
   erx_machine_stop_live(&live);
   regs.space_root = live.space_root;
+  unsigned ec = ts->esr.ec().get();
   regs.cause = ts->esr.raw();
-  regs.addr = ts->pf_address;
+  regs.addr = stop_fault_addr(ec, ts->pf_address);
   erx_fault_t fault = {};
   fault.cause = uint32_t(ts->esr.raw());
-  fault.addr = ts->pf_address;
+  fault.addr = regs.addr;
   fault.pc = ts->pc;
-  erx_stop_trapped(regs, fault, "%s: exception class 0x%02x", what,
-                   unsigned(ts->esr.ec().get()));
+  erx_stop_trapped(regs, fault, "%s: exception class 0x%02x", what, ec);
 }
 
 // The glue's setup, from the boot handoff: the record's form and the build's
