@@ -90,6 +90,8 @@ module Erx
         "systems differ: #{first.system} against #{second.system}; systems are only set side by side"
       elsif first.name != second.name
         "environments differ: #{first.name} against #{second.name}"
+      elsif first.details['command_line'] != second.details['command_line']
+        "kernel command lines differ: #{first.details['command_line'].inspect} against #{second.details['command_line'].inspect}"
       else
         field = CELL_FIELDS.find { |_, value| value.call(a.cell) != value.call(b.cell) }
         "cells differ in #{field.first}" if field

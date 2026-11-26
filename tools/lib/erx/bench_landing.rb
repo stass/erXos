@@ -23,13 +23,14 @@ module Erx
 
     # What an erXos boot gives back as a system's guest (BenchSystem::Booted): measured
     # is the boot's map (its serial log, image SHA-256, flags, compiler, workloads'
-    # SHA-256, QEMU version and the stored log a replayed boot came from), answer its
+    # SHA-256, QEMU version, kernel command line and the stored log a replayed boot came from), answer its
     # lines judged (BenchMeasurement.boot), memory_mib the machine's, pinned whether its
     # program bound each thread its cells time to a CPU (BenchSystem::Booted).
     def self.booted(measured, answer, memory_mib:, pinned:)
       BenchSystem::Booted.new(
         clock: answer.fetch(:clock) || {}, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
-        environment: { 'memory_mib' => memory_mib, 'machine' => 'virt', 'qemu' => measured.fetch(:qemu_version) }.compact,
+        environment: { 'memory_mib' => memory_mib, 'machine' => 'virt', 'qemu' => measured.fetch(:qemu_version),
+                       'command_line' => measured[:command_line] }.compact,
         subject: measured.slice(:image_sha256, :flags, :compiler, :workloads).transform_keys(&:to_s),
         logs: [{ serial: BenchRecord.boot_log(measured.fetch(:serial)) }], reused_from: measured.fetch(:reused_from),
         pinned: pinned

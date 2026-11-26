@@ -1508,10 +1508,14 @@ module Erx
         flags.on('--accel NAME', %w[tcg hvf], 'boot, g3, g5, bytes and web only: the guest accelerator') { |value| options[:accel] = value }
         flags.on('--systems LIST', Array, 'a declared benchmark only: the systems booted side by side under HVF') { |value| options[:systems] = value }
         flags.on('--profile NAME', 'with --systems only: landing, one round, or full, three') { |value| options[:profile] = value }
+        flags.on('--kernel-words LIST', Array, "with --systems only: words added to erxos's native boot's kernel command line") do |value|
+          options[:kernel_words] = value
+        end
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       return bench_session(name, options) if options.key?(:systems)
       raise OptionParser::InvalidArgument, '--profile applies only with --systems' if options.key?(:profile)
+      raise OptionParser::InvalidArgument, '--kernel-words applies only with --systems' if options.key?(:kernel_words)
 
       inapplicable = { 'boot' => %i[iterations samples flavour], 'g3' => %i[iterations samples runs],
                        'g5' => %i[iterations samples image flavour runs],
@@ -1725,7 +1729,7 @@ module Erx
     # the side-by-side tables of the runs. The history root is checked before any boot.
     # The exit status is nonzero if any boot failed.
     def self.bench_session(name, options)
-      refused = options.keys - %i[systems profile]
+      refused = options.keys - %i[systems profile kernel_words]
       unless refused.empty?
         raise OptionParser::InvalidArgument, "#{refused.map { |option| "--#{option}" }.join(', ')} do not apply to bench #{name} --systems"
       end
@@ -1734,7 +1738,8 @@ module Erx
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       history = BenchRecord.history
       BenchRecord::Destination.new(history: history, erxos_root: ROOT)
-      guests = [NativeBench::Guest.new(run: NativeBench::Run.new(root: ROOT, runner: runner)),
+      guests = [NativeBench::Guest.new(run: NativeBench::Run.new(root: ROOT, runner: runner,
+                                                                 kernel_words: options.fetch(:kernel_words, []))),
                 XdomainBench::Guest.new(run: XdomainBench::Run.new(root: ROOT, runner: runner)),
                 L4ReBench::Guest.new(build: L4ReBench::Build.new(directory: File.join(ROOT, 'build/l4re')),
                                      qemu: Qemu.new(root: ROOT, runner: runner), platform: Platform.development(ROOT)),

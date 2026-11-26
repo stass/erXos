@@ -118,6 +118,10 @@ module Erx
     # (docs/design-bench.md, "The boot name"), on its command line.
     QEMU_BOOT_NAME = '0' * 32
     QEMU_COMMAND_LINE = "#{NAME_WORD}#{QEMU_BOOT_NAME}".freeze
+
+    # A QEMU boot's kernel command line: the boot name, then the words the caller adds
+    # (bench --kernel-words, such as erx.trace=0), which the run's record keeps.
+    def self.command_line(words) = [QEMU_COMMAND_LINE, *words].join(' ').freeze
     # The root's naming line at its end, done or deadline, as one line of the serial log,
     # with or without its line end: QEMU's bench-done checkpoint and timed_out's one pattern.
     END_LINE = /\Aerx: bench: boot [0-9a-f]{32} (?<form>done|deadline)\r*$/n
@@ -243,18 +247,20 @@ module Erx
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
-                     platform: Platform.development(root))
+                     platform: Platform.development(root), kernel_words: [])
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
         @platform = platform
+        @command_line = NativeBench.command_line(kernel_words)
       end
 
       # One boot of benchmark's image, seeded with seed's fault if given, under accel at
       # cpus CPUs, with the kernel as last built unless asked to rebuild: its serial log,
       # its seconds, the guest's lines, the image's SHA-256, its root's build flags,
-      # QEMU's version, and the stored log a replayed boot came from (nil for a fresh one).
+      # QEMU's version, the kernel command line, and the stored log a replayed boot came
+      # from (nil for a fresh one).
       def call(benchmark, accel:, cpus:, seed: nil, build: false, jobs: 4)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build_for(@platform, jobs: jobs) if build
@@ -267,7 +273,8 @@ module Erx
         NativeBench.check_end(serial)
         { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds'),
           lines: NativeBench.guest_lines(serial), image_sha256: report.fetch('image_sha256'), flags: flags,
-          compiler: @compiler, qemu_version: report['qemu_version'], reused_from: report['reused_from'],
+          compiler: @compiler, qemu_version: report['qemu_version'], command_line: @command_line,
+          reused_from: report['reused_from'],
           timed_out: NativeBench.timed_out(serial) }.freeze
       end
 
@@ -292,7 +299,7 @@ module Erx
 
       def boot(built, accel:, cpus:, directory:, deadline_seconds:)
         Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: cpus, image: built.single,
-                                                   memory_mib: MEMORY_MIB, command_line: QEMU_COMMAND_LINE,
+                                                   memory_mib: MEMORY_MIB, command_line: @command_line,
                                                    checkpoints: NativeBench.checkpoints(deadline_seconds: deadline_seconds),
                                                    machine_end: true, directory: directory)
       rescue Error => e

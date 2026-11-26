@@ -10,7 +10,7 @@ class BenchCompareTest < Minitest::Test
   Record = Erx::BenchRecord
   Compare = Erx::BenchCompare
 
-  def environment(kind, system: 'erxos') = Record::Environment.new(kind: kind, model: 'Mac16,10', cpus: 4, system: system, details: {})
+  def environment(kind, system: 'erxos', details: {}) = Record::Environment.new(kind: kind, model: 'Mac16,10', cpus: 4, system: system, details: details)
 
   def cell(median: 100, bucket: 2, batch: 1, status: 'measured')
     Record::Cell.new(
@@ -25,9 +25,9 @@ class BenchCompareTest < Minitest::Test
   end
 
   # A record of one boot per cell given, at positions 1, 2 and so on.
-  def record(cells, kind: 'qemu-hvf', system: 'erxos', load: [0.5, 0.5], reused_from: nil)
+  def record(cells, kind: 'qemu-hvf', system: 'erxos', load: [0.5, 0.5], reused_from: nil, details: {})
     Record::Record.new(
-      environment: environment(kind, system: system),
+      environment: environment(kind, system: system, details: details),
       subject: Record::Subject.new(revision: 'a' * 40, dirty: false, details: {}),
       run: Record::Run.new(date: Time.utc(2026, 11, 23), started_by: 'manual', load: load, host_cpus: 12,
                            reused_from: reused_from, details: {}),
@@ -37,8 +37,9 @@ class BenchCompareTest < Minitest::Test
     )
   end
 
-  def side(kind: 'qemu-hvf', system: 'erxos', load: [0.5, 0.5], reused_from: nil, cell: nil, **cell_options)
-    record = record([cell || cell(**cell_options)], kind: kind, system: system, load: load, reused_from: reused_from)
+  def side(kind: 'qemu-hvf', system: 'erxos', load: [0.5, 0.5], reused_from: nil, cell: nil, details: {}, **cell_options)
+    record = record([cell || cell(**cell_options)], kind: kind, system: system, load: load, reused_from: reused_from,
+                                                    details: details)
     Compare::Side.new(record: record, cell: record.boot.cells.first)
   end
 
@@ -50,6 +51,15 @@ class BenchCompareTest < Minitest::Test
     assert_match(/system/, error.message)
     assert_match(/linux against erxos/, error.message)
     assert_raises(Erx::Error) { verdict([side, side, side], [side(system: 'linux')]) }
+  end
+
+  # A run booted with erx.trace=0 (bench --kernel-words) shares its environment's name with
+  # one booted without; the kernel lines in their details keep them apart.
+  def test_runs_booted_with_different_kernel_lines_are_never_compared
+    off = side(details: { 'command_line' => 'erx.arg=0 erx.trace=0' })
+    error = assert_raises(Erx::Error) { Compare.comparable!(off, side(details: { 'command_line' => 'erx.arg=0' })) }
+    assert_match(/kernel command lines differ/, error.message)
+    Compare.comparable!(off, side(details: { 'command_line' => 'erx.arg=0 erx.trace=0' }))
   end
 
   def test_a_mean_has_no_distribution_to_compare

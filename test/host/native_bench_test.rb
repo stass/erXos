@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'tmpdir'
 require_relative '../../tools/lib/erx/native_bench'
 require_relative '../../tools/lib/erx/bench_suite'
 require_relative '../../tools/fuzz/bench_line'
@@ -161,6 +162,21 @@ class NativeBenchTest < Minitest::Test
     assert_equal "erx.arg=#{'0' * 32}", Erx::NativeBench::QEMU_COMMAND_LINE
     assert_match(/deadline/, Erx::NativeBench.timed_out("erx: bench: boot #{name}\nerx: bench: boot #{name} deadline\r\n"))
     assert_nil Erx::NativeBench.timed_out("erx: bench: boot #{name}\nerx: bench: boot #{name} done\r\n")
+  end
+
+  # bench --systems --kernel-words adds words to the native boot's line after its name, and
+  # the run's record keeps the line, so a run with erx.trace=0 is told from one without.
+  def test_the_callers_kernel_words_follow_the_boot_name_and_reach_the_record
+    line = Erx::NativeBench.command_line(['erx.trace=0'])
+    assert_equal Erx::NativeBench::QEMU_COMMAND_LINE, Erx::NativeBench.command_line([])
+    assert_equal "erx.arg=#{'0' * 32} erx.trace=0", line
+    Dir.mktmpdir('erx-native-bench-') do |directory|
+      serial = File.join(directory, 'serial.log').tap { |path| File.write(path, "erx: bench: boot\n") }
+      measured = { qemu_version: 'QEMU 0', command_line: line, image_sha256: '0' * 64, flags: [], compiler: 'clang',
+                   serial: serial, reused_from: nil }
+      booted = Erx::BenchLanding.booted(measured, { clock: nil, cells: [], refused: [] }, memory_mib: 512, pinned: false)
+      assert_equal line, booted.environment.fetch('command_line')
+    end
   end
 
   # The hang seed spins after the root reports nullcall's first cell: the boot ends at the
