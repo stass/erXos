@@ -4,8 +4,11 @@ This document is erXos's Bluetooth stack: how a Bluetooth controller
 reaches erXos, which domain parses what it sends, how an erXos machine
 advertises itself, serves the GATT services that apps declare to a phone,
 carries a serial line to a phone, and pairs and bonds with LE Secure
-Connections; and, as later stages, Wi-Fi provisioning from a phone, HID
-over GATT into the display's input router, and classic Bluetooth. It
+Connections; what the maker of a device writes to use each of these
+([The interface](#the-interface)); and, as later stages, a service's
+own octets in the advertising, Wi-Fi provisioning from a phone, the
+central role, for HID over GATT into the display's input router and for
+apps that read other devices, and classic Bluetooth. It
 refines the unit rule of
 [design-shared-devices.md](design-shared-devices.md#the-unit-rule), the
 Raspberry Pi 4's UARTs of
@@ -20,7 +23,15 @@ Decisions every reader needs:
   machine that a phone app finds, connects to and talks to: it
   advertises its name and service UUIDs, serves GATT, carries a serial
   line and pairs. The central role (scanning, connecting, a GATT client)
-  arrives with HID over GATT, a later stage.
+  is a later stage with two users: HID over GATT inside the Bluetooth
+  domain, and apps, through the same facet and the same declarations
+  ([The central role](#the-central-role)).
+* **A device plugs in at four places, each with one home.** What a
+  phone sees is declared as data in `abi/gatt`; an Erlang process
+  handles it through the `ble` facet; pairing and bonds are commanded in
+  a file tree at `/bluetooth`; and what the stack observes is read at
+  `/proc/bt` ([The interface](#the-interface)). Only Erlang code uses
+  the `ble` facet.
 * **One table, one gate.** The GATT attribute table is configuration:
   it is built from checked-in service declarations that the manifest
   selects, and it never changes while the Bluetooth domain lives. Every
@@ -59,7 +70,17 @@ Decisions every reader needs:
   only ever made, never replaced.** LE Secure Connections only, with a
   16-octet key; a window is an open file, ends with its first pairing,
   and opens to a radio peer only after the wait that SMP asks after a
-  failed pairing.
+  failed pairing. Whoever holds the control tree is the machine's
+  Bluetooth administrator: a person at a shell, or the one app a device's
+  maker gives it to.
+* **A bond is the machine's, and a handler knows a bonded phone by its
+  bond, never by an address.** A bond reaches every service at its
+  level. Each bond has a random name made with it, which only a link
+  encrypted with that bond's key carries to a handler, so an app that
+  keys its own records by it cannot be fooled by a copied address or a
+  later pairing. The name is not a secret: every handler on that link
+  hears it, so it lets apps tell phones apart and also lets them
+  recognize one phone across services.
 * **Bonds are machine secrets.** Release builds keep them in a sealed
   state slot of the vault, an opaque blob the vault never parses
   ([design-system.md](design-system.md#state-slots)); development builds
@@ -290,6 +311,78 @@ Each names its consumer.
 | B8 | The trusted base parses no radio bytes | the system domain's integrity ([design.md](design.md#decisions)) | 1 |
 | B9 | Every bring-up starts from one state, whatever the last one left | restarts of the controller, the Bluetooth domain and the line | 1 |
 | B10 | A connection's name never names a later connection | apps that notify after a phone left | 2 |
+| B11 | Someone can open a pairing window, read the bonds and forget one, on every image that can pair | the administrator of a development board; a device's own app, which pairs a phone when its button is pressed or from its settings screen | 4 |
+| B12 | A handler tells bonded phones apart by a name that a link carries only once it is encrypted with that bond's key, and never by an address | an app that gives each phone its own rights: a lock's owner and its guests, the users of a kiosk or a head unit | 4 |
+| B13 | A handled service puts a few octets of its own into the advertising, in room its declaration reserves | a vendor's phone app that tells its devices, or their state, apart before it connects; commissioning schemes whose phone side looks for service data | later |
+| B14 | An app hears the advertisements of the services it declares, connects only to devices that advertise one of them, and reads, writes and subscribes to those services on those devices; it hears no other advertisement | a gateway that collects from Bluetooth sensors; the accessories of a kiosk or a controller that are not HID | later |
+
+What no consumer asks for is not designed, and
+[What waits for a consumer](#what-waits-for-a-consumer) lists it with
+what each would need.
+
+## The interface
+
+This section is the map for someone building a device on erXos: what
+they write, where it goes, and which section defines it. It rests on a
+survey of how other systems let a program use Bluetooth Low Energy
+([research-ble-apis.md](research-ble-apis.md)), whose interfaces fall
+into four shapes: a static attribute table with callbacks (Zephyr,
+Apache NimBLE, ESP-IDF); objects a program builds at run time and
+publishes to a system service that owns pairing (Apple's Core Bluetooth,
+Android); objects on a message bus with a registered pairing agent
+(BlueZ); and central access scoped to named services and one chosen
+device (Web Bluetooth, Android's Companion Device Manager). erXos takes
+one idea from each and no interface whole:
+
+* the **static table** of the embedded stacks, because a device's
+  services are few, fixed and checkable before anything runs
+  ([One table, one gate](#one-table-one-gate));
+* **pairing and the bond list owned by the system**, as on the phone
+  systems, so that no app writes pairing code and none can get it wrong;
+* the **pairing agent as whoever opened one thing**, BlueZ's agent
+  reduced to the opener of a file
+  ([The pairing window](#the-pairing-window));
+* **authority as a list of named services**, Web Bluetooth's rule that a
+  page uses only the services it named, made a manifest grant that the
+  build checks ([The `ble` facet](#the-ble-facet),
+  [The central role](#the-central-role)).
+
+**Four places, each with one home.** The homes are those of
+[design.md](design.md#decisions): observed state at `/proc`, a thing
+someone commands as a file tree its owner serves, a live conversation as
+a declared protocol.
+
+| A device's maker | Writes | Home | Defined in |
+| --- | --- | --- | --- |
+| says what a phone sees, what each access requires of the link, and what the machine advertises for the service | a declaration, `abi/gatt/NAME.txt`, which the board's manifest selects | configuration, checked when the image is built | [Declarations](#declarations-abigatt), [Advertising](#advertising) |
+| answers the phone | an Erlang process, the service's handler, over the `ble` facet: an `erx_gatt_service` callback module, or `erx_gatt_serial` for a byte stream; its package names the service in `gatt` | a declared protocol | [The `ble` facet](#the-ble-facet), [The client](#the-client) |
+| pairs phones, lists the bonds and forgets them | reads and writes of the control tree's `pair`, `bonds` and `ctl`, by a person at a shell (`btpair`, `cat`, `echo`) or by the one app the manifest gives the tree | a file tree, mounted at `/bluetooth` | [The pairing window](#the-pairing-window), [Bonds and the store](#bonds-and-the-store) |
+| watches the stack | nothing: the Bluetooth domain reports it | `/proc/bt` | [Inspection](#inspection) |
+
+**What each kind of device uses.**
+
+| Device | Serves | Who opens the pairing window | Beyond stage 4 |
+| --- | --- | --- | --- |
+| a consumer gadget: a lock, a light, a tracker | its own declared services, at `encrypted` or `authenticated`; it tells its owner's phone from a guest's by `bond` | its app, when its button is pressed: `nodisplay` with no screen, `display` with one | the advertised payload (B13) |
+| an industrial sensor or controller | its own services and the standard ones, each a plain declaration | a technician's session over SSH or the console, at commissioning: `btpair display` | the central role, to read other sensors (B14) |
+| a headless box set up from a phone | a setup service | its app, at a button or for a time after power-on: `nodisplay`, so `encrypted` at most | an out-of-band pairing method, for `authenticated` ([Decisions](#decisions), 3) |
+| a kiosk | services for phones that walk up to it | its own app, which shows the passkey on its screen and lists the bonds in its settings | the central role, for accessories; HID over GATT, for keyboards and scanners that type |
+| a head unit | services for the driver's and the passengers' phones | as the kiosk | classic Bluetooth, which hands-free and audio need and no stage here designs |
+
+**A restart costs a reattach.** The attributes are configuration and
+not a handler's objects, so a handler that crashes takes no service
+with it: the service serves its declared values, its supervisor starts
+the handler again, and the handler attaches and sets its values
+([A service belongs to its handler](#a-service-belongs-to-its-handler)).
+An app keeps nothing across a restart to have its services back, and the
+system keeps nothing on its behalf.
+
+**Erlang only.** The `ble` facet's client is Erlang code in the app's
+session. A native program has no route to it: a program holds no facet
+([design-programs.md](design-programs.md#facets)), and none is designed
+here. An app whose logic is native runs it as a helper of its Erlang
+application, which holds the service
+([What waits for a consumer](#what-waits-for-a-consumer)).
 
 ## The construction
 
@@ -396,6 +489,72 @@ the controller's resources are freed only on its report: a handle's
 outstanding ACL packets return to the credit count at its Disconnection
 Complete, as HCI 4.2 states, and not before.
 
+### A bond's name is made with its key
+
+A handler that gives each phone its own rights needs a name for a
+bonded phone that stays across its connections. No address is one. A
+phone that uses privacy connects from a resolvable private address that
+changes. An identity address is what a peer says it is, and anyone who
+heard it can repeat it. And a name computed from the identity would
+pass to whoever pairs under that identity after a `forget`, since a
+pairing's identity is a claim until a reconnection proves it with the
+pairing's key (SMP 2.4.3.2).
+
+So each bond has an **id**, 128 random bits, written everywhere as 32
+lower-case hexadecimal digits. The store draws it from
+`crypto:strong_rand_bytes/1` in the step that keeps the bond, draws
+again if a kept bond has it, and stores it with the bond
+([Bonds and the store](#bonds-and-the-store)). From that:
+
+* **Only the key brings it.** A handler hears a bond's id only in
+  `connected`, for a link encrypted with that kept bond's key, by the
+  transition that makes the link `bonded` for the gate
+  ([One table, one gate](#one-table-one-gate)). A peer that copied a
+  bonded phone's address has a link with no bond, and a peer that knows
+  an id gains nothing by it: the id is a name the stack attaches to an
+  authenticated link, never something a peer presents.
+* **It dies with its bond.** `forget` ends the bond and its id. The
+  same phone, paired again, is another bond with another id, so what an
+  app recorded under the old one passes to nobody.
+* **It names no later bond, with high probability.** The id is drawn,
+  not counted, and owes nothing to the phone's address or to how many
+  bonds the store has kept. An app's own records can outlive the store:
+  a `forget all` over a state that did not decode, or a data partition
+  made again, starts the store empty, and a counter that began again at
+  1 would hand a stranger's phone the id an app recorded for its
+  owner's. The store keeps no record of ids it no longer holds, so it
+  cannot rule a repeat out: two given bonds share an id with a
+  probability of 2^-128, and among all the bonds a machine ever makes,
+  n of them, some two share one with a probability below n^2 / 2^129.
+  A repeat among the bonds the store holds is ruled out, by drawing
+  again.
+
+**What the id is not.** It is not a secret and not a credential. Every
+handler of every service a link reaches hears the id of the link's
+bond, whether or not the phone used that handler's service, so two
+apps that compare notes recognize the same phone, and an app that logs
+ids learns when each bonded phone comes and goes. What the id promises
+is narrower: a handler that is told an id is talking over a link
+encrypted with that bond's key. An app that must not learn which bonded
+phones come near is served by no grant of this design
+([Open decisions](#open-decisions), 3).
+
+**What `forget` promises.** A confirmed `forget` takes the bond, its
+key and its id off the medium, and the domain's next start does not
+bring them back ([Bonds and the store](#bonds-and-the-store)). It does
+not survive a rollback of the medium: a vault medium rolled back to an
+older machine file brings back the older blob, with every bond and id
+it held, as it brings back every other machine secret
+([design-system.md](design-system.md#state-slots)), and a development
+data partition restored from an older copy brings back the older
+directory.
+
+A handler's `connected` carries no address at all
+([The `ble` facet](#the-ble-facet)): an address in the event would
+invite an app to key on it. The control tree names a bond by the same
+id, in `bonds`, in a window's `bonded` line and in `forget`, so a bond
+has one name wherever it is named.
+
 ### A service belongs to its handler
 
 A served service has at most one handler, the process that attached to
@@ -500,6 +659,10 @@ round trip to a handler is one step out and one step back.
 | a window closed as its pairing completes leaves a kept bond counted failed, or a failure kept | the link's one step that hands the bond to the store decides which side the close fell on, and the store's answer is the outcome |
 | an app's crash leaves dangling attributes | attributes are configuration; the handler detaches, and its service serves its declarations |
 | a removed or restarted app's late `set` or notification, or a phone's bytes buffered for it, reaches the service's next owner | a service's state is its handler's, and every effect and every write is compared with the handler it was made under ([A service belongs to its handler](#a-service-belongs-to-its-handler)) |
+| an app keys a phone's rights by an address, which a peer copies | a handler hears no address; a bond's id comes only with the bond's key ([A bond's name is made with its key](#a-bonds-name-is-made-with-its-key)) |
+| a phone paired after a `forget`, or after the store was lost, inherits what an app recorded for an earlier bond | a bond's id is drawn with the bond and ends with it |
+| a handler's advertised octets overflow the advertising data, or stay after the handler | their room is reserved by the declaration and checked when the image is built, and they are their handler's, as its values are ([Advertising](#advertising)) |
+| a compromised Bluetooth domain serves a link as `ctl`, and an administrator's `echo forget all > /bluetooth/ctl` empties one of the administrator's own files | no link in the control tree is followed ([The Bluetooth domain](#the-bluetooth-domain)) |
 
 ## Stages
 
@@ -507,9 +670,10 @@ The work is ordered by the first consumer, a phone app talking to an
 erXos device, in four stages whose sections follow: the controller and
 advertising, the GATT server, the serial service, and pairing and
 bonding. Each ends in a demo against a phone and a test against Bumble
-([On QEMU against Bumble](#on-qemu-against-bumble)); Wi-Fi
-provisioning, HID over GATT and classic Bluetooth come after them
-([Later stages](#later-stages)). [plan.md](plan.md#track-b-bluetooth)
+([On QEMU against Bumble](#on-qemu-against-bumble)); the advertised
+payload ([Advertising](#advertising)), Wi-Fi provisioning, the central
+role with HID over GATT and with apps as centrals, and classic Bluetooth
+come after them ([Later stages](#later-stages)). [plan.md](plan.md#track-b-bluetooth)
 schedules the work.
 
 Stages 1 to 3 need no Security Manager: until stage 4 the link answers
@@ -553,8 +717,11 @@ the release otherwise only loads, declared per script
   `bt@pi.example.com` advertises `pi`
   ([design-system.md](design-system.md#identifiers)). The release's boot
   script starts `erx_bt`, and the `crypto` it requires, before init's
-  ready report, and `erx_bt` then runs only the mint of `ble` ([The
-  `ble` facet](#the-ble-facet)); the row's `-eval`,
+  ready report, and `erx_bt` then runs only the domain's two mints, of
+  `ble` ([The `ble` facet](#the-ble-facet)) and of `bluetooth`, the
+  control tree (below), since a mint named after the ready report is
+  refused ([design-system.md](design-system.md#facets-a-configured-domain-serves));
+  the row's `-eval`,
   `ok=erx_bt_top:start_stack()`, starts the rest, `erx_bt_sup`, once
   init holds the ready answer's facets, the `line` grant among them, as
   the PCIe domain starts its enumerator
@@ -568,11 +735,97 @@ the release otherwise only loads, declared per script
 
 It serves three things: the `ble` facet to apps, as the service `ble`
 that the manifest declares beside the domain's row ([The `ble`
-facet](#the-ble-facet)); its **control tree**, an instance of `files`
-with `ctl` and `pair` ([Stage 4](#stage-4-pairing-and-bonding)), which
-the manifest grants to administrators' sessions and to whichever app
-templates it names; and its state at `/proc/bt`, through the inspection
-schema ([Inspection](#inspection)).
+facet](#the-ble-facet)); its **control tree**, the service `bluetooth`,
+with `pair`, `bonds` and `ctl` ([Stage 4](#stage-4-pairing-and-bonding));
+and its state at `/proc/bt`, through the inspection schema
+([Inspection](#inspection)).
+
+**The control tree.** The manifest declares the service `bluetooth`
+beside the domain's row, as it declares `ble`, and the domain mints its
+grants with `erx_fs_mint`, the mint of every files service a configured
+domain serves, as the storage domain mints `data`
+([design-system.md](design-system.md#facets-a-configured-domain-serves)).
+The tree's server, the window process `erx_bt_fs`, starts with the
+rest of the stack after the ready report, so the mint uses
+`erx_fs_mint`'s deferred mount, as the storage domain's mint waits for
+its volume ([design-storage.md](design-storage.md#the-system-tree)):
+`erx_bt_top` starts the mint from the boot script and registers it as
+`erx_bt_tree_mint`; the mint names itself the service's mint and
+acknowledges its start, both before the ready report, and only then
+runs its mount, `erx_bt_fs:mounted/0`, which waits for the message
+`{erx_bt_fs, Pid}` that `erx_bt_fs` sends the registered mint as it
+starts and answers `Pid`, the argument every grant of the tree serves
+from. A mint request that arrives first waits in the mint's queue, as
+it does in the storage domain's. The wait ends when the stack has
+started, whose one wait is the store's first read, bounded by
+`bt_store_timeout_ms`, 5 s, inside the domain service's 10 s deadline
+for a mint ([design-system.md](design-system.md#facets-a-configured-domain-serves));
+a grant whose mint misses that deadline fails and is logged, as any
+mint's does, and the domain's next incarnation mints it again.
+`erx_bt_fs` is a temporary, `significant` child of `erx_bt_sup`, as
+the store and the registry are, so its end ends the domain, and with
+it the mint and every grant of the tree; the domain service restarts
+the domain, and the new incarnation mints every grant anew
+([Concurrency](#concurrency)). No grant ever holds the pid of a window
+process that has ended, and nothing re-binds one.
+A grantee mounts it at `/bluetooth`, a row of `erx_ns`'s table of mount
+points beside `/machine` and `/media`
+([design-files.md](design-files.md#building-binding-and-mounting), "A
+facet's mount"); a session whose template holds no grant of it has no
+`/bluetooth`, as one without `machine` has no `/machine`
+([Open decisions](#open-decisions), 1, weighs `/svc`).
+
+* **Its interface is its own, and no link in it is followed.**
+  `abi/services` declares `bluetooth` as an interface of its own, as it
+  declares `media`: a tree that speaks 9P2000.L as `files` does, with
+  `files`'s quantities and one parameter, its rights, `ro` or `rw`, and
+  `rw` where a row states none. What
+  differs from `files` is what differs for `media`
+  ([design-drives.md](design-drives.md#links-and-rights)): the tree's
+  server parses what strangers send, so a link in it is a stranger's,
+  and the resolver follows none, answering `eacces` where it would
+  ([design-files.md](design-files.md#resolving-a-path), "Symbolic
+  links"). The mark comes with the facet's interface number, which the
+  domain service sets from the manifest and no server's reply does, so
+  it holds for every mount and bind of the tree. Without it a Bluetooth
+  domain taken over from radio range could serve `ctl` as a link to
+  `/etc/start.conf`, and the administrator's next `echo forget all >
+  /bluetooth/ctl` would empty that file: the takeover would reach,
+  through the administrator's hand, files its row gives it no grant to.
+  The interface admits no `rx`, so nothing runs from the tree.
+* **The right is the grant.** Whoever holds the tree `rw` is the
+  machine's Bluetooth administrator: it opens pairing windows, sees
+  each passkey, reads every bond's identity and forgets bonds; a holder
+  of an `ro` grant reads `bonds` and nothing else, since `pair` opens
+  only for reading and writing and `ctl` only for writing. The tree
+  checks no name: there is no administrator flag beside the facet rows,
+  as for `/machine`
+  ([design-system.md](design-system.md#a-sessions-request)).
+* **Who is granted it.** Every development manifest that has a `bt` row
+  grants it `rw` to root's session template, so an administrator at the
+  console, over SSH or in the web client's terminal pairs with `btpair`
+  ([The pairing window](#the-pairing-window)). A release manifest grants
+  it to root's template, to any administrator's template its author
+  lists, and to the app that is the device's pairing interface, by a
+  facet row of a start row's template, as `bleuart` holds `ble`, which
+  names its one holder. An `apps` row may offer it too, by naming
+  `bluetooth` in its `services`, where an app's package says `needs
+  bluetooth` ([design-packaging.md](design-packaging.md#the-apps-row)),
+  and that naming is the board's explicit opt-in: no default and no
+  derived row ever adds it ([Open decisions](#open-decisions), 4). Such a
+  row makes every admitted app that asks an administrator of all the
+  machine's bonds, and a shared signer is no separation between those
+  apps, so a board on which one app should administer Bluetooth grants
+  the tree to that app's template by name instead. `bleuart` holds no grant of it: the console over
+  Nordic's UART service requires no bond and opens no window
+  ([The console](#the-console)).
+* **The store's grant comes with it.** A manifest that grants the
+  control tree also holds the `bt` row's store grant, above: without a
+  store every window answers `eio`
+  ([The pairing window](#the-pairing-window)), so the manifest check
+  refuses a `bluetooth` grant in a manifest whose `bt` row has no
+  store, which would be an image that offers pairing and can never
+  pair.
 
 It is a domain of its own, not a part of the devices domain: what it
 parses comes from anyone in radio range, so it holds no device and no
@@ -1078,6 +1331,10 @@ table, fixed before any peer arrives:
 | subscriptions | one configuration per characteristic with notify or indicate, per link | the table |
 | pairings | one at a time, in an open window, which closes at the first, and none during the pairing wait | the window |
 | bonds | `bt_bonds_max`, 8 | the store |
+| a service's advertised payload | its declared maximum, fitted into the advertising data when the image is built; however fast handlers change what is advertised, one `advertising_changed` outstanding in the controller process's mailbox and one pending write in the core | the registry and the controller process |
+| with the central role: reports kept for one scan | `bt_scan_reports_max`, 32, each with one payload cut to its declared maximum; a scan lasts at most `bt_scan_ms_max` | the controller process |
+| with the central role: what a peer's table makes a link keep | the handles of the declared characteristics of the services the link's owner uses, and nothing else | the link |
+| with the central role: a peer's notifications not yet taken by their owner | `bt_write_queue`, 16; past it the link ends, counted | the link |
 | the stored state | `bt_state_max`, 4 KiB | the store |
 | time | every HCI command 5 s; every handler's answer 5 s; every call of the store's backend 5 s; SMP 30 s (SMP 3.4); an indication 30 s (ATT 3.3.3) | each owner |
 
@@ -1472,9 +1729,10 @@ restart of the group rebuilds the same configuration:
 * `advertising_data` and `scan_response_data`, from `erx_bt_adv:data/1`,
   a pure function of what the registry answers `erx_gatt_srv:advertised/0`:
   the UUIDs of the served services whose declarations say `advertise`
-  and that have a handler now, and GAP's name and appearance; the
-  registry sends the controller process the same answer again at each
-  change ([Advertising](#advertising));
+  and that have a handler now, the payloads those handlers set, and
+  GAP's name and appearance; at each change the registry sends
+  `advertising_changed`, at most one outstanding, and the controller
+  process asks again ([Advertising](#advertising));
 * `patch`: `none` when the row names no patch, else the manufacturer from
   `patch_manufacturer` and the records `erx_bt_patch:records/1` returns
   for the file `patch` names. The file is read whole here, so a file the
@@ -1575,21 +1833,23 @@ its maker checks it against Bumble's address parser.
 The controller process advertises, connectable and undirected, on all
 three channels at a 100 ms interval, while connections are below the
 row's limit. The data are a pure function of the advertised services,
-the name and the appearance, `erx_bt_adv:data/1`, which the controller
-process calls at its start and again at each change of the advertised
-services
+the payloads their handlers set, the name and the appearance,
+`erx_bt_adv:data/1`, which the controller process calls at its start and
+again at each change of the advertised services or of a payload
 ([The controller process's effects](#the-controller-processs-effects)):
 
 * **advertising data:** the Flags structure (LE General Discoverable,
-  BR/EDR not supported) and the list of UUIDs of the services whose
+  BR/EDR not supported); the list of UUIDs of the services whose
   declaration says `advertise` and that have a handler, as complete
-  lists of 16-bit and 128-bit UUIDs;
+  lists of 16-bit and 128-bit UUIDs; and each payload a handler has set,
+  in the order of its service's name (below);
 * **scan response data:** the complete local name, or the shortened name
   where it does not fit, and the appearance when it fits.
 
-Each is at most 31 bytes, and the manifest check computes both and
-refuses a configuration whose advertised UUIDs do not fit; the name is
-shortened rather than refused. The AD type values come from Bumble's
+Each is at most 31 bytes, and the manifest check computes both, with
+every declared payload at its maximum, and refuses a configuration whose
+advertised UUIDs and payloads do not fit; the name is shortened rather
+than refused. The AD type values come from Bumble's
 `core.py:1594-1622`, unverified against the supplement.
 
 **A service is advertised while someone handles it.** The table is fixed
@@ -1597,25 +1857,110 @@ for the domain's life, but which of its services a phone is told of
 follows their handlers: a service that says `advertise` is in the
 advertising data from its handler's `attach` until that handler's end
 ([A service belongs to its handler](#a-service-belongs-to-its-handler)).
-The registry, which already sees both events and sends each link
-`{handler, Service, Handler | none}` at them, also sends the controller
-process `{advertised, Services}` when the set of advertised services
-with a handler changes; the controller process turns it into one input
-of `erx_bt_hci_core`, `{advertising_data, Data}`, `Data` from
+**The registry holds what is advertised; the controller process asks
+for it.** The registry already sees both events, and sends each link
+`{handler, Service, Handler | none}` at them. What is advertised, the
+set of advertised services with a handler and each handler's payload
+(below), is part of its state, which `erx_gatt_srv:advertised/0`
+answers. When that state changes, the registry tells the controller
+process with one message, `advertising_changed`, which carries nothing,
+and only if no such message is outstanding: it marks one outstanding
+when it sends it, and clears the mark when it answers the controller
+process's `advertised/0`. So:
+
+* **The controller's mailbox holds at most one such message**, however
+  fast handlers attach, end or set payloads, and the answer it fetches
+  is always the latest state, never one a later change has replaced.
+* **No change is lost.** A change after the answer finds the mark clear
+  and sends again. A controller process that starts asks `advertised/0`
+  for its configuration, which clears a mark left for a group that
+  ended, and its bring-up advertises the answer; with no controller
+  process registered the registry sends nothing and marks nothing.
+* **A caller never waits on the controller.** The registry answers an
+  `attach`, an `advertise` and a handler's end once its own state has
+  changed, so a facet's request ends with a value the registry holds,
+  never with a message queued behind a busy controller.
+* **No two processes wait on each other.** The controller process calls
+  the registry, which waits on no process; the registry only sends to
+  the controller process.
+
+The controller process turns the answer into one input of
+`erx_bt_hci_core`, `{advertising_data, Data}`, `Data` from
 `erx_bt_adv:data/1`, and the core writes LE Set Advertising Data with
 it at its next free command slot, a later input replacing one not yet
-written. A controller process that starts takes the set in its
-configuration, from `erx_gatt_srv:advertised/0`, and the bring-up
-advertises that, so a change while the group restarts is not missed.
-Nothing restarts, no link ends and the scan response is
-unchanged. That a controller takes LE Set Advertising Data while
-legacy advertising is enabled, and uses the new data from its next
-advertising event, is unverified: no source read for this design
-states it (the command is the Core specification's Vol 4, Part E,
-7.8.7). The Bumble cell and probe B-P7 settle it
-([Board probes](#board-probes)); a controller that refuses it comes back
-to this design. A group restart asks the registry at its start, so a
-change sent to the group that ended is not lost.
+written. Nothing restarts, no link ends and the scan response is
+unchanged. A controller that takes LE Set Advertising Data while legacy
+advertising is enabled uses the new data in the advertising events
+that follow, and an event already under way may use either (HCI 7.8.7,
+Vol 4 Part E); the Bumble cell checks the stack against it, and probe
+B-P7 checks that the Pi 4's patched controller conforms
+([Board probes](#board-probes)).
+
+**A service's payload: its shape is declared, its octets are its
+handler's** (B13). A declaration may reserve one payload for its service
+([Declarations](#declarations-abigatt)): `data MAX`, a Service Data
+structure under the service's UUID, or `manufacturer COMPANY MAX`, a
+Manufacturer Specific Data structure of that company identifier, each
+of at most `MAX` octets. The handler gives the octets with
+`erx_gatt:advertise(Service, Octets)`
+([The `ble` facet](#the-ble-facet)), and the payload is advertised from
+then until the handler's next `advertise`, an empty one taking it out,
+or the handler's end. It is the same construction as a characteristic's
+value: the declaration fixes the room, the owner sets the content, and
+the content ends with the owner
+([A service belongs to its handler](#a-service-belongs-to-its-handler)).
+From it:
+
+* **The advertising never overflows at run time.** The manifest check
+  has already fitted every served service's payload at its maximum, so
+  no `advertise` can be refused for room, and none changes what another
+  service advertises.
+* **A service speaks only under its own name.** Service Data carries the
+  service's own UUID, and the manifest check refuses two served
+  services that declare one company identifier, so no handler puts
+  octets into the advertising under another service's UUID or another
+  maker's company.
+* **One state, one message.** A payload is part of what the registry
+  holds as advertised, so `advertise` changes that state and answers,
+  and the controller process fetches it as above: a handler that calls
+  `advertise` a thousand times while the controller is busy leaves one
+  message in the controller's mailbox and one pending write in the
+  core.
+* **A payload is public.** Advertising is sent in the clear to anyone
+  in range, whatever level the service's characteristics require. A
+  reservation in a declaration is permission to broadcast public
+  octets, and a handler puts there nothing it would not show every
+  scanner.
+
+A payload is in the advertising data, never the scan response, so a
+phone that scans passively sees it. Legacy advertising's 31 octets are
+the room, and each structure in them spends one octet on its length
+and one on its type before its data. The two forms of payload cost
+differently, since Service Data carries its service's UUID again:
+
+| The advertising data hold | Octets before the payload | Most payload octets |
+| --- | --- | --- |
+| Flags (3), the service's 128-bit UUID listed (18), Manufacturer Specific Data with its company identifier (4) | 25 | 6 |
+| Flags (3), 128-bit Service Data with its UUID (18), the UUID not listed | 21 | 10 |
+| Flags (3), the 128-bit UUID listed (18), 128-bit Service Data (18) | 39 | none: it does not fit |
+| Flags (3), a 16-bit UUID listed (4), 16-bit Service Data (4) | 11 | 20 |
+
+So a service with a 128-bit UUID that reserves `data` does not also say
+`advertise`: its Service Data already names it, and the manifest check
+refuses the pair as it refuses any configuration that does not fit.
+Each further advertised service takes its room from the same 31
+octets. The structures' type values come from the same source as the
+others, and the octets each structure spends on its length, type and
+UUID or company identifier are the Core Specification Supplement's
+(Part A, 1.4 and 1.11), not read for this design and unverified until
+they are; `erx_bt_adv` and the manifest check take them from
+`abi/formats/bluetooth.txt`, the one place they are written, and the
+payload test compares `erx_bt_adv`'s data with Bumble's encoder of
+advertising data for each row above. What stays out, each for want of
+a consumer: advertising that goes on while every connection slot is
+taken, which needs non-connectable advertising beside the connectable;
+extended advertising and its longer data; a second payload for one
+service ([What waits for a consumer](#what-waits-for-a-consumer)).
 
 When a connection completes, the controller stops advertising, as it does
 for connectable advertising, and the controller process enables it again
@@ -1640,8 +1985,23 @@ characteristic rx   6e400002-b5a3-f393-e0a9-e50e24dcca9e 244  write open write_w
 characteristic tx   6e400003-b5a3-f393-e0a9-e50e24dcca9e 244  notify open
 ```
 
+A service that asks for security and speaks in the advertising reads:
+
+```text
+# lock: a door lock that its owner's phone opens.
+service lock 5f0e0001-7c1b-4c3a-9d2e-0b6a1f3c8e11 advertise manufacturer 0x1234 2
+#              name    uuid                                 max accesses
+characteristic state   5f0e0002-7c1b-4c3a-9d2e-0b6a1f3c8e11 1   read encrypted notify encrypted
+characteristic command 5f0e0003-7c1b-4c3a-9d2e-0b6a1f3c8e11 16  write bonded
+```
+
 A `service` line gives the service's name, an identifier, its UUID, 16-bit
-or 128-bit, and optionally `advertise`. Each `characteristic` line gives
+or 128-bit, and optionally `advertise`, which lists the UUID in the
+advertising, and one payload, `data MAX` or `manufacturer COMPANY MAX`,
+whose octets the service's handler sets ([Advertising](#advertising)):
+`COMPANY` is the 16-bit company identifier the Bluetooth SIG assigned
+the device's maker, in hexadecimal, and `MAX` the most octets the
+payload holds. Each `characteristic` line gives
 its name, an identifier unique in the service, its UUID, the maximum
 length of its value, at most 512, and the accesses it allows, each with
 the level it requires: `read`, `write`, `write_without_response`,
@@ -1670,7 +2030,9 @@ gives GAP's and GATT's own services, two characteristics of one name or UUID, a 
 over 512, an access without a level or repeated, a `notify` and an
 `indicate` with different levels, a characteristic with no access, an
 initial value longer than its maximum or on a characteristic that is not
-readable, and a byte above 0x7f or a control byte. Nothing
+readable, a second payload, a payload whose maximum is 0 or which
+alone, with the Flags, would not fit one advertising data, a company
+identifier past 16 bits, and a byte above 0x7f or a control byte. Nothing
 reads a declaration at run time, so it is not an input to fuzz.
 
 Which services a machine serves is the manifest's: each `ble` facet row
@@ -1695,7 +2057,8 @@ from any other template would hold it, so that two sessions would
 contend for one service's handler, as `line_grant` refuses one
 ([Who holds `ble`](#the-ble-facet)); a service no file
 declares, a service two rows name,
-two served services of one UUID, and advertising data that do not fit.
+two served services of one UUID or of one company identifier, and
+advertising data that do not fit with every payload at its maximum.
 Every served set is thus a subset of `abi/gatt`'s services with none
 served twice, so the declarations bound what a machine serves and no
 count of its own is needed: the host tests build the table of every
@@ -1795,15 +2158,19 @@ names of `abi/gatt`, an identifier set in strict byte order
 parameter services 1 identifier set 8 bytes 63 checked_by ble_grant
 ```
 
-No handler hears a bonded phone's identity address, the one name of it
-that stays across its connections: a phone that connects from a
-resolvable private address shows that address alone. One that connects
-from its identity address shows it in `address`, to every handler.
+No handler hears an address, neither the one a phone connected from nor
+a bonded phone's identity address: a handler knows a phone by its `Conn`
+while it is connected, and a bonded phone across its connections by its
+bond's id
+([A bond's name is made with its key](#a-bonds-name-is-made-with-its-key)).
+The addresses are the administrator's to see, in the control tree and
+at `/proc/bt`.
 
 The bound is written there once; [Declarations](#declarations-abigatt)
-gives what `ble_grant` refuses. The interface declares the five
-operations below, `attach 1`, `set 2`, `notify 3`, `indicate 4` and
-`reply 5`. A facet row of `ble` says `operations none`, and the facet's
+gives what `ble_grant` refuses. The interface declares the six
+operations below, `attach 1`, `set 2`, `notify 3`, `indicate 4`,
+`reply 5` and `advertise 6`; the central role adds its own, with two
+more parameters ([Apps as centrals](#apps-as-centrals)). A facet row of `ble` says `operations none`, and the facet's
 `admit/3` decides what passes, as the `pcie` facet's does
 ([design-pcie.md](design-pcie.md#processes)), since the boot refuses
 operations on a row whose service a configured domain serves: nothing
@@ -1969,6 +2336,7 @@ answers the writes handed to it.
 | `notify(Conn, Service, Char, Value)` | `ok` once queued for the link, or `{error, busy}` when its queue holds `bt_notify_queue`; `{error, not_attached}` as for `set` |
 | `indicate(Conn, Service, Char, Value)` | `ok` once the phone confirms; `{error, not_attached}` as for `set` |
 | `reply(Req, ok \| {error, Code})` | `ok`: the answer goes to the write's link when `Req` names a write the registry handed to the caller and not yet answered; any other answer is dropped |
+| `advertise(Service, Octets)` | `ok`: the service's payload is `Octets` from now on, until the caller's next `advertise` or its end, and an empty `Octets` takes it out of the advertising ([Advertising](#advertising)); `{error, not_allowed}` when the declaration reserves no payload, `{error, too_long}` past its maximum, `{error, not_attached}` as for `set` |
 
 `Service` is one the grant names; `Char` one the declaration names. A
 handler receives, through the envelope rule, which the client module
@@ -1976,7 +2344,7 @@ handler receives, through the envelope rule, which the client module
 
 | Event | Meaning |
 | --- | --- |
-| `{connected, Conn, #{address := A, bonded := boolean(), level := L}}` | a phone connected, or its link's security changed: `level` is what the link reaches now, `open` until it is encrypted and then its key's, and `bonded` is true once the link is encrypted with a kept bond's key, a resolved bond's or its own pairing's once kept; `A` is the address the phone connected from, a resolvable private address included |
+| `{connected, Conn, #{level := L, bond := none \| Bond}}` | a phone connected, or its link's security changed: `level` is what the link reaches now, `open` until it is encrypted and then its key's, and `bond` is the id of the kept bond whose key encrypts the link, a resolved bond's or its own pairing's once kept, and `none` until then, so it is a bond's id exactly where the gate's `bonded` holds; the event carries no address |
 | `{mtu, Conn, Mtu}` | the bearer's MTU changed; a notification carries at most `Mtu - 3` octets |
 | `{subscribed, Conn, Char, none \| notify \| indicate}` | the phone wrote the characteristic's configuration |
 | `{write, Req, Conn, Char, Value}` | a write the gate allowed; the handler answers `erx_gatt:reply(Req, ok \| {error, Code})`, where `Req` is a reference the registry made for this write, which names it to no other handler, link or write |
@@ -1988,7 +2356,15 @@ link at a time, as ATT's sequential protocol has them; write commands
 queue behind it, within `bt_write_queue`. For a write command the
 handler's answer is awaited and dropped, so the queue is its pace. An
 answer `{error, Code}` with `Code` from `0x80` to `0x9F` is the ATT
-Application Error of that code; Value Not Allowed is `value_not_allowed`.
+Application Error of that code; Value Not Allowed is `value_not_allowed`;
+and `not_authorized` is ATT's Insufficient Authorization (Table 3.4),
+the answer of a handler that knows the phone by its bond and does not
+let that bond write; its code joins `att_error` in
+`abi/formats/bluetooth.txt`. The gate decides what a level may
+do; a handler decides, among the phones that reach it, which may do
+what, and it can refuse only what it is asked: a read never reaches a
+handler ([The attribute table](#the-attribute-table)), so what one
+phone alone may read is sent to it as a notification on its `Conn`.
 No answer within `bt_handler_timeout_ms`, 5 s, is Unlikely Error (`0x0E`). A service with no
 handler serves reads from its values and answers writes Unlikely Error.
 
@@ -2022,9 +2398,9 @@ own session, whose public functions the SDK lists
   sessions, so the end arrives. A second process of the same session
   that attaches a service its sibling holds meets no end and gets
   `{error, attached}` at the deadline: a service has one handler, and
-  an app gives it one process. `set/3`, `notify/4` and `indicate/4`
-  make the facet's operations and answer theirs, except `{error,
-  not_attached}`, at which they exit the calling process with
+  an app gives it one process. `set/3`, `notify/4`, `indicate/4` and
+  `advertise/2` make the facet's operations and answer theirs, except
+  `{error, not_attached}`, at which they exit the calling process with
   `{not_attached, Service}`: the caller is no longer the service's
   owner, and only an attach makes it one.
 * **`erx_gatt_service`**, a behaviour whose process is one service's
@@ -2062,6 +2438,48 @@ own session, whose public functions the SDK lists
   `{serial_lost, Conn}` where it dropped a write's bytes
   ([For apps](#for-apps)), and the `connected`, `subscribed` and
   `disconnected` events; `erx_gatt_serial:send(Conn, Bytes)` calls it.
+
+A holder of the control tree needs no facet, only files: it opens
+`/bluetooth/pair` with `file:open/2` for reading and writing, writes the
+window's mode and reads its lines
+([The pairing window](#the-pairing-window)). One more module of the
+client application, **`erx_bt_pair`**, owns the grammar of the tree's
+lines in both directions, and the reading of them:
+
+* **One bond record.** A bond is named in the tree by one record, the
+  term `#{id := Bond, address := Address, type := public | random,
+  level := authenticated | unauthenticated}` and the text `BOND
+  AA:BB:CC:DD:EE:FF TYPE LEVEL`, `BOND` its 32 hexadecimal digits.
+  `format_bond/1` and `parse_bond/1` are its one formatter and its one
+  parser. A line of `bonds` is a record, and a window's `bonded` line
+  is the word `bonded` and a record, composed and parsed by the same
+  two functions, so the list and the event cannot disagree on a field.
+* **The window's lines.** `format/1` is how the window composes each
+  line, and `parse/1` turns one line into a term: `{wait, N}`,
+  `waiting`, `{passkey, Digits, Address}`, `{bonded, Record}`,
+  `{failed, Address, Reason}`, `{closed, timeout}`, or `invalid` for
+  anything else.
+* **Bounded reading.** A reader takes the tree's files only through
+  `erx_bt_pair:next/1`, which reads with a count of at most
+  `bt_pair_line_max + 1` octets and holds at most that many octets that
+  do not yet end a line. When it holds `bt_pair_line_max + 1` octets
+  with no newline among them it answers `overlong` and reads no more,
+  and the reader closes the file: `btpair` prints `[invalid]` and ends
+  with a failure status, and an app treats it as the end of the window
+  or of the list. `bt_pair_line_max`, 128, is a limit of
+  `abi/formats/bluetooth.txt`; the longest line the window composes,
+  `bonded` with a random identity and an unauthenticated level, is 80
+  octets. A read of `bonds` that yields more than `bt_bonds_max`
+  records is refused the same way. So what another domain writes costs
+  a reader a bounded buffer whatever it sends, and only a compromised
+  Bluetooth domain ever sends a line that long, so ending is the
+  recovery.
+
+What a reader parses is another domain's bytes, so `next/1`,
+`parse/1` and `parse_bond/1` have a fuzz target, and an app that shows
+a passkey shows the digits of a parsed line and never the line. The
+`bt` release ships the client application for `format/1` and
+`format_bond/1`, so the two directions cannot drift.
 
 `bt_attach_retry_ms` and `bt_attach_wait_ms` are limits of
 `abi/formats/bluetooth.txt`, beside `bt_handler_timeout_ms`. That the
@@ -2158,9 +2576,9 @@ that never waits on a link:
 
 1. `erx_bt_store:resolve(Address) -> none | Bond`. The store resolves
    the address against the bonds ([Reconnection](#reconnection)) and
-   answers the one bond it names, with its LTK, level, identity, table
-   hash and subscriptions and without its IRK, so no other bond's key
-   leaves the store. A store left `unknown` by its start's read
+   answers the one bond it names, with its id, LTK, level, identity,
+   table hash and subscriptions and without its IRK, so no other bond's
+   key leaves the store. A store left `unknown` by its start's read
    holds no bonds and answers `none`; one `unknown` after an unconfirmed
    `put` answers from the bonds it holds, so bonds already kept work on a
    trial boot (below). The
@@ -2169,7 +2587,8 @@ that never waits on a link:
 2. `erx_gatt_srv:join(Conn, #{address := Address}) -> #{table := Table,
    values := Values, handlers := Handlers}`. The registry maps `Conn` to
    the link, tells the services' handlers `connected` at level `open`
-   and not bonded, as every link starts, and answers the table, the
+   and with no bond, as every link starts, keeps the address for
+   `/proc/bt` alone, and answers the table, the
    values the current handlers set and each served service's handler or
    `none`. It takes `join`, `set` and every change of a handler in one
    order, so every `set` and every `{handler, ...}` after what it
@@ -2244,7 +2663,7 @@ takes it and forwards nothing.
 | | `{wait, Ms}` | at once, for each `wait` | at `0` the link sends the Security Request unless the phone has begun encryption; otherwise it asks again `Ms` later |
 | link, registry | `{write, Ref, Key, Value, Handler}` | a write the gate allowed; `Handler` is the service's handler as the link knew it when the write's first byte arrived | the service's handler, which the registry hands it under a fresh `Req` when it is `Handler`, and otherwise answers Unlikely Error; without `Handler`, bytes a phone sent while one app owned a service could reach the next ([A service belongs to its handler](#a-service-belongs-to-its-handler)) |
 | | `{subscribed, Key, none \| notify \| indicate}`, `{mtu, Mtu}` | the phone wrote a configuration; the bearer's MTU changed | the handlers' `subscribed` and `mtu` |
-| | `{security, #{level := L, bonded := B}}` | the link's level or `bonded` changed | the handlers' `connected` |
+| | `{security, #{level := L, bond := none \| Bond}}` | the link's level changed, or it became a kept bond's | the handlers' `connected` |
 | registry, link | `{answer, Ref, Answer}` | the handler answered the write `Ref` | the write's response; an answer to a write no longer awaited changes nothing |
 | | `{set, Key, Value}` | a handler set a value | reads return it |
 | | `{handler, Service, Handler \| none}` | an `attach` of the service, or its handler's end | the service's owner as later writes carry it; the link serves the service's declared values and drops its notifications still waiting for credits. Without it a removed app's values and queued notifications would stay before its successor's phones |
@@ -2252,8 +2671,8 @@ takes it and forwards nothing.
 | link, store | `{keep, Tag, Bond, Subscriptions}` | the pairing's third phase ended | the store keeps the bond, tells the window the outcome and, at `ok`, monitors the link ([Bonds and the store](#bonds-and-the-store)) |
 | | `{subscriptions, Subscriptions}` | a link encrypted with a kept bond's key changed a configuration | GATT 3.3.3.3: the Write Response waits for the store's answer |
 | | `{served, Hash}` | a link encrypted with a kept bond's key had Service Changed confirmed | the bond's table hash; not answered, since a hash not kept costs one more Service Changed |
-| store, window | `{outcome, Link, Tag, {bonded, Identity, Level} \| {failed, Reason}}` | the store answered the `keep` of `Link`, the pid it came from | the `bonded` or `failed` line and the pairing wait |
-| store, link | `{kept, ok \| {error, Reason}}` | the store answered `keep` or `subscriptions` | for `keep`, at `ok` the key is a kept bond's, otherwise the link ends; the configuration write's response or Unlikely Error |
+| store, window | `{outcome, Link, Tag, {bonded, Bond, Identity, Level} \| {failed, Reason}}` | the store answered the `keep` of `Link`, the pid it came from | the `bonded` or `failed` line and the pairing wait |
+| store, link | `{kept, {ok, Bond} \| {error, Reason}}` | the store answered `keep` or `subscriptions` | for `keep`, at `{ok, Bond}` the key is the kept bond's, whose id the link's next `security` carries, otherwise the link ends; the configuration write's response or Unlikely Error |
 | | `forgotten` | the link's bond is forgotten, or missing from the state read after a `put` left unconfirmed | the link ends ([Bonds and the store](#bonds-and-the-store)) |
 
 **A pairing's outcome has one ordering point: the link's step that ends
@@ -2490,8 +2909,9 @@ session runs, and the Bluetooth domain advertises `nus` only while it
 has a handler ([Advertising](#advertising)). `service bleuart stop` ends
 the session and its handler with it, and the Bluetooth domain
 writes advertising data without the UART service at the controller's
-next free command slot; from which advertising event the controller
-uses it is unverified until probe B-P7 ([Advertising](#advertising)); `service bleuart start` attaches it again
+next free command slot, and the controller uses the new data from the
+advertising events that follow (HCI 7.8.7), which probe B-P7 checks on
+the Pi 4 ([Advertising](#advertising)); `service bleuart start` attaches it again
 and puts it back. Nothing restarts the Bluetooth domain, and no other
 service or link changes. With `bleuart` off the machine still
 advertises its name, so a scanner lists the machine but a terminal app's
@@ -2553,7 +2973,8 @@ ships it off, and a release build has none.
 | relay (host) | `erx_bleuart` over a stub line and a stub `erx_gatt_serial`: a connection opens one tty with `shell`; each connection's bytes become its own tty's `tty_input` in order and its tty's output reaches its own client; a `serial_lost` sends `tty_hangup` and the bytes after it reach no tty; a burst of `bt_write_queue` writes while a send is pending reaches the tty whole and a master past twice that loses the shell, with a notice; output before `subscribed` is held and taken after it; `disconnected` sends `tty_hangup`; the shell's `exited` ends the relay; `unavailable` sends the one line at the subscription and opens no tty; a refused `open_tty` leaves no tty; the line's end ends `erx_bleuart` | `serial_lost` ignored, so the bytes after the gap continue the line; every event forwarded, so the master's queue grows past the bound |
 | `serial_lost` (host) | `erx_gatt_serial` with an owner whose queue holds `bt_write_queue` messages answers the next write `0x80` and sends one `serial_lost` for a run of three such writes | the bytes dropped with no message |
 | the link's queue (host) | `erx_bt_link_core` holding `bt_write_queue` write commands for a handler ends the link at the next and the registry sends `disconnected` | the command discarded and the link kept |
-| advertising (host) | the registry sends `{advertised, [nus]}` at `nus`'s attach and `{advertised, []}` at its handler's end, and nothing for a service that does not say `advertise`; `erx_bt_hci_core`, in its exhaustive exploration, writes LE Set Advertising Data with `{advertising_data, D}`'s bytes at its next free command slot while advertising, and two inputs before the slot frees write only the later; a controller process started after `nus`'s attach writes data with `nus` before it enables advertising | the registry's message sent at attach only, which keeps the UUID after the handler's end; the controller's ask at its start dropped (the restarted controller advertises without `nus`) |
+| advertising (host) | after `nus`'s attach the registry has sent one `advertising_changed` and `advertised/0` answers `nus`; after its handler's end it answers no service; a service that does not say `advertise` changes neither; `erx_bt_hci_core`, in its exhaustive exploration, writes LE Set Advertising Data with `{advertising_data, D}`'s bytes at its next free command slot while advertising, and two inputs before the slot frees write only the later; a controller process started after `nus`'s attach writes data with `nus` before it enables advertising | the registry's state changed at attach only, which keeps the UUID after the handler's end; the controller's ask at its start dropped (the restarted controller advertises without `nus`) |
+| advertising under a paused controller (host), the registry with a controller process the test suspends with `sys:suspend/1` | a handler calls `advertise` 1,000 times with distinct octets and each call answers `ok`; the suspended process's mailbox then holds exactly one `advertising_changed`; after `sys:resume/1` the next LE Set Advertising Data the core writes carries the last octets, and a further `advertise` sends one more message | the registry sending at every change (the mailbox holds 1,000 messages); the mark cleared when the message is sent rather than at the controller's ask (the mailbox holds 1,000); the state sent in the message rather than fetched (the data written after the resume are the first octets) |
 | `root_line` (host) | the login service answers the console's root session's `tty_line` minted for the grantee with the login facet as opening; with no console session it answers `unavailable` and keeps no row, so a second call is answered | the caller named as the opening, so the line outlives the grant |
 | manifest (host) | the Raspberry Pi 4's development manifest packs; a `login` row listing `root_line` in a release manifest is refused; a `ble` grant to a template with no `start` row, or whose principal's `domains` quota is not 1, is refused; `nus` named by `bleuart` and by the `apps` row's `gatt` is refused | the release rule removed |
 | Bumble (QEMU) | a cell whose manifest runs `bleuart` in the echo's place, since both handle `nus`: a Bumble central's scan shows the UART service; it connects with no pairing, subscribes to `tx`, reads the `% ` prompt, writes `echo hello` and a CR and reads `hello`; `Ctrl-C` interrupts a `top` on the terminal, which nothing else ends; it disconnects; it reconnects and gets a new prompt, and `ps` there lists no more shells than before, so the one it had is gone from root's session; after `service bleuart stop` a scan shows no UART service and after `service bleuart start` it shows it again | the disconnect ignored, so the master lives on with its tty and the old shell is still in root's session (leaving out only the `tty_hangup` proves nothing: the master's end hangs its tty up) |
@@ -2627,7 +3048,11 @@ Manager ignores in every phase.
 
 ### The pairing window
 
-A window is an open fid of the control tree's `pair` file. Opening it
+A window is an open fid of the control tree's `pair` file,
+`/bluetooth/pair` where its holder mounts the tree
+([The Bluetooth domain](#the-bluetooth-domain)), opened for reading and
+writing; any other open answers `eacces`, so a holder of a read-only
+grant opens no window and keeps none from others. Opening it
 while another window is open, or while the pairing a closed window
 admitted has no outcome yet, answers `ebusy`, so the window process
 awaits at most one pairing. The window process takes the store's state
@@ -2652,7 +3077,7 @@ each ASCII the window composes from numbers and addresses alone:
 | `wait N` | the window is open, and the pairing wait has `N` seconds to run |
 | `waiting` | the window is open, the wait has passed, and the machine is bondable (GAP 9.4.3) |
 | `passkey NNNNNN AA:BB:CC:DD:EE:FF` | type this passkey on the phone with this address |
-| `bonded AA:BB:CC:DD:EE:FF TYPE LEVEL` | a bond is kept: its identity, the address with its type `public` or `random`, and its level `authenticated` or `unauthenticated` |
+| `bonded BOND AA:BB:CC:DD:EE:FF TYPE LEVEL` | a bond is kept: the word `bonded` and the bond's record, as `bonds` lists it ([The client](#the-client)): its id, 32 hexadecimal digits ([A bond's name is made with its key](#a-bonds-name-is-made-with-its-key)), its identity, the address with its type `public` or `random`, and its level `authenticated` or `unauthenticated` |
 | `failed AA:BB:CC:DD:EE:FF REASON` | the pairing failed, with its reason ([Refusals](#refusals-and-error-results)) |
 | `closed timeout` | the time ran out |
 
@@ -2731,15 +3156,64 @@ its own link ([Concurrency](#concurrency)). So a guesser gets one try
 per window and at most one per wait, and a fresh passkey for each
 (SMP 2.3.5.6.3).
 
-Who may open a window is who holds the control tree: the manifest grants
-it to administrators' sessions and to the app templates it names, such
-as a vendor app that opens a window when its button is pressed. No
-window opens by itself, at first boot or ever.
+**Who opens a window** is who holds the control tree with the right to
+write ([The Bluetooth domain](#the-bluetooth-domain)), and a device's
+maker chooses among three openers by whom the manifest grants it:
+
+| Opener | How | Mode |
+| --- | --- | --- |
+| a person at a shell: the console, SSH, the web client's terminal | `btpair display` or `btpair nodisplay` | either |
+| the device's own app, on its screen | it opens `pair`, writes `display` and shows the digits of the `passkey` line; a settings screen lists `bonds` and writes `forget` | `display` |
+| the device's own app, at a button | it opens `pair` and writes `nodisplay` when the button is pressed, and closes the file at the outcome | `nodisplay` |
+
+The system opens no window by an act of its own, at first boot or ever.
+An app that opens one at its start, for the minutes after a headless
+box is powered on, does so by the grant its maker gave it, and the
+window is that app's act. No app without the tree can open one, see a
+passkey or learn a pairing peer's address, and no app with only a `ble`
+grant needs to: its declaration states the level, the gate answers a
+phone that has not reached it with the error GAP gives (10.3.1), and
+starting the pairing is the phone's part. A handler learns of a
+pairing only as its link's `connected` event, once the bond is kept.
+
+**A window admits one pairing, in either role.** The window is the
+administrator's consent to one pairing, and it is the same consent
+whichever side starts it: a phone's Pairing Request, or, with the
+central role, a pairing the machine starts on a link it made
+([The central role](#the-central-role)). The first such pairing to
+reach the window takes it, and the window closes at it, as it does for
+a phone. A window does not choose the peer. What the administrator
+sees instead is the peer's address, on the `passkey` line before any
+key is kept and on the `bonded` line after, and a wrong bond is undone
+with `forget`. Under `display`, a peer other than the one the
+administrator meant fails, unless someone at that peer types the
+passkey the machine shows; under `nodisplay`, the nearby attacker who
+can pair during a window can do so in either role, which is the risk
+`nodisplay` already carries (below).
+
+**`btpair`.** The command shell has no redirection that opens one file
+for reading and writing ([design-shell.md](design-shell.md#the-language)),
+and a window is one open file, so a person drives it with a command:
+`btpair display` or `btpair nodisplay`, an Erlang command of the command
+shell ([design-shell.md](design-shell.md#commands)) that declares
+`-erx_needs([bluetooth])`, as `reboot` declares `machine`. It opens `/bluetooth/pair`, writes the mode, and prints each
+line it reads, through `erx_bt_pair:next/1`, until the file ends; its
+own end, an interrupt's included, closes the file and so the window. It
+prints another domain's words, so it prints a line only after
+`erx_bt_pair:parse/1` accepts it, composed again from the parsed
+digits, addresses and words, and `[invalid]` for any other line; a line
+past `bt_pair_line_max` prints `[invalid]` and ends it
+([The client](#the-client)). The rest of the tree needs
+no command: `cat /bluetooth/bonds`, and `echo forget BOND >
+/bluetooth/ctl`.
 
 The `nodisplay` window makes Just Works bonds, unauthenticated: they
 reach `encrypted` characteristics and never `authenticated` ones. A
 nearby attacker can pair during such a window, which is why the level
-is the declaration's to require and the window's to offer.
+is the declaration's to require and the window's to offer. A window
+offers these two methods and no other: Numeric Comparison is not
+offered ([Open decisions](#open-decisions), 2), and a method that works
+out of band waits for its design ([Decisions](#decisions), 3).
 
 **Where the passkey is shown.** A `display` window's passkey reaches a
 person only on the `pair` file, through whatever the opener holds the
@@ -2756,7 +3230,9 @@ NFC or a code the phone scans ([Decisions](#decisions), 3).
 
 ### Bonds and the store
 
-A **bond** holds the phone's identity address, its IRK, the LTK, the
+A **bond** holds its id
+([A bond's name is made with its key](#a-bonds-name-is-made-with-its-key)),
+the phone's identity address, its IRK, the LTK, the
 level, the table hash it was last served, and its subscriptions to
 characteristics with `notify` or `indicate`. The stored **state** is the
 identity address and at most `bt_bonds_max` bonds, encoded by `erx_bt_state`
@@ -2896,12 +3372,14 @@ A pairing that completes asks the store to keep the new state, the
 bond with the subscriptions its link has made so far, under the tag the
 window admitted it by; the store tells the window its answer, which is
 the pairing's outcome however the link has fared since
-([The link's messages](#the-links-messages)). The bond is kept with no
+([The link's messages](#the-links-messages)). The store process draws
+the bond's id in that step and hands it to `erx_bt_state`, which stays
+pure. The bond is kept with no
 table hash, since `keep` carries none, so the first reconnection
 encrypted with its key indicates Service Changed once if the phone
 subscribed to it ([Reconnection](#reconnection)). The link's key
-is a kept bond's once the store answered `ok`, which `connected` tells
-the handlers with `bonded => true`; the link's level does not wait on
+is a kept bond's once the store answered `{ok, Bond}`, which `connected`
+tells the handlers with the bond's id; the link's level does not wait on
 the store ([One table, one gate](#one-table-one-gate)). A pairing whose
 store is `unknown`, or whose `put` is not `ok`, fails `failed ...
 unavailable`, its keys are discarded and the link ends. On a trial boot
@@ -2912,16 +3390,48 @@ fails `unavailable` there, pairing fails, and bonds already kept work.
 **Pairing never replaces a bond.** A pairing whose phone turns out, at
 its key distribution, to have the identity of a bond already kept fails
 with `already_bonded`, its keys discarded; the operator ends a bond with
-`forget AA:BB:CC:DD:EE:FF TYPE` written to the control tree's `ctl`,
-the identity as its `bonded` line showed it, `public` or `random`, or
-`forget all`, and pairs again; a bond is its whole identity, so a
-public and a random address of the same octets are two bonds. A ninth bond fails with `bonds_full`.
+`forget BOND` written to the control tree's `ctl`, the id as its
+`bonded` line and `bonds` show it, or `forget all`, and pairs again; a
+bond is its whole identity, so a
+public and a random address of the same octets are two bonds, each with
+its id. A ninth bond fails with `bonds_full`; a device that must hold
+more phones, a head unit's, asks for a larger `bt_bonds_max`, within the
+state slot's 4 KiB.
 Forgetting a bond ends its connected link: the store sends `forgotten`
 to each link it monitors for that bond
 ([The link's messages](#the-links-messages)). SMP 2.4.3.2 holds a
 distributed identity address valid only once a reconnection has used it
 with the pairing's key; the same caution keeps a claimed identity from
 ever overwriting a kept one.
+
+**A bond is the machine's.** A bond is made with the machine, in a
+window its administrator opened, and reaches every served service at
+its level, whichever app handles it. A phone holds one key for one
+peer, and its own system shows its user one device to pair with; a bond
+that reached one app's services alone would leave the phone bonded,
+refused by the other apps' services, and unable to pair again, since a
+link with a key never pairs. So an `encrypted` access means a phone the
+machine's administrator admitted, and what differs between phones is
+what each handler allows each bond
+([The `ble` facet](#the-ble-facet)). A machine whose apps do not trust
+the phones of one another's users is not served by this
+([Open decisions](#open-decisions), 3).
+
+**`bonds`** is the control tree's list of what `forget` names. It reads
+as one line for each kept bond, in the order of their ids,
+
+```text
+BOND AA:BB:CC:DD:EE:FF TYPE LEVEL
+```
+
+the record a window's `bonded` line carries after its first word,
+composed by the same function (`erx_bt_pair:format_bond/1`) from the state
+the store last read or confirmed. It holds no key, and nothing a peer
+chose but its identity address. While the store is `unknown` since its
+start a read answers `eio`, never an empty list, which would read as a
+machine with no bonds. It is what an app's list of paired phones reads;
+an administrator's session also finds the bonds at `/proc/bt`
+([Inspection](#inspection)).
 
 A bonded link's subscriptions persist across connections, as GATT
 3.3.3.3 requires: a write of a Client Characteristic Configuration that
@@ -2989,18 +3499,86 @@ characteristic needs a passkey shown through a trusted channel, so a
 machine with none waits for an out-of-band method
 ([Decisions](#decisions), 3).
 
+### The central role
+
+A central scans, connects and is a GATT client. It has two users, the
+HID function inside the Bluetooth domain ([HID over GATT](#hid-over-gatt))
+and apps ([Apps as centrals](#apps-as-centrals)), which stand on one set
+of parts and one rule.
+
+**The parts.** The controller process gains passive and active scanning
+(LE Set Scan Parameters and Enable), an advertising report decoder with
+a fuzz target, and LE Create Connection. A link gains the GATT client, a
+pure state machine over the same codec, explored exhaustively. Pairing
+as initiator shares `erx_smp_core`'s checks and runs only in a window,
+as a responder's does, and takes the window as a phone's pairing does
+([The pairing window](#the-pairing-window)). A link the machine made
+serves the table to its peer through the gate, as every link does, and
+connections of both roles count against the `bt` row's one limit.
+
+**A connection goes only to a device that matched.** The controller
+process writes LE Create Connection only for an address it has just
+heard advertise a service the connection's user may use, matched as a
+scan matches (below), or, for a reconnection to a bond, through the
+filter accept list of bonded identities. Nothing a user names reaches
+the controller as a target unless the air confirmed it within the same
+request, so no user can turn the machine's central role on a device
+outside its services.
+
+**One declaration for both roles, one gate for both directions.** A
+service the machine uses on another device is declared in the form and
+the directory of one it serves, `abi/gatt/NAME.txt`, and each word of
+the declaration reads from the other side. The UUIDs are what the client
+looks for. A characteristic's maximum is the longest value the client
+accepts. Its accesses are the operations the client may make. Each
+access's level is what the link must reach before the client makes it,
+or takes what it brings. And `advertise`, `data` and `manufacturer` say
+what a scan matches, as they say what a server advertises. The client
+calls the gate, `erx_gatt_gate:check/2`, before it sends a request and
+before it hands on a notification or an indication. From that:
+
+* **No user of the client takes a peer's data over a link weaker than
+  its declaration asks for.** The reconnection attack on clients, BLESA
+  ([Attack classes](#attack-classes)), is closed by the gate and not by
+  each user's care: the HID function's rule that nothing is asked or
+  taken before encryption with a bond's key is this gate at `bonded`.
+* **A user never sees a handle or a UUID.** Discovery is the link's: at
+  connection it finds, by UUID, the declared services its users named
+  and the handles of their declared characteristics, and keeps nothing
+  else of the peer's table. So a hostile peer's table can make the link
+  hold only what the declarations name.
+* **A value is bounded by its declaration.** One longer than its
+  declared maximum is refused and counted, never delivered.
+* **What can be named at all is an allow-list.** The generator refuses
+  a declaration of the HID service's UUID, as it refuses GAP's and
+  GATT's own ([Declarations](#declarations-abigatt)), so no grant can
+  name a keyboard's reports to read them and none can make the machine a
+  keyboard to a phone; input reaches a display only through the HID
+  function below. Web Bluetooth keeps HID from pages with a list of
+  blocked services ([research-ble-apis.md](research-ble-apis.md)); here
+  nothing is nameable until a declaration is checked in.
+
 ### HID over GATT
 
 A Bluetooth keyboard or mouse types into a display, as a USB one does.
-This stage adds the central role and keeps every rule above:
+This stage uses the central role and keeps every rule above:
 
-* **Central.** The controller process gains passive and active scanning
-  (LE Set Scan Parameters and Enable), an advertising report decoder with
-  a fuzz target, and LE Create Connection to bonded devices through the
-  filter accept list; a link gains the GATT client, a pure state machine
-  over the same codec, explored exhaustively; pairing as initiator
-  shares `erx_smp_core`'s checks, with erXos showing the passkey a
-  keyboard types, in a window as above.
+* **Central.** The parts of [The central role](#the-central-role), with
+  LE Create Connection to bonded devices through the filter accept
+  list, and with erXos showing the passkey a keyboard types, in a
+  window as above.
+* **The first connection is the window's.** A keyboard that has never
+  paired has no bond to reconnect by, so while a window is open, and
+  only then, the HID function scans for a connectable advertiser of the
+  HID service that no bond names, connects to the first it hears and
+  pairs as initiator; that pairing takes the window, as any first
+  pairing does ([The pairing window](#the-pairing-window)). Under
+  `display` the machine shows the passkey and the person types it on
+  the keyboard in their hand, so a neighbour's keyboard in pairing mode
+  fails unless someone types the passkey on it; a mouse, with no keys
+  to type on, pairs Just Works, which only a `nodisplay` window offers.
+  Once bonded, the keyboard reconnects through the accept list with no
+  window.
 * **Input only through a bond.** The HID function of a link, the only
   writer of its input records, starts only when the link is encrypted
   with a bond's key, and the GATT client sends no request before that,
@@ -3025,6 +3603,133 @@ This stage adds the central role and keeps every rule above:
   The domain then has, toward that display, the reach of a person at it
   and no more ([design.md](design.md#threat-model)).
 
+### Apps as centrals
+
+An app reads other devices through its `ble` grant (B14), which says in
+two more parameters what it may do as a central:
+
+```text
+parameter uses 2 identifier set 8 bytes 63 checked_by ble_grant
+parameter links 3 u64 optional range 0 4 checked_by ble_grant
+```
+
+* `uses` names the services of `abi/gatt` the grantee may use on other
+  devices, at most 8. Several grants may name one service: a connection
+  has one owner, a used service has none.
+* `links` is how many connections the row's grantees may hold together
+  as centrals, none where the row states none; a grant without it is
+  refused every central operation, `{error, not_granted}`, by its facet.
+
+**A row's links are counted for all its grantees together.** A row of
+a configured domain or a start row's template has one principal, and
+an `apps` row has as many grantees as installed apps, all drawing on
+one row. So the registry counts a central connection against the
+principal of the grantee that asked for it, the name every mint request
+carries ([design-system.md](design-system.md#facets-a-configured-domain-serves)),
+and counts the connections of every installed app's principal together
+against the `apps` row's `links`. The limits come in `erx_bt`'s
+application key `central`, which the build derives from the manifest's
+`ble` rows as it derives `services`: each principal whose rows state
+`links`, with their sum, and `apps`, with the `apps` row's. A principal
+that `central` does not name is an installed app's, since admission
+refuses an app named as any principal of the manifest
+([design-packaging.md](design-packaging.md#admission)), and every
+principal whose row states `links` is named, both coming from the same
+rows. `ble_grant` refuses a manifest whose `central` limits together,
+the `apps` row's counted once, pass the `bt` row's connection limit, so
+what centrals can take from the slots phones connect to is fixed when
+the image is built, and two apps share the `apps` row's `links` rather
+than each taking them.
+
+An installed app takes `uses` as it takes `gatt`: the `apps` row offers
+the services and its `links`, and a package names the services it uses
+([design-packaging.md](design-packaging.md#the-declaration)), fields
+that design adds with this stage.
+
+**The authority is the list of services, not a choice of device.** The
+phone systems put a chooser the system draws between an app and the
+devices in range, and the person's pick becomes the app's access to one
+device (Web Bluetooth, Android's Companion Device Manager,
+[research-ble-apis.md](research-ble-apis.md)). A device built on erXos
+often has no screen and nobody at it, so no chooser is drawn, and
+nothing here stands in for one: the grant bounds which kinds of device
+an app reaches, by the services it names, and an app reaches every
+device in range that advertises one of them.
+
+| An app might want | It gets |
+| --- | --- |
+| to see what is in the air | reports only of advertisements that match a service it uses: the service's UUID in a list, its Service Data or its company's Manufacturer Specific Data. It hears no report of an advertiser that matches none. Of each one that matches it learns the address and the signal strength, so the device's presence and rough distance; a company identifier matches every product of that company that advertises it, and a phone whose app advertises a used service is reported as any matching device is |
+| to connect | to a device it names by address or by bond, only while that device advertises a service the app uses, which the Bluetooth domain hears within the call |
+| to read and write | the declared characteristics of the services it uses, each at its declared level, and nothing else the device serves |
+| a device that asks for a bond | one made in a window an administrator opened; no app starts a pairing outside one |
+
+The operations join the `ble` interface, and `erx_gatt_client`, a module
+of the client application, makes them and takes the events' envelope
+off:
+
+| Operation | Answer |
+| --- | --- |
+| `scan(Service, Ms)` | `{ok, Reports}` after `Ms` milliseconds, at most `bt_scan_ms_max`, 10 s: one report for each advertiser that matched `Service`, the latest heard from it, at most `bt_scan_reports_max`, 32, the strongest kept. A report is `#{address := Address, rssi := Dbm, connectable := boolean(), payload := none \| Octets}`, the payload the one the declaration reserves, cut to its maximum |
+| `connect(Service, Address \| {bond, Bond})` | `Service` one the grant's `uses` names. The Bluetooth domain scans for at most `bt_scan_ms_max` for an advertisement from `Address`, or from an address that resolves to `Bond`, that matches `Service` as `scan` matches, and only then connects to that address. `{ok, Conn, Found}` once the link is up and discovery has ended, `Found` the used services the device has; the caller is the connection's owner. `{error, not_found}` when no such advertisement is heard, with nothing sent to any device; `{error, limit}` at the count of the caller's principal, or of the apps, or at the row's connection limit; `{error, timeout}` past `bt_connect_timeout_ms` for the connection. A connection to a bond encrypts with its key first; a peer without the key loses the link |
+| `disconnect(Conn)` | `ok` |
+| `read(Conn, Service, Char)` | `{ok, Value}`; `{error, insufficient_security}` when the gate refuses, with nothing sent; `{error, {att, Code}}` for the peer's ATT error; `{error, too_long}` past the declared maximum |
+| `write(Conn, Service, Char, Value)` | `ok` at the peer's response, or once queued for a characteristic that declares `write_without_response` alone; the errors of `read` |
+| `subscribe(Conn, Service, Char, none \| notify \| indicate)` | `ok` once the peer answered the configuration write |
+
+The owner hears `{value, Conn, Service, Char, Value}` for each
+notification and indication the gate allows, `{connected, Conn, #{level
+:= L, bond := none | Bond}}` when the link's security changes, and
+`{disconnected, Conn}`. From the construction:
+
+* **A connection goes only where the call's own scan found it.**
+  `connect` keeps no candidate and trusts no address the caller brings:
+  it confirms in the air, within the call, that the target advertises a
+  service the caller's grant uses. An address made up, or one another
+  app's scan of another service reported, connects to nothing unless
+  that device advertises a service of the caller's, and then the caller
+  could have scanned for it itself. A bond's id gives no more, since an
+  id is a name and not a credential
+  ([A bond's name is made with its key](#a-bonds-name-is-made-with-its-key)):
+  a connection by bond needs the bonded device to advertise a used
+  service too.
+* **A connection belongs to the process that asked for it.** The
+  registry monitors the owner, and the owner's end disconnects, so no
+  link outlives the process that wanted it. Every operation on a
+  `Conn`, `disconnect`, `read`, `write` and `subscribe`, is checked
+  against its owner at the registry, and any other caller, another
+  process of the same app or another app's, is answered `{error, gone}`,
+  as for a `Conn` that has ended, so a `Conn` passed on or seen
+  elsewhere reaches nothing and tells nothing. A link a phone made has
+  no owner, so every client operation on its `Conn` is answered so.
+  Reconnection is the owner's supervisor starting it again; the system
+  restores nothing on an app's behalf.
+* **Requests queue in the link, not in the app.** ATT allows one request
+  at a time on a bearer; the link holds the others, within the facet's
+  `in_flight`, and answers each call in order. No call is refused
+  because another is in progress.
+* **A scan is one bounded call.** There is no stream of reports that a
+  neighbour's advertising rate could pour into an app's mailbox: the
+  Bluetooth domain keeps the latest report of each matching advertiser
+  within the bound, and the call returns them. A listener of broadcast
+  sensors calls again.
+* **A peer's notifications are paced by their taker.** The client
+  answers each `value` it takes; a link holding `bt_write_queue` values
+  not yet taken ends, counted, as one whose write commands outrun a
+  handler does
+  ([What a radio peer can make the domain spend](#what-a-radio-peer-can-make-the-domain-spend)),
+  so a gap in a peer's stream is a disconnection and never silent.
+* **Pairing stays the administrator's.** A request the gate refuses for
+  want of a key starts a pairing, as initiator, only while a window is
+  open, and that pairing takes the window as a phone's would, the first
+  to reach it ([The pairing window](#the-pairing-window)); otherwise it
+  answers `insufficient_security`. The bond it makes is the machine's,
+  with an id, as a phone's is.
+
+What a link the machine made serves to its peer is unchanged: the table,
+through the gate. Client operations on a link a phone made, for the
+services some phones offer their accessories, are not designed
+([What waits for a consumer](#what-waits-for-a-consumer)).
+
 ### Classic Bluetooth
 
 Classic HID (BR/EDR) adds inquiry, an SDP client, L2CAP's
@@ -3034,6 +3739,26 @@ its fuzz target, under the same window and store, and a link kind beside
 the LE link. Cross-transport key derivation stays off unless a consumer
 is named. It is designed when a classic device is needed.
 
+### What waits for a consumer
+
+Each of these was weighed for the interface
+([research-ble-apis.md](research-ble-apis.md)) and is not designed,
+because nothing built or planned needs it. Each names who would ask and
+what it would take.
+
+| Not designed | Who would ask | What it would take |
+| --- | --- | --- |
+| a route to Bluetooth for native programs | an app whose Bluetooth logic is C and cannot sit behind an Erlang handler that starts it as a helper | a program holds no facet ([design-programs.md](design-programs.md#facets)), so either requests of their own in the program protocol, relayed by the program's handler, with a C client generated from `abi/services/ble.txt`, or a file tree for stream-shaped services. Neither changes the Erlang interface |
+| an out-of-band pairing method | an `authenticated` service on a machine with no display and no management channel: Wi-Fi provisioning on a headless box | a carrier for the out-of-band data, NFC or a code printed for each device, and so data written into each device when it is made; SMP's out-of-band exchange in `erx_smp_core` ([Decisions](#decisions), 3) |
+| requests for connection parameters, data length or PHY | a battery-powered peripheral that must stretch its connection interval; a transfer that needs another PHY | LE signaling's parameter update, which a link answers Command Reject today ([Links: the fixed channels](#links-the-fixed-channels)), and the HCI commands; the wish stated in a declaration or the `bt` row, not by a handler's call |
+| L2CAP connection-oriented channels | a bulk transfer GATT is too slow for; a profile that requires one | credit-based channels in the link, with bounds, and operations of their own |
+| a value for one connection, or a read a handler answers | data one phone alone may read, where a notification on its `Conn` will not do | [Alternatives considered](#alternatives-considered), "Reads answered by the handler" |
+| client operations on a link a phone made | a gadget that takes the time or its notices from the phone | the GATT client on a link no app owns, and a rule for who subscribes |
+| advertising while every slot is taken; extended advertising; a second payload | a broadcaster that must be heard while phones are connected | non-connectable advertising beside the connectable, which legacy advertising cannot run at once |
+| more than 4 connections or 8 bonds | a head unit | larger constants in `abi/formats/bluetooth.txt`, within the controller's buffers and the state slot's 4 KiB |
+| a package that brings its own declaration | an app for an image whose maker did not declare its service | [Alternatives considered](#alternatives-considered) |
+| Bluetooth mesh; the HID device role | none named | designs of their own |
+
 ## Security
 
 The Bluetooth domain is outside the trusted base. What it holds and what
@@ -3042,9 +3767,10 @@ a radio peer can do:
 | Adversary | Can | Cannot |
 | --- | --- | --- |
 | A radio peer, anyone in range | send any packet the controller forwards; connect while a slot is free and so hold it; read and write `open` characteristics; pair during a `nodisplay` window and so reach `encrypted` characteristics; on a development build with `bleuart` on, use a root shell of the console's root session ([The console](#the-console)) | reach an `encrypted` characteristic without a bond made in a window, or an `authenticated` one without the passkey the window showed; make the system domain parse a radio byte, since no `ble` grant names it and what a client types on `bleuart` reaches root's session's tty, not the system domain; make the Bluetooth domain hold more than its bounds; replace a bond |
-| An app holding a `ble` grant | attach to, set, notify and indicate the services its grant names, and answer the writes handed to it; keep its facet's requests in flight up to the row's `in_flight` | handle, set or notify a service its grant does not name, which its facet refuses before the registry sees it, an installed app's grant naming only the services admission gave it and no other app; take a service another app or a configured domain holds by installing a package that declares it, which admission refuses; set, notify or receive a phone's bytes on a service once its handler has ended, or leave values or buffered bytes for the service's next owner, since a service's state is its handler's; answer a write handed to another process; reach a link, the store or the controller except through the registry |
+| An app holding a `ble` grant | attach to, set, notify and indicate the services its grant names, and answer the writes handed to it; keep its facet's requests in flight up to the row's `in_flight`; hear the bond id of every bonded link its services reach, and so recognize a bonded phone at each connection and across apps that compare ids; broadcast in the clear the octets its declared payload reserves; with the central role, scan for, connect to and use every device in range that advertises a service its grant uses, within its row's `links` | handle, set or notify a service its grant does not name, which its facet refuses before the registry sees it, an installed app's grant naming only the services admission gave it and no other app; take a service another app or a configured domain holds by installing a package that declares it, which admission refuses; set, notify or receive a phone's bytes on a service once its handler has ended, or leave values or buffered bytes for the service's next owner, since a service's state is its handler's; answer a write handed to another process; reach a link, the store or the controller except through the registry; learn a phone's address, or name a bond no link encrypted with that bond's key showed it; open a pairing window, see a passkey or forget a bond; put octets into the advertising under another service's UUID or company, or past the room its own declaration reserves; connect to a device that does not advertise a service its grant uses, or operate on a connection another process owns |
+| A holder of the control tree, `rw`: an administrator's session, or the app a device's maker gave it | open pairing windows of either mode and so admit a phone to every service at that level; see each passkey and each bond's identity address; forget any bond or all | pair outside a window or faster than the pairing wait, which outlives its windows; replace a bond; read a key; with an `ro` grant, do more than read `bonds` |
 | The controller, its closed firmware | everything a radio peer can; read every LTK erXos gives it; forge what a bonded peer could send | reach anything erXos does not send it: it sees the line, not the machine |
-| A compromised Bluetooth domain | everything the controller can; read the bonds; act as any bonded phone toward the apps it serves; type into `bleuart`'s shells and read them, where `bleuart` runs, as any radio peer can | reach a device, a partition or a facet beyond its row's; reach the system domain but through the `ble` facet's grantees; open the system shell, which no line it reaches carries |
+| A compromised Bluetooth domain | everything the controller can; read the bonds; act as any bonded phone toward the apps it serves; type into `bleuart`'s shells and read them, where `bleuart` runs, as any radio peer can | reach a device, a partition or a facet beyond its row's; reach the system domain but through the `ble` facet's grantees; open the system shell, which no line it reaches carries; make a holder of the control tree read or write a file outside the tree, since no link in it is followed; the false lines it can show that holder gain it nothing, since it already holds every bond and answers every phone |
 
 The vault cannot keep a bond's key from the Bluetooth domain or the
 controller, which needs it in clear in LE Long Term Key Request Reply;
@@ -3098,7 +3824,26 @@ classes and arities.
 * **Tracking.** The identity address is static for an installation, so
   a machine advertising is recognizable while it advertises, as any
   peripheral without privacy is; advertising with resolvable private
-  addresses is a later option with a consumer to name.
+  addresses is a later option with a consumer to name. In the other
+  direction, what is enforced is narrower than "no app can track a
+  phone". A handler is given no phone's address, but it hears the bond
+  id of every bonded link it serves, whether or not the phone used its
+  service, so it can log when each bonded phone comes and goes, and two
+  apps that compare ids recognize the same phone. An app that scans
+  hears only advertisers of the services it declares
+  ([Apps as centrals](#apps-as-centrals)), but of each it learns the
+  address and signal strength, and a company identifier matches every
+  product of that company. A service's advertised payload is public,
+  whatever its characteristics require ([Advertising](#advertising)).
+  Keeping bonded phones' comings and goings from apps would take an
+  authority this design does not give, one that withholds the id from
+  handlers of services the link has not used; no consumer has asked
+  for it ([Open decisions](#open-decisions), 3).
+* **A handler that trusts an address.** An app that gave rights to an
+  address would give them to anyone who copied it. No handler is given
+  one: a bonded phone's name is its bond's id, which only a link
+  encrypted with that bond's key carries
+  ([A bond's name is made with its key](#a-bonds-name-is-made-with-its-key)).
 * **Holding the only slot.** With the default limit of one connection, a
   peer that connects and stays keeps the phone out. This is a security
   residual of the design, which fails safely: the peer reaches only
@@ -3111,9 +3856,9 @@ classes and arities.
 
 `/proc/bt` shows the controller (bring-up state, manufacturer, versions,
 the patch applied, the address it reports and the identity address),
-each connection (`Conn`'s number, the peer's address, the bond's identity
-when resolved, the level, the MTU, subscriptions), each bond (identity
-address, level; never a key), and the counters: framing errors, dropped
+each connection (`Conn`'s number, the peer's address, the bond's id and
+identity when resolved, the level, the MTU, subscriptions), each bond
+(id, identity address, level; never a key), and the counters: framing errors, dropped
 events and frames, refused PDUs, failed pairings by
 reason. A value the domain does not know, such as the version before the
 bring-up reached it, is `unknown`, never a guess. The line service shows
@@ -3135,17 +3880,26 @@ its line at the system domain's `/proc`: bytes each way, breaks, resets.
   controller group in the domain's `rest_for_one` supervisor, so a
   controller restart ends every link, every handler hears `disconnected`
   for each, and handlers stay attached.
-* **No facet outlives the registry.** The store and the registry are
-  temporary, `significant` children of `erx_bt_sup`, whose
-  `auto_shutdown` is `any_significant`, so the end of either ends
-  `erx_bt_sup` and so the domain, and every facet ends with the mint: no
-  handler stays attached to a registry that has forgotten it, and none
-  needs telling. Each facet finds the registry by name at each request,
+* **No facet outlives the registry, and no grant of the control tree
+  outlives its server.** The store, the registry and the window process
+  are temporary, `significant` children of `erx_bt_sup`, whose
+  `auto_shutdown` is `any_significant`, so the end of any of them ends
+  `erx_bt_sup` and so the domain, and every facet and every grant of
+  the tree ends with its mint: no handler stays attached to a registry
+  that has forgotten it, no grant of the tree serves from a window
+  process that has ended, and none needs telling. Each facet finds the
+  registry by name at each request,
   and one made while the domain stops is refused `{error,
   unavailable}`. A facet never
   blocks on the registry, since `erx_facet` sends a forward with an
   alias and passes the reply on when it comes, and the registry waits on
   no facet.
+* **What is advertised** is the registry's state, and the controller
+  process fetches it with `erx_gatt_srv:advertised/0` after the one
+  `advertising_changed` the registry keeps outstanding; the registry
+  never waits on the controller process, so this call adds no wait
+  cycle, and the controller's mailbox holds at most one such message
+  ([Advertising](#advertising)).
 * **A disconnection during a handler's answer** drops the answer: the
   reply goes to the link's pid, whose process no longer exists; the handler
   has already heard `disconnected` from the registry or hears it next.
@@ -3207,10 +3961,11 @@ The supervision tree of `erx_bt`:
 ```text
 erx_bt_top                      one_for_all, intensity 0
   erx_ble_facet                 the mint of ble, from the boot script; the ble facets
+  erx_bt_tree_mint              erx_fs_mint of bluetooth, from the boot script; the tree's grants
   erx_bt_sup                    rest_for_one, from the row's -eval
     erx_bt_store                the identity address and the bonds
-    erx_gatt_srv                the table, handlers, Conn map
-    erx_bt_fs                   the control tree and the window
+    erx_gatt_srv                the table, handlers, Conn map, advertising state
+    erx_bt_fs                   the control tree's server and the window
     erx_bt_host_sup             one_for_all, at most 5 restarts in 60 s
       erx_bt_link_sup           a temporary link per connection
       erx_bt_line_rx            the reader, registered
@@ -3221,13 +3976,16 @@ erx_bt_top                      one_for_all, intensity 0
 The console is no part of this tree: `erx_bleuart` and its
 `erx_gatt_serial` run in `bleuart`'s session ([The console](#the-console)).
 
-`erx_bt_top` restarts nothing: the mint's end, or `erx_bt_sup`'s past
-its own intensity, ends `erx_bt`, a permanent application, and so the
+`erx_bt_top` restarts nothing: either mint's end, or `erx_bt_sup`'s,
+ends `erx_bt`, a permanent application, and so the
 domain, which the domain service restarts within the row's intensity,
 as the PCIe domain's supervisor does
-([design-pcie.md](design-pcie.md#processes)). The facets are not
-children of the tree: each is a process the mint started with
-`erx_facet:start/3`, and ends with the mint.
+([design-pcie.md](design-pcie.md#processes)). Both mints start before
+init's ready report, the only time a mint can be named
+([The Bluetooth domain](#the-bluetooth-domain)). The facets are not
+children of the tree: each `ble` facet is a process the mint started
+with `erx_facet:start/3`, and each grant of the control tree a child of
+the `erx_fs_grants` its mint links to itself; each ends with its mint.
 
 The controller group starts in that order, so the controller process
 finds its siblings running and registered when it starts
@@ -3244,7 +4002,7 @@ and stops in the reverse order, the controller process first.
 | a malformed ATT request | the ATT server | nothing: Invalid PDU | none needed |
 | a handler that does not answer in 5 s | the link's deadline | nothing: Unlikely Error | none |
 | the registry's end, or the store's | `erx_bt_sup`, which shuts down at either | the domain, as the mint's end does: every facet, attachment and link | the domain service restarts the domain within its intensity; every handler stops at its facet's end, and its supervisor's restart attaches through the facet the new incarnation mints ([The client](#the-client)) |
-| the mint's end | `erx_bt_top` | the domain: every facet ends with its mint | the domain service restarts the domain within its intensity, and its mint mints every grant anew |
+| the end of either mint, or of the window process | `erx_bt_top`; for the window process, `erx_bt_sup`, which shuts down at it | the domain: every facet and every grant of the control tree ends with its mint | the domain service restarts the domain within its intensity, and its mints mint every grant anew |
 | a handler that ends | the registry's monitor | the handler's attachment: its services' values return to the declared ones, the writes handed to it are left to the links' deadlines, and what phones sent under it reaches no one | the app's supervisor restarts the handler, which attaches again through `erx_gatt`'s retry and sets its values ([The client](#the-client)) |
 | the store answers `unavailable`, returns a blob that does not decode, or leaves a `put` unconfirmed, a backend call past `bt_store_timeout_ms` included | the store | the pairing; at start, the bonds: the domain runs without them and refuses pairing; the configuration write; `forget` | `/proc/bt` and the log say `store_unavailable` or `store_unreadable`; the store is `unknown`; after an unconfirmed `put` a change reads first and fails unless the read succeeds; after the start's read the next start reads again; `forget all` alone replaces a blob that does not decode ([Bonds and the store](#bonds-and-the-store)) |
 | a broken line, its driver's start failed included | the line service | reads of `data`; with no driver, writes too | the controller group's restart writes `reset`, which starts the driver again |
@@ -3265,18 +4023,26 @@ and stops in the reverse order, the controller process first.
 | the control tree's `pair` | `ebusy` | another window is open |
 | | `einval` | a first write other than `display` or `nodisplay` |
 | | `eio` | the store is `unknown` since its start |
-| the control tree's `ctl` | `einval` | any write but `forget ADDRESS TYPE` or `forget all` |
-| | `eio` | `forget ADDRESS TYPE` while the store stays `unknown`, or any `forget` whose `put` is unconfirmed |
-| | `enoent` | no bond has that identity |
-| `ble` facet | `{error, not_granted}` | a service the grant does not name, refused by the facet before the registry sees it |
+| | `eacces` | an open that is not for both reading and writing, so a holder of an `ro` grant opens no window and holds none shut against others |
+| the control tree's `ctl` | `einval` | any write but `forget BOND`, `BOND` 32 lower-case hexadecimal digits, or `forget all` |
+| | `eio` | `forget BOND` while the store stays `unknown`, or any `forget` whose `put` is unconfirmed |
+| | `enoent` | no bond has that id |
+| the control tree's `bonds` | `eio` | a read while the store is `unknown` since its start |
+| | `eacces` | an open for writing |
+| any path of the control tree | `eacces` | a link the resolver would follow ([The Bluetooth domain](#the-bluetooth-domain)) |
+| | `erofs` | a write through an `ro` grant, refused by the grant before any callback ([design-files.md](design-files.md#invariants), F5) |
+| `btpair` | the shell's refusal of a command whose `-erx_needs` its session does not hold; `[invalid]` in place of a line | the session holds no `bluetooth` grant; a line `erx_bt_pair:parse/1` does not accept |
+| `ble` facet | `{error, not_granted}` | a service the grant does not name, refused by the facet before the registry sees it; with the central role, a `Service` its `uses` does not name, or any central operation on a grant without `links` |
+| | `{error, not_found}` | with the central role, a `connect` for which no advertisement from the address, or from one resolving to the bond, matching the service is heard within `bt_scan_ms_max`; nothing is sent to any device |
+| | `{error, limit}` | with the central role, a `connect` past the count of the caller's principal, or of the installed apps together, or past the `bt` row's connection limit |
 | | `{error, attached}` | the service already has a handler: one whose end has not yet reached the registry, the same app's previous session's or, after a removal, the previous owner app's, which `erx_gatt:attach/1` waits out for up to `bt_attach_wait_ms` before it answers this; or another process of the same session that holds the service, which it answers at that deadline |
 | | `{error, not_attached}` | a `set`, `notify` or `indicate` whose caller is not the service's handler: another process of the grantee, or a handler whose end has detached it; `erx_gatt` exits the caller with `{not_attached, Service}` |
-| | `{error, badarg}` | an operation of another shape, or a `reply` whose answer is not `ok`, `{error, value_not_allowed}` or `{error, Code}` with `Code` in `16#80..16#9F`, refused by the facet |
+| | `{error, badarg}` | an operation of another shape, or a `reply` whose answer is not `ok`, `{error, value_not_allowed}`, `{error, not_authorized}` or `{error, Code}` with `Code` in `16#80..16#9F`, refused by the facet |
 | | `{error, unavailable}` | no registry is registered: before the row's `-eval` has started it, or while it restarts |
-| | `{error, no_such_characteristic}`, `{error, not_allowed}` | an unknown name; an access the declaration does not allow |
-| | `{error, too_long}` | a value over the characteristic's maximum, or a notification over the bearer's `Mtu - 3` |
+| | `{error, no_such_characteristic}`, `{error, not_allowed}` | an unknown name; an access the declaration does not allow, an `advertise` for a service whose declaration reserves no payload among them |
+| | `{error, too_long}` | a value over the characteristic's maximum, a notification over the bearer's `Mtu - 3`, or a payload over its declared maximum |
 | | `{error, busy}` | the link's notification queue holds `bt_notify_queue` |
-| | `{error, gone}` | a dead `Conn` |
+| | `{error, gone}` | a dead `Conn`; with the central role, a client operation on a `Conn` the caller does not own, another process's or a link a phone made |
 | | `{error, not_subscribed}`, `{error, insufficient_security}` | the phone did not subscribe; the gate refused |
 | | `{error, timeout}` | an indication unconfirmed in 30 s, after which the link ends (ATT 3.3.3) |
 | installing a package, at `cp`'s close (admission, [design-packaging.md](design-packaging.md#admission)) | `eperm`, `{gatt_not_offered, S}` in the log | the package's `gatt` names a service the `apps` row's `gatt` does not offer, a service a configured domain's row names among them |
@@ -3328,7 +4094,7 @@ Each core's test is paired with the seeded faults it must catch.
 | `erx_pl011:program/1` | `fresh` writes `CR` 0 first, clears `FEN` before the divisors, drains the receive side within 33 reads, writes the divisors before `LCR_H` and `CR` whole last with the flow enables; under flow `none` no step sets `RTSEN` or `RTS`, and under `rts_cts` only the last sets `RTSEN`; `keep` clears no FIFO and programs the divisors only of an unprogrammed UART | `LCR_H` before the divisors, so the rate never latches; `fresh` keeping the boot's divisors; `RTS` set under flow `none` |
 | `erx_smp_crypto` | SMP Appendix D's sample data for `f4`, `f5`, `f6` and `ah` | the AES-CMAC key byte order reversed |
 | `erx_bt_state` | a state round-trips; another version, a truncation and an oversized count are refused; the largest state the declared table allows encodes in at most 4 KiB | the bond count read without its bound |
-| the store's table, against a scripted fake store and a development file over a fake data tree that fails a chosen step | a start reading `unavailable` or an undecodable blob runs with no bonds and refuses pairing, configuration writes and `forget ADDRESS TYPE`, and `forget all` replaces the bad blob; a start reading `none` makes the identity address; a `put` that reached the medium but answered `unavailable` fails the pairing, and the next pairing reads first and keeps its bond; after every confirmed change and read the domain's bonds are the store's; over the development file, a pairing's `put` that the storage completes after its deadline and after a confirmed `forget` of a bond it holds does not bring the bond back at the next start; a lower generation landing late, a `.new` name and names not the store's leave `get`'s blob the highest generation's | `unavailable` read as `none` (a pairing overwrites the stored bonds); the pre-put state kept after an unconfirmed `put` (the failed pairing's bond lost); the development file read at its lowest generation, and an unconfirmed `put` not counted in the next generation (each brings the forgotten bond back); a `.new` name not counted; `forget all` put without reading the generation |
+| the store's table, against a scripted fake store and a development file over a fake data tree that fails a chosen step | a start reading `unavailable` or an undecodable blob runs with no bonds and refuses pairing, configuration writes and `forget BOND`, and `forget all` replaces the bad blob; a start reading `none` makes the identity address; a `put` that reached the medium but answered `unavailable` fails the pairing, and the next pairing reads first and keeps its bond; after every confirmed change and read the domain's bonds are the store's; over the development file, a pairing's `put` that the storage completes after its deadline and after a confirmed `forget` of a bond it holds does not bring the bond back at the next start; a lower generation landing late, a `.new` name and names not the store's leave `get`'s blob the highest generation's | `unavailable` read as `none` (a pairing overwrites the stored bonds); the pre-put state kept after an unconfirmed `put` (the failed pairing's bond lost); the development file read at its lowest generation, and an unconfirmed `put` not counted in the next generation (each brings the forgotten bond back); a `.new` name not counted; `forget all` put without reading the generation |
 | the line's `ctl` grammar | `reset`, with or without newline; everything else `einval` | a prefix match accepting `resetx` |
 | the line service's reset, over a model driver and device service | the five steps in order: the driver started with flow `none` before the off notification, the off and on notifications with their times between, and the driver started with the grant's flow only after the on time; input during the power cycle never reaches a reader; a power `{error, _}` at the off or the on notification ends the holding driver before the next step and, once it has ended, answers `eio`, leaves the line broken with no driver and answers `eio` to a write that arrived during the reset; with no power line, steps 1 and 5 alone | the grant's flow passed to the holding start, so RTS is asserted as the controller powers up; the second start made before the on time has passed; the holding start dropped, so the old driver's settings meet the power-up; the failure path that skips ending the holding driver, so a write queued during the reset reaches the controller under flow `none` |
 | the line keeper's core (`erx_line_core`), explored | from a fresh line, with and without a power line, every event in every reachable state up to three requests and two power-cycling resets, each start both answering and refusing: no driver of flow `none` outside a reset, the one live driver of the grant's flow the core's and the only one sent bytes, a reset always waiting on an event still to come, `ok` only at the fresh start and `eio` only with the line broken | a failed reset answered while its holding driver still runs; a failing reset that never takes its holding driver's end |
@@ -3345,7 +4111,7 @@ Each core's test is paired with the seeded faults it must catch.
 | a notification to a link that ends before answering it | the registry's caller gets `{error, gone}` | the caller's `From` handed to the link in a plain message (the caller waits until its own timeout) |
 | the `ble` facet, over a registry the test registers | a request naming a service its grant names reaches the registry with the grantee's caller in it, and the answer reaches the caller; one naming another service is refused `{error, not_granted}`, and the registry sees nothing; with no registry registered, `{error, unavailable}`; an attaching caller, not the facet, hears the events, and only it answers its writes | the service check dropped from `admit/3` (another app's service attached); the handler taken from the forwarded call's `From` (events go to the facet, which drops them) |
 | `forget` with bonded links connected | the link whose address resolved to the forgotten bond at its start ends; a link of another bond stays | the store taking a link's pid only at `keep` |
-| `forget` by the whole identity | a public and a random bond of the same octets are two bonds: forgetting one leaves the other, and forgetting it again is `enoent` | `forget` matching the octets alone |
+| the two identities of one address | a public and a random bond of the same octets are two bonds with two ids: the second pairing is kept, forgetting one id leaves the other, and forgetting it again is `enoent` | the bonds compared by their octets alone (the second pairing fails `already_bonded`) |
 | `erx_bt_hci_core`'s backlog, case by case | a link that acknowledges nothing is sent exactly `bt_link_backlog` messages, events and ACL packets alike; the next is dropped, the handle's disconnect is asked with `0x14`, and nothing more reaches the link; a link that acknowledges every message is never disconnected; a `taken` naming a gone link changes nothing, even on a reused handle | the bound compared one too late (33 sent); `completed` not counted; `taken` taken without its name (a gone link's acknowledgement lowers the next link's backlog) |
 | the link's backlog through the controller group, a link held at its start by a store that does not answer while the model line delivers 40 ACL packets for its handle | `HCI_Disconnect` with `0x14` is written after the 32nd; the link's mailbox never holds more than 32 of the controller's messages | the bound removed (all 40 delivered) |
 | a pairing's outcome, with the link, the window process and the store running | a window closed after the link's `keeping` leaves the bond kept, the window process logging `bonded` and counting no failure; a window closed before it fails the pairing `withdrawn`, and the store gets no `keep`; a link killed after `keeping` leaves the store's outcome as the pairing's; a window opened before that outcome answers `ebusy` | the window's monitor kept past `keeping` (the killed link counted `disconnected` while its bond is kept); the store's outcome sent to the link alone (the window waits) |
@@ -3357,6 +4123,17 @@ Each core's test is paired with the seeded faults it must catch.
 | `erx_bt_top`'s tree, with a stub controller line | killing `erx_gatt_srv`, and killing `erx_bt_store`, ends `erx_bt_top` and so the application | the registry made permanent (`erx_bt_sup` restarts it and every facet lives on, with no handler attached) |
 | `erx_gatt_service` against a stub facet registry | `start_link` answers `{ok, Pid}` with no `ble` grant installed; once the stub installs it the handler attaches and sets its values; an attach answered `{error, not_granted}` ends the handler with it | the attach made before the answer (the start fails `not_granted` before the session can report ready) |
 | `erx_gatt:attach/1` against a stub facet, on a clock the test moves | a stub that answers `{error, attached}` twice and then `{ok, ...}` gives `{ok, ...}` after two waits of `bt_attach_retry_ms`; one that answers `{error, attached}` throughout gives `{error, attached}` once `bt_attach_wait_ms` has passed, and not before; `{error, not_granted}` and `{error, unavailable}` come back at the first ask; `set/3` answered `{error, not_attached}` exits the caller with `{not_attached, nus}` | the retry removed (the first case answers `{error, attached}`); the deadline removed (the second case asks without end, past the test's own deadline); `not_attached` returned rather than exiting (the caller lives on, detached) |
+| a bond's id, in `erx_bt_state` and the store over a fake backend | a kept bond has an id of 32 hexadecimal digits, which the store's outcome to the window, `resolve/1` and the `kept` answer all give alike; two pairings from one address, the second after a `forget`, get different ids, and after `forget all` over a blob that does not decode the next bond's id is none the lost state held; with the random source replaced by one that repeats a kept bond's id once, the store draws again and keeps the new bond under a fresh id; a state round-trips its ids, and one in which two bonds share an id is refused | the id taken from the count of bonds kept (the bond after the loss gets the first bond's id); the id computed from the address (the second pairing gets the first id); the redraw dropped (two kept bonds share an id, which the next encode refuses); the decoder's check for a shared id dropped |
+| the registry's `connected`, over a core with one joined link | at the join the event's map holds `level` and `bond := none` and no other key; after the link's `{security, #{bond := B}}` it holds `B`; for a link whose address resolved and which has not encrypted it holds `none` | the join's address copied into the event (the map has an `address` key); the bond's id taken at `resolve` (a peer that copied a bonded phone's address is shown that bond's id) |
+| the payload, in `erx_bt_adv:data/1` and the registry's core | the octets a handler gave are in the advertising data under its service's UUID or company, payloads in the order of their services' names; they leave at an empty `advertise` and at the handler's end; one past its maximum is `{error, too_long}`, one for a service that reserves none `{error, not_allowed}`, another caller's `{error, not_attached}`; for each row of the budget table in [Advertising](#advertising), the data built with a full payload equal Bumble's encoding of the same structures and take the octets the table gives; for every pair of declared maxima the manifest check admits, the data built with full payloads are at most 31 octets, and a 128-bit service that says `advertise` and reserves `data` is refused | the payload kept at the handler's end (a removed app's octets stay in the air); the manifest check fitting payloads at no length (a manifest whose maxima overflow packs, and the built data pass 31 octets); Service Data counted without its UUID (the listed-and-data row packs) |
+| the control tree, `erx_bt_fs_tree` with `erx_bt_pair` | `forget` with a kept id forgets that bond alone, with an id no bond has answers `enoent`, and with 31 digits, an upper-case digit or an address answers `einval`; `bonds` lists every kept bond, one line each, no line holding an octet run of any key, and answers `eio` while the store is unknown since its start; an open of `pair` for reading alone answers `eacces`, and a read-write open after it is answered; `parse/1` reads back every line `format/1` makes, and answers `invalid` for a line with a control byte or a passkey of five digits | `forget` matching a prefix of the id; `bonds` read as empty for an unknown store; the read-only open admitted (the open after it answers `ebusy`) |
+| one bond record, `erx_bt_pair` | for bonds of both address types and both levels, `parse_bond(format_bond(R))` is `R`, a `bonds` line and the rest of a `bonded` line made for one bond are the same octets, and `parse/1` of the `bonded` line gives `{bonded, R}` with the same `R` as `parse_bond/1` of the `bonds` line | the `bonded` line composed by its own code that drops the type (the round trip of a random identity fails) |
+| bounded reading, `erx_bt_pair:next/1` over a stub file | a stream of window lines yields the same terms whatever its split into reads, at every split point including inside a newline's neighbours and one octet per read; a line of exactly `bt_pair_line_max` octets parses; a stream of `bt_pair_line_max + 1` octets with no newline answers `overlong` after reads that together asked for no more than that, and the stub sees no further read; a `bonds` file of `bt_bonds_max + 1` records is refused | the buffer bound checked only at a newline (the stub serves 1 MiB with no newline and `next/1` takes it all); a read count of the remaining file size rather than the bound |
+| both mints before readiness, `erx_bt_top` started from the boot script against a stub `erx_facet` | both `ble` and `bluetooth` are provided before the start returns; a mint request for `bluetooth` sent before the stack starts is answered once `erx_bt_fs` has started, with a grant that serves `bonds`; killing `erx_bt_fs` ends `erx_bt_top` | the tree's mint started under `erx_bt_sup` (the provide is refused after the report); the mount run before the acknowledgement (the boot script's start waits on a stack that starts only after readiness, and the start times out); `erx_bt_fs` not significant (it restarts and the grant answers from a dead pid) |
+| the control tree's links, through a grant of the `bluetooth` interface mounted in a test namespace, its server a stub that serves `ctl` as a link to a file of that namespace | a write to `/bluetooth/ctl` answers `eacces` and the file is unchanged | the stub's service declared of the `files` interface (the write lands in the file) |
+| a handler's `not_authorized` | the write is answered Insufficient Authorization, and the next write still reaches the handler | the answer sent as an Application Error |
+| `btpair` over a stub tree | it prints a pairing's parsed lines in order and ends at the file's end; an interrupt closes the file, which the stub sees as a clunk; a line that does not parse prints `[invalid]`; a stream with no newline past `bt_pair_line_max` prints `[invalid]`, ends with a failure status and clunks the file | the line printed as read (a line holding an escape sequence reaches the terminal); `btpair` reading with `file:read_line/1` (the unterminated stream is read whole) |
+| the manifest check's `bluetooth` rows | a development manifest that grants the tree to root's template packs; each refusal fires on a manifest that differs from it in that alone: a grant with `rx`, and a grant where the `bt` row has no store | the store rule removed (an image that offers pairing and can never pair packs) |
 
 ### Fuzz targets
 
@@ -3365,8 +4142,12 @@ Each core's test is paired with the seeded faults it must catch.
 the LE signaling decoder, `erx_att`, `erx_smp`, `erx_bt_state` and the
 development store's file names (`erx_bt_state_file:generation/1`), the line
 service's `ctl` grammar, the control tree's `pair` and `ctl` grammars,
-and the `ble` facet's admission (`erx_ble_facet:admit/3`); in the HID stage, the advertising
-report decoder, the GATT client's response decoder and the Report
+the reader of the tree's lines (`erx_bt_pair:next/1` over a stub file
+that splits its input into reads at fuzzer-chosen points, with seeds
+for a split inside every line and for an unterminated stream past
+`bt_pair_line_max`, and `parse/1` and `parse_bond/1` on what it yields),
+and the `ble` facet's admission (`erx_ble_facet:admit/3`); with the central role, the advertising
+report decoder and the GATT client's response decoder, and in the HID stage the Report
 Reference decoder (the Report Map is `erx_hid_desc`'s, which has its
 own). Each runs at the milestone gate's budget, and the codecs are also
 compared with Bumble's decoders on the same corpus, a differential test
@@ -3404,8 +4185,41 @@ and sends the serial service's bytes back. It runs in a domain of the
 suite's own, which the suite's `ble` grant names, from a release only a
 test image carries, as the system-domain suite boots its test-only
 `erx_echo_test` (`tools/lib/erx/system_domain.rb`, `ECHO_BOOT`); no
-handler runs in the system domain, which `ble_grant` refuses (B8). The
-stages' peers:
+handler runs in the system domain, which `ble_grant` refuses (B8).
+
+**The bond check.** What a bond reaches is shown on one test service,
+`abi/gatt/bondcheck.txt`, whose three characteristics are constants read
+at the three levels above `open`, with no write, no subscription and no
+handler, since a declared value is served whether or not a handler runs
+([The attribute table](#the-attribute-table)):
+
+```text
+service bondcheck eb417d8e-58b1-4f45-b9f5-e9e24e229b0f
+characteristic encrypted     eb417d8f-58b1-4f45-b9f5-e9e24e229b0f 9  read encrypted     value 656e63727970746564
+characteristic authenticated eb417d90-58b1-4f45-b9f5-e9e24e229b0f 13 read authenticated value 61757468656e74696361746564
+characteristic bonded        eb417d91-58b1-4f45-b9f5-e9e24e229b0f 6  read bonded        value 626f6e646564
+```
+
+Each value is its own level's name in ASCII, so the service proves the
+gate and holds no secret. A link with no key reads none of the three,
+each answered Insufficient Authentication (`0x05`); a link encrypted
+with a Just Works bond's key reads `encrypted` alone; a link encrypted
+with a Passkey Entry bond's key reads all three, `bonded` once the
+store has kept the bond. It is a declaration like any other, so the
+generator, the manifest check and the gate need nothing for it. The
+suite's `ble` grant names it beside `nus`, and the board's pairing
+checklist runs on a test image whose `apps` row offers `ble` with `gatt
+bondcheck`, which serves the service with no app installed, as the
+domain serves every service a `ble` row names
+([The `ble` facet](#the-ble-facet)). `bleuart`'s grant never names it
+and no shipped manifest serves it: the console over Nordic's UART service stays without a bond
+([The console](#the-console)).
+
+The suite's manifest grants the control tree to root's session and the
+store's development grant to the `bt` row, and the harness drives a
+window as an administrator does, by typing `btpair display` or `btpair
+nodisplay` at the console and reading the lines it prints. The stages'
+peers:
 
 | Stage | Peer | Passes | Seeded fault |
 | --- | --- | --- | --- |
@@ -3416,13 +4230,23 @@ stages' peers:
 | 3 | decision 7's echo package, `examples/echo`, declaring `gatt nus`, in the system partition of a medium whose `apps` row offers `ble` and `gatt nus` in place of the echo domain's grant, enabled, so it starts at boot; once it logs that it echoes, `serial_peer.py` | every byte comes back through the app | the session's `ble` row narrowed to no service (`erx_domain_core:granted/4`): the echo's serial handler stops `not_granted`, its session ends, and the cell fails at the echo's attach |
 | 3 | an app's grant, in a cell whose manifest offers `ble` and `gatt nus` in its `apps` row in place of the echo domain's grant: two test packages over `erx_gatt_echo_test`, `echo_a` and `echo_b`, each declaring `gatt nus`; `cp echo_a.app /apps/`, `service echo_a start`, then `serial_peer.py`; `cp echo_b.app /apps/`; `rm /apps/echo_a.app`, `cp echo_b.app /apps/`, `service echo_b start`, then `serial_peer.py` again | the bytes come back through `echo_a`; `echo_b`'s first copy fails with `EEXIST` and `/apps` holds no `echo_b.app`; after the removal its copy succeeds and the bytes come back through it | admission's check of the other apps' services removed: `echo_b`'s first copy succeeds |
 | 3 | the same cell, owners changing while a phone stays connected: with `echo_a` running, `test/bt/peer/gatt_peer.py` sends a Prepare Write of `rx` and waits for the harness; the harness runs `rm /apps/echo_a.app`, `cp echo_b.app /apps/` and `service echo_b start`; the peer then sends Execute Write and, after it, `serial_peer.py`'s stream; then `service echo_b restart` and the stream again | Execute Write is answered Unlikely Error and none of the prepared bytes comes back on `tx`; `echo_b`'s start attaches within `bt_attach_wait_ms`, after the removal and after the restart, and each stream comes back through `echo_b` whole | the link's write carrying the handler at Execute Write (the prepared bytes come back through `echo_b`); the registry ignoring a handler's end (`echo_b`'s start fails `{attached, nus}` at the deadline, and the stream gets Unlikely Error) |
-| 4 | `apps/pair.py --mode le --sc true --mitm true --io keyboard C tcp-client:...`, where the device configuration `C` fixes the peer's address and names its key store, `"keystore": "JsonKeyStore:K"` (`bumble/keys.py:198-206`, `:272-285`); the harness reads the passkey from the `pair` file and writes it to `pair.py`'s standard input, which `input()` reads (`apps/pair.py:102-107`, `:159-168`) | `bonded ... authenticated`; then `apps/gatt_dump.py --device-config C --encrypt` reads an `authenticated` value; after the Bluetooth domain restarts, it reads it again | the LTK reply sending a key of the wrong bond: encryption fails |
+| 4 | `test/bt/peer/pair_peer.py --io keyboard`, with a fixed address and a Bumble key store `K` (`"keystore": "JsonKeyStore:K"`, `bumble/keys.py:198-206`, `:272-285`): it reads `bondcheck`'s three values, then pairs with Secure Connections, MITM and bonding while the harness runs `btpair display` and writes the passkey it prints to the peer's standard input, then reads the three again | before the pairing each read answers Insufficient Authentication; `btpair` prints `bonded BOND ... authenticated` and ends; after it all three read their values | the gate allowing a read on a link with no key: the reads before the pairing return values |
+| 4 | `pair_peer.py --reconnect` with the same address and `K`, after the Bluetooth domain restarts | the link encrypts with the kept key and `bonded` reads its value, with no Pairing Request sent and no window open | the LTK reply sending a key of the wrong bond: encryption fails |
+| 4 | `pair_peer.py --io none`, with a second address and key store, while the harness runs `btpair nodisplay` | `bonded BOND ... unauthenticated`; `encrypted` reads its value; `authenticated` and `bonded` answer Insufficient Authentication | the Just Works key recorded as `authenticated` in the link's `key`: `authenticated` reads its value |
+| 4 | the bond's name: `erx_gatt_echo_test`, the handler of `nus`, logs every `connected` it hears; the first peer above connects after its pairing and again after the Bluetooth domain restarts, and then a peer with the first's address and an empty key store connects | the id `btpair` printed is in `cat /bluetooth/bonds` and is the `bond` the echo logs for the first peer, both times; the echo logs `none` for the peer with the copied address; no `connected` it logs holds an address | the bond's id given to the link at `resolve`: the echo logs the first peer's id for the peer with the copied address |
+| 4 | `echo forget BOND > /bluetooth/ctl` with the first peer's id while that peer is connected, then `pair_peer.py --reconnect` | the peer's link ends; `bonds` no longer lists the id; the reconnection does not encrypt, and `encrypted` answers Insufficient Authentication | `forget` taking the bond out of the list and leaving its link: the peer's next read of `bonded` returns its value |
 | 4 | `apps/pair.py --sc false` | `failed ... secure_connections_required` | the Secure Connections flag check removed |
 | 4 | `apps/pair.py` while no window is open | Pairing Not Supported | the window check removed |
 | 4 | a second `apps/pair.py` run with the same address and an empty key store, in a new window | `failed ... already_bonded`; the first key store still encrypts | the bond replaced |
 | 4 | `apps/pair.py` with a wrong passkey, then again at once in a new window | the first `failed ... confirm`; the second answered Repeated Attempts until 2 s have passed, then pairs | the wait not kept across windows |
 | 4 | a bonded peer subscribes, the Bluetooth domain is killed at once after the Write Response, and the peer reconnects encrypting only on erXos's Security Request | the subscription is restored and a notification arrives | the configuration kept only at the link's end; no Security Request sent |
 | 4 | a peer with the bonded peer's address and an empty key store connects and writes Service Changed's configuration | Insufficient Encryption; the bonded peer then reconnects and finds its subscription as it kept it | the configuration write kept on a resolved link before its encryption |
+| payload | a second test declaration, `abi/gatt/advcheck.txt`, a service of a 128-bit UUID that reserves `data 4` and does not say `advertise`, since its Service Data names it ([Advertising](#advertising)), with a characteristic `value` read and notified `open` and a characteristic `guarded` read `encrypted`; the cell's manifest serves `advcheck` and `bondcheck` and no service that says `advertise`, so its advertising data are the Flags and one Service Data, 25 octets at the payload's maximum; `erx_gatt_echo_test` handles it, advertises four octets and then four others, and its domain is then stopped; the stage 1 scanner prints each report | the scan shows the first octets and then the second in Service Data under the service's UUID, and after the stop no Service Data | the payload kept at the handler's end: the scan still shows it after the stop |
+| central | `test/bt/peer/server_peer.py`, a Bumble peripheral that serves and advertises `advcheck` and logs every request it receives, beside a second Bumble advertiser of another UUID; a test app whose grant says `uses advcheck` and `links 1` scans, connects with `connect(advcheck, Address)` to the address its scan reported, reads, subscribes, and is then killed | the scan returns one report, the server's, with its payload; the read of `value` returns it and each notification arrives; the read of `guarded` answers `insufficient_security` and the server logs no request for it; at the app's end the server sees the disconnection | the scan's match dropped (two reports); the client's gate skipped (the server logs the Read Request); the owner's end ignored (the server's link stays up) |
+| central, targets | the same peers, the test app, and a second test app whose grant says `uses other`, the second advertiser's service: the second app scans and hands the first the address its scan reported; the first calls `connect(advcheck, A)` with that address and with an address no device uses; once the first holds a connection, the second calls `read` and `disconnect` on its `Conn` | both connects answer `{error, not_found}` and neither peer logs a connection request; the second app's calls answer `{error, gone}`, the server logs no request and the first app's link stays up | the match skipped in `connect` (the second advertiser logs a connection); the owner check dropped (the server logs the second app's Read Request) |
+| central, two apps | a cell whose `apps` row offers `ble` with `uses advcheck` and `links 1`, two test packages that each declare `uses advcheck`, and two server peers advertising `advcheck` at two addresses: the first app connects to one, then the second to the other; the first disconnects and the second asks again | the first connects; the second is answered `{error, limit}` while the first holds its link, and connects once it has disconnected | the apps' connections counted for each grant rather than together (the second app connects while the first holds its link) |
+| central, pairing | the central cell's server, which serves `guarded` only over an encrypted link and pairs with no input or output: the test app reads `guarded` with no window open, then the harness runs `btpair nodisplay` and the app reads it again, and then a phone peer sends a Pairing Request | without a window the read answers `insufficient_security` and the server logs no Pairing Request; in the window the app's read starts the pairing, `btpair` prints `bonded BOND ... unauthenticated` with the server's identity and ends, and the read returns the value; the phone's Pairing Request is answered Pairing Not Supported, the window having closed at the first pairing | the initiator's window check dropped (the server logs a Pairing Request without a window) |
+| HID | a Bumble peer serving the HID service and advertising it connectably, with a keyboard's input and output: with no window open the HID function connects to nothing; with `btpair display` open it connects, pairs with the passkey the harness reads from `btpair` and types at the peer, and a key the peer reports reaches the display's input tree; after the Bluetooth domain restarts the peer reconnects with no window | no connection without a window; `bonded BOND ... authenticated`; the key arrives; the reconnection encrypts | the HID function's scan run without a window (the peer logs a connection with none open) |
 
 Reconnection with a resolvable private address uses Bumble's
 `examples/device_with_rpa.json` as the peer's configuration;
@@ -3432,9 +4256,13 @@ peer.
 
 ### On the board
 
-The Pi 4's checklist, by hand, with a phone and with a Bumble peer on a
-USB dongle on the development host, which makes the peer side scripted,
-and with a Mac as a second scripted peer: `tools/ble_board_check.rb` drives
+The Pi 4's checklist, by hand, with a phone and with a Bumble peer on
+the development host, which makes the peer side scripted: its
+controller is an nRF52840 dongle running Zephyr's HCI USB firmware,
+which Bumble opens over its `usb:` transport, in place of the QEMU
+suite's virtual controller (that the pair carries a Secure Connections
+pairing is unverified until its first run); and with a Mac as a second
+scripted peer: `tools/ble_board_check.rb` drives
 `blew`, a macOS command-line tool over CoreBluetooth, to scan, connect and
 discover, write and read Nordic's UART service, one `blew` run per step
 and one connection per step after the scan, then two `blew nus` sessions
@@ -3446,9 +4274,17 @@ unknown when `blew` times out or cannot use Bluetooth. The list:
 the machine appears in the phone's scanner with its name; nRF-style GATT
 browsers show the declared table; a terminal app for Nordic's UART
 service gets root's shell through `bleuart` ([The console](#the-console),
-[Decisions](#decisions), 7); the phone pairs by typing the passkey the
-`pair` file shows, reboots the machine, and reads an `authenticated`
-value again; a `reset` written
+[Decisions](#decisions), 7); on the test image that serves `bondcheck`
+([On QEMU against Bumble](#on-qemu-against-bumble)), the Bumble peer on
+the dongle runs that table's three pairing rows and its rows for the
+bond's name and for `forget` against the board, with `btpair` typed at
+the board's console, and a phone then pairs by typing the passkey that
+`btpair display` prints, the machine is rebooted, and the phone reads
+`bondcheck`'s `bonded` value again with no new pairing. The seeded
+failure of that last step is the development store's directory emptied
+before the reboot: the phone's link then does not encrypt and the read
+answers Insufficient Authentication, which shows the passing read rests
+on the kept bond and not on a link that stayed up. A `reset` written
 while a phone is connected is followed by a bring-up that reaches
 advertising. Its seeded failure is a line whose reset passes the grant's
 flow to the holding start: the controller then boots in download mode,
@@ -3543,6 +4379,70 @@ list ([todo-performance.md](todo-performance.md)):
   request needs the app's verdict within the ATT transaction, which a
   file stream cannot answer without a second file and a matching rule:
   a live conversation, so a declared protocol.
+* **A pairing agent that an app registers**, as BlueZ's agent object
+  and Zephyr's authentication callbacks are
+  ([research-ble-apis.md](research-ble-apis.md)). It brings a
+  registration, a rule for which of two registrants is asked, a pairing
+  that waits on a callback into an app, and an agent that must be
+  tracked to its end. The opener of `pair` is the agent, for exactly as
+  long as it holds the file open, with nothing registered.
+* **The window's mode in the file's name, opened for reading**, so that
+  `cat /bluetooth/pair/passkey` would be a window and no `btpair` were
+  needed. A read would then change what the machine accepts from the
+  air, a read-only grant could open windows, and a command that reads a
+  whole tree would make the machine bondable. Control is a file to
+  write.
+* **Bonds that belong to the app whose window made them.** It would
+  keep one app's phones from another app's services. But a phone has
+  one key for the machine, so the phone would be bonded and yet refused
+  by the other apps' services, with no way to pair again; the store
+  would hold a list of apps for each bond and the tree a way to edit
+  it; and the gate would decide by service owner as well as by level.
+  The phone systems scope an association to an app on the central's
+  side, where one system draws the pairing dialog for all apps; a
+  peripheral's bond is with the device ([Open decisions](#open-decisions),
+  3).
+* **A bonded phone's name computed from its identity**, a hash of the
+  identity address under a machine key. It would be the same after a
+  `forget` and a new pairing, so whoever pairs next under a claimed
+  identity would take over what an app recorded for the phone before;
+  an id drawn with the bond is bound to the bond's key.
+* **The phone's address in `connected`.** No handler named a use for
+  it, an app that keyed on it would be fooled by a copied address, and
+  every app would learn the identity address of a phone that does not
+  hide it.
+* **Advertising data a handler builds whole**, as Android's advertiser
+  and BlueZ's advertisement object take them. The data could overflow at
+  run time, one app could take the room another needs, and a handler
+  could advertise a UUID that is not its own. **Advertising fixed
+  wholly by the declaration** cannot carry what differs for each device
+  or changes while it runs, a commissioning discriminator or a state.
+  A declared room with the handler's octets in it has neither fault.
+* **Scan reports as a stream of events.** The rate of the reports is
+  the neighbours' to set, so the stream would need credits between the
+  Bluetooth domain and each scanning app; one bounded call needs none.
+* **A chooser the system draws for a central app's device**, as the
+  phone systems have. It needs a display the system owns and a person
+    at it, which a gateway has neither of
+    ([Apps as centrals](#apps-as-centrals)).
+  * **Candidates a scan hands out**, opaque names for the devices one
+    grantee's scan reported, which `connect` would take in place of an
+    address. They would be state per grantee with a lifetime, a bound and
+    an owner to check, to prove what one advertisement heard inside
+    `connect` proves with none: that the target advertises a service the
+    caller uses.
+  * **A commissioning operation in the control tree**, which pairs with
+    one peer the administrator selects, by address, as initiator or as
+    responder. It would let an administrator in a crowded room choose the
+    device rather than take the first, but it needs a list of the devices
+    in range in the tree, a grammar for a target and a window keyed by a
+    peer. No consumer of the central role needs it: a keyboard's holder
+    types the passkey the machine shows, which a neighbour's keyboard
+    does not get, and the `passkey` and `bonded` lines name the peer.
+    It is the step to take when one does
+    ([The pairing window](#the-pairing-window)).
+* **The control tree under `/svc`, or under `/dev`**
+  ([Open decisions](#open-decisions), 1).
 * **The controller's own P-256** (LE Read Local P-256 Public Key, LE
   Generate DHKey, HCI 7.8.36 and 7.8.37) and ctaes for AES. It would keep
   OpenSSL out of the Bluetooth domain, at the cost of a new AES primitive,
@@ -3757,6 +4657,105 @@ list ([todo-performance.md](todo-performance.md)):
    the login grant hands over the line, `root_line`, is
    [design-login.md](design-login.md#risks-and-open-decisions)'s open
    decision 5.
+9. **Decided: only Erlang code uses Bluetooth.** The interface is the
+   declarations, the `ble` facet with its Erlang client, the control
+   tree and `/proc/bt` ([The interface](#the-interface)). No route for
+   native programs is designed, and its absence shapes nothing above: a
+   program holds no facet, so a route would be requests of the program
+   protocol with a generated C client, or a file tree for stream-shaped
+   services, either of which sits beside the Erlang interface without
+   changing it ([What waits for a consumer](#what-waits-for-a-consumer)).
+10. **Decided: `bleuart` requires no bond.** `nus` stays `open`,
+    `bleuart`'s grant names `nus` alone, and it holds no grant of the
+    control tree and opens no window ([The console](#the-console)).
+    Pairing and the gate's levels are exercised on the test service
+    `bondcheck`, which no shipped manifest serves
+    ([On QEMU against Bumble](#on-qemu-against-bumble)).
+
+## Open decisions
+
+The sections above are written as each recommendation here has it.
+
+1. **Where the control tree lives.** The Bluetooth domain serves `pair`,
+   `bonds` and `ctl`, and a path must reach them.
+
+   | Place | For | Against |
+   | --- | --- | --- |
+   | `/bluetooth`, a tree of its own that manifest facet rows grant (recommended) | how every configured domain's tree is reached: `/machine`, `/media`, `/data` and `/apps` are rows of the same table of mount points; the manifest names who holds it, so a device's own app can be the one holder; `pair`, a stream with a window's lifetime, is the tree's own file | one more name at `/`; no link in it may be followed, which needs the tree to have an interface of its own, as `media` has, where `/svc` gives the rule for nothing |
+   | `/svc/bluetooth`, by widening `/svc` to system services | one place to look for what takes commands; `/svc`'s provider follows no link, and `erx_svc_client` bounds how long a system command waits | `/svc/NAME` is an app's own tree: its provider is the session that runs NAME's start row (AT2 of [design-app-trees.md](design-app-trees.md#invariants)), which a configured domain is not; its grants are derived for every session that holds `start` and no manifest row grants one (AT8), so a device's pairing app could hold the tree only by holding the start table too; its tree is the flat `status` and `ctl` that `erx_svc` serves, which has no place for `pair`; NAME would be shared by apps and domains, so admission would refuse an app named `bluetooth`; and `service bluetooth stop` would be offered by the name and refused, since the start table does not switch configured domains ([Decisions](#decisions), 8) |
+   | `/dev/bt` | short, and where a UNIX user looks for hardware | the Bluetooth domain holds no device; the controller's line is the device and lies in the system domain; a protocol stack's control under `/dev` wears the shape of something it is not |
+
+   Recommended: `/bluetooth`. What `/svc` has that the control tree
+   needs is its rule on links, and the tree takes that rule the way
+   `media` does, from its interface
+   ([The Bluetooth domain](#the-bluetooth-domain)). `/svc` and
+   `/bluetooth` differ in how a grant arises, by policy for every app
+   or by a row for one tree, and that difference is the one between an
+   installed app and a configured domain. With `bluetooth`, two
+   interfaces carry the mark; a third is the time to make it a word of
+   the interface's row in `abi/services`. Widening `/svc` changes AT2,
+   AT8 and what `service NAME` means, in a design already accepted.
+2. **Numeric Comparison.** A window offers Passkey Entry with the
+   machine showing the passkey, or Just Works. Numeric Comparison,
+   where both sides show six digits and each user confirms, would save
+   a kiosk's or a head unit's user from typing them on the phone.
+   Recommended: keep `display` and `nodisplay`, and do not offer it.
+   Every device that could offer it has a screen, and Passkey Entry
+   with the machine displaying needs only that. And offering it opens
+   the method-confusion attack ([Attack classes](#attack-classes)) on
+   the machine's side: an attacker in the middle runs Numeric
+   Comparison with the machine and Passkey Entry with the phone, and a
+   user who accepts on the Numeric Comparison side gives the attacker a
+   bond with the machine even though the phone's Passkey Entry side
+   fails. The Bluetooth SIG's notice on the vulnerability states that
+   consequence
+   ([method-vulnerability](https://www.bluetooth.com/learn-about-bluetooth/key-attributes/bluetooth-security/method-vulnerability/),
+   not read for this design and unverified until it is). Offering it
+   later is a third mode word, `compare`, a `confirm NNNNNN ADDRESS`
+   line and a `yes` or `no` written to the open file.
+3. **A bond's scope and its name.** Recommended: a bond is the
+   machine's and reaches every service at its level; each bond has a
+   drawn id of 128 bits; handlers hear the id and no address, and the
+id is a name every handler on the link hears, not a secret
+   ([A bond's name is made with its key](#a-bonds-name-is-made-with-its-key),
+   [Bonds and the store](#bonds-and-the-store)). This changes the
+   `connected` event of the client, whose `address` and `bonded` give
+   way to `bond`, the `ctl` grammar, where `forget BOND` takes the place
+   of `forget ADDRESS TYPE`, and the stored state, which gains the id,
+   so a state written without ids does not decode and is replaced with
+   `forget all`. The alternative, bonds scoped to the app whose window
+   made them, is weighed in
+   [Alternatives considered](#alternatives-considered); it serves a
+   machine whose apps come from makers that do not trust each other's
+   users, which no planned device is.
+4. **Whether an `apps` row may offer the control tree.** Recommended:
+   only by the board's explicit opt-in, naming `bluetooth` in the
+   `apps` row's `services`, and preferring grants to named templates.
+   The opt-in lets an installed app, a kiosk's own among them, be the
+   device's pairing interface without a row of its own in the board's
+   manifest; its cost is that every admitted app that asks becomes an
+   administrator of all the bonds, and a shared signer does not
+   separate those apps from each other
+   ([The Bluetooth domain](#the-bluetooth-domain)). Where one app should
+   administer Bluetooth, a facet row grants the tree to that app's
+   template by name, so the manifest lists every holder and the pairing
+   app is a principal of the board's manifest with a start row. The
+   other choices are to forbid the `apps` row from offering it at all,
+   which costs a kiosk built only from installed apps its pairing
+   screen, or to allow it freely, which no consumer needs.
+5. **What is built, and in what order.** Recommended: the pairing path
+   first, as one piece: both mints before readiness, the store's grant
+   and the control tree's grants in the development manifests, the
+   bond's id, which changes the stored state and the tree's lines once,
+   `btpair` with `erx_bt_pair`'s bounded reading and one bond record,
+   `bondcheck`, and the pairing, reconnection and `forget` cells, without
+   which no image pairs and nothing on hardware tests stage 4. The
+   advertised payload and the central role, apps as centrals and HID
+   over GATT alike, wait until a consumer justifies each: nothing in the
+   first release needs them, and the central role is most of this
+   design's new obligations (scan state, connection owners, the
+   counted links, discovery and pairing as initiator).
+   [plan.md](plan.md#track-b-bluetooth) schedules the work.
 
 ## Board probes
 
@@ -3828,5 +4827,6 @@ are read; what they settle is in [The hardware](#the-hardware),
 * **B-P7**, on the Pi 4, the patched controller: while advertising,
   write LE Set Advertising Data with the UART service's UUID added and
   then removed, and read its Command Complete status and what a phone's
-  scanner shows after each, which settles whether advertising follows
-  its handlers without a disable ([Advertising](#advertising)).
+  scanner shows after each, which checks that the controller uses new
+  data while advertising as HCI 7.8.7 requires, so that advertising
+  follows its handlers without a disable ([Advertising](#advertising)).

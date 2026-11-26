@@ -78,7 +78,7 @@ evidence, not design contracts.
 | [design-crypto.md](design-crypto.md) | cryptography: OpenSSL in the runtime images, OTP's crypto applications, HTTPS clients |
 | [design-ssh.md](design-ssh.md) | SSH: the SSH domain, logins, keys and channels |
 | [design-login.md](design-login.md) | logging in through a front end: the system domain's one `login` facet for SSH, the web and `bleuart`'s root line |
-| [design-bluetooth.md](design-bluetooth.md) | Bluetooth Low Energy, peripheral first, and `bleuart`, root's shell over Nordic's UART service |
+| [design-bluetooth.md](design-bluetooth.md) | Bluetooth Low Energy, peripheral first; the interface a device's maker uses: declared GATT services, the `ble` facet, and pairing and bonds in the control tree at `/bluetooth`; and `bleuart`, root's shell over Nordic's UART service |
 | [design-live.md](design-live.md) | the live machine: console, ttys, attributed text, the inspector and `/proc`, tracing, the code store and loading code by the host link, SSH or a file, the host link |
 | [design-debugger.md](design-debugger.md) | the kernel debugger: the stop every fatal kernel error takes and the state it leaves each CPU in, the hold that lends a development board's memory over the console wire, to the host's tool and to read-only commands typed at its prompt, and `tools/erx debug`, one command set on the host over crash records, memory images, held boards, stubs and recorded runs, with the inspection schema's views |
 | [design-shell.md](design-shell.md) | the command shell: rc's language, the command namespace, text pipelines, job control |

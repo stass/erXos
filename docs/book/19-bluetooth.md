@@ -22,7 +22,11 @@
 > state belongs to its handler beyond its owner's check of sets and
 > notifications, `bleuart`, root's shell over the serial service,
 > and tests against a Bumble peer that scans, connects, reads, streams
-> and pairs.
+> and pairs. Also designed and not built: the control tree's place at
+> `/bluetooth`, its grant and the `btpair` command, without which no
+> image can pair; an id for each bond, which a handler hears in place of
+> an address, and the list of bonds; a service's own octets in the
+> advertising; and apps as centrals, which scan and read other devices.
 
 **Background needed.** [Chapter 3](03-erlang.md), sections 3.3 and
 3.4: links, supervisors and restart strategies.
@@ -92,8 +96,11 @@ Of these, the advertised name and services, the table of characteristics
 with the level each requires, and pairing and bonding are built. The app
 side of characteristics and the serial stream are designed and not built.
 
-The central role, which scans and connects, belongs to the design
-of HID over GATT, for keyboards and mice. Classic Bluetooth, the older
+The central role, which scans and connects, is designed as a later
+stage with two users: HID over GATT, for keyboards and mice, and apps
+that read other devices, such as a gateway that collects from sensors
+([design-bluetooth.md, The central role](../design-bluetooth.md#the-central-role)).
+Classic Bluetooth, the older
 BR/EDR radio of headsets, is neither built nor designed, and neither
 is the legacy pairing that LE Secure Connections replaced.
 
@@ -480,8 +487,16 @@ decides whether the phone may read it? The design answers with
 configuration and one function. The declarations, the table, the gate,
 the registry and pairing are **Built**, with host tests. What is
 designed and not built is said where it comes up: an installed app's
-own grant, the rule that a service's state belongs to its handler, and
-the app that handles the serial service.
+own grant, the rule that a service's state belongs to its handler, the
+app that handles the serial service, the control tree's place and
+grant, the bonds' ids, the advertised payload and apps as centrals.
+
+The maker of a device plugs in at four places, each with one home
+([design-bluetooth.md, The interface](../design-bluetooth.md#the-interface)).
+What a phone sees is declared as data. An Erlang process answers the
+phone through a facet. Pairing and the bonds are commanded in a file
+tree. And what the stack observes is read at `/proc/bt`. Only Erlang
+code uses the facet; a native program has no route to Bluetooth.
 
 An app declares its services as data, one checked-in file per service
 under `abi/gatt/`
@@ -561,6 +576,23 @@ next. When a handler ends, each link is told, serves the declared
 values again, and drops the service's queued notifications
 ([design-bluetooth.md, A service belongs to its handler](../design-bluetooth.md#a-service-belongs-to-its-handler)).
 
+A handled service can also speak in the advertising. This is designed
+and not built. Its declaration reserves one payload with a maximum
+length, carried under the service's own UUID or under its maker's
+company identifier, and the handler sets the octets while it runs. The
+build has already fitted every reserved payload at its maximum into the
+31 bytes, so no handler's octets overflow the advertising or take
+another service's room. The octets are public: anyone in range reads
+them, whatever the service's characteristics require. Room is short.
+Service Data repeats its service's UUID, so a service with a 128-bit
+UUID has ten octets of it only when it does not also list its UUID.
+The registry keeps what is advertised as part of its state and tells
+the controller process only that it changed, with at most one such
+message outstanding; the controller process fetches the latest state,
+so a handler that changes its octets a thousand times while the
+controller is busy leaves one message and one write
+([design-bluetooth.md, Advertising](../design-bluetooth.md#advertising)).
+
 Pairing happens only in a window that someone opened by opening the
 control tree's `pair` file, and the window ends with its first
 pairing attempt, whether it succeeds or fails. After a failure the
@@ -568,6 +600,61 @@ next attempt waits, from 2 up to 64 seconds, and the wait outlives
 every window. A pairing never replaces a bond; only an explicit
 `forget` ends one
 ([design-bluetooth.md, The pairing window](../design-bluetooth.md#the-pairing-window)).
+A bond belongs to the machine and reaches every service at its level,
+whichever app handles it.
+
+Who opens the window? Whoever the manifest grants the control tree. In
+the design the tree is mounted at `/bluetooth`, and a development
+manifest grants it to root's session. A command, `btpair`, drives a
+window from a shell and prints the passkey to type on the phone, since
+the shell cannot open one file for both reading and writing. The maker
+of a device may grant the tree to the device's own app instead, which
+shows the passkey on its screen, or opens a window when its button is
+pressed. A board may also offer the tree to every installed app that
+asks, by naming it in its `apps` row, which makes each such app an
+administrator of all the bonds; the design prefers a grant to one
+named app. The tree is served by a mint the domain starts before it
+reports ready, as every mint must be, and its grants wait for the
+window process, which starts with the rest of the stack.
+A window admits one pairing, whichever side starts it: a phone, or the
+machine itself as a central. It does not choose the peer; the passkey
+line and the bonded line name it, and a wrong bond is forgotten.
+No link in the tree is followed, as in a removable drive's
+tree. The Bluetooth domain parses what strangers send, and a domain
+taken over from radio range must not be able to turn an administrator's
+write to `ctl` into a write of one of the administrator's own files
+([design-bluetooth.md, The Bluetooth domain](../design-bluetooth.md#the-bluetooth-domain)).
+The tree's `pair` and `ctl` are built. Its place, its grant, a `bonds`
+file that lists the bonds, and `btpair` are designed, so no image can
+pair yet.
+
+How does a handler tell one bonded phone from another? Not by an
+address: a phone that guards its privacy changes its address, and
+anyone can copy one. In the design each bond has an id, 128 random bits
+drawn when the bond is kept, and a handler hears it only on a link
+encrypted with that bond's key. The id ends with its bond. A phone that
+is forgotten and paired again is a new bond with a new id, so what an
+app recorded for the old one passes to nobody, short of a chance of
+2^-128 that two ids match or a medium rolled back to an older copy of
+the bonds. The id is a name, not a secret: every handler on the link
+hears it, whether or not the phone uses its service, so apps can
+recognize a bonded phone each time it comes and across services. The handler's
+`connected` event carries no address at all
+([design-bluetooth.md, A bond's name is made with its key](../design-bluetooth.md#a-bonds-name-is-made-with-its-key)).
+The built event carries the phone's address and whether it is bonded.
+
+An app can also be a central, in the design: it scans for other devices
+and reads them. Its grant names the services it may use on them, and
+those services are declared in the same files as the ones the machine
+serves. A scan reports only advertisers of those services, though of
+each it learns the address and the signal strength, and it connects
+only to a device the Bluetooth domain hears advertise one of them
+during the call. Several apps share the links the board grants apps.
+Every read and every notification
+passes the same gate, now asking whether the link is secure enough for
+the app to take a peer's data. A connection belongs to the process that
+asked for it and ends with that process
+([design-bluetooth.md, Apps as centrals](../design-bluetooth.md#apps-as-centrals)).
 The pairing itself, LE Secure Connections in `erx_smp_core` over the
 crypto of `erx_smp_crypto`, is a pure state machine run by the link's
 core; the window, the control tree and the bond store, `erx_bt_store`,
@@ -621,6 +708,12 @@ controller, and checks that the bring-up reaches advertising. A Bumble
 peer on a second socket that scans, connects, reads and pairs, with
 a seeded fault in each test, such as advertising data built wrong,
 which must make the UUIDs vanish from the peer's scan, is Designed.
+Its pairing tests read a test service, `bondcheck`, whose three
+constant values need an encrypted link, an authenticated one and a
+kept bond, so one peer shows what an unpaired, a Just Works and a
+Passkey Entry peer may read; the harness opens each window by typing
+`btpair` at the console, as an administrator would
+([design-bluetooth.md, On QEMU against Bumble](../design-bluetooth.md#on-qemu-against-bumble)).
 
 What only a board answers, the design lists as board probes
 ([design-bluetooth.md, Board probes](../design-bluetooth.md#board-probes)):
@@ -631,7 +724,10 @@ advertising on the ROM alone, with the pins set by the system domain's
 root at boot. A script, `tools/ble_board_check.rb`, drives a Mac's `blew`
 through the scripted steps (scan, connect and discover, write and read the
 serial service) and two sessions of root's shell over `bleuart`, which
-the board passes; pairing is not yet run on the board.
+the board passes; pairing is not yet run on the board. The design
+runs the same pairing tests against the board from a Bumble peer whose
+controller is a USB dongle on the development host
+([design-bluetooth.md, On the board](../design-bluetooth.md#on-the-board)).
 
 ## 19.8 Design choices
 
@@ -645,6 +741,23 @@ table in code, which brings attribute handles allocated while phones
 are connected, announcements that the table changed, and conflicts
 between apps. Configuration removes them: the table is built once from
 the declarations, and installing an app changes no attribute.
+
+**Pairing owned by the system, through one file.** Some stacks have an
+app register a pairing agent, with callbacks the pairing waits on. In
+erXos the agent is whoever holds the `pair` file open, for as long as
+it does, and no app that only handles a service writes pairing code.
+
+**A bond with the machine, named by a drawn id.** A bond scoped to one
+app would leave a phone bonded and yet refused by the other apps'
+services, unable to pair again. A name computed from the phone's
+identity would pass to whoever paired next under that identity. An id
+drawn with the bond is bound to the bond's key and ends with it.
+
+**A declared room in the advertising, filled at run time.** Advertising
+data that a handler builds whole can overflow, or take another
+service's room; data fixed in the declaration cannot carry what differs
+from device to device. The declaration reserves the room and the
+handler sets the octets.
 
 **A power cycle and a fresh UART at every reset.** Without them, each
 bring-up would need a case for every state the last one could leave:
@@ -675,7 +788,10 @@ what a phone may do. This is built and tested on the host, and its
 bring-up on QEMU against a Bumble controller, and on the Pi 4 it
 advertises, but no phone has connected, read or paired there; an
 installed app's grant, a service's handler as the owner of its state
-and advertised service UUIDs are designed.
+and advertised service UUIDs are designed. So is the rest of what a
+device's maker uses: the control tree at `/bluetooth` with `btpair`, a
+drawn id by which a handler knows a bonded phone, a service's own
+octets in the advertising, and apps that scan and read other devices.
 
 ## Where to read next
 
