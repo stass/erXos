@@ -3000,13 +3000,25 @@ reaches files of exactly one tree
 is the entry's `ro`, `rw` or `rx`, so a read-only bind of an `rw` grant
 reaches its client read-only and the client never sends a request that
 writes through it. Every request the client sends passes one function,
-which makes the two refusals the client's own properties rest on and
-nothing more: it refuses with `erofs`, sending nothing, a request that
+which makes the two refusals the client's own properties rest on:
+it refuses with `erofs`, sending nothing, a request that
 the generated grammar's `writes/1` marks as writing when the entry's
 rights are other than `rw`, as the grant's own funnel refuses it for
 the grant's rights; and it refuses with `einval`, sending nothing, a
 walk that names `.`, `..` or an empty name, so no walk a client sends
-carries one, whoever built it (F2, F3, F11). It does not check the rest
+carries one, whoever built it (F2, F3, F11). It also enforces one
+limit of the transport, which is not a check of the grammar: a request
+whose message, encoded as a frame's payload, passes
+`files_max_frame_min` is refused with `einval`, sending nothing,
+since a grant of another domain is reached through frames, every domain that serves or holds a `files` grant takes frames
+of at least that size (property 16 of design-system.md), and a longer
+one is dropped there without a reply
+([design-domains.md](design-domains.md), "Payload size"), which would
+leave the caller waiting for ever. The bound holds a write of the
+64 KiB transfer unit with its encoding, so it refuses only requests
+the grant's funnel refuses `einval` for passing the grammar's bounds,
+and it holds for a grant of the client's own domain too, so the answer
+does not depend on where the grant is served. It does not check the rest
 of a request against the grammar: every request comes from code of the
 client's own domain, the client's operations or a caller of
 `erx_file_remote:exchange/2` and `send/2` such as `erx_win`, and the

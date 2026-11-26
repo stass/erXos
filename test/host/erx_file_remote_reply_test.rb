@@ -39,8 +39,8 @@ class ErxFileRemoteReplyTest < Minitest::Test
   # hands out fresh fids.
   FID = "fid() ->\n    prim_file:erx_fid().\n"
   STAND_IN_FID = "fid() ->\n    erlang:unique_integer([positive]).\n"
-  # Seeded faults of a native program's open and of the seek rule: the text replaced, its
-  # replacement and the case that must fail.
+  # Seeded faults of a native program's open, of the seek rule and of the frame bound:
+  # the text replaced, its replacement and the case that must fail.
   TextFault = Data.define(:name, :from, :to, :caught_by)
   TEXT_FAULTS = [
     TextFault.new(name: "an lopen's eloop under O_NOFOLLOW answered as it is",
@@ -61,7 +61,15 @@ class ErxFileRemoteReplyTest < Minitest::Test
     TextFault.new(name: 'a seek past off_t admitted',
                   from: 'seek_to(Base, Offset) when Base + Offset > ?ERX_OFF_MAX -> {error, eoverflow};',
                   to: 'seek_to(Base, Offset) when Base + Offset > ?ERX_OFF_MAX + 1 -> {error, eoverflow};',
-                  caught_by: 'seek_to_follows_freebsd_test_')
+                  caught_by: 'seek_to_follows_freebsd_test_'),
+    TextFault.new(name: 'the frame bound removed, so a request past it is sent and dropped',
+                  from: 'erlang:external_size(Message) > ?ERX_FILES_MAX_FRAME_MIN orelse oversized(Addressed).',
+                  to: 'erlang:external_size(Message) < 0 orelse oversized(Addressed).',
+                  caught_by: 'write_past_the_frame_bound_is_refused_before_it_is_sent_test_'),
+    TextFault.new(name: 'a message exactly at the frame bound refused',
+                  from: 'erlang:external_size(Message) > ?ERX_FILES_MAX_FRAME_MIN orelse oversized(Addressed).',
+                  to: 'erlang:external_size(Message) >= ?ERX_FILES_MAX_FRAME_MIN orelse oversized(Addressed).',
+                  caught_by: 'write_past_the_frame_bound_is_refused_before_it_is_sent_test_')
   ].freeze
 
   def test_the_cases_pass

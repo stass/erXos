@@ -240,15 +240,16 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [Medium] files, the client's frame bound (`otp/erts/preloaded/src/erx_file_remote.erl`, `refused/2`):
-  the client no longer decodes a request against the grammar (design-files.md, "Erlang clients"), so
-  nothing on the client bounds a request's size, and a request over the receiving domain's `max_frame`
-  on a grant of another domain is dropped there without a reply while the grant lives, so
-  `exchange/2` waits for ever where it used to answer `einval`. No caller reaches it today as far as
-  a review could tell (`erx_win:write_at/4`, `clipboard_write/3` and `write/3` pass bytes through
-  unchunked; the shell export's writes are capped at 64 KiB by its own funnel). Decide in the design
-  between one size refusal derived from `files_max_frame_min`, a transport limit rather than a
-  grammar check, and an over-limit send that comes back as an error.
+* [Medium] files, the client's frame bound unproven (`otp/erts/preloaded/src/erx_file_remote.erl`, `posted/2`):
+  the client refuses a request whose message passes `files_max_frame_min` as `erlang:external_size/1`
+  measures it, which rests on two facts nothing checks. That size equals the frame's `payload_len`
+  under the transport's flags (no atom cache, design-domains.md), unverified for an alias and a local
+  pid against ERTS's `external.c`; and that the largest request the grammar admits, a write of
+  `p9_io_max` or an xattr of `p9_xattr_max` with names, alias and pid at their bounds, fits
+  `files_max_frame_min`, two limits declared apart in `abi/protocols/9p.txt` and
+  `abi/services/files.txt`. Derive or check the second in the generator, and confirm the first with
+  file and line or a hosted case across a real lane. If either fails, a valid request is refused
+  einval or an oversized one hangs.
 * [Medium] files, the windows facet's tree (`erlang/apps/erx_win/src/erx_win.erl:134`, `:326`): `erx_win`
   builds its display handle as `{Grant, ?ERX_WINDOWS_TREE_BYTES, rw}`, a second source of the tree and
   rights the registry holds with the facet, from the mint's reply and the facet row (design-files.md, "The

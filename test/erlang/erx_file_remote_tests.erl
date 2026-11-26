@@ -228,3 +228,53 @@ seek_to_follows_freebsd_test_() ->
      ?_assertEqual({ok, Max}, erx_file_remote:seek_to(Max - 1, 1)),
      ?_assertEqual({error, eoverflow}, erx_file_remote:seek_to(Max, 1)),
      ?_assertEqual({error, eoverflow}, erx_file_remote:seek_to(1, Max))].
+
+%% The transport bound: a grant of another domain is reached through frames of at least
+%% files_max_frame_min bytes, and the cross-domain transport drops a longer one without
+%% a reply (design-domains.md, Payload size). The stand-in plays that transport and a
+%% funnel behind it, which answers einval to what the grammar refuses, a write past
+%% p9_io_max among them, and tells the test each message it dropped or took. The client refuses
+%% a request whose message passes the bound with einval, sending nothing, and sends one
+%% exactly at it; without the refusal the exchange waits for ever on a dropped frame.
+frame_server(Test) ->
+    spawn(fun() -> frame_loop(Test) end).
+
+frame_loop(Test) ->
+    receive
+        {erx_9p, Alias, _Owner, _Request} = Message ->
+            case erlang:external_size(Message) > ?ERX_FILES_MAX_FRAME_MIN of
+                true -> Test ! {dropped, self()};
+                false ->
+                    Test ! {received, self()},
+                    Alias ! {erx_origin, ?SERVER, {erx_9p, Alias, {error, einval}}}
+            end,
+            frame_loop(Test)
+    end.
+
+%% A write whose message to a grant is Bytes long when this process sends it, as the
+%% client does in it: an alias made here encodes at the size of the client's.
+write_of(Bytes) ->
+    Alias = erlang:alias(),
+    Empty = erlang:external_size({erx_9p, Alias, self(), {write, 1, 0, <<>>}}),
+    erlang:unalias(Alias),
+    {write, 1, 0, binary:copy(<<0>>, Bytes - Empty)}.
+
+write_past_the_frame_bound_is_refused_before_it_is_sent_test_() ->
+    {timeout, 10,
+     fun() ->
+             ok = empty(),
+             Server = frame_server(self()),
+             Grant = {Server, <<"t">>, rw},
+             Over = write_of(?ERX_FILES_MAX_FRAME_MIN + 1),
+             ?assertEqual([{error, einval}], erx_file_remote:exchange(Grant, [Over])),
+             ?assertEqual([{error, einval}, {error, einval}],
+                          erx_file_remote:exchange(Grant, [{clunk, 1}, Over])),
+             ?assertEqual({error, einval}, erx_file_remote:send(Grant, Over)),
+             ?assertEqual([{error, einval}],
+                          erx_file_remote:exchange(Grant, [write_of(?ERX_FILES_MAX_FRAME_MIN)])),
+             Taken = fun(What) -> receive {What, Server} -> What after 0 -> none end end,
+             ?assertEqual(received, Taken(received)),
+             ?assertEqual(none, Taken(received)),
+             ?assertEqual(none, Taken(dropped)),
+             exit(Server, kill)
+     end}.

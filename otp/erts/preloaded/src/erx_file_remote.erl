@@ -37,9 +37,11 @@
 %% offsets (offset_after/4).
 %%
 %% Every request passes exchange/2, or send/2, its send half for one request, which
-%% makes the client's two refusals and no other check: a walk that names ".", ".." or an
-%% empty name is refused, so no walk this client sends carries one, and nothing that
-%% writes through rights other than rw is sent. The grant's funnel checks every request
+%% makes the client's two refusals and no other check of the protocol: a walk that
+%% names ".", ".." or an empty name is refused, so no walk this client sends carries
+%% one, and nothing that writes through rights other than rw is sent. A request whose
+%% message passes files_max_frame_min, the frame every grant's domain takes, is refused
+%% einval too, a limit of the transport (posted/2). The grant's funnel checks every request
 %% against the generated protocol grammar, erx_9p_grammar, and refuses a malformed one
 %% einval; the grammar holds each reply to its request. A server's reply is untrusted:
 %% a reply of any other shape answers eio and raises nothing in the caller, which may be the code server. A server of another
@@ -1264,11 +1266,12 @@ text(Path) ->
 %% every operation: a walk that names ".", ".." or an empty name sends nothing and
 %% answers einval, since only the resolver acts on those (design-files.md, Resolving a
 %% path); and a request that writes, through rights other than rw, sends nothing and
-%% answers erofs, as the grant's own funnel would. Nothing else is checked here: the
-%% grant's funnel decodes every request against the grammar and refuses a malformed one
-%% einval (design-files.md, Erlang clients). If one is refused, nothing is sent; else
-%% each request goes to an alias of its own, all at once, and the replies are answered
-%% in order.
+%% answers erofs, as the grant's own funnel would. Nothing else of the protocol is
+%% checked here: the grant's funnel decodes every request against the grammar and
+%% refuses a malformed one einval (design-files.md, Erlang clients). One limit of the
+%% transport, not of the grammar, is: a request whose message passes the frame bound
+%% answers einval (posted/2). If one is refused, nothing is sent; else each request
+%% goes to an alias of its own, all at once, and the replies are answered in order.
 -spec exchange(grant(), [tuple()]) -> [term()].
 exchange({Pid, _, Rights}, Requests) ->
     case refused(Requests, Rights) of
@@ -1281,8 +1284,17 @@ exchange({Pid, _, Rights}, Requests) ->
 -spec send(grant(), tuple()) -> {ok, request_id()} | {error, einval | erofs}.
 send({Pid, _, Rights}, Request) ->
     case refused([Request], Rights) of
-        none -> {ok, sent_request(Pid, erlang:monitor(process, Pid), Request)};
-        Why -> {error, Why}
+        none ->
+            Monitor = erlang:monitor(process, Pid),
+            case posted(Pid, [addressed(Monitor, Request)]) of
+                {ok, [Id]} ->
+                    {ok, Id};
+                {error, einval} ->
+                    erlang:demonitor(Monitor, [flush]),
+                    {error, einval}
+            end;
+        Why ->
+            {error, Why}
     end.
 
 %% A flush of the request Id names, which names it by its alias (design-files.md,
@@ -1332,15 +1344,46 @@ dot_names(_) -> false.
 %% requests share one monitor of the grant, so a remote grant is monitored once for them.
 sent(Pid, Requests) ->
     Monitor = erlang:monitor(process, Pid),
-    Ids = [sent_request(Pid, Monitor, Request) || Request <- Requests],
-    Answers = collect(Ids, live),
+    Answers = case posted(Pid, [addressed(Monitor, Request) || Request <- Requests]) of
+                  {ok, Ids} -> collect(Ids, live);
+                  {error, einval} -> [{error, einval} || _ <- Requests]
+              end,
     erlang:demonitor(Monitor, [flush]),
     Answers.
 
-sent_request(Pid, Monitor, Request) ->
+%% Request at an alias of its own: its id, and the message the grant receives.
+addressed(Monitor, Request) ->
     Alias = erlang:alias(),
-    erlang:send(Pid, {erx_9p, Alias, self(), Request}),
-    #request_id{alias = Alias, request = Request, monitor = Monitor}.
+    {#request_id{alias = Alias, request = Request, monitor = Monitor},
+     {erx_9p, Alias, self(), Request}}.
+
+%% Sends each addressed message, or none when one passes the frame bound, a limit of
+%% the transport rather than a check of the grammar. A grant of another domain is
+%% reached through frames whose payload is the message in external term format, and
+%% the receiving domain drops a payload past its max_frame without a reply
+%% (design-domains.md, Payload size); every domain that serves or holds a files grant
+%% takes at least files_max_frame_min (property 16 of design-system.md), so a message
+%% within it, as external_size/1 measures its encoding, passes any grant's max_frame;
+%% the receiver's other limits (max_message_heap, funnel_depth, the facet's
+%% max_request) are not checked here. A grant of
+%% this domain, reached without a frame, has the same bound, so the answer does not
+%% depend on where the grant is served. files_max_frame_min holds a write of the 64 KiB
+%% transfer unit with its encoding (abi/services/files.txt), so a request past it is
+%% one the grant's funnel refuses einval for passing the grammar's bounds; it answers
+%% einval here, before anything is sent, instead of leaving its caller waiting for a
+%% reply that never comes.
+posted(Pid, Addressed) ->
+    case oversized(Addressed) of
+        false ->
+            {ok, [begin erlang:send(Pid, Message), Id end || {Id, Message} <- Addressed]};
+        true ->
+            [erlang:unalias(Alias) || {#request_id{alias = Alias}, _} <- Addressed],
+            {error, einval}
+    end.
+
+oversized([]) -> false;
+oversized([{_, Message} | Addressed]) ->
+    erlang:external_size(Message) > ?ERX_FILES_MAX_FRAME_MIN orelse oversized(Addressed).
 
 %% Liveness is live until the grant's monitor fires, and gone after, when each request
 %% left answers with what arrived before the end.
