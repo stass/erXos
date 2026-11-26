@@ -11,6 +11,8 @@
  * pages, with the ring core's reader. Linked into the kernel only, never into the root.
  */
 
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -32,6 +34,9 @@ typedef union erx_trace_rings {
 
 _Alignas(ERX_PAGE_SIZE) erx_trace_rings_t erx_trace_rings;
 
+/* Whether a map_trace call holds the rings' mapping (erx_trace_kernel_window_claim). */
+static atomic_bool trace_rings_window_claimed;
+
 /* The record's cpu is the ring's own, whatever the entry says, so a ring holds only its CPU's records. */
 void
 erx_trace_kernel_put(uint32_t cpu, const erx_trace_entry_t *entry)
@@ -49,4 +54,16 @@ erx_trace_kernel_pages(size_t *bytes)
 {
 	*bytes = sizeof(erx_trace_rings.pages);
 	return (erx_trace_rings.pages);
+}
+
+bool
+erx_trace_kernel_window_claim(void)
+{
+	return (!atomic_exchange_explicit(&trace_rings_window_claimed, true, memory_order_acq_rel));
+}
+
+void
+erx_trace_kernel_window_release(void)
+{
+	atomic_store_explicit(&trace_rings_window_claimed, false, memory_order_release);
 }

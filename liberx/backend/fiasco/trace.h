@@ -6,6 +6,7 @@
 #ifndef ERX_FIASCO_TRACE_H
 #define ERX_FIASCO_TRACE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -22,5 +23,11 @@ void	erx_fiasco_trace_service(uint32_t event, uint64_t arg0, uint64_t arg1, uint
  * so a record names the writer's CPU when the mask names exactly one.
  */
 void	erx_fiasco_trace_set_mask(uint32_t index, uint64_t mask);
+
+/*
+ * Asks the kernel to map its trace rings into the root's window; false when it refused, and
+ * erx_trace_read then answers ERX_ENOTSUP for the boot. The root's first thread, once.
+ */
+bool	erx_fiasco_trace_window_map(void);
 
 #endif /* ERX_FIASCO_TRACE_H */

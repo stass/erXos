@@ -1,3 +1,5 @@
+// Modified by erXos: map_trace maps the kernel's trace rings read-only into the
+// root (docs/design-fiasco.md, "The kernel's trace rings").
 INTERFACE:
 
 #include "kobject_helper.h"
@@ -15,6 +17,9 @@ public:
     Shutdown_system    = 0x1,
     Allow_cpu_shutdown = 0x2,
     Set_task_asid_arm  = 0x10,
+    // erXos: maps the kernel's trace rings read-only into the caller
+    // (Erx_trace::map_trace, ERX_FIASCO_PFC_MAP_TRACE).
+    Erx_map_trace      = 0x100,
   };
 
 private:
@@ -27,6 +32,8 @@ protected:
 
 //-----------------------------------------------------------------------------
 IMPLEMENTATION:
+
+#include "erx_trace.h"
 
 JDB_DEFINE_TYPENAME(Platform_control_object, "Icu/Pfc");
 
@@ -114,6 +121,7 @@ Platform_control_object::kinvoke(L4_obj_ref ref, L4_fpage::Rights rights,
     case Op::Suspend_system:     return sys_system_suspend(rights, f, r_msg);
     case Op::Shutdown_system:    return sys_system_shutdown(rights, f, r_msg);
     case Op::Allow_cpu_shutdown: return sys_cpu_allow_shutdown(rights, f, r_msg);
+    case Op::Erx_map_trace:      return Erx_trace::map_trace(f, r_msg);
     default:                     return invoke_arch(rights, f, r_msg, s_msg);
     }
 }

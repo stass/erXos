@@ -4,9 +4,9 @@
  */
 
 /*
- * A task's side of the trace ring (docs/design-fiasco.md, "The trace ring"). Only the
- * root links the ring; a task links this file instead, so its reader refuses and its
- * parks and wakes record nothing.
+ * A task's side of the trace rings (docs/design-fiasco.md, "The trace ring" and "The
+ * kernel's trace rings"). Only the root links its ring and maps the kernel's; a task links
+ * this file instead, so both readers refuse and its parks and wakes record nothing.
  */
 
 #include <stdint.h>
@@ -32,4 +32,17 @@ erx_backend_trace_write(uint32_t event, uint64_t arg0, uint64_t arg1, uint64_t a
 	(void)arg0;
 	(void)arg1;
 	(void)arg2;
+}
+
+int
+erx_trace_read(uint64_t res, uint32_t cpu, uint64_t cursor, erx_trace_record_t *records, uint32_t max,
+    erx_trace_read_result_t *result)
+{
+	(void)res;
+	(void)cpu;
+	(void)cursor;
+	(void)records;
+	(void)max;
+	(void)result;
+	return (ERX_ENOTSUP);
 }

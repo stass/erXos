@@ -1,6 +1,8 @@
 // Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: alloc_ku_mem refuses an area under 16 KiB or not aligned
 // to its size (docs/design-fiasco.md, "Congruent UTCB areas").
+// Modified by erXos: erx_map_kernel_ro maps the kernel's trace rings read-only
+// (docs/design-fiasco.md, "The kernel's trace rings").
 INTERFACE:
 
 #include "context.h"
@@ -963,6 +965,42 @@ Task::ext_map_ku_mem(Utcb const *utcb, Utcb *out, void *k_addr,
     }
 
   return commit_result(0);
+}
+
+/**
+ * erXos: map kernel memory read-only at a user address of this task, as
+ * kernel-user memory is mapped but without a Ku_mem record, since the pages
+ * are the kernel image's and never freed (docs/design-fiasco.md, "The
+ * kernel's trace rings"). Its one caller, Erx_trace::map_trace, has checked
+ * that [u_addr, u_addr + size) is page-aligned user space and holds the claim
+ * that keeps a second mapping of the same pages out.
+ *
+ * \retval 0                 Mapping succeeded.
+ * \retval -L4_err::ENomem   A page table could not be allocated.
+ * \retval -L4_err::EExists  Something is mapped in the range already.
+ * \retval -L4_err::EInval   The task is being destroyed, or another failure.
+ */
+PUBLIC
+int
+Task::erx_map_kernel_ro(Address u_addr, void *k_addr, size_t size)
+{
+  Ref_ptr self(this);
+  auto guard_task = switch_lock_guard(existence_lock);
+  if (!guard_task.is_valid())
+    return -L4_err::EInval;
+
+  // As map_ku_mem: interrupts enabled for the remote TLB flushes.
+  auto guard_cpu = lock_guard<Lock_guard_inverse_policy>(cpu_lock);
+
+  User_ptr<void> user(reinterpret_cast<void *>(u_addr));
+  switch (map_ku_mem_chunk(&user, k_addr, false, size, true,
+                           L4_fpage::Rights::R()))
+    {
+    case Mem_space::Insert_ok:         return 0;
+    case Mem_space::Insert_err_nomem:  return -L4_err::ENomem;
+    case Mem_space::Insert_err_exists: return -L4_err::EExists;
+    default:                           return -L4_err::EInval;
+    }
 }
 
 /*

@@ -13,6 +13,7 @@
  * functions and as an address, never as a type. kernel/core/trace_rings.c implements it.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -52,6 +53,15 @@ void		erx_trace_kernel_put(uint32_t cpu, const erx_trace_entry_t *entry);
  * read-only into the root.
  */
 const void	*erx_trace_kernel_pages(size_t *bytes);
+
+/*
+ * map_trace's once per boot: the first call claims the rings' mapping and every later one
+ * finds it claimed, so two calls never map the same pages at once. A call whose map then
+ * fails, or that is refused, releases its claim, so a later call may map. Each returns
+ * whether this call holds the claim.
+ */
+bool		erx_trace_kernel_window_claim(void);
+void		erx_trace_kernel_window_release(void);
 
 #ifdef __cplusplus
 }

@@ -30,3 +30,17 @@ erx_backend_trace_write(uint32_t event, uint64_t arg0, uint64_t arg1, uint64_t a
 	(void)erx_trace_ring_put(&erx_trace_ring, &entry);
 	(void)pthread_mutex_unlock(&trace_mutex);
 }
+
+/* The hosted process runs on no kernel of erXos's, so there are no kernel rings to read. */
+int
+erx_trace_read(uint64_t res, uint32_t cpu, uint64_t cursor, erx_trace_record_t *records, uint32_t max,
+    erx_trace_read_result_t *result)
+{
+	(void)res;
+	(void)cpu;
+	(void)cursor;
+	(void)records;
+	(void)max;
+	(void)result;
+	return (ERX_ENOTSUP);
+}

@@ -188,7 +188,13 @@ erx_fiasco_root_up(const void *archive, size_t archive_bytes, uint64_t dma_bytes
 	return (erx_fiasco_reaper_start());
 }
 
-/* The root's thread table: its pages, its native UTCB slots, and the first thread's semaphore. */
+/* What a boot whose kernel refused map_trace prints; it reads no kernel trace. */
+static const char trace_refused[] = "trace: the kernel refused its trace rings' window; no kernel trace this boot\n";
+
+/*
+ * The root's thread table: its pages, its native UTCB slots, and the first thread's
+ * semaphore; then the root's trace ring, and the window onto the kernel's.
+ */
 static const char *
 service_thread_table_init(void)
 {
@@ -207,6 +213,8 @@ service_thread_table_init(void)
 		return ("threads: the kernel refused the first thread's semaphore");
 	erx_fiasco_thread_first_init();
 	erx_trace_ring_touch();
+	if (!erx_fiasco_trace_window_map())
+		erx_fiasco_console_write(trace_refused, sizeof(trace_refused) - 1);
 	return (NULL);
 }
 

@@ -123,9 +123,12 @@ erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size, erx_log
 	const erx_fiasco_log_read_request_t request = { .caller = erx_fiasco_thread_self()->index,
 	    .cursor = cursor, .window = (uint64_t)(uintptr_t)window, .size = size };
 	erx_fiasco_reply_t reply;
-	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_LOG_READ, &request, sizeof(request), &reply);
+	int status;
 
-	(void)res;
+	/* Only the root resource's slot holds TRACE, as erXos's kernel would check it. */
+	if (res != ERX_ROOT_SLOT_ROOT_RESOURCE)
+		return (ERX_ERIGHTS);
+	status = erx_fiasco_service_call(ERX_FIASCO_CALL_LOG_READ, &request, sizeof(request), &reply);
 	if (status == ERX_OK)
 		*result = (erx_log_read_result_t){ .next_cursor = reply.first, .lost = reply.second,
 		    .written = reply.third };
@@ -138,9 +141,11 @@ erx_log_take(uint64_t res, void *window, uint64_t size, erx_log_read_result_t *r
 	const erx_fiasco_log_take_request_t request = { .caller = erx_fiasco_thread_self()->index,
 	    .window = (uint64_t)(uintptr_t)window, .size = size };
 	erx_fiasco_reply_t reply;
-	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_LOG_TAKE, &request, sizeof(request), &reply);
+	int status;
 
-	(void)res;
+	if (res != ERX_ROOT_SLOT_ROOT_RESOURCE)
+		return (ERX_ERIGHTS);
+	status = erx_fiasco_service_call(ERX_FIASCO_CALL_LOG_TAKE, &request, sizeof(request), &reply);
 	if (status == ERX_OK)
 		*result = (erx_log_read_result_t){ .next_cursor = reply.first, .lost = reply.second,
 		    .written = reply.third };
