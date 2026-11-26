@@ -23,7 +23,10 @@ module ErxFatAllocFuzz
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_fat/src/erx_fat.erl'
   SOURCES = %w[erlang/apps/erx_fat/src/erx_fat_alloc.erl erlang/apps/erx_fat/src/erx_fat_read.erl
+               erlang/apps/erx_fat/src/erx_fat_name.erl erlang/apps/erx_fat/src/erx_fat_entry.erl
                test/erlang/erx_fat_alloc_tests.erl test/erlang/erx_fat_alloc_fuzz.erl].freeze
+  # The case table erx_fat_name reads, which the build generates.
+  CASE = 'erlang/apps/erx_fat/src/erx_fat_case.erl'
   CHECKED = '        names_pass(Fat, Sets),'
   UNCHECKED = '        _ = fun names_pass/2,'
   DEADLINE_SECONDS = '600'
@@ -54,8 +57,9 @@ module ErxFatAllocFuzz
       core_path = File.join(work, File.basename(CORE))
       File.binwrite(core_path, core_text)
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, core_path,
-                                       *SOURCES.map { |source| File.join(ROOT, source) }, stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-I', File.join(ROOT, File.dirname(CORE)), '-o', work, core_path,
+                                       *SOURCES.map { |source| File.join(ROOT, source) },
+                                       Erx::Generated.path(CASE, root: ROOT), stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e({ 'ERX_FSIMG' => Erx::Fsimg.locate(root: ROOT) },

@@ -15,6 +15,7 @@ require_relative 'hardware'
 require_relative 'sysreg_headers'
 require_relative 'facet_names'
 require_relative 'terminal_generation'
+require_relative 'fat_case'
 require_relative 'keymap'
 require_relative 'gatt_decl'
 require_relative 'splash_mark'
@@ -112,6 +113,7 @@ module Erx
       Generator.new(name: 'hardware', plan: ->(root) { Hardware.generation(root: root) }, code: CODE),
       Generator.new(name: 'sysreg', plan: ->(root) { SysregHeaders.generation(root: root) }, code: CODE),
       Generator.new(name: 'terminal', plan: ->(root) { TerminalRules.generation(root: root) }, code: CODE),
+      Generator.new(name: 'fat_case', plan: ->(root) { FatCase.generation(root: root) }, code: CODE),
       Generator.new(name: 'facets', plan: ->(root) { FacetNames.generation(root: root) }, code: CODE),
       Generator.new(name: 'keymap', plan: ->(root) { Keymap.generation(root: root) }, code: CODE),
       Generator.new(name: 'gatt', plan: ->(root) { GattDecl.generation(root: root) }, code: CODE),

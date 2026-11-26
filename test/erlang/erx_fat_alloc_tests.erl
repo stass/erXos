@@ -13,7 +13,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% The image helpers test/erlang/erx_fat_alloc_fuzz.erl shares.
--export([use/1, reader/0, apply_plan/1, flat/0, entries/1, entry/3, op/3, verify/1, finished/1]).
+-export([use/1, reader/0, apply_plan/1, flat/0, entries/1, entry/3, op/3, verify/1, collect/2, finished/1]).
 
 -define(SECTOR, 512).
 -define(UNKNOWN, 16#ffffffff).

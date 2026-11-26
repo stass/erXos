@@ -20,18 +20,7 @@ module Erx
     # not recorded: an unrelated OTP import does not regenerate the tree.
     def generation(root:)
       root = File.realpath(root)
-      source_bytes = read_input(File.join(root, 'abi/terminal.txt'), maximum: 65_536)
-      model = source(source_bytes)
-      origin = Origin.new(root: File.join(root, 'otp'))
-      inputs = model.fetch('input').to_h do |name, path|
-        bytes = read_input(File.join(root, path), maximum: 8 * 1024 * 1024)
-        record = origin.imported_file(path.delete_prefix('otp/'))
-        unless record && Digest::SHA256.hexdigest(bytes) == record.fetch('sha256') &&
-               record.fetch('license') == LICENSE
-          raise Error, 'terminal input differs from its pinned OTP origin'
-        end
-        [name, bytes]
-      end
+      source_bytes, model, inputs = pinned_inputs(root: root)
       records = unicode_data(inputs.fetch('unicode_data'))
       intervals = unsafe_intervals(model, records: records,
                                    ignorables: derived_properties(inputs.fetch('properties'), version: model.fetch('unicode')))
@@ -55,6 +44,25 @@ module Erx
                          reads: input_hashes.merge('abi/terminal.txt' => Digest::SHA256.hexdigest(source_bytes)))
     rescue SystemCallError => error
       raise Error, "cannot read terminal generation input: #{error.message}"
+    end
+
+    # abi/terminal.txt's bytes, its model and each input it names, read and checked
+    # against its pinned OTP origin: the one pinned Unicode version every generator
+    # of Unicode tables reads (this one and Erx::FatCase).
+    def pinned_inputs(root:)
+      source_bytes = read_input(File.join(root, 'abi/terminal.txt'), maximum: 65_536)
+      model = source(source_bytes)
+      origin = Origin.new(root: File.join(root, 'otp'))
+      inputs = model.fetch('input').to_h do |name, path|
+        bytes = read_input(File.join(root, path), maximum: 8 * 1024 * 1024)
+        record = origin.imported_file(path.delete_prefix('otp/'))
+        unless record && Digest::SHA256.hexdigest(bytes) == record.fetch('sha256') &&
+               record.fetch('license') == LICENSE
+          raise Error, 'terminal input differs from its pinned OTP origin'
+        end
+        [name, bytes]
+      end
+      [source_bytes, model, inputs]
     end
 
     def ascii_header(model)

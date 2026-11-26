@@ -60,7 +60,7 @@ allocator as it was.
 """.
 
 -export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, volume_flags/2,
-         writable/1]).
+         writable/1, view/1]).
 -export_type([alloc/0, layout/0, plan/0, step/0, finding/0, cluster/0]).
 
 -include("generated/erx_abi.hrl").
@@ -155,6 +155,23 @@ new(#{read := Read, type := Type, fat_start := FatStart, fats := Fats, fat_secto
 %% ---------------------------------------------------------------------------
 %% Chains
 %% ---------------------------------------------------------------------------
+
+-doc """
+The volume as the batch leaves it: a function that reads one of its sectors, each
+sector of the first FAT with every entry the batch changes, so a reader that
+follows chains through it (erx_fat:with_read/2) sees the batch's.
+""".
+-spec view(alloc()) -> read_sector().
+view(Alloc = #alloc{read = Read, fat_start = FatStart, batch = Batch}) ->
+    BySector = maps:groups_from_list(fun({Cluster, _Value}) -> entry_sector(Alloc, Cluster) end,
+                                     [{Cluster, Value} || Cluster := {_Kind, Value} <- Batch]),
+    fun(Sector) ->
+            Index = Sector - FatStart,
+            case BySector of
+                #{Index := Entries} -> guarded(fun() -> patched(Alloc, Index, Entries) end);
+                #{} -> Read(Sector)
+            end
+    end.
 
 -doc "The chain from First as the batch leaves it, first to last.".
 -spec chain(alloc(), cluster()) -> {ok, [cluster()]} | {error, finding()}.
