@@ -262,8 +262,7 @@ design does not have, to be deleted so no side-by-side table can show it under s
 ## Stopgap replacements
 
 * [Medium] tooling, `tools/lib/erx/system_domain_regrant.rb` and `session_domain.rb`: the regrant judge does not
-  read the end line, so a root fault that powered off would pass, and its fixture `abort.log` still ends
-  `erx: end off` and needs recapturing first; the session suite's halt boot could require `erx: end off`, which
+  read the end line, so a root fault that powered off would pass; the session suite's halt boot could require `erx: end off`, which
   init's halt after a refused commit, now a reset, no longer prints. The crash and watchdog suites check the end line.
 * [Low] tooling, `tools/lib/erx/native_crash.rb`: the pc check asks only that the pc is at or
   above RAM's start, with no upper bound and nothing tying it to the crash root's image,

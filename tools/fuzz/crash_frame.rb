@@ -18,18 +18,28 @@ module Erx
 
     module_function
 
+    NO_FAULT = { 'kind' => 0, 'cause' => 0, 'addr' => 0, 'pc' => 0, 'thread' => 0, 'space' => 0, 'status' => 0 }.freeze
+
     # A well-formed brief record, for seeds and tests to start past the CRC.
-    def brief_record
-      fault = { 'kind' => 0, 'cause' => 0, 'addr' => 0, 'pc' => 0, 'thread' => 0, 'space' => 0, 'status' => 0 }
+    def brief_record = record(form_name: 'brief', cause: :watchdog, fault: NO_FAULT)
+
+    # A well-formed full record of an end of cause with fault's fields and text:
+    # no registers, frames or CPU entries, as the Fiasco backend's end path
+    # writes one. Every size and offset is the ABI file's.
+    def full_record(cause:, fault:, text:) = record(form_name: 'full', cause: cause, fault: NO_FAULT.merge(fault), text: text)
+
+    def record(form_name:, cause:, fault:, text: '')
+      body = form_name == 'full' ? ("\0".b * (FRAME::RECORD_SIZE - FRAME::BRIEF_SIZE)) + text.b : ''.b
       fields = { 'magic' => FRAME::CODEC.constant('crash_magic'), 'version' => FRAME::CODEC.constant('crash_version'),
-                 'length' => FRAME::BRIEF_SIZE, 'crc' => 0, 'form' => FRAME::FORMS.fetch('brief'),
-                 'cause' => FRAME::CAUSE.fetch(:watchdog), 'cpu' => 0, 'uptime_ns' => 1, 'since_pet_ns' => 1,
+                 'length' => FRAME::BRIEF_SIZE + body.bytesize, 'crc' => 0, 'form' => FRAME::FORMS.fetch(form_name),
+                 'cause' => FRAME::CAUSE.fetch(cause), 'cpu' => 0, 'uptime_ns' => 1, 'since_pet_ns' => 1,
                  'build_id' => 'BUILDID8', 'boot_value' => FRAME::VALUE_UNKNOWN, 'boot_slot' => FRAME::SLOT_NONE,
                  'nframes' => 0, 'ncpus' => 0, 'fault' => fault }
-      record = FRAME::CODEC.encode_layout('erx_crash_brief', fields).dup
+      record = FRAME::CODEC.encode_layout('erx_crash_brief', fields) + body
       record[FRAME::CRC_START - 4, 4] = [FRAME.crc32c(record.byteslice(FRAME::CRC_START..))].pack('L<')
       record
     end
+    private_class_method :record
 
     # The frame of a record's bytes, under the header line asked for.
     def frame_of(record, form_name: nil, length: nil)

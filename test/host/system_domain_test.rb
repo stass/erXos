@@ -4,6 +4,7 @@
 
 require 'minitest/autorun'
 require_relative '../../tools/lib/erx/system_domain'
+require_relative 'root_fault_log_helper'
 
 # What the system_domain suite's harness types and expects (tools/lib/erx/system_domain.rb).
 # Nothing boots here.
@@ -259,9 +260,9 @@ class SystemDomainTest < Minitest::Test
   # root fault, a read of a decommitted page, does not.
   def test_the_regrant_boot_ends_with_a_crash_record_of_the_aborts_write_to_address_0
     load = "#{Suite::Regrant::LOAD_ANSWER}\r\n"
-    abort = File.binread(File.expand_path('../fixtures/system_domain/abort.log', __dir__))
-    Suite::Regrant.judge(abort)
-    other = File.binread(File.expand_path('../fixtures/native_crash/decommitted.log', __dir__))
+    pc = Erx::Platform.development(ROOT).ram_first + RootFaultLog::PC_ABOVE_RAM
+    Suite::Regrant.judge(RootFaultLog.log(kind: Erx::RootFault::MEMORY, cause: RootFaultLog::ABORT_WRITE, pc: pc, before: load))
+    other = RootFaultLog.log(kind: Erx::RootFault::MEMORY, cause: RootFaultLog::READ, pc: pc, address: RootFaultLog::TOUCHED)
     assert_match(/absent/, assert_raises(Erx::Error) { Suite::Regrant.judge(other + load) }.message)
     assert_match(/address, access disagree/, assert_raises(Erx::Error) { Suite::Regrant.judge(load + other) }.message)
   end
