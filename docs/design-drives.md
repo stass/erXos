@@ -995,8 +995,21 @@ alone:
    written as neither;
 3. its mount's one flush, sent before anything is written, answered `ok`
    (`flush` when it answered `enotsup`, a medium that cannot flush);
-4. its format's own state allows it: a FAT volume's dirty flag is clear
-   (`dirty`).
+4. its format's own state allows it. A FAT volume's state allows it
+   when its dirty flag is clear (`dirty`: "the FAT's dirty flag is
+   set"), its FAT records no hard error (`hard error`: "the FAT's
+   hard-error flag is set"), and, on FAT32, its `ExtFlags` leave its
+   FATs mirrored (`mirror`: "the volume's FATs are not mirrored"),
+   checked in that order. Each is a state the server cannot write
+   safely: a dirty volume may hold a change half made, which a repair
+   on another machine settles and no guess on erXos does; a hard error
+   is the mark another system leaves after a disk error (its meaning as
+   the specification gives it is unverified here), so the volume's
+   structures are suspect in the same way; and the batches write each
+   FAT entry to every copy, which a volume of one live FAT does not
+   expect, so serving it would take a second write rule for a layout
+   no consumer asks for
+   ([design-storage.md](design-storage.md#removable-media-fat)).
 
 A flush that answers anything else, `eio` or the window's end, **refuses**
 the mount, with nothing written: the volume shows `none flush` with the
@@ -1239,7 +1252,10 @@ Two things finish volumes:
   `kill` and `include_shared_binaries` set, so a volume whose heap,
   stack and the binaries it holds pass that at a garbage collection is
   ended alone (`erlang.erl:8120-8165`, `process_flag(max_heap_size,
-  ...)`). A littlefs port's budget is a wall of `media_volume_bytes`
+  ...)`). The FAT server holds a write's bytes until its batch commits,
+  and commits early once a batch's data passes a quarter of the bound
+  ([design-storage.md](design-storage.md#removable-media-fat)), so
+  writes that never sync stay well inside it. A littlefs port's budget is a wall of `media_volume_bytes`
   carved from the media domain's, so the port draws on nothing the
   runtime was promised, and a carve the domain cannot promise fails that
   mount with `enomem`. Neither bounds all a volume makes the runtime
@@ -1321,7 +1337,7 @@ parser reads both:
 | `table` | `mbr`, `gpt`, `none` or `refused FINDING` |
 | `sN` | volume N's format, a name of the probe's table or `unknown`; `extended` for an MBR's extended entry |
 | `sN_mount` | one of three outcomes: `rw`; `ro`, with the reason on `sN_ro_reason`; or `none REASON`, no files: `format` for a format not served, FAT12 among them, `unknown`, `extended`, `flush` with the flush's answer, or `failed` with why the volume ended |
-| `sN_ro_reason` | a read-only volume's alone: the writable rule's first condition that does not hold, as one plain line: `erXos does not write NAME` (`format`), `a NAME signature is also on the volume` (`also`), `the medium cannot flush` (`flush`) or `the FAT's dirty flag is set` (`dirty`); the volume's mount logs the same line |
+| `sN_ro_reason` | a read-only volume's alone: the writable rule's first condition that does not hold, as one plain line: `erXos does not write NAME` (`format`), `a NAME signature is also on the volume` (`also`), `the medium cannot flush` (`flush`), `the FAT's dirty flag is set` (`dirty`), `the FAT's hard-error flag is set` (`hard error`) or `the volume's FATs are not mirrored` (`mirror`); the volume's mount logs the same line |
 | `sN_sectors` | its length |
 | `sN_fat` | FAT's type, `12`, `16` or `32` |
 | `sN_label`, `sN_serial` | the volume's label and serial number, or a GPT entry's name and unique GUID, as the medium gives them |
@@ -1684,7 +1700,7 @@ so a pass shows the code under test ran.
 | the table as a property test: for every MBR and GPT the generator writes, the served volumes lie inside the medium, pairwise apart and apart from every metadata sector, and `place/3` never answers a sector outside its volume | the end check written `<` for `=<` |
 | `erx_media_probe` on a seed of each table row; on a FAT32 volume holding EROFS's magic at 1,024 bytes, which selects `erofs`; on a FAT32 volume that kept a littlefs superblock in block 1, which selects `littlefs` with `msdosfs` also found, mounting `ro` for `msdosfs` also found in a development build and `none format` in a release, which serves no littlefs; and on a FAT12 volume fsimg writes, refused `none format` | the order reversed, so the first volume selects `msdosfs`; the written-formats check dropped, so the littlefs volume is found alone; the FAT type left to the mount, so the FAT12 volume is selected and mounted |
 | littlefs's signature over volumes the tree's littlefs writes with `erx_lfs_config`: freshly formatted, after many commits, after compactions of the root pair that leave its current superblock in block 1, and cut mid-commit and mounted again, each found by the probe and mounted | the signature read in block 0 alone, so the compacted volume is `unknown` |
-| the writable rule over every combination of format, written formats also found, flush answer and dirty flag | the `also` condition removed, so the doubly formatted volume mounts writable; every flush answer but `ok` taken as `enotsup` |
+| the writable rule over every combination of format, written formats also found, flush answer, dirty flag, hard-error flag and FAT32's mirroring | the `also` condition removed, so the doubly formatted volume mounts writable; every flush answer but `ok` taken as `enotsup`; the hard-error and mirroring conditions each removed, so a volume that sets one mounts writable |
 | a selected format whose mount fails: the FAT32 volume holding EROFS's magic is `none failed` and nothing is written | a fall-through to the next format found, which mounts it as FAT |
 | the drive process and the media tree, under `erx_media_sup` against a fake drive grant and window: a medium's mount, a listing, a read; the window's end, after which an open fid answers `eio` and `diskN` lists `status` and `ctl`; a new window, mounted at the next walk; a volume process killed, the others still served; a volume past its memory bound; the drive process killed with a write outstanding, after which the next walk mounts the medium afresh and the outstanding write is answered before the new mount's first read | the drive process not monitoring the window, so the open fid reads after the end; a volume process started as a permanent child, so the kill restarts it; `max_heap_size` given `media_volume_bytes` as words unconverted, so a volume eight times its allowance is not ended; the grant answering the old window again without its restart, so the old write reaches the window after the new mount's read |
 | the drive grant's occupant, over `erx_blk_drive:step/2` by name: a place with no occupant drops a serve; a function that occupied a place and ended before its serve leaves it free, its late serve dropped and the next function's `occupy/2` answered `ok`; a block grant occupied by its device process takes that process's serve of a second window, under a fresh reference, after its first window ended, and takes it before that end is seen, its held asks answered from the second window | the clause that lets a grant with no occupant take any serve restored, so the late serve lands and the next `occupy/2` answers `taken`; a block grant's occupation freed at its window's end, so the second serve is dropped and the disk is never mounted again |

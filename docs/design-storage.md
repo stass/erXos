@@ -1727,26 +1727,38 @@ designed. It maps the format onto the file protocol as follows:
   a sector being written whole, which a medium that tears a write breaks
   ([Risks and open questions](#risks-and-open-questions)). Before the
   first change after a mount, it sets the volume's dirty flag, which FAT16
-  and FAT32 carry in the FAT's second entry, and flushes. It then commits
-  changes in **batches**, at `fsync`, at unmount and every 5 s while
-  changes wait, each batch in five steps with a flush after each, so no
+  and FAT32 carry in the FAT's second entry, marks FAT32's FSInfo hints
+  unknown (below), and flushes. A write answers as soon as the server
+  holds its bytes, and every read sees every write answered before
+  it. The server then commits changes in **batches**: at `fsync`,
+  at the volume's finish, every 5 s while changes wait, and as soon as the
+  data a batch holds passes a quarter of the volume's memory bound,
+  `media_volume_bytes` ([design-drives.md](design-drives.md#time-and-memory)),
+  so a copy that never syncs holds at most that much in the volume's
+  process. Each batch runs in five steps with a flush after each, so no
   write of a step reaches the medium before every write of the steps
-  before it:
-  1. **Data**: the files' data, and every cluster that grows a directory
+  before it; a step the batch has no write for is skipped with its
+  flush:
+  1. **Data**: the files' data, in new clusters and, rewritten in place,
+     in the clusters a file keeps; every cluster that grows a directory
      or holds a new directory's first entries, written whole with its
-     entries or zeroes.
+     entries or zeroes; and the `..` entry of a directory the batch moves
+     to another parent.
   2. **Allocation**: the FAT entries of every cluster the batch
      allocates, each new run written whole as a chain of its own that
      ends in an end-of-chain mark, which no name and no live chain
      reaches yet.
-  3. **Removal**: the directory entries that remove names.
+  3. **Removal**: the directory entries that remove names: a removed
+     file's or directory's, a renamed file's old entry, and the entry of
+     the name a rename replaces.
   4. **Publication**: what makes the new runs reachable and cuts the old
      ones: the FAT entry that links a file's old last cluster to its new
      run, the directory entries that add or change names, a renamed
      file's new entry among them, and the end-of-chain marks that cut a
      shrinking file's chain.
   5. **Release**: the FAT entries that free clusters, which since step 4
-     no live chain and no name reaches.
+     no live chain and no name reaches and which belong to no file a fid
+     still names.
 
   Each FAT entry goes to every copy of the FAT in the same step, the first
   copy first. A cluster freed in a batch is allocated again only in a
@@ -1756,18 +1768,25 @@ designed. It maps the format onto the file protocol as follows:
   once more. So a power cut or a removal at any point leaves names and
   chains that reach only allocated clusters holding written data, with no
   cluster in two chains or under two names; loses at most the batch being
-  committed, whose files may hold old or new bytes block by block; and
-  leaves at most lost clusters; and a volume whose flag is clear has no
-  change half made. FAT16's and FAT32's entries, two and four bytes at
-  aligned offsets, never straddle a sector, so each entry's write is
-  whole. A volume
-  found dirty mounts read-only and reports it, so the files can be copied
-  off and the volume repaired on another machine, never by a guess on
-  erXos. Every guarantee above rests on the medium's flushes, so a FAT
-  volume mounts writable only under the drives' writable rule: its one
-  flush, sent before it writes anything, answered `ok`, it is FAT16 or
-  FAT32 and not dirty, and no other format the build writes has its
-  signature on it; a flush
+  committed, whose files may hold old or new bytes block by block and
+  whose names, added, removed or renamed, may each be found whole,
+  missing or under their short name alone, so that a file the cut batch
+  renames may be under its old name, its new name or none; and leaves at
+  most lost clusters, the clusters of a name found missing among them;
+  and a volume whose flag is clear has no change half made. FAT16's and
+  FAT32's entries, two and four bytes at aligned offsets, never straddle
+  a sector, so each entry's write is whole. A write or flush of a batch
+  that fails is a cut: the volume ends, `none failed`, its requests
+  answering `eio` and the writes it had answered but not committed lost,
+  and the medium mounts read-only as dirty when it next mounts. A volume
+  found dirty, or whose FAT records a hard error, mounts read-only and
+  reports it, so the files can be copied off and the volume repaired on
+  another machine, never by a guess on erXos. Every guarantee above rests
+  on the medium's flushes, so a FAT volume mounts writable only under the
+  drives' writable rule: its one flush, sent before it writes anything,
+  answered `ok`, it is FAT16 or FAT32, not dirty, recording no hard error
+  and, on FAT32, mirroring its FATs, and no other format the build writes
+  has its signature on it; a flush
   that answers `enotsup`, a medium that cannot flush, as a USB medium that
   refuses SYNCHRONIZE CACHE is
   ([design-usb.md](design-usb.md#the-scsi-subset)), mounts it read-only
@@ -1776,6 +1795,68 @@ designed. It maps the format onto the file protocol as follows:
   last batch, and the dirty flag's clearing, are written at the volume's
   finish, which `eject` and the machine's ordered end send
   ([design-drives.md](design-drives.md#finishing-a-volume)).
+
+* **The FAT's second entry and FSInfo.** The server writes the FAT's
+  second entry only to set the dirty flag and to clear it, and never sets
+  its hard-error flag, the mark another system leaves there after a disk
+  error (its meaning as the specification gives it is unverified here).
+  The top four bits of a FAT32 entry are reserved: the server takes an
+  entry's value from its low 28 bits and writes every entry, the first
+  two included, with its top four bits as it read them, as the
+  specification asks of writers (unverified here). A FAT32 volume's
+  FSInfo sector holds two hints, a count of free clusters and the cluster
+  to search from for the next free one, each `0xFFFFFFFF` when unknown;
+  they are untrusted input, and the server reads neither, finding free
+  clusters in the FAT itself. It never writes a free count, which would
+  have to be exact at every cut, and the batches do not keep it so: the
+  dirty flag's step writes both hints `0xFFFFFFFF`, the count stays so,
+  and the finish's last batch writes in its release step a next-free hint
+  that is a cluster of the volume, the one after the last cluster the
+  mount allocated, wrapping past the volume's last cluster to its first,
+  or leaves it unknown if the mount allocated none. So every FSInfo sector the server leaves passes fsimg's check, which
+  accepts a count that is unknown or exact and a hint that is unknown or
+  names a cluster of the volume (`lib/formats/fat/verify.c:176-180` at
+  fsimg `b6c1ea2`), and the next system to mount the volume counts the
+  free clusters again. A FAT32 volume whose `ExtFlags` turn mirroring
+  off keeps one active FAT, which the field's low four bits name
+  (unverified here): the server reads that FAT, failing the mount when it
+  names no FAT of the volume, and mounts the volume read-only (`mirror`),
+  since the batches write each entry to every copy and a second rule for
+  a volume of one live copy has no consumer.
+* **Removing a file.** A removed file's name goes in its batch's removal
+  step, and its clusters are released in the release step of the first
+  batch after the last fid that names it is clunked, as FreeBSD's
+  `msdosfs` frees a removed file's clusters only when its last reference
+  ends (`msdosfs_inactive`, `sys/fs/msdosfs/msdosfs_denode.c:664-668` at
+  `release/14.3.0`). Until then the file reads and writes as before, its
+  path staying in the server's table of paths (see "File identity and
+  version" under [Read-write storage](#read-write-storage)), and a run it
+  grows is allocated and linked as any file's but reached by no name. A
+  name a rename replaces is removed the same way. So a session that maps
+  a file keeps reading it while the file is removed or replaced, and no
+  fid ever reads a cluster another file has since been given. A cut
+  before the release leaves those clusters lost, which the guarantees
+  above allow; the finish releases them in its last batch, since no
+  request reaches the volume after it.
+* **Renaming.** A rename onto an existing name removes the replaced
+  name's entry and the renamed file's old entry in the batch's removal
+  step and publishes the renamed file's new entry in its publication
+  step, as above. A directory renamed onto a directory that holds entries
+  fails with `enotempty`, onto a file with `enotdir`, a file onto a
+  directory with `eisdir`, and a directory into its own subtree with
+  `einval`, as POSIX's `rename` answers them (unverified against
+  FreeBSD's source here); the last is found by walking the new parent's
+  `..` entries to the root, at most as many steps as the volume has
+  clusters. A directory moved to another parent has its `..` entry
+  rewritten in the batch's data step, as data of its first cluster.
+* **Directory growth.** A new name takes the first run of free slots in
+  its directory, deleted or never used, long enough for its long-name
+  entries and its short entry, written in the publication step. Where no
+  run is long enough, the server appends one cluster, written in the data
+  step with the new entries and zeroes and linked in the publication
+  step. A directory is never compacted, so no entry of a live name moves.
+  FAT16's root directory has a fixed number of slots, and a name that
+  finds no run in it fails with `enospc`.
 
 A FAT image is untrusted input like any other: the boot sector, the FATs,
 the directories and the long-name chains are decoded with checked bounds,
@@ -2206,7 +2287,7 @@ a file closed and opened again may get a new qid path
 | The block device reports an error, or the controller stops answering | the device process's completions and its deadline | the request's buffer, quarantined until the device is reset ([design-runtime.md](design-runtime.md#the-device-nif)) | the device process reports to the device service, which resets the device by starting a new device process; a window is bound to the life of the device process it first reached and answers `{error, eio}` once that process has ended, since a reset may drop writes the device's volatile cache held and had answered `ok`, so a reset by any route breaks the volumes over the device, which remount through their own restart | `{error, eio}` on the request, and on every later request of a volume mounted before the reset; the inspector's device record |
 | The SD card or its controller reports an error, or misses a deadline | the device process's interrupt decode, the card's R1 status, Auto CMD12's R1, and the request's in-flight bound or the start step's deadline ([The SD host controller](#the-sd-host-controller)) | the failed write's sectors unknown; no buffer, since programmed I/O lends the controller no memory | the device process ends, which ends the storage domain, since `erx_blk_sup` restarts nothing; the domain service restarts the domain, whose device process's start waits for a card still programming, resets the controller and returns the card to idle with CMD0 | `{error, eio}` on the request in flight and on the backlog; one log line naming the step and the status bits |
 | The domain that runs the block driver ends | the domain service | every window dead; every client's reads and writes fail | the domain service starts the domain again from its specification, whose creation gives it the device again, the device service names its windows, and each client receives its window anew as a grant | `eio` on every file of every storage service until the windows return; the domain's death record |
-| A FAT volume found dirty, or a removal while mounted | the volume's dirty flag; the window's errors | the volume, read-only | none on erXos; the volume is repaired on another machine | a report naming the volume; `{error, erofs}` for writes, `{error, eio}` after a removal |
+| A FAT volume found dirty or recording a hard error, or a removal while mounted | the FAT's second entry; the window's errors | the volume, read-only | none on erXos; the volume is repaired on another machine | a report naming the volume; `{error, erofs}` for writes, `{error, eio}` after a removal |
 | An update's signature or manifest fails its check | the verifier, before decoding | nothing written | none needed | the update refused, with the reason |
 
 **Diagnostics.** The inspector shows the boot value, the record, the
@@ -2358,15 +2439,70 @@ blocks on its own lane, the service's group alone is charged, and the
 inspector's per-client statistic attributes the work.
 
 **FAT.** The FAT server's power-cut harness cuts after every write and
-every flush and around both changes of the dirty flag, reorders the
-writes between flushes as F2FS's harness does, and checks each image with
-fsimg's verify: a clean flag never comes with a change half made, no name
-or chain reaches a cluster the FAT does not allocate, no cluster lies in
-two chains or under two names, and no file an earlier batch committed
-changes, but for the batch being committed, whose bytes may be old or new
-block by block. Its layouts include a chain whose old last entry and new
-run lie in different FAT sectors, a chain that grows and one that shrinks
-in one batch. Name matching
+every flush and around both changes of the dirty flag, and reorders the
+writes between flushes as F2FS's harness does. fsimg's verify is the
+oracle, and every clean image, a finished mount's and every cut after
+the clean flag landed, goes to it unmodified. A cut image is dirty and
+may hold lost clusters, both of which fsimg's verify rejects ("unowned
+FAT allocation" and "FAT volume is dirty", fsimg's
+`lib/formats/fat/verify.c:128` and `:156`),
+so the harness first checks it with `Erx::FatVolume`, a Ruby reader of
+FAT images that shares no code with `erx_fat` or fsimg: no cluster lies
+in two chains or under two names; no name or chain reaches a cluster the
+FAT does not allocate; no file an earlier batch committed changes; the
+cut batch's files hold old or new bytes block by block and its names are
+whole, missing or under their short name alone; and a clean flag never
+comes with a change half made. It lists the lost clusters, and the
+harness derives a copy of the image with them freed in every FAT and the
+dirty flag cleared, on which fsimg's verify must pass, so fsimg checks
+the rest of every cut image too. macOS's `fsck_msdos` and FreeBSD's
+`fsck_msdosfs` give second opinions, which the harness reports and which
+fail nothing. Its layouts include a chain whose old last entry and new
+run lie in different FAT sectors, a chain that grows and one that
+shrinks in one batch, a long name across a sector boundary, a rename
+onto an existing name, a directory moved to another parent, and a file
+removed while a fid names it. Each seeded fault must fail the harness:
+the release step merged into the publication step, so a cut leaves a
+name reaching a free cluster; a cluster freed in a batch allocated again
+in the same batch, so a committed file changes; the moved directory's
+`..` written after its new entry is published.
+
+The FAT server's host tests, each with the seeded fault that must fail
+it:
+
+* FSInfo after the dirty flag's step reads both hints unknown, and after
+  the finish the count unknown and the hint a cluster of the volume, the
+  image passing fsimg's verify; seeded with a finish that writes the
+  free count the mount found, which verify refuses once the mount has
+  allocated.
+* A FAT32 image whose entries all have their reserved top bits set,
+  written and finished, keeps each entry's top bits byte for byte;
+  seeded with a writer that writes them zero.
+* A file removed while a fid names it, then another file written over
+  more clusters than it held, in later batches: the fid reads the
+  removed file's bytes unchanged, and after its clunk the next batch
+  releases its clusters, so the finished image passes fsimg's verify;
+  seeded with the release made in the removal's batch, so the fid reads
+  the other file's bytes, and with no release, so verify finds an
+  unowned allocation.
+* A rename onto a file and onto an empty directory, a directory onto a
+  directory with entries (`enotempty`) and into its own subtree
+  (`einval`); seeded with the subtree walk dropped, so the moved
+  directory leaves the tree and verify finds its clusters unowned.
+* Names created until a directory cluster fills, removed and created
+  again: a run of deleted slots is reused only when long enough, a new
+  cluster is appended otherwise, and FAT16's full root answers `enospc`;
+  seeded with a run taken without its length checked, so a long name
+  overwrites the next live entry, and with FAT16's root grown by a
+  cluster.
+* A copy of four times `media_volume_bytes` with no `fsync` completes
+  with the volume alive; seeded with the early commit removed, so the
+  volume's memory bound ends it.
+* A write the window fails in the middle of a batch ends the volume
+  `none failed`, and the next mount is read-only as dirty; seeded with
+  the failure ignored, so the batch's later steps are written.
+
+Name matching
 is compared with Windows' rules over Basic Multilingual Plane letters with
 and without simple uppercase forms and Deseret letters in both cases.
 fsimg creates the images the server reads and verifies those it writes;
