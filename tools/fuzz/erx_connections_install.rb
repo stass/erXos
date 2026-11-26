@@ -15,13 +15,15 @@ require_relative '../lib/erx/generated'
 # against a model. Compiled from source and run on stock's emulator (ERX_ERL and ERX_ERLC,
 # the oracle's). It runs the agent as it is, then a copy that installs from any domain's
 # envelope, which the target must catch. The agent writes the registry through its owner,
-# erx_facets, a preloaded module stock's emulator lacks, compiled beside it.
+# erx_facets, a preloaded module stock's emulator lacks, compiled beside it with the 9P
+# grammar it checks a tree's name with, generated.
 module ErxConnectionsInstallFuzz
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   AGENT = 'erlang/apps/erx/src/erx_connections.erl'
   REGISTRY = 'otp/erts/preloaded/src/erx_facets.erl'
   FUZZ = 'test/erlang/erx_connections_install_fuzz.erl'
+  GRAMMAR = File.join(Erx::Generated::OUTPUT, 'otp/erts/preloaded/src/erx_9p_grammar.erl')
   # Where the ABI's generated Erlang header, which the registry includes, lies.
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   ENVELOPE = '{erx_origin, SystemId, {erx_facets_install, Tag, Name, Interface, Facet}}'
@@ -48,7 +50,7 @@ module ErxConnectionsInstallFuzz
     Dir.mktmpdir('erx-connections-install-fuzz') do |work|
       agent_path = File.join(work, File.basename(AGENT))
       File.binwrite(agent_path, agent_text)
-      sources = [agent_path, File.join(ROOT, REGISTRY), File.join(ROOT, FUZZ)]
+      sources = [agent_path, File.join(ROOT, REGISTRY), File.join(ROOT, GRAMMAR), File.join(ROOT, FUZZ)]
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, *sources, stdin_data: '')
       raise output unless status.success?
 

@@ -522,10 +522,15 @@ with_model_agent(Case) ->
         Clear()
     end.
 
-%% Installs a facet of a process of its own under Name, through the agent.
+%% Installs a facet of a process of its own under Name, net or data, through the agent:
+%% net's as a message service's, its pid, and data's as a tree's, with its tree.
 model_install(Agent, Name) ->
-    Facet = spawn(fun() -> receive after infinity -> ok end end),
-    Agent ! {install, #{Name => {?ERX_SERVICE_FILES, Facet}}, self()},
+    Pid = spawn(fun() -> receive after infinity -> ok end end),
+    Facet = case Name of
+                net -> {?ERX_SERVICE_NET, Pid};
+                data -> {?ERX_SERVICE_FILES, {Pid, <<"data">>, rw}}
+            end,
+    Agent ! {install, #{Name => Facet}, self()},
     receive {installed, Agent} -> ok end.
 
 model_agent(Waiting) ->

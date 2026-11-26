@@ -6,7 +6,8 @@
 %% installations {erx_facets_install, Tag, Name, Interface, Facet} in the system connection's
 %% envelope, in another domain's envelope and bare, with tags, names, interfaces and facets
 %% of every shape (no integer, no atom, no pid, another domain's pid, an interface that is no
-%% positive integer), tuples of the wrong size,
+%% positive integer, a facet of a tree without its tree or whose tree is no plain name),
+%% tuples of the wrong size,
 %% the facets answer in another domain's envelope, and arbitrary terms. The test process
 %% plays the agent's kernel and its domain pid, as erx_connections_tests does.
 %%
@@ -15,7 +16,8 @@
 %%   and exactly the installations a
 %%   model took: those in the system connection's envelope with an integer tag, a name
 %%   (an atom, or a drive's {drive, N}, N a non-negative integer), a positive integer
-%%   interface and a pid, each replacing an older {Interface, Pid} of its name;
+%%   interface and a facet, a pid or {Pid, Tree, Rights} with Tree a plain name and
+%%   Rights ro, rw or rx, each replacing an older {Interface, Facet} of its name;
 %% * each such installation, and nothing else, is acknowledged to the domain pid with
 %%   its tag, in order;
 %% * every other message is dropped and counted.
@@ -80,10 +82,13 @@ message(Agent, {Model, Dropped, Tally}) ->
 accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Interface, Facet}})
   when is_integer(Tag), is_integer(Interface), Interface > 0, is_pid(Facet) ->
     named(Tag, Name, {Interface, Facet});
-accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Interface, {Pid, Rights} = Facet}})
+accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Interface, {Pid, Tree, Rights} = Facet}})
   when is_integer(Tag), is_integer(Interface), Interface > 0, is_pid(Pid),
        (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx) ->
-    named(Tag, Name, {Interface, Facet});
+    case lists:member(Tree, plain_trees()) of
+        true -> named(Tag, Name, {Interface, Facet});
+        false -> no
+    end;
 accepted(_Message) ->
     no.
 
@@ -117,7 +122,15 @@ name() -> pick([data, echo, log, data, '', <<"data">>, 1, {data}, "data", {drive
                  {drive, x}, {drive, 1.0}, {disk, 0}, {drive, 0, 1}]).
 interface() -> pick([5, 3, 8, 23, 1, 5, 3, 0, -1, 1.0, files, <<5>>, {5}, 1 bsl 70]).
 facet() -> pick([pid(5), pid(5), pid(99), self(), data, fun() -> ok end, make_ref(), {pid(5)}, [pid(5)],
-                  {pid(5), rx}, {pid(5), rw}, {pid(99), ro}, {pid(5), rwx}, {data, rw}, {pid(5), ro, x}]).
+                  {pid(5), tree(), rx}, {pid(5), tree(), rw}, {pid(99), tree(), ro}, {pid(5), tree(), rwx},
+                  {data, tree(), rw}, {pid(5), rw}, {pid(5), ro, x}, {pid(5), tree(), ro, x}]).
+tree() -> pick(plain_trees() ++ other_trees()).
+
+%% Trees a mint's reply may name, plain names of the 9P grammar, and trees it may not:
+%% empty, dot names, holding a slash, with a NUL, not UTF-8, longer than a name, no binary.
+plain_trees() -> [<<"data">>, <<"t">>, <<"windows">>, <<16#c3, 16#a9>>, binary:copy(<<"a">>, 255)].
+other_trees() -> [<<>>, <<".">>, <<"..">>, <<"a/b">>, <<"../x">>, <<"a", 0>>, <<255>>,
+                  binary:copy(<<"a">>, 256), data, "data"].
 field() -> pick([tag(), name(), interface(), facet()]).
 
 random_term() ->
