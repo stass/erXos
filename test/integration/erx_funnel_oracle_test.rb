@@ -25,7 +25,7 @@ require_relative '../fixtures/funnel_wire'
 #   adds fun-table and node-table entries; and it refuses a record one byte
 #   past ERX_PROG_FRAME_MAX that it accepts at the bound.
 #
-# One run of the driver and one of erl serve the whole class.
+# One build of the driver, its runs and one run of erl serve the whole class.
 class ErxFunnelOracleTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__).freeze
   SEED = Integer(ENV.fetch('ERX_FUNNEL_SEED', '20261108'))
@@ -37,19 +37,22 @@ class ErxFunnelOracleTest < Minitest::Test
   DOMAIN_ONLY = { fun: EtfWire.fun, pid: EtfWire.pid('web@erxos'), reference: EtfWire.ref('web@erxos'),
             export: EtfWire.export }.transform_values { |term| "\x83".b + term }.freeze
 
-  # Random control terms of every operation, each element in a random
-  # encoding of a random value of its kind.
+  # Random control terms of every operation of the grammar, each element in a
+  # random encoding of a random value of its kind.
   class ControlGenerator
     include EtfWire
 
     NODES = %w[web@erxos system@erxos a_1@erxos].freeze
     PAYLOAD = [22, 24, 26, 28, 29, 33].freeze
 
-    def initialize(random) = @random = random
+    def initialize(random, operations)
+      @random = random
+      @operations = operations
+    end
 
     # The control term's bytes and the payload length its frame declares.
     def control
-      number = [1, 7, 19, 20, 22, 24, 26, 28, 29, 31, 33, 35, 36].sample(random: @random)
+      number = @operations.sample(random: @random)
       ["\x83".b + tuple(integer(number), *elements(number)), PAYLOAD.include?(number) ? 9 : 0]
     end
 
@@ -57,12 +60,13 @@ class ErxFunnelOracleTest < Minitest::Test
 
     def elements(number)
       case number
-      when 1, 7, 22, 24, 26 then [a_pid, a_pid]
+      when 1, 22, 24, 26 then [a_pid, a_pid]
       when 19, 20, 28 then [a_pid, a_pid, a_ref]
       when 29 then [a_ref, a_pid, a_pid, tuple(an_atom, an_atom, integer(@random.rand(256))), an_option_list]
       when 31 then [a_ref, a_pid, integer(@random.rand(1 << 27)), @random.rand(2).zero? ? a_pid : a_spawn_error]
       when 33 then [a_pid, a_ref]
-      else [integer(1 + @random.rand((1 << 64) - 1)), a_pid, a_pid]
+      when 35, 36 then [integer(1 + @random.rand((1 << 64) - 1)), a_pid, a_pid]
+      else raise Erx::Error, "the grammar's operation #{number} has no shape here"
       end
     end
 
@@ -100,9 +104,17 @@ class ErxFunnelOracleTest < Minitest::Test
 
     private
 
-    def inputs
+    # The grammar's operations, by the funnel's own answer: a one-element tuple {N}
+    # is refused with op when N is no operation and with arity when it is one.
+    def operations(driver)
+      numbers = (0..255).to_a
+      lone = numbers.map { |number| "control 0 #{("\x83".b + EtfWire.tuple(EtfWire.small(number))).unpack1('H*')}" }
+      driver.check(lone).zip(numbers).reject { |answer, _| answer.start_with?('op ') }.map(&:last)
+    end
+
+    def inputs(operations)
       random = Random.new(SEED)
-      generator = ControlGenerator.new(random)
+      generator = ControlGenerator.new(random, operations)
       controls = Array.new(CONTROLS) { generator.control }
       mutated = Array.new(MUTATED) do
         bytes, payload_len = controls[random.rand(CONTROLS)]
@@ -133,7 +145,7 @@ class ErxFunnelOracleTest < Minitest::Test
     def compare(directory)
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
       driver = FunnelDriver.new(root: ROOT, runner: runner, directory: directory)
-      given = inputs
+      given = inputs(operations(driver))
       payload = ->(bytes) { "payload 0 1024 100000000 #{bytes.unpack1('H*')}" }
       channel = ->(bytes) { "channel 0 1024 100000000 #{bytes.unpack1('H*')}" }
       requests = given.fetch(:controls).map { |bytes, payload_len| "control #{payload_len} #{bytes.unpack1('H*')}" } +

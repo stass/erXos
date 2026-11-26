@@ -4930,7 +4930,12 @@ erts_set_group_leader(Process *proc, Eterm new_gl)
 
     ASSERT(is_pid(new_gl));
 
-    /* erXos: edit 83. Every way a group leader is set ends here: none of another domain. */
+    /*
+     * erXos: edit 83. Every change to an existing process's group leader ends here: none
+     * of another domain. Process creation assigns the leader in erl_process.c, and a
+     * spawn request from another domain, or naming a leader of one, gives its child
+     * this node's init (dist.c).
+     */
     if (erts_dist_pid_of_other_domain(new_gl))
         return 0;
 
@@ -4985,7 +4990,7 @@ BIF_RETTYPE erts_internal_group_leader_2(BIF_ALIST_2)
     /*
      * erXos: edit 83. No group leader crosses a domain: a leader or a member of another
      * domain is badarg here, so no frame is written (the funnel's grammar has no
-     * GROUP_LEADER); erts_set_group_leader refuses such a leader on every other path.
+     * GROUP_LEADER); erts_set_group_leader refuses such a leader on every other change.
      */
     if (is_not_pid(BIF_ARG_1) || erts_dist_pid_of_other_domain(BIF_ARG_1)
         || erts_dist_pid_of_other_domain(BIF_ARG_2))

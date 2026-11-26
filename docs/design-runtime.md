@@ -531,14 +531,15 @@ the calling process, in the request's `GroupLeader` slot, so the caller's
 group leader is never encoded into a frame and never exported. In `bif.c`,
 `group_leader(GL, Pid)` fails with `badarg` in the caller's runtime, and
 writes no frame, when `GL` or `Pid` is a process of another domain of this
-machine, and `erts_set_group_leader`, which every path that changes a group leader reaches (`erts_internal:group_leader/3` and a `GROUP_LEADER` from another machine included), refuses a leader of another domain; a spawn request from another machine that names one also gets `init`. The io protocol has the server apply code its client names
+machine, and `erts_set_group_leader`, which every change to an existing process's group leader reaches (`erts_internal:group_leader/3` and a `GROUP_LEADER` from another machine included), refuses a leader of another domain; a spawn request from another machine that names one also gets `init`. The io protocol has the server apply code its client names
 (`io:format`'s request carries a module, function and arguments that `group`
 applies), so a leader in another domain would let any domain that can
 message a group run its chosen code in the terminal's domain; refusing
 rather than dropping reports no success that did not happen, and the
 refusal depends on the pids' nodes alone. A node of another machine keeps
 stock behaviour. The `system_domain` suite's `group_leader_cross`
-checkpoint tests both sites, and the funnel refuses `GROUP_LEADER`
+checkpoint tests the spawn, `group_leader/2` and, through
+`erts_internal:group_leader/3`, the setter, and the funnel refuses `GROUP_LEADER`
 ([design-domains.md](design-domains.md#frames)).
 
 **Libraries that take the envelope** ([design-domains.md](design-domains.md#the-peer)).
@@ -4419,7 +4420,7 @@ Everything not listed behaves as stock OTP 29.1.2.
 | a message larger than the connection's lane allows | `system_limit` from the send, ERTS's own too-large path |
 | `erlang:send/3` with `[nosuspend, notify]` | added: the option `notify`, valid only with `nosuspend` toward another node; a send refused as busy returns `nosuspend` as stock does, and the sender then receives `{erx_lane_ready, Node}` once, when the queue stops being busy or the connection ends (edit 67, [Connections in ERTS](#connections-in-erts)) |
 | `erx:export/3` | added: `erx:export(Name, Rights, Peer)` sets what a peer holds on one of the calling domain's own names, a pid or alias of the domain or the domain itself, to exactly `Rights`, widening or narrowing; only the owner grants, and an encode gives a peer `send` alone ([Connections in ERTS](#connections-in-erts)) |
-| a message from another domain | arrives as `{erx_origin, D, Msg}`, `D` the lane's peer, in every process (edit 16); `gen` takes call replies in their envelopes (edit 58), no io request or reply crosses a domain, since every group leader is of its own domain (edit 83), and `sys` takes nothing apart ([design-domains.md](design-domains.md#the-peer)) |
+| a message from another domain | arrives as `{erx_origin, D, Msg}`, `D` the lane's peer, in every process (edit 16); `gen` takes call replies in their envelopes (edit 58); io sends no request or reply to another domain of this machine on its own, since no group leader is of another domain of this machine (edit 83); an io message sent there explicitly arrives enveloped, which stock io does not accept; and `sys` takes nothing apart ([design-domains.md](design-domains.md#the-peer)) |
 | `erx:owner/1` | added: the domain id a pid, reference or port carries, its creation ([design-domains.md](design-domains.md#erlang-interface)) |
 | `erx:limits/0` | added: the `max_frame`, `max_message_heap` and `funnel_depth` the calling domain's runtime enforces, from the limit record it installed at its start, read through the BIF `erx_dist:limits/0` ([design-domains.md](design-domains.md#erlang-interface)) |
 | `erx_dist:supervised/0` | added: `true` when the boot page carries the `supervised` flag, which the domain library sets from the plan's restart, for a configured domain whose row allows a restart or a created domain whose specification's restart is `permanent` or `transient`, and `false` otherwise; the code server reads it to decide whether to wait for its start load ([design-live.md](design-live.md#the-code-server)) |

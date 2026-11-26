@@ -622,13 +622,20 @@ module Erx
     # leader, then tells the child to report. A spawn request's child takes erts's own
     # init as its group leader, never the spawner's, and group_leader/2 on a process of
     # another domain fails with badarg and sends nothing, so the leader is still erts's
-    # init (docs/design-domains.md, D18).
+    # init (docs/design-domains.md, D18). Then erts_internal:group_leader/3, a BIF with
+    # no domain check of its own, asks a process of the system domain to take the
+    # erts child as its leader: erts_set_group_leader refuses a leader of another
+    # domain, so the answer is badarg and the member keeps the shell's leader.
     GROUP_LEADER_EXPRESSION = "SdGlP=spawn('erts@erxos',erx_echo_test,group_leader_of,[self()])," \
                               "SdGlS=case catch group_leader(self(),SdGlP) of {'EXIT',{badarg,_}}->badarg;SdGlO->SdGlO end," \
+                              'SdGlM=spawn(fun()->receive stop->ok end end),SdGlF=make_ref(),' \
+                              'ok=erts_internal:group_leader(SdGlP,SdGlM,SdGlF),' \
+                              'SdGlT=receive {SdGlF,SdGlX}->SdGlX after 15000->timeout end,' \
+                              'SdGlU=(process_info(SdGlM,group_leader)=:={group_leader,group_leader()}),SdGlM!stop,' \
                               'SdGlP!report,' \
                               'SdGlR=receive {erx_origin,_,{group_leader,_,_}=SdGlV}->SdGlV after 15000->timeout end,' \
-                              'io:format("~0kp~n",[{group_leader_cross,SdGlS,SdGlR}])'
-    GROUP_LEADER_ANSWER = '{group_leader_cross,badarg,{group_leader,true,true}}'
+                              'io:format("~0kp~n",[{group_leader_cross,SdGlS,SdGlT,SdGlU,SdGlR}])'
+    GROUP_LEADER_ANSWER = '{group_leader_cross,badarg,badarg,true,{group_leader,true,true}}'
     GROUP_LEADER_START = /\A#{PROMPT}\{group_leader_cross,/n
     # peer stopped by its side's end while erts runs, its watcher told noconnection twice;
     # then erts halted with status 69, its watcher told {domain_down, Erts, {halt, 69}} by

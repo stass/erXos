@@ -1212,8 +1212,9 @@ model harness drive `erx_device.c` itself. `erx_device_dma_check` and `erx_devic
      messages (`global:sync/0` and `register_name/2` stall on another domain's node),
      and `proc_lib`'s start acks. Each needs its owner's unwrap, or a design note that
      it does not cross domains. (`peer`'s detached io relay, which sends io requests to
-     its origin's group leader, does not: no io request crosses a domain, design-domains'
-     compatibility table.)
+     its origin's group leader, needs neither: it is never reached across domains, since
+     `peer`'s `gen_server` calls to the origin's controller before it
+     (`otp/lib/stdlib/src/peer.erl:1402`, `1407`) already time out there.)
 * [Medium] Runtime, group leaders (`dist.c`, edit 83 of design-runtime): toward another
   domain a spawn request names its sender in its `GroupLeader` slot, so the caller's group
   leader is never encoded and so never exported with `send` to the peer, but no test
