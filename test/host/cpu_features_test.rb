@@ -27,7 +27,9 @@ class CpuFeaturesTest < Minitest::Test
   FORBIDDEN_FEATURES = {
     'CONFIG_ARM_SVE' => %w[SVE SVE2 SVEAES SVEPMULL SVEBITPERM SVESHA3 SVESM4 SVEI8MM SVEF32MM SVEF64MM SVEBF16],
     'CONFIG_LAZY_FPU' => [],
-    'CONFIG_CPU_VIRT' => []
+    'CONFIG_CPU_VIRT' => [],
+    'CONFIG_JDB' => [],
+    'CONFIG_INPUT' => []
   }.freeze
   # Never claimed on Fiasco, whatever its configuration: cpu_features.c's table has no row for them.
   NEVER = %w[PACA PACG BTI MTE CPUID].freeze
