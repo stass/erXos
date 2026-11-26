@@ -16,7 +16,8 @@
 > tool's `--tty`; log files under `/var/log`; a crash record that
 > survives the reset; domain crash dumps under `/proc`;
 > the host's tree mounted in the machine; the kernel's stop with every
-> CPU's state in the crash record, the hold, and `tools/erx debug` over
+> CPU's state and its last trace records in the crash record, the
+> kernel's per-CPU trace rings read live, the hold, and `tools/erx debug` over
 > records, memory images, held boards, stubs and recorded runs, in place
 > of Fiasco's kernel debugger, which no erXos kernel carries.
 
@@ -350,13 +351,18 @@ its own reporter ([design-live.md, Tracing](../design-live.md#tracing)):
 | --- | --- | --- |
 | `erts` | `runtime` | OTP's `in` and `out` events of the traced processes |
 | `backend` | backend reporter `liberx trace` | the root service's trace ring: parks, wakes, interrupt deliveries, task starts and ends |
-| `kernel` | `kernel` | one `unsupported` entry |
+| `kernel` | `kernel` | the kernel's per-CPU rings: IPC sends, replies and receives, faults, thread switches, preemptions, placements, interrupts, object creation and deletion |
 
 The `backend` row is the 4,096-record **trace ring** of
 [chapter 9](09-processes.md#971-one-timeline)
-(`liberx/backend/fiasco/trace.c`). The kernel's own trace call,
-`erx_trace_read`, is refused on Fiasco, so the `kernel` row shows one
-`unsupported` entry: the reader sees that the kernel was asked.
+(`liberx/backend/fiasco/trace.c`). The `kernel` row reads the rings
+that Fiasco's kernel writes, one for each CPU, always on, in the same
+record format. The kernel maps them once, read-only, into the root, so
+a read never enters the kernel and can change nothing it reads
+([design-fiasco.md, The kernel's trace rings](../design-fiasco.md#the-kernels-trace-rings)).
+The kernel's rings are **Designed**; until they are built, the kernel's
+trace call, `erx_trace_read`, is refused on Fiasco and the row shows one
+`unsupported` entry, so the reader sees that the kernel was asked.
 
 `erx:trace(Spec)` starts a trace from a map:
 
@@ -858,7 +864,11 @@ fixed layout of the ABI file
 ([design-fiasco.md, The end path](../design-fiasco.md#the-end-path)).
 It holds the cause, the program counter and fault address, the build
 identifier, the uptime, a short message, the faulting thread's
-registers and a backtrace. Of the four causes the layout
+registers and a backtrace; the layout also has room for the newest
+records of each CPU's kernel trace ring, eight each on four CPUs, so a
+record nobody was reading live still says what each CPU did last
+([design-debugger.md, The record's trace tail](../design-debugger.md#the-records-trace-tail);
+**Designed**). Of the four causes the layout
 names (fault, halt, missed watchdog pet, panic), the root writes a
 fault or a missed pet; even `erlang:halt(abort)` arrives as a fault.
 The root first gives the UART back to the kernel, which writes out its

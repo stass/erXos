@@ -10,7 +10,8 @@
 > doorbell into work; the system domain on the interpreter, with
 > BeamAsm available to other domains; musl under ERTS, with FreeBSD's
 > errno and signal numbers; hosted mode on macOS; `ps` over Erlang
-> processes; and `erx:trace`. **Designed:** pinned schedulers and
+> processes; and `erx:trace`. **Designed:** the kernel's own trace
+> rings in `erx:trace`; pinned schedulers and
 > parking in place of spinning; the urgent scheduler, the one way a
 > thread runs above its band's base; CPU sets and thread limits; refusing a scheduler thread every other blocking wait;
 > refusing code that is not installed; one shared copy of common code;
@@ -775,14 +776,21 @@ or out. From the root service it takes the **trace ring**, 4,096
 records that `liberx` writes as it carries out parks, wakes and
 doorbell deliveries
 ([design-fiasco.md, The trace ring](../design-fiasco.md#the-trace-ring)).
-The trace process merges both in time order
-(`erlang/apps/erx/src/erx_trace.erl`). It is **Built**.
+From the kernel it takes one more ring for each CPU, in the same
+record format: the kernel's own IPC, faults, thread switches,
+interrupts and object creations, which the root reads through a
+read-only mapping of the kernel's rings
+([design-fiasco.md, The kernel's trace rings](../design-fiasco.md#the-kernels-trace-rings)).
+The trace process merges them all in time order
+(`erlang/apps/erx/src/erx_trace.erl`). The merge and the root's ring
+are **Built**; the kernel's rings are **Designed**.
 
 So one stream shows an executor of the system domain park, the
 dispatcher deliver a doorbell, the executor wake, and the Erlang
-process that ran next. Only the root's own threads write the ring, so
-a park in another domain does not appear, though that domain's process
-events do.
+process that ran next. Only the root's own threads write the root's
+ring, so a park in another domain does not appear there, though that
+domain's process events do, and its IPC, faults and switches appear in
+the kernel's rows.
 
 ### 9.7.2 A worked example
 

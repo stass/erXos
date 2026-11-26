@@ -2636,7 +2636,8 @@ marker only as a whole line, passes over it:
   full form `regs` is zero unless the cause is `FAULT` or `PANIC`, `frames`
   is zero past `nframes`, every CPU entry's state is one of the stop
   states, an entry is zero past `ncpus` and holds no register for a state
-  that has none, and every byte of `text` is printable ASCII or a
+  that has none, the trace tail is as
+  [design-debugger.md](design-debugger.md#the-records-trace-tail) says, and every byte of `text` is printable ASCII or a
   newline, as escaped text is. A frame that ends before its lines or before the end
   line is reported as `truncated`; a line that is not base64 of the
   expected length, a second header line inside a frame, or any failed
@@ -2644,7 +2645,9 @@ marker only as a whole line, passes over it:
   case.
 * The ABI file declares `crash_frame_begin` and `crash_frame_end`, the
   marker strings, `crash_frame_line` (76) and `crash_frame_lines_max`
-  (288), `crash_cpus` (16), the full form's CPU entries, and `cpu_limit`,
+  (288), `crash_cpus` (16), the full form's CPU entries,
+  `crash_trace_records` (32), the full form's trace tail
+  ([design-debugger.md](design-debugger.md#the-records-trace-tail)), and `cpu_limit`,
   one more than the highest CPU a cpuset can name;
   `ERX_CRASH_BRIEF_SIZE` and `ERX_CRASH_RECORD_SIZE` are the generated sizes
   of the two layouts.
@@ -2666,7 +2669,9 @@ the backtrace, the message or the log. The message passes `erx_log_escape`;
 the log's newest whole lines that fit follow it, each read through the
 log's own check of a record, since a panic may have stopped a CPU halfway
 through an append; a log whose counters could not be the ring's, since a wild
-store may have reached them, gives no lines.
+store may have reached them, gives no lines. The trace tail follows the
+same rule: only records each ring's own reader keeps
+([design-debugger.md](design-debugger.md#the-records-trace-tail)).
 
 At boot step 4 the kernel reads the region before it carves the buffer. A
 record that passes the reader's checks, and whose form is
@@ -7694,9 +7699,15 @@ model and the ABI reference. The events are `park` (slot, deadline),
 `result` is the park's status, `ERX_OK` or `ERX_ETIMEDOUT`; `target` is the
 space started or ended, and `status` its exit status. `cpu_unknown` marks a
 record whose writer cannot name its CPU; the kernel always can and never sets
-it. These five events are the ones both the kernel's rings and Fiasco's
-record ([design-fiasco.md](design-fiasco.md#the-trace-ring)); each other
-kernel event extends the enum from 6 with its own `args` line.
+it. These five events are the ones both the kernel's rings and the root's
+ring on Fiasco record ([design-fiasco.md](design-fiasco.md#the-trace-ring)).
+The events from 6 on are the kernel's own: IPC sends, replies and
+receives and their failures, faults and their ends, switches,
+preemptions, placements, interrupts and object creation and deletion,
+which Fiasco's rings declare and write
+([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)) and this
+kernel writes where it does the same thing; each other event of this
+kernel extends the enum with its own `args` line.
 
 The kernel records dispatches and preemptions, yield requests and grace
 overruns, throttles and refills, parks and wakes, IPC sends, receives and

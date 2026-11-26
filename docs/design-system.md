@@ -908,7 +908,9 @@ file, `erx_crash_record_t`, whose `form` says which of two forms it is
   no other register, no stack and no dump, so nothing the system domain
   held, a passphrase it was checking included, survives the reset in it;
 * the **full** form, a development build's: the brief form's fields, the
-  faulting thread's registers, the backtrace and the kernel log's tail,
+  faulting thread's registers, the backtrace, the newest records of each
+  CPU's kernel trace ring
+  ([design-debugger.md](design-debugger.md#the-records-trace-tail)) and the kernel log's tail,
   among it the slogan and the start of the dump that the system domain's
   runtime writes to the kernel log through its sink before it stops its
   space, so a crash of ERTS in the system domain is read as a crash of the

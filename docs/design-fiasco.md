@@ -678,7 +678,7 @@ callers as it says.
 | the time page, `erx_time_set_offset` | ERTS's time, deadlines | service: one pool page, recorded as a memory object of the root budget, holding the scale of the architecture's user-readable counter and the wall offset. The service maps it read-only into every task at the task's creation, at a constant address just above the task area, the thread table and its label page, that no `erx_vm_reserve` hands out; `erx_time_page` returns that address in a task and the page's window address in the root. Reading is local. `erx_time_set_offset(time_page, offset)` is a service call whose body checks the handle against the caller's entry, as every service call does: a handle that is not the time page `ERX_ETYPE`, and one without `WRITE`, which only the system domain holds, `ERX_ERIGHTS`, as on erXos's kernel; it then stores the offset as the page's, refusing one outside `0..time_offset_max` with `ERX_EINVAL` ([design-time.md](design-time.md#on-fiasco)) | correct layout; the boot information's `time_page` names the object and nothing maps from it | FD27 |
 | `erx_entropy_read`, `erx_entropy_add` | ERTS's `crypto` seed, the host link, musl's `getrandom` | service: `liberx/backend/fiasco/entropy.c` over `rng.c`, keyed from the counter, then mixed with `/chosen`'s `rng-seed` and `kaslr-seed` where the device tree carries them (`kernel/core/rng_seed.c`), and on the Raspberry Pi 4 with the board's random generator on the condition of [Entropy sources](design-platforms.md#entropy-sources) ([The Raspberry Pi 4](#the-raspberry-pi-4)); each reply holds 16 bytes and each request 32, so the stubs loop | the banner names what went in, `erx: entropy: from /chosen/rng-seed (32 bytes), /chosen/kaslr-seed (8 bytes) and the counter`, or on the Raspberry Pi 4 `erx: entropy: from the RNG200 (32 bytes) and the counter`, or says `erx: entropy: quality: low, from the counter alone` when nothing else went in, followed on the Pi 4 by `, since the RNG200 gave too few words within 100 ms` or `, since the RNG200 could not be read` when its read failed. A release image never runs on such a seed, as [design-crypto.md](design-crypto.md) requires: its root counts the bytes that went in from sources other than the counter, the count the banner prints, and with fewer than 32, after the banner's line, writes `erx: entropy: refused: a release does not run without a seed` and ends the machine as `ERX_END_OFF` before it starts any domain, so no key, vault or authentication path ever runs on the counter alone; a development build prints the line and goes on, its banner saying `development build: trusted code only`. `entropy_quality` stays unreported; at most 256 bytes a call; a read the generator cannot serve `ERX_ENOTSUP`; `ERX_ENTROPY_CREDIT` `ERX_ENOTSUP`, since no source is trusted | FD26 |
 | `erx_debug_log`, `erx_log_read`, `erx_log_take` | `liberx`, ERTS's crash path, test tasks; the Erlang log readers, of which the log service, `erx_syslog`, alone takes | service: [The console](#the-console) | correct | FD26 |
-| `erx_backend_trace_read`, `erx_trace_read` | `erx_trace_ring:read/3`, for `erx:trace` | local, in the root: [The trace ring](#the-trace-ring) | the root's parks, wakes, IRQ deliveries and task starts and ends, reported by `liberx trace`; a cursor past the head, or `max` of 0 or over 512, `ERX_EINVAL`; an exhausted ring `ERX_ELIMIT`; `erx_backend_trace_read` in a task `ERX_ENOTSUP`; `erx_trace_read` `ERX_ENOTSUP` everywhere, so the kernel's row is `unsupported` | FD26 |
+| `erx_backend_trace_read`, `erx_trace_read` | `erx_trace_ring:read/3`, for `erx:trace` | local, in the root: [The trace ring](#the-trace-ring), and for `erx_trace_read` the kernel's rings through the root's read-only window ([The kernel's trace rings](#the-kernels-trace-rings)) | the root's parks, wakes, IRQ deliveries and task starts and ends, reported by `liberx trace`, and the kernel's IPC, faults, switches, preemptions, placements, interrupts and objects, reported by `kernel`; a cursor past the head, or `max` of 0 or over 512, `ERX_EINVAL`; an exhausted ring `ERX_ELIMIT`; `erx_trace_read` for a CPU with no ring `ERX_EINVAL`; either call in a task, and `erx_trace_read` in a boot whose root could not map the rings, `ERX_ENOTSUP` | FD26 |
 | `erx_watchdog_pet`, the crash record, `erx_machine_end(res, how)` | M1's criteria | pet: a local atomic store in the root, a task's call `ERX_ENOTSUP`, and hosted `ERX_OK` with no effect. End: the root's alone, a task's call `ERX_ENOTSUP`, as the kernel's `POWER` check leaves it to the system domain ([design-system.md](design-system.md#a-sessions-request)); [The end path](#the-end-path) | `ERX_END_OFF`, `_RESET` and `_PANIC` as erXos's kernel ends them; `ERX_END_TRIAL` `ERX_ENOTSUP`, before anything stops, while the boot value is `unknown`, and otherwise the platform's trial request made by the root and a reset, a kernel hang or a stalled watchdog is caught only on a board whose platform record names a hardware watchdog, from the start of the root's watchdog thread ([The watchdog](#the-watchdog)) | FD26, FD29 |
 | `erx_firmware_request(resource, index)` | the device service's firmware worker: the VL805's notification, the Bluetooth line's power notifications, the Raspberry Pi 4's sensor readings | the root's alone, a task's call `ERX_ENOTSUP`; in the root, local, in the caller's thread, never in the root service, whose one thread serves every task. Having no resource objects, the backend takes the row as a value, `erx_firmware_request_row` of `liberx/backend/api.h`, which the domain library's firmware entries call with the row it resolved from the manifest; the root maps the mailbox's page, which the board's platform record names, keeps a page of its own image as the buffer, and runs the same C17 mailbox core as erXos's kernel, sleeping between reads ([The firmware request](#the-firmware-request), [design-kernel.md](design-kernel.md#firmware-requests), [design-board-sensors.md](design-board-sensors.md#the-kernel-call)) | erXos's kernel's ([design-kernel.md](design-kernel.md#firmware-requests)): the row's answer, at most its window, in the caller's UTCB; a deadline of 1 s from the call's start; `ERX_EBUSY` beside a request in flight, the trial request's included; every call after an `ERX_ETIMEDOUT` answered `ERX_ETIMEDOUT` at once; `ERX_EPROTO` for an answer outside the interface; `ERX_ENOTSUP` on a platform whose record names no rows, QEMU `virt` among them | FD29: the root task, in user mode, maps the mailbox |
 | a thread's fault | a domain's or a program's fault; a test task's fault | [Faults](#faults-and-the-fault-of-the-root-task) | a fault record at the space's fault gate, thread `unknown`, the faulting thread left waiting; with no fault gate, a crash record and the task's end; the machine's end for the root | FD19, FD20 |
@@ -801,7 +801,7 @@ that kernel, and otherwise stays a published downside.
 | FD23 | K29 | vCPU upcalls with no event lost (K29), events ending a wait | the subset of [vCPU upcalls on Fiasco](#vcpu-upcalls-on-fiasco), over a vCPU state area its program can write, harming only itself, since the resume validates the frame and Fiasco sanitizes what it restores (`task.cpp:100-123`, `arm/64/context-arm-hyp-64.cpp:27-35`) | signals in programs arrive late around waits and raw kernel calls, and `sem_wait` never fails with `EINTR` | narrowed by stage F3 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision); erXos's kernel |
 | FD24 | K7, K10 to K15, K20, K33, CLAUDE.md "Untrusted input", CLAUDE.md "Kernel stacks are proven", "Chokepoints are build checks" and "The ABI and the hardware each have one source" | a kernel built under erXos's construction rules: the stack proof, recursion only through `musttail`, the kernel chokepoint checks, generated register access, a generated kernel ABI, one route from user mode, once-only reads of every user-writable field (K7), no panic on a user thread's input (K12), bounded kernel paths (K13), and K10, K11, K14, K15, K20 and K33 by construction | Fiasco's C++, its 8 KiB thread block measured by the conformance suite's watermark (`kernel/stack_fiasco.txt`), never proven; each of those properties holds only as far as Fiasco's own code gives it | a Fiasco defect reachable from a domain's capabilities can break isolation; the system-call fuzz campaign and the upstream watch are the defence; that the kernel never loads or stores through an address a domain supplies, and reads each user-writable field once per decision (K7), holds only as far as Fiasco's own code gives it, which no erXos audit checks | erXos's kernel |
 | FD25 | D12, D16, K3, K32 | budgets with caps above guarantees, borrowing, every charge returning at once, a resize of the whole, a watch, and exact `used` for every budget (K3, K32) | every budget is a wall at its guarantee, `used + carved <= wall` checked at every charge, carve, resize and destroy, a carved budget's kernel memory a share fixed at its creation ([Memory and budgets](#memory-and-budgets)); only the user-page part resizes; each budget record counts the user pages charged to it, and its kernel memory is not counted; a destroy is the root deleting everything charged to the budget | a program is refused while its session has memory free in another part, or is sized at its largest; an app shares the `apps` wall with the others only through the principal's wall the domain service carves for each session and destroys at its retire, as on erXos's kernel ([design-packaging.md](design-packaging.md#an-apps-principal)); D16's charging of a connection to its child budget holds, at walls | narrowed by stage F6 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision); erXos's kernel |
-| FD26 | K19, K31 | the kernel's trace ring, entropy, log, watchdog and deterministic mode at the kernel's level (K19, K31) | the root's, in user mode ([The trace ring](#the-trace-ring), [The console](#the-console), [The watchdog](#the-watchdog)); entropy is `liberx`'s generator in the root, and a read's bytes stay in the Fiasco UTCB message registers of the reader and of the root service until a later message long enough overwrites them, and in whatever registers and stack spill slots the compiler used on both sides | the inspector's kernel row is `unsupported`; a kernel hang or a stalled watchdog thread is caught only by the board's hardware watchdog or the harness's deadline; a record still in the ring, the root's own C output among them, is lost at a watchdog end or an end on a thread other than the root service's ([The end path](#the-end-path)); the root's crash frame may interleave with a writing console driver and a task's frame with the watchdog end's, since the root's ends write before anything is stopped, where a kernel stop parks every admitted CPU first, and prints best effort too when one of them does not answer ([design-debugger.md](design-debugger.md#the-stop)); after the handoff the kernel's own lines reach the log only at the log service's next take, are lost with the kernel's 4 KiB ring at a hang, are lost with the root's untaken records at a kernel stop once a take has moved them, and at the machine's end come out ahead of untaken log records older than them ([The kernel's lines](#the-kernels-lines)); in a boot that never takes the log, a test root's or a partial boot's, the kernel writes the UART whenever it prints, as upstream does; deterministic mode's comparison starts at erXos's banner, or at the root's first line if Fiasco's own boot proves not deterministic | erXos's kernel |
+| FD26 | K19, K31 | the kernel's trace ring, entropy, log, watchdog and deterministic mode at the kernel's level (K19, K31) | the kernel's trace rings, with Fiasco's events and Fiasco's object ids, read by the root through a read-only window ([The kernel's trace rings](#the-kernels-trace-rings)); the rest the root's, in user mode ([The console](#the-console), [The watchdog](#the-watchdog)); entropy is `liberx`'s generator in the root, and a read's bytes stay in the Fiasco UTCB message registers of the reader and of the root service until a later message long enough overwrites them, and in whatever registers and stack spill slots the compiler used on both sides | the kernel's rings record no grant, throttle, refill or budget refusal, which Fiasco does not have (FD5, FD15), and their object ids are not erXos's kernel's and are joined to the root's records only through `object_create`'s slot; a kernel hang or a stalled watchdog thread is caught only by the board's hardware watchdog or the harness's deadline; a record still in the ring, the root's own C output among them, is lost at a watchdog end or an end on a thread other than the root service's ([The end path](#the-end-path)); the root's crash frame may interleave with a writing console driver and a task's frame with the watchdog end's, since the root's ends write before anything is stopped, where a kernel stop parks every admitted CPU first, and prints best effort too when one of them does not answer ([design-debugger.md](design-debugger.md#the-stop)); after the handoff the kernel's own lines reach the log only at the log service's next take, are lost with the kernel's 4 KiB ring at a hang, are lost with the root's untaken records at a kernel stop once a take has moved them, and at the machine's end come out ahead of untaken log records older than them ([The kernel's lines](#the-kernels-lines)); in a boot that never takes the log, a test root's or a partial boot's, the kernel writes the UART whenever it prints, as upstream does; deterministic mode's comparison starts at erXos's banner, or at the root's first line if Fiasco's own boot proves not deterministic | erXos's kernel |
 | FD27 | none (an address) | the runtime maps the time page from its boot information's `time_page` | the root maps the page read-only into every task at its creation, at a constant address | a task's time page is at one address it cannot move or unmap | erXos's kernel |
 | FD28 | CLAUDE.md "Trust placement" | the startup proof, `erx_root_plan` run by the packer and the kernel, with its charge evidence, and every property of the system manifest checked | the root startup rule, and the manifest check refuses the records of properties outside its scope ([The Phase 1 manifest check](#the-phase-1-manifest-check)) | a manifest that uses those records does not build | erXos's kernel (Track K's first part, before GK3); M9 and M11 for the refused records |
 | FD29 | K31 | each board's platform items: the hardware watchdog, the crash region, the trial request and the device secret | on the Raspberry Pi 4 and the Pi 5 alike: the root's watchdog thread, which arms the board's power-management watchdog on every boot and reloads it, so a hang of Fiasco or of the root resets the board, with nothing behind the stretch before that thread starts, since the board's `config.txt` leaves `kernel_watchdog_timeout` unset and nothing under Fiasco would reload it earlier ([The watchdog](#the-watchdog)); a crash record on the console alone; the boot value as the firmware reports it; the trial request made by the root through the mailbox ([The end path](#the-end-path)); the firmware requests, each a row the domain library resolved from the manifest and the root's own code sends in the caller's thread ([The firmware request](#the-firmware-request)); `sealing` `none` ([The Raspberry Pi 4](#the-raspberry-pi-4)) | a crash leaves no record but the console's; that the caller of a firmware request chooses neither the tag nor the argument holds only against other domains, since the system domain's code shares the root's address space, which maps the mailbox's page for the boot, and could post any request, the board's key read among them; a hang before the root's watchdog thread starts, in the firmware's stage or in Fiasco's boot, stays hung until the power is cycled; and nothing is sealed to the board | M12; stage F4 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision) for the stretch before the root's watchdog thread starts |
@@ -2925,8 +2925,132 @@ The hosted backend keeps the same ring and writes the parks, wakes and deliverie
 `cpu_unknown`.
 
 **Reporters.** The ring's records carry the backend reporter `liberx_trace`, declared in `abi/inspection.txt` as standing in
-for the kernel and labelled `liberx trace`. `erx_trace_read`, the kernel's call, is refused, so the trace's `kernel` row and
-the inspector's `[kernel, trace]` are `unsupported`, reported by `kernel`.
+for the kernel and labelled `liberx trace`. The kernel's own records, which `erx_trace_read` returns from [the kernel's trace
+rings](#the-kernels-trace-rings), carry `kernel`, so the trace's `kernel` row and the inspector's `[kernel, trace]` show
+Fiasco's events, reported by `kernel`, and are `unsupported` only in a boot whose root could not map the rings.
+
+### The kernel's trace rings
+
+A kernel developer needs the kernel's own history: which thread ran, what it sent and to whom, which faults it took and how
+they ended, which interrupts arrived. Upstream kept it in the debugger's trace buffer, which leaves the fork with the debugger
+([design-debugger.md](design-debugger.md#on-fiasco)). The fork gives Fiasco erXos's kernel's rings in its place
+([Trace ring](design-kernel.md#trace-ring)): one ring of 4,096 `erx_trace_record` records for each CPU, always on in every
+build, in the layout of the root's ring above, written by the same core and read by the same reader. Fiasco adds events to
+the ABI's enum and no format.
+
+**The construction.** Each CPU writes only its own ring, with interrupts masked, and nothing reads a ring by entering the
+kernel. The rings are one static array of the kernel's image, `erx_trace_rings`, one ring for each CPU number below
+`CONFIG_MP_MAX_CPUS` (8 in `config/fiasco/kernel.defconfig`, so 2 MiB), page-aligned and alone on its pages. The kernel maps
+those pages once, read-only, into the root's address space, where the root reads them with the reader it already has. Three
+properties follow, and the rest of this section is their detail:
+
+* **Writing reaches nothing outside the rings.** The writer's only stores are the record at the current CPU's head, taken
+  modulo the ring's size, and that head. What a domain does decides the values in a record's words and never where they go:
+  every argument is a value the kernel already holds, never an address to store through.
+* **Reading changes nothing.** The root's mapping is read-only in a page table only the kernel writes, so the root cannot
+  write a ring; a read is loads alone, so it neither enters the kernel nor adds a record to the ring it reads.
+* **Only the root reads.** Only the root's space maps the rings, and only the root holds the platform control object through
+  which it asked for the mapping.
+
+**Events.** Fiasco's rings write the events below, numbered on from 6 in `abi/kernel.txt`, each with its `args` line
+([Trace ring](design-kernel.md#trace-ring)); erXos's kernel writes the same events where it does the same thing. Each is
+written at one place, beside upstream's own trace point where it had one there:
+
+| Event | Written in, and when | Arguments |
+| --- | --- | --- |
+| `ipc_send` | `Thread::do_ipc` (`kern/thread-ipc.cpp:621`), once its send phase has found its partner, for a send to anything but a reply capability | `object` (the thread or IPC gate invoked), `tag` (the message tag word) |
+| `ipc_reply` | the same, for a send to the caller's reply capability | `partner` (the thread replied to), `tag` |
+| `ipc_receive` | `Thread::do_ipc_receive` (`kern/thread-ipc.cpp:765`), once a message has arrived, on the receiver's CPU | `sender`, `label` (the IPC gate's label, 0 for a send to the thread itself), `tag` |
+| `ipc_send_fail`, `ipc_receive_fail` | the same two functions, when the phase ends with an error | `object`, `error` (Fiasco's IPC error code) |
+| `fault` | `Thread::handle_page_fault_pager` (`kern/thread-ipc.cpp:247`) for a page fault, and `Thread::send_exception` (`kern/thread-ipc.cpp:1044`) for any other exception from user mode, before the message to the pager or the handler | `address`, `pc`, `cause` (the architecture's syndrome word) |
+| `fault_end` | the same two functions, when the reply has come back or the message has failed | `address`, `error` (0 when the thread resumes) |
+| `switch` | `Context::switch_exec_locked` (`kern/context.cpp:1239`), beside upstream's context-switch point, before the switch | `next` (the thread switched to), `next_space` |
+| `preempt` | `Timeslice_timeout::expired` (`kern/timeslice_timeout.cpp:36`), when the running thread's quantum ends | `quantum` (its length, in microseconds) |
+| `sched_set` | `Scheduler::sys_run` (`kern/scheduler.cpp:63`), when the root sets a thread's priority and CPU set as [Bands](#bands) places it | `target`, `priority`, `cpus` (the CPU mask) |
+| `irq` | `Irq_chip::handle_irq` (`kern/irq_chip.cpp:409`), for every interrupt the controller dispatches, before its handler runs | `pin`, `object` (the IRQ object, 0 for a line whose handler is the kernel's own) |
+| `object_create` | `Factory::kinvoke` (`kern/factory.cpp:150`), beside upstream's creation point, once the object is made and placed | `object`, `slot` (its index in the caller's object space), `protocol` (Fiasco's protocol number for its kind) |
+| `object_delete` | `Kobject::destroy` (`kern/kobject.cpp:314`), beside upstream's destruction point | `object` |
+
+The `error` and `protocol` words are Fiasco's own numbers, shown as numbers: a table mapping them onto the ABI's statuses or
+kinds would answer for codes the ABI has no word for. Whether the kernel's timer interrupt passes `Irq_chip::handle_irq`, and
+so appears as `irq` records, is unverified; `native_trace` counts them on an idle CPU.
+
+**Identity.** `thread`, `space` and every argument that names an object hold Fiasco's object id plus one
+(`Kobject_dbg::dbg_id`, `kern/kobject_dbg.cpp:43`, kept by `CONFIG_RT_DBG`), so 0 stays "none". The ids come from a counter
+that only increments (`kern/kobject_dbg.cpp:94`), so unlike the root's indices a kernel record names one object for the
+whole boot. They are not the root's indices: a reader joins the two through `object_create`'s `slot`, the slot in which the
+root's tables hold each object they made. No record holds a kernel address: ids are counters, and every address an argument
+holds is a user address.
+
+**Writing.** One glue function, `Erx_trace::record(event, arg0, arg1, arg2)` in `fiasco/kernel/src/erx/erx_trace.cpp`, is the
+only writer, and each hook is one call of it. It masks interrupts for the write itself (`cpu_lock`), since Fiasco runs some
+kernel paths with interrupts enabled (`Factory::kinvoke` around the object's manufacture, `kern/factory.cpp:182`;
+`Kobject::destroy`); under the mask it reads the CPU, the current thread and its space and the counter, and hands the entry
+to `erx_trace_ring_put` on that CPU's ring. A CPU's ring has one writer, the CPU, and no interrupt can enter its write, so the
+mask stands where the root's ring has its trace lock, and the sequence protocol is the core's ([The trace ring](#the-trace-ring),
+"Writing"). The time is the counter converted by the same core function the root's `erx_clock_ns` calls, so the kernel's
+rings and the root's merge on one clock.
+
+The ring core moves from `liberx/backend/core/trace_ring.c` to `kernel/core/trace_ring.c`, its header to `include/erx/core/`,
+so `erx_cores.a` and the root link one implementation; the root's own ring and its writers stay in `liberx`. The ring's type
+gains 64-byte alignment, so a record is one cache line and the head shares a line with no record. The glue's references into
+Fiasco (`cpu_lock`, `current()`, the object id, the counter) are lines of `fiasco/erx_glue_imports.txt`.
+
+**The root's window.** As its service starts, the root asks for the mapping with one operation the fork adds to the platform
+control object (`kern/platform_control_object.cpp`), which only the root holds ([The end path](#the-end-path)): `map_trace`,
+whose one argument is a flexpage of the root's own space, the window, which the root's layout reserves for `ERX_CPU_LIMIT`
+rings. The kernel maps the rings' pages at the window's base with read rights alone, through the function Fiasco maps
+kernel-user memory with (`Task::map_ku_mem_chunk`, `kern/task.cpp:160`), and answers the number of rings it mapped. It refuses
+a window smaller than the rings or outside user space with `-L4_EINVAL`, and every call after one that succeeded with
+`-L4_EEXIST`, so the operation makes the kernel write the page-table entries of the root's window once in a boot and nothing
+else. The decision is a pure core function, `erx_fiasco_trace_window`, over the window and the ring count, so host tests drive
+each refusal, and the system-call fuzz campaign covers the operation's decoding. A refused map leaves the root without the
+rings: it prints one line saying so, `erx_trace_read` answers `ERX_ENOTSUP` for that boot, and the root's crash records carry
+no trace tail.
+
+**Reading.** `erx_trace_read(res, cpu, cursor, window)` is answered in the root: for a `cpu` below the number of rings mapped
+it runs `erx_trace_ring_read` on that CPU's ring in the window, with that reader's cursor rule and refusals
+([The trace ring](#the-trace-ring), "Reading"), and for any other `cpu` it answers `ERX_EINVAL`. A task links the refused
+stub and answers `ERX_ENOTSUP`, as for `erx_backend_trace_read`. `res` is not checked, as for the root's other machine calls
+answered in the root: on Fiasco, holding `TRACE` is being the root. The BIF `erx_trace_ring:read/3` reads `{kernel, Cpu}`
+through this call unchanged. A CPU that never started has an empty ring.
+
+**Who may read.** The rings show other domains' timing, the user addresses of their faults and the tags of their messages.
+The root already sees all of it, since it is every task's pager and the creator of every object; what it passes on is the
+system domain's policy, as on erXos's kernel: `erx:trace`'s `kernel` row needs a trace facet of scope `all`, and a release
+build's projections choose the fields shown ([Tracing](design-live.md#tracing)). The crash record carries a trace tail only
+in its full form, which only development builds write
+([design-debugger.md](design-debugger.md#the-records-trace-tail)). A domain that makes many kernel events on a CPU
+overwrites other domains' older records there, which a reader counts as overwritten: the rings are a diagnostic, not an audit
+log, and a domain can push its own records out of them.
+
+**Concurrency and failure.** Readers take no lock and never delay a writer. A reader on another CPU keeps only whole records
+by the sequence rule, so a record half written, or overwritten while it was read, is counted and never shown. Nothing in a
+write allocates or can fail, and a ring past exhaustion writes nothing more, as the core says. The stop's request is an
+interrupt, which a write masks, so a CPU the stop parks is never mid-write
+([design-debugger.md](design-debugger.md#stopping-every-cpu)); only the leader, if it trapped inside a write, or a CPU that
+did not answer can leave a record half written, and every reader drops it by the same rule.
+
+**Cost.** A record is one cache line: the interrupt mask, one counter read, the conversion to nanoseconds (two divisions) and
+eight stores with release order. A round trip from a task to the root writes about six records (a send, a switch, a receive,
+a reply, a switch and a receive). The cost is not measured: `tools/erx bench nullcall` (`root-same-space`,
+`root-cross-space`), `wake` and `vm` run before and after the patch on QEMU `virt` under HVF with four CPUs and on the
+Raspberry Pi 4, and [todo-performance.md](todo-performance.md) holds the item until they have
+([Open decisions](#open-decisions)).
+
+**After a stop.** Two readers serve a stopped machine. The crash record's full form carries the newest records of each CPU's
+ring ([design-debugger.md](design-debugger.md#the-records-trace-tail)), whether the kernel's stop writes it or the root writes
+its own record and reads the rings through its window. The hold serves whole rings to `tools/erx debug`'s `trace`, which
+finds `erx_trace_rings` by its symbol in the kernel's image, memory the readable-RAM map always holds
+([design-debugger.md](design-debugger.md#readable-ram)).
+
+**Alternatives.** A call that copies records into the caller's message words, as the console ring's take does
+([The kernel's lines](#the-kernels-lines)), enters the kernel for every seven records, needs a decoder per read, and writes
+IPC and switch records of its own into the ring it reads, so a tracer that follows the present chases its own traffic; the
+window enters the kernel once per boot. Upstream's trace buffer and its log points use their own record format, came with
+the debugger and its output, and would be a second model beside `erx_trace_record`. A tail kept only for the crash record
+would still need a ring on every CPU and the same hook on every path, which is where the cost lies; the window and the
+reader it reuses are what the live view adds, and they are small.
 
 ## IPC gates and where transfer fits
 
@@ -4300,6 +4424,16 @@ no test can drive the change:
   outside `test_space_create`, with the guests that pass it (`test/guest/native_irq/guest.c:536`,
   `native_space/guest.c:793`, `native_task/guest.c:151`) passing a gate or using the test create. Its tests are the *Kernel lines* and kernel-trap cases of
   [The backend's cases](#the-backends-cases) and the cores' host tests.
+* **The kernel's trace rings.** Upstream's trace buffer leaves with the debugger, and the fork writes erXos's per-CPU
+  trace rings in its place ([The kernel's trace rings](#the-kernels-trace-rings)). The C++ is one call of the glue's
+  writer at each event's place (`kern/thread-ipc.cpp`, `kern/context.cpp`, `kern/timeslice_timeout.cpp`,
+  `kern/scheduler.cpp`, `kern/irq_chip.cpp`, `kern/factory.cpp`, `kern/kobject.cpp`), the `map_trace` operation of the
+  platform control object (`kern/platform_control_object.cpp`), one line that lets the glue call
+  `Task::map_ku_mem_chunk`, and the glue file `fiasco/kernel/src/erx/erx_trace.cpp` with the static rings: an estimate of
+  about 120 lines, unverified. The ring, its writer's sequence protocol, its reader, the clock's conversion and the
+  window's decision are C17 cores in `erx_cores.a`, which the root links too. Its tests are `native_trace` and the host
+  tests of the ring and the window ([The backend's cases](#the-backends-cases)); its cost is measured by `nullcall`,
+  `wake` and `vm` before and after.
 * **An unbound pin's interrupt.** `Irq_chip_gen::detach` masks and clears a pin without waiting
   for a CPU that has already acknowledged its interrupt, so upstream's `Irq_chip::handle_irq`
   (`irq_chip.cpp`) can dereference a null object when a domain's interrupt is detached as it fires.
@@ -4509,7 +4643,10 @@ ran the code it claims to:
 | **Task fault**: the record appears and the machine continues | the fault ending the machine |
 | **Interrupt**, `native_irq` and `fiasco_time_test.rb`: a UART line and a software object wake a parked executor across CPUs through the root's dispatcher; ack opens the line; a holder binds and acks its own line and is refused the root's group | ack removed; the listed flag ignored: a label reported twice; the interlock removed: the early trigger lost; the dispatcher's trigger removed; the hooked trigger removed; the home check of a task's bind removed |
 | **Trace ring**, `trace_ring_test.rb` and TSan: lapping, overwrite during a read, bounds, a task's call `ERX_ENOTSUP` | the second `seq` load removed; the head start returning 0; the skip counted one short; the cursor check removed: stale slots copied; the `max` bound removed; a read that ignores `max`: a copy past its slot; the terminal check removed; the exhausted head's check removed; the odd store removed; the ring linked into a task in place of the stub: the link lists' test fails |
-| **Trace on four CPUs**, `native_trace`: the kernel row's `unsupported` line, a backend `park` and `wake`, the workload's `in` not `late` | the park core's `trace` effect removed; the clock offset's sign flipped; `erx_trace_read` answering `ERX_OK` with no records: the `unsupported` line is missing |
+| **Trace on four CPUs**, `native_trace`: a backend `park` and `wake`, the workload's `in` not `late`; and from the kernel's rings, on every CPU, `switch` records, the test task's `object_create` with the slot the root's table holds it in, an `ipc_send` and `ipc_receive` pair for one of its requests, a `fault` and `fault_end` for its first touch of a page, and an `irq` for its device line, each between the backend records around it on the one clock | the park core's `trace` effect removed; the clock offset's sign flipped; the hook in `Thread::do_ipc` removed: no `ipc_send`; the reader's even-count check inverted: no kernel record kept; `map_trace` answered with no mapping: the kernel row is `unsupported` |
+| **The window is read-only**, a test root of `native_trace` that stores to its window after mapping it | the root faults at the window's address and its crash frame says so | the window mapped with write rights: the store succeeds and the test root reports it |
+| **The reader of a kernel ring**, `tools/fuzz/trace_ring_fuzz.c` with the CPU number in its input, over a set of rings the input writes freely, heads and counts no writer would leave among them | whatever the rings hold, a read answers `ERX_OK`, `ERX_EINVAL` or `ERX_ELIMIT`, touches no ring past the count mapped, writes no record past `max`, accounts for every index between the cursor and the next, and keeps only records whose count is the even count of an index it read | the CPU's bound check against the rings mapped removed: AddressSanitizer on the read past the last ring; the count's check reduced to evenness: a record of an earlier lap is kept and the target's assertion fails |
+| **The window's refusals**, host test of `erx_fiasco_trace_window` | a window smaller than the rings, one outside user space and a second call are refused, an exact window is accepted | the size check removed: the small window is accepted |
 | **Watchdog**, `native_watchdog`: pets hold the machine up; once they stop a spinning thread does not keep it from ending and resetting | the end skipped; pets ignored |
 | **A backend lock across CPUs**, `native_lock`, on four CPUs: two threads of a task on two CPUs each take and release one backend lock 100,000 times and add to a counter that only the lock guards, and a thread at the ceiling contends on the first one's CPU for the last tenth; the counter ends at 200,000, and with the lock free and no thread waiting a down on the lock's semaphore with a zero timeout times out, so no credit is left; a pause of the task while one thread waits on the lock, and its resume, leave both results unchanged | the unlock's up made when the word was 1 or more: a second holder, so the counter falls short, and the zero-timeout down succeeds; the down after a cancel not retried: the waiter goes on without the lock and the counter falls short |
 | **A semaphore's wake across CPUs**, `native_semaphore_race.rb` under `make check-native-seeds`, on a test kernel that holds the up between dequeue and activation | the bit's wait removed: the IPC wait ends early |
@@ -4809,6 +4946,12 @@ hooks.
 
 ## Open decisions
 
+* **What the kernel's trace rings may cost.** They are always on in every build, as erXos's kernel's are, and their cost on
+  IPC, switches and faults is not measured ([The kernel's trace rings](#the-kernels-trace-rings), "Cost").
+  Recommendation: keep them always on and unconditional if `nullcall.root-cross-space` rises by no more than 5 % on the
+  Raspberry Pi 4; past that, first make the writer cheaper (the counter converted to nanoseconds by a multiply and shift in
+  place of two divisions, and one release fence for the fields in place of a release store each, which the record's
+  `atomic` lines would then say), and only then drop events from the hot path, never the post-mortem tail.
 * **Whether ERTS publishes a hint under erXos's kernel.** The urgent scheduler closes, with calls
   that kernel has, the gap a published urgency leaves for an executor that is ready
   ([Urgency](#urgency)), and with it no normal scheduler holds urgent work, so `ERX_GROUP_HINTS`
