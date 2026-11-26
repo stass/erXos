@@ -14,7 +14,7 @@ class FiascoTest < Minitest::Test
   # The recording runner resolves a configuration by copying it, so the
   # fixture is already in the shape the configuration check accepts.
   KERNEL_CONFIG = "CONFIG_ARM=y\n# CONFIG_CPU_VIRT is not set\nCONFIG_FPU=y\nCONFIG_SYNC_CLOCK=y\n" \
-                  "CONFIG_BENCHMARKING=y\nCONFIG_PERF_CNT_USER=y\n"
+                  "CONFIG_BENCHMARKING=y\nCONFIG_PERF_CNT_USER=y\nCONFIG_RT_DBG=y\n"
 
   def test_build_environment_supplies_the_host_temporary_directory
     assert_equal File.realpath(Dir.tmpdir), Erx::Fiasco.build_environment.fetch('TMPDIR')

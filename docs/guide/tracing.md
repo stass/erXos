@@ -128,8 +128,11 @@ numbers are never compared with HVF or native ones.
 | `tools/erx bench web --accel hvf` | a record view's round trip over `tools/erx web`, unpaced and at a UART's rate |
 | `tools/erx bench net-freebsd --host H [--runs N] [--only LIST]` | `erx_net` and lwIP on a FreeBSD x86-64 test host, one table; `H` is the host's ssh name, or the value of `ERX_NET_BENCH_HOST` |
 
-Several design documents name workloads the tool does not have yet, such as
-`nullcall`, `app-start` and `fs`; `tools/erx bench` refuses them as
-unknown, so a document's mention of one is a plan. Costs suspected and not
+A declared benchmark such as `nullcall` runs through `--systems`:
+`tools/erx bench nullcall --systems erxos` boots erXos alone under HVF and
+prints its rows, and naming more systems boots them side by side. Several
+design documents name workloads the tool does not have yet, such as
+`app-start` and `fs`; `tools/erx bench` refuses them as unknown, so a
+document's mention of one is a plan. Costs suspected and not
 yet measured are listed in [todo-performance.md](../todo-performance.md),
 each with the measurement that settles it.

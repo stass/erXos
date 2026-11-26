@@ -164,9 +164,9 @@ read_log(const char *op, const char *cursor)
 	int status;
 
 	if (cursor == NULL)
-		status = erx_log_take(0, window, sizeof(window), &result);
+		status = erx_log_take(ERX_ROOT_SLOT_ROOT_RESOURCE, window, sizeof(window), &result);
 	else
-		status = erx_log_read(0, strtoull(cursor, NULL, 10), window, sizeof(window), &result);
+		status = erx_log_read(ERX_ROOT_SLOT_ROOT_RESOURCE, strtoull(cursor, NULL, 10), window, sizeof(window), &result);
 	printf("%s %d lost %" PRIu64 "\n", op, status, result.lost);
 	if (status != ERX_OK || result.written > sizeof(window))
 		return;
