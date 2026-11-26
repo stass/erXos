@@ -136,6 +136,9 @@ limit crash_size u32 16384
 # The CPU entries a full crash record holds (docs/design-debugger.md, "The
 # record's CPU entries").
 limit crash_cpus u32 16
+# The frames a full crash record holds: the leader's walk of its own frame
+# pointers stops at this many (docs/design-debugger.md, "The stop").
+limit crash_frames u32 64
 limit crash_magic u64 0x4853415243585245
 limit crash_frame_line u32 76
 limit crash_frame_lines_max u32 288

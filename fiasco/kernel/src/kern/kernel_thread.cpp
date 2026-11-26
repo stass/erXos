@@ -1,5 +1,6 @@
 // Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
-// Modified by erXos: a test kernel's seeded kernel trap (ERX_TEST_KERNEL_TRAP,
+// Modified by erXos: the boot CPU's admission to the stop of the machine
+// (docs/design-debugger.md, "Stopping every CPU"); a test kernel's seeded kernel trap (ERX_TEST_KERNEL_TRAP,
 // tools/lib/erx/native_kernel_trap.rb), which no other kernel builds; and the
 // tickless idle drives its CPU's pending RCU work before it halts
 // (docs/design-fiasco.md, "The release's Fiasco build", "RCU from idle").
@@ -46,6 +47,7 @@ IMPLEMENTATION:
 #include "config.h"
 #include "cpu.h"
 #include "delayloop.h"
+#include "erx_machine_stop.h"
 #include "globals.h"
 #include "helping_lock.h"
 #include "kernel_task.h"
@@ -154,6 +156,7 @@ Kernel_thread::run()
   // No initcalls after this point!
 
   kernel_context(home_cpu(), this);
+  Erx_machine_stop::admit();
 
   Rcu::leave_idle(home_cpu());
 

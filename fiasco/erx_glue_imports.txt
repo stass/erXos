@@ -6,12 +6,23 @@
 # the effect that needs it and the glue file that may hold the reference. A
 # glue object with an undefined symbol its file does not list fails the build.
 # The cores' own erx_ functions need no entry.
+_Z14platform_resetv machine-stop erx_machine_stop.cpp
+_ZN12Per_cpu_data8_offsetsE machine-stop erx_machine_stop.cpp
+_ZN16Cpu_pm_callbacks5_listE machine-stop erx_machine_stop.cpp
+_ZN16Erx_console_ring5closeEv machine-stop erx_machine_stop.cpp
+_ZN16Erx_machine_stop4bootEbPKh boot-handoff erx_handoff.cpp
+_ZN3Cpu12_online_maskE machine-stop erx_machine_stop.cpp
 _ZN3Kip10global_kipE boot-handoff erx_handoff.cpp
+_ZN3Pic3gicE machine-stop erx_machine_stop.cpp
+_ZN5Timer22_scaler_shift_ts_to_usE machine-stop erx_machine_stop.cpp
 _ZN7Console5stateEm console-ring erx_console_ring.cpp
+_ZN8Kconsole2_cE machine-stop erx_machine_stop.cpp
 _ZN8Koptions1oEv boot-handoff erx_handoff.cpp
 _ZdlPv console-ring erx_console_ring.cpp
 __libc_backend_printf_lock console-ring erx_console_ring.cpp
 __libc_backend_printf_unlock console-ring erx_console_ring.cpp
+memcpy machine-stop erx_machine_stop.cpp
 panic boot-handoff erx_handoff.cpp
 printf boot-handoff erx_handoff.cpp
 puts boot-handoff erx_handoff.cpp
+vsnprintf machine-stop erx_machine_stop.cpp

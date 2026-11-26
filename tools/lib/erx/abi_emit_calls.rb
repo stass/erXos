@@ -589,7 +589,7 @@ module Erx
         members = %w[crash_cause crash_form boot_value boot_slot].flat_map do |name|
           schema.types.fetch(name).members.keys.sort.map { |member| "#{Model.constant_prefix(name)}_#{member}" }
         end
-        constants = [*members, 'crash_size', 'crash_cpus', 'build_id_size'].map { |name| schema.constants.fetch(name) }
+        constants = [*members, 'crash_size', 'crash_cpus', 'crash_frames', 'build_id_size'].map { |name| schema.constants.fetch(name) }
         values = schema.types.fetch('fault_kind').members.values
         raise SchemaError, 'a fault kind does not fit the crash seam\'s mask' unless values.all? { |value| value.between?(0, 31) }
 

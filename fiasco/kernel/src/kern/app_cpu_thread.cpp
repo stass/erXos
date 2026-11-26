@@ -1,3 +1,7 @@
+// Modified by erXos: a CPU's start ends in its admission to the stop of the
+// machine (docs/design-debugger.md, "Stopping every CPU"); and a test kernel's
+// seeded panic on CPU 2 (ERX_TEST_MACHINE_STOP, tools/lib/erx/native_machine_stop.rb),
+// which no other kernel builds.
 INTERFACE [mp]:
 
 #include "kernel_thread.h"
@@ -10,6 +14,10 @@ private:
 };
 
 IMPLEMENTATION [mp]:
+
+#include "erx_machine_stop.h"
+#include "panic.h"
+#include "timer.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -104,7 +112,21 @@ App_cpu_thread::bootstrap(Mword resume)
 
   Scheduler::scheduler->trigger_hotplug_event();
   Timer_tick::enable(ccpu);
+  Erx_machine_stop::admit();
   cpu_lock.clear();
+
+#ifdef ERX_TEST_MACHINE_STOP
+  // The test kernel of tools/lib/erx/native_machine_stop.rb only: CPU 2
+  // panics once the boot has had time to start every CPU and the root task,
+  // so its run shows the stop asking the others.
+  if (!resume && ccpu == Cpu_number(2))
+    {
+      printf("erx: machine stop seed\n");
+      while (Timer::system_clock() < 3000000)
+        Proc::pause();
+      panic("machine stop seed on CPU 2");
+    }
+#endif
 
   if (!resume)
     {

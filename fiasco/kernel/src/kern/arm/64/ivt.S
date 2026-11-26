@@ -1,4 +1,6 @@
-/* Modified by erXos: the SError vectors from user mode enter arm_serror_user_entry. */
+/* Modified by erXos: the SError vectors from user mode enter arm_serror_user_entry;
+ * the interrupt entry hands the stop its frame, and the stop's switch to a panic
+ * stack (docs/design-debugger.md, "On Fiasco"). */
 /* -*- asm -*- */
 
 #include "globalconfig.h"
@@ -279,6 +281,47 @@ resume_trigger_exception_after_pf_trampoline:
 	b	.Lret_from_exception
 #endif
 
+// erx_machine_stop_switch(regs, stack_top, body, arg): saves the call site's
+// registers into regs (an erx_stop_regs_t: x0 to x30, sp, the return address
+// as the pc, the processor state, the translation root of the space and zero
+// for the exception's cause and address), moves to stack_top and calls
+// body(arg), which never returns.
+.global erx_machine_stop_switch
+erx_machine_stop_switch:
+	stp	x0, x1,   [x0]
+	stp	x2, x3,   [x0, #16]
+	stp	x4, x5,   [x0, #32]
+	stp	x6, x7,   [x0, #48]
+	stp	x8, x9,   [x0, #64]
+	stp	x10, x11, [x0, #80]
+	stp	x12, x13, [x0, #96]
+	stp	x14, x15, [x0, #112]
+	stp	x16, x17, [x0, #128]
+	stp	x18, x19, [x0, #144]
+	stp	x20, x21, [x0, #160]
+	stp	x22, x23, [x0, #176]
+	stp	x24, x25, [x0, #192]
+	stp	x26, x27, [x0, #208]
+	stp	x28, x29, [x0, #224]
+	mov	x9, sp
+	stp	x30, x9,  [x0, #240]
+	mrs	x9, nzcv
+	mrs	x10, daif
+	orr	x9, x9, x10
+	mrs	x10, CurrentEL
+	orr	x9, x9, x10
+	mrs	x10, spsel
+	orr	x9, x9, x10
+	stp	x30, x9,  [x0, #256]
+	mrs	x9, EL(TTBR0)
+	str	x9,       [x0, #272]
+	stp	xzr, xzr, [x0, #280]
+	mov	sp, x1
+	mov	x29, #0
+	mov	x0, x3
+	blr	x2
+	brk	#3
+
 .global kern_kdebug_ipi_entry
 kern_kdebug_ipi_entry:
 	brk #3
@@ -331,6 +374,9 @@ sys_call_table:
 	stp	x3, x4, [sp, #EF_PC]
 	mov	x0, sp
 	str	x0, [sp, #EF_KSP]
+	// The frame and the stack pointer the interrupt found, for the stop request.
+	add	x1, sp, #EF_SIZE
+	bl	erx_machine_stop_irq_frame
 
 	.global __irq_handler_b_irq
 __irq_handler_b_irq:

@@ -69,10 +69,11 @@ INTERFACES_KERNEL += $(if $(CONFIG_TEST_SUPPORT_CODE),string_buffer)
 
 # erXos's glue onto the C17 cores (Makeconf, ERX_CORE_ARCHIVE).
 VPATH			+= erx
-INTERFACES_KERNEL	+= erx_handoff erx_console_ring erx_clock
+INTERFACES_KERNEL	+= erx_handoff erx_console_ring erx_clock erx_machine_stop
 CXXFLAGS_erx_handoff	+= $(ERX_GLUE_CXXFLAGS)
 CXXFLAGS_erx_console_ring	+= $(ERX_GLUE_CXXFLAGS)
 CXXFLAGS_erx_clock	+= $(ERX_GLUE_CXXFLAGS)
+CXXFLAGS_erx_machine_stop	+= $(ERX_GLUE_CXXFLAGS)
 
 #
 # ABI Subsystem

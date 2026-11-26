@@ -1,5 +1,6 @@
 // Modified by erXos: an SError taken in user mode is sent to the running
-// thread as an exception (arm_serror_user_entry).
+// thread as an exception (arm_serror_user_entry); the debug interrupt is the
+// stop of the machine's request (docs/design-debugger.md, "On Fiasco").
 INTERFACE [arm]:
 
 class Trap_state;
@@ -529,6 +530,7 @@ Thread::store_tpidruro(Trex *)
 //-----------------------------------------------------------------------------
 IMPLEMENTATION [mp]:
 
+#include "erx_machine_stop.h"
 #include "ipi.h"
 #include "irq_mgr.h"
 
@@ -538,12 +540,12 @@ public:
   static void kern_kdebug_ipi_entry() asm("kern_kdebug_ipi_entry");
 };
 
-PUBLIC static inline NEEDS["ipi.h"]
+PUBLIC static inline NEEDS["ipi.h", "erx_machine_stop.h"]
 void
 Thread::handle_debug_remote_requests_irq()
 {
   Ipi::eoi(Ipi::Debug, current_cpu());
-  Thread::kern_kdebug_ipi_entry();
+  Erx_machine_stop::request();
 }
 
 PUBLIC static inline

@@ -173,7 +173,7 @@ layout erx_crash_cpu wire_le 8 56
 layout erx_crash_record wire_le 8 1800
   field header erx_crash_brief 0
   field regs erx_regs 120
-  field frames u64 392 count 64
+  field frames u64 392 count @crash_frames
   field cpus erx_crash_cpu 904 count @crash_cpus
 
 layout erx_msgtag wire_le 8 8

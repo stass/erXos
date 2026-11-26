@@ -19,6 +19,7 @@ IMPLEMENTATION:
 
 #include <cstdio>
 #include "erx/core/boot_handoff.h"
+#include "erx_machine_stop.h"
 #include "kip.h"
 #include "koptions.h"
 #include "panic.h"
@@ -45,6 +46,7 @@ Erx_handoff::banner()
 {
   erx_boot_handoff_view_t view = erx_handoff_accept();
 
+  Erx_machine_stop::boot(view.development, view.build_id);
   if (view.development)
     printf("development build: trusted code only\n");
   if (view.test_code)
