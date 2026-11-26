@@ -1046,7 +1046,10 @@ out as the production image's boot partition is:
   entry of it is made from that one layout. The firmware and
   `config.txt` are those the normal image's set has, from the same
   platform record and pins, so the bench runs at the board's own
-  settings.
+  settings, with one difference: a bench set's `config.txt` holds the
+  record's ARM clock with `arm_freq` and `force_turbo`, where a normal
+  card has neither line and keeps the firmware's dynamic clocking
+  ([The board's ARM clock](#the-boards-arm-clock)).
 * **The CPUs.** The count is the platform record's `cpuset`; the pair a
   two-CPU cell spans is the root's CPU and the last, as on QEMU
   (`NativeBench.asked`).
@@ -1912,8 +1915,11 @@ the same way for each, by the firmware rather than by the system. The
 platform record names the clock (`config/platforms/raspi4b.json`,
 `arm_clock_hz`, 1500 MHz, which every Raspberry Pi 4 Model B revision
 runs by default), and `BootPartition.config_txt`, which writes the
-`config.txt` of erXos's cards, of every bench set, of L4Re's set and of Linux's,
-writes it as `arm_freq=1500` and holds it with `force_turbo=1`. Raspberry
+`config.txt` of every bench set, erXos's, L4Re's and Linux's,
+writes it as `arm_freq=1500` and holds it with `force_turbo=1`. A normal
+erXos card is no benchmark: its `config.txt` has neither line, so it
+keeps the firmware's dynamic clocking, and the clock lines are the one
+way a bench set's `config.txt` differs from a normal card's. Raspberry
 Pi's `config.txt` documentation (`overclocking.adoc` of
 `github.com/raspberrypi/documentation` at `20d5b6f5`, SHA-256
 `b19ff813...a5b9c`, "Overclocking options") says `arm_freq` is the ARM's
@@ -1925,7 +1931,7 @@ gives the default as 0 in its table and as 60 since the November 2024
 firmware in its text); that `force_turbo=1` disables that dynamic
 clocking and forces the maximum even when the cores are idle; that it
 sets the warranty bit only together with an `over_voltage` above 0,
-which no card writes; and that the firmware still throttles the ARM at
+which no set writes; and that the firmware still throttles the ARM at
 80 to 85 C and under low voltage. `arm_boost` only raises an unset
 `arm_freq` on a board revision that allows 1800 MHz, so an explicit
 `arm_freq` makes it moot. So erXos and L4Re, which ask the firmware for
@@ -1942,13 +1948,17 @@ How each system's clock is known:
 | Linux | the same `config.txt`; the governor is not relied on | Linux's own report, where the set reads it, else none |
 
 A bench set's build record states the clock and the `total_mem` its
-`config.txt` sets (`BootPartition.card_settings`, `CardSettings`, from the same values
-`config.txt` is written from), and every board run's record keeps the
+`config.txt` sets: `BootPartition.write_set`, the one writer of a set,
+derives one `CardSettings::Card` from the platform record
+(`BootPartition.card_settings`) and writes both `config.txt`'s clock and
+memory lines and the record's two fields from it, so no set can state
+other settings than its `config.txt` holds. Every board run's record keeps the
 clock as `arm_clock_hz` in its run's details and the memory as
 `memory_mib` in its environment: erXos's walk from the build records of
 the sets it booted (no clock when they differ), L4Re's run from its
 set's build record, which the run copies beside its console log and
-whose SHA-256 its record keeps; a log without it gives neither. A build
+whose SHA-256 its record keeps; an L4Re run whose log has no set's
+build record beside it is refused. A build
 record that states a clock other than a whole number of megahertz, or a
 memory other than a positive whole number, is refused rather than read
 as one that states none. The side-by-side table converts a

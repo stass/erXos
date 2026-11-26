@@ -103,6 +103,14 @@ class BenchSideBySideTest < Minitest::Test
                     "probe.same idle same-cpu, on the board"
   end
 
+  # A run whose record states a clock config.txt could not set is refused, naming the run.
+  def test_a_broken_arm_clock_is_refused_naming_its_run
+    broken = boot('l4re', 1, [mean('same')], clock: nil, round: 2)
+    broken = broken.with(record: broken.record.with(run: broken.record.run.with(details: { 'arm_clock_hz' => 1_500_500_000 })))
+    error = assert_raises(Erx::Error) { Tables.tables(BENCHMARK, [runs.first, broken], systems: %w[erxos l4re], forms: false) }
+    assert_match(/\Abench: the record of round 2 in #{broken.record.environment.name}: arm_clock_hz/, error.message)
+  end
+
   def test_a_cross_cpu_cell_is_read_from_the_four_cpu_form
     cross = table.rows.last
     assert_equal [['measured', ns(2000)]], column(cross, 'erxos').entries.map { |entry| [entry.status, entry.values['p50']] }

@@ -62,6 +62,14 @@ module Erx
     ARMSTUB_LICENSE = 'LICENSE.tf-a'
     # A file of the layout whose bytes are given, not read from a path.
     Text = Data.define(:bytes)
+    # config.txt in a plan, which every plan holds as one of these and never as a Text:
+    # write and write_set write it (config_txt) from the card settings each derives
+    # (card_settings), so a bench set's config.txt and its build record state one card.
+    # tail is lines a set adds after the board's own, such as Linux's initramfs line.
+    ConfigPlan = Data.define(:platform, :overlays, :build_kind, :tail) do
+      # config.txt with card's settings.
+      def text(card) = BootPartition.config_txt(platform, overlays: overlays, build_kind: build_kind, card: card) + tail
+    end
     # The firmware's files, by deps.lock pin; each keeps its pinned file name.
     FIRMWARE = %w[rpi-firmware-start4 rpi-firmware-fixup4 rpi-firmware-license].freeze
     # A file name of the layout: one name, or one under overlays/.
@@ -124,10 +132,11 @@ module Erx
     # * init_uart_clock: the PL011s' clock from the record, for UART3, the host link.
     # * core_freq, core_freq_fixed: the header map's core clock, which the I2C and SPI
     #   controllers divide, fixed so the rate their drivers divide holds (core_lines).
-    # * arm_freq, force_turbo: the record's ARM clock, held (CardSettings): no system run on
-    #   the board asks the firmware for a clock, and without force_turbo the firmware's own
-    #   scaling would choose one.
-    # * total_mem, gpu_mem: the record's RAM.
+    # * arm_freq, force_turbo: card's ARM clock, held, on a bench set only (card_settings):
+    #   no system run on the board asks the firmware for a clock, and without force_turbo
+    #   the firmware's own scaling would choose one. A card keeps that dynamic clocking.
+    # * total_mem, gpu_mem: card's memory, the record's RAM (total_mem_mib), and the
+    #   VideoCore's share of it.
     # * framebuffer_depth, framebuffer_ignore_alpha, max_framebuffers: one 32-bit
     #   framebuffer with its alpha channel ignored, so the root finds at most one
     #   simple-framebuffer node, not one per HDMI port (design-device-tree.md).
@@ -141,7 +150,7 @@ module Erx
     #   so an overlay's device gets its pins from these lines alone. The on-board rows give
     #   no line: the firmware leaves GPIO 30 and 31 inputs whatever a line asks, so the root
     #   sets every on-board row at boot (docs/design-header-io.md, "On-board pins").
-    def config_txt(platform, overlays:, build_kind:)
+    def config_txt(platform, overlays:, build_kind:, card:)
       table = platform.pins
       raise Error, "#{platform.record_path}: the boot partition needs the record's pins" if table.nil?
 
@@ -151,8 +160,8 @@ module Erx
         kernel=#{KERNEL}
         kernel_address=0x#{QemuPlan::MACHINES.fetch(platform.name).loads.image.to_s(16)}
         armstub=#{ARMSTUB}
-        #{arm_clock_lines(platform)}#{setting_lines(table, build_kind)}init_uart_clock=#{pl011_clock(platform)}
-        total_mem=#{total_mem_mib(platform)}
+        #{arm_clock_lines(card)}#{setting_lines(table, build_kind)}init_uart_clock=#{pl011_clock(platform)}
+        total_mem=#{card.memory_mib}
         gpu_mem=#{GPU_MEM_MIB}
         framebuffer_depth=32
         framebuffer_ignore_alpha=1
@@ -187,10 +196,10 @@ module Erx
       TOTAL_MEM_MIB
     end
 
-    # The ARM clock lines for platform's record: arm_freq in MHz, the unit config.txt takes,
-    # held by force_turbo; none for a record that names no clock (CardSettings).
-    def arm_clock_lines(platform)
-      hz = CardSettings.clock_hz(platform.record, label: platform.record_path) or return ''
+    # The ARM clock lines for card: arm_freq in MHz, the unit config.txt takes, held by
+    # force_turbo; none for a card that holds no clock.
+    def arm_clock_lines(card)
+      hz = card.arm_clock_hz or return ''
 
       "arm_freq=#{hz / 1_000_000}\nforce_turbo=1\n"
     end
@@ -257,7 +266,7 @@ module Erx
     def plan(platform:, build_kind:, bootable:, bl31:, bl31_license:, tree:, firmware:)
       board = BoardTree.board(platform)
       own = { KERNEL => bootable, ARMSTUB => bl31, ARMSTUB_LICENSE => bl31_license,
-              CONFIG => Text.new(config_txt(platform, overlays: tree.overlays.keys, build_kind: build_kind)),
+              CONFIG => ConfigPlan.new(platform: platform, overlays: tree.overlays.keys, build_kind: build_kind, tail: ''),
               **command_line_entry(platform, build_kind),
               board.file => tree.board, BoardTree.source_file(board) => tree.source,
               BoardTree::LICENSE_FILE => tree.license,
@@ -277,7 +286,8 @@ module Erx
     # and record, the inputs' build record, with the SHA-256 of each file, the EROFS image,
     # the volume and the card added.
     def write(root:, directory:, plan:, record:, runner:, fsimg:, erofs:, volume:)
-      directory = staged(root: root, directory: directory, plan: plan, entries: ENTRIES, record_name: RECORD) do |work, files, written|
+      directory = staged(root: root, directory: directory, plan: plan, bench: false, entries: ENTRIES,
+                         record_name: RECORD) do |work, files, written, _card|
         image = PiMedium.write(directory: work, name: IMAGE, files: files, names: plan.keys.map { |name| name.split('/').first }.uniq,
                                erofs: erofs, volume: volume, runner: runner, fsimg: fsimg)
         compress(image, to: File.join(work, COMPRESSED), runner: runner)
@@ -290,10 +300,12 @@ module Erx
 
     # Writes plan into directory, as write does, as the files under boot/ and their build
     # record alone, with no card, volume or compression: a bench set
-    # (docs/design-bench.md, "The bench image's boot set").
+    # (docs/design-bench.md, "The bench image's boot set"). Its config.txt holds a bench
+    # set's settings (card_settings), which the record states beside record's own fields.
     def write_set(root:, directory:, plan:, record:)
-      directory = staged(root: root, directory: directory, plan: plan, entries: SET_ENTRIES, record_name: SET_RECORD) do |_work, _files, written|
-        receipt(record, image: nil, files: written, pieces: {})
+      directory = staged(root: root, directory: directory, plan: plan, bench: true, entries: SET_ENTRIES,
+                         record_name: SET_RECORD) do |_work, _files, written, card|
+        receipt(record.merge(card.to_record), image: nil, files: written, pieces: {})
       end
       WrittenSet.new(files: File.join(directory, PARTITION), record: File.join(directory, SET_RECORD))
     end
@@ -301,11 +313,13 @@ module Erx
     # The one way write and write_set place their entries. plan's names must be the
     # layout's, and directory an existing one under root that holds none of entries.
     # plan's files go under boot/ of a fresh work directory beside them, each refused if
-    # it holds the build's path. The block gets the work directory, boot/ and each file's
-    # SHA-256, makes what else the entries hold and answers the receipt, which is written
-    # as record_name. Only then do entries move into directory. Answers directory as
-    # checked, resolved within root.
-    def staged(root:, directory:, plan:, entries:, record_name:)
+    # it holds the build's path; config.txt, which plan must hold as a ConfigPlan, is
+    # written with the card settings of a bench set or a card (card_settings, bench). The
+    # block gets the work directory, boot/, each file's SHA-256 and those settings, makes
+    # what else the entries hold and answers the receipt, which is written as record_name.
+    # Only then do entries move into directory. Answers directory as checked, resolved
+    # within root.
+    def staged(root:, directory:, plan:, bench:, entries:, record_name:)
       plan.each_key { |name| raise Error, "boot partition: #{name.inspect} is not a file name of the layout" unless NAME.match?(name) }
       directory = OutputDirectory.check(root: root, path: directory)
       raise Error, "boot partition: #{directory} is not a directory" unless File.directory?(directory)
@@ -313,18 +327,27 @@ module Erx
       taken = entries.select { |name| File.exist?(File.join(directory, name)) || File.symlink?(File.join(directory, name)) }
       raise Error, "boot partition: #{directory} already holds #{taken.join(', ')}" unless taken.empty?
 
+      config = plan[CONFIG]
+      raise Error, "boot partition: the plan's #{CONFIG} is not written from the card's settings (ConfigPlan)" unless
+        config.is_a?(ConfigPlan)
+
+      card = card_settings(config.platform, bench: bench)
       Dir.mktmpdir('.boot-partition-', directory) do |work|
         files = File.join(work, PARTITION)
         written = plan.to_h do |name, source|
           path = File.join(files, name)
           FileUtils.mkdir_p(File.dirname(path))
-          bytes = source.is_a?(Text) ? source.bytes : BoundedFile.read(source, maximum: MAX_FILE)
+          bytes = case source
+                  in Text then source.bytes
+                  in ConfigPlan then source.text(card)
+                  else BoundedFile.read(source, maximum: MAX_FILE)
+                  end
           host = BuildPath.find_in(bytes, root: root)
           raise Error, "boot partition: #{name} holds the build's path #{host}" if host
           File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o644) { |file| file.write(bytes) }
           [name, Digest::SHA256.hexdigest(bytes)]
         end
-        receipt = yield work, files, written
+        receipt = yield work, files, written, card
         File.write(File.join(work, record_name), JSON.pretty_generate(receipt) + "\n")
         entries.each { |name| File.rename(File.join(work, name), File.join(directory, name)) }
       end
@@ -474,7 +497,6 @@ module Erx
     # Lays the partition's files for bootable out into directory with their build record,
     # as lay_out does, without the card: a bench set (write_set). With boot_cpu_only, the
     # board's tree keeps only the boot CPU (BoardTree.boot_cpu_only), and the record says so.
-    # The record states what config.txt sets that a run's record keeps (card_settings).
     def lay_out_set(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:,
                     revision: SourceRevision.read(root: root, runner: runner), boot_cpu_only: false)
       plan, record = layout(root: root, runner: runner, platform: platform, build_kind: build_kind, bootable: bootable,
@@ -483,15 +505,15 @@ module Erx
       # A set has no card, so its record names no card's tool.
       record = record.merge('inputs' => record.fetch('inputs').except('card'))
       record = record.merge('board_tree_cpus' => 'boot CPU only') if boot_cpu_only
-      write_set(root: root, directory: directory, plan: plan, record: record.merge(card_settings(platform).to_record))
+      write_set(root: root, directory: directory, plan: plan, record: record)
     end
 
-    # What platform's config.txt sets that a board run's record keeps (CardSettings::Card),
-    # from the values config_txt writes: the ARM clock, when the platform's record names
-    # one, and total_mem.
-    def card_settings(platform)
-      CardSettings::Card.new(arm_clock_hz: CardSettings.clock_hz(platform.record, label: platform.record_path),
-                             memory_mib: total_mem_mib(platform))
+    # What platform's config.txt sets that a board run's record keeps (CardSettings::Card):
+    # total_mem, and on a bench set the platform's ARM clock, when its record names one. A
+    # card leaves the clock to the firmware's dynamic clocking (docs/design-bench.md, "The
+    # board's ARM clock").
+    def card_settings(platform, bench:)
+      CardSettings::Card.new(arm_clock_hz: (platform.arm_clock_hz if bench), memory_mib: total_mem_mib(platform))
     end
 
     # The plan and the build record of bootable's partition on platform: BL31 and the

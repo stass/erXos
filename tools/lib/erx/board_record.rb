@@ -65,7 +65,7 @@ module Erx
       receipt.fetch('source').fetch_values('commit', 'dirty') => [String => commit, dirty]
       receipt.fetch('inputs').fetch('firmware') => Array => firmware
       receipt.fetch('inputs').fetch('linux', nil) => Hash | nil => linux
-      card = CardSettings.read(receipt, label: path)
+      card = CardSettings.read(receipt, label: "board record: #{path}")
       SetFacts.new(
         environment: BenchRecord::Environment.new(
           kind: 'pi4', model: nil, cpus: CPUS, system: linux ? 'linux' : 'erxos',

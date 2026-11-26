@@ -7,15 +7,15 @@ require_relative 'error'
 module Erx
   # What a Raspberry Pi card's config.txt sets that a board run's record keeps
   # (docs/design-bench.md, "The board's ARM clock"). The ARM clock is the platform
-  # record's arm_clock_hz, which every card's config.txt sets as arm_freq and holds with
-  # force_turbo, so erXos and every system benchmarked on the board run at one configured
-  # clock, short of the firmware's throttling; total_mem is the memory the firmware
-  # reports, of which gpu_mem goes to the VideoCore. BootPartition.card_settings gives
-  # both from the values config_txt writes, and a bench set's build record states them; a
-  # board run's record keeps the clock in its run's details and the memory in its
-  # environment, and the side-by-side table converts a cell counted in CPU cycles to
-  # nanoseconds at its own run's clock and says so (BenchSideBySide). A set laid out
-  # without them, or a log without its set's record, gives a record without them.
+  # record's arm_clock_hz, which every bench set's config.txt sets as arm_freq and holds
+  # with force_turbo, so erXos and every system benchmarked on the board run at one
+  # configured clock, short of the firmware's throttling; a card that is no bench set
+  # keeps the firmware's dynamic clocking. total_mem is the memory the firmware reports,
+  # of which gpu_mem goes to the VideoCore. BootPartition.write_set writes a set's
+  # config.txt and its build record from one Card (BootPartition.card_settings); a board
+  # run's record keeps the clock in its run's details and the memory in its environment,
+  # and the side-by-side table converts a cell counted in CPU cycles to nanoseconds at its
+  # own run's clock and says so (BenchSideBySide).
   module CardSettings
     # The key of the clock in the platform record, a set's build record and a run's details.
     CLOCK_KEY = 'arm_clock_hz'
@@ -27,8 +27,6 @@ module Erx
       # The settings as a set's build record states them.
       def to_record = { CLOCK_KEY => arm_clock_hz, MEMORY_KEY => memory_mib }.compact
     end
-    # The settings of a run whose set's build record is not at hand.
-    UNKNOWN = Card.new(arm_clock_hz: nil, memory_mib: nil)
 
     module_function
 

@@ -102,14 +102,19 @@ class L4ReBoardTest < Minitest::Test
   def test_cpus_started_after_benchmarks_done_are_erxos_return_and_not_counted
     returned = ['erx: boot image build 0123456789abcdef index ' + ('a' * 64) + ' x', LOG[1],
                 *(1..3).map { |cpu| "CPU#{cpu} booted (same IDs as CPU0)." }]
-    _, record = imported([*LOG, *returned], set_record: nil)
-    assert_nil record.run.details.fetch('arm_clock_hz')
-    assert_equal [1, {}], [record.environment.cpus, record.environment.details]
+    _, record = imported([*LOG, *returned])
+    assert_equal 1, record.environment.cpus
   end
 
-  def test_a_set_record_that_is_no_object_or_states_a_broken_clock_is_refused
+  # The run's clock and memory come only from the build record of the set it booted, so a
+  # log without one beside it is refused, as is a record that is no object or states a
+  # broken clock or memory; each refusal names the command and the record.
+  def test_a_set_record_that_is_missing_no_object_or_broken_is_refused
+    error = assert_raises(Erx::Error) { imported(LOG, set_record: nil) }
+    assert_match(%r{\Abench import: .*/boot\.receipt\.json}, error.message)
     [[1], { 'arm_clock_hz' => '1500' }, { 'arm_clock_hz' => 1_500_500_000 }, { 'total_mem_mib' => -1 }].each do |broken|
-      assert_raises(Erx::Error) { imported(LOG, set_record: broken) }
+      error = assert_raises(Erx::Error) { imported(LOG, set_record: broken) }
+      assert_match(%r{\Abench import: .*/boot\.receipt\.json}, error.message)
     end
   end
 

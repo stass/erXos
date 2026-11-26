@@ -52,13 +52,6 @@ module Erx
 
     module_function
 
-    # config.txt: erXos's bench sets' own for platform, for no overlay, and the firmware's
-    # initramfs line, which loads INITRAMFS at INITRAMFS_ADDRESS and names it in the tree.
-    def config_txt(platform)
-      BootPartition.config_txt(platform, overlays: [], build_kind: BuildKind::DEVELOPMENT) +
-        "initramfs #{INITRAMFS} 0x#{INITRAMFS_ADDRESS.to_s(16)}\n"
-    end
-
     # Whether Linux on the board runs benchmark name: erx_peer_bench has its counterpart
     # in a boot Linux's guest runs (LinuxGuest::BOOTS).
     def runs?(name) = LinuxGuest::BOOTS.include?(PeerBench::BOOTS[name])
@@ -74,7 +67,7 @@ module Erx
     def plan(platform:, name:, linux:, initramfs:, bl31:, bl31_license:, firmware:)
       own = { BootPartition::KERNEL => linux.fetch(KERNEL), BootPartition::ARMSTUB => bl31,
               BootPartition::ARMSTUB_LICENSE => bl31_license,
-              BootPartition::CONFIG => BootPartition::Text.new(config_txt(platform)),
+              BootPartition::CONFIG => config(platform),
               BootPartition::CMDLINE => BootPartition::Text.new(command_line(name)),
               File.basename(linux.fetch(TREE)) => linux.fetch(TREE),
               File.basename(linux.fetch(LICENSE)) => linux.fetch(LICENSE), INITRAMFS => initramfs }
@@ -84,9 +77,16 @@ module Erx
       own.merge(firmware)
     end
 
+    # config.txt: erXos's bench sets' own for platform, for no overlay, and the firmware's
+    # initramfs line, which loads INITRAMFS at INITRAMFS_ADDRESS and names it in the tree.
+    def config(platform)
+      BootPartition::ConfigPlan.new(platform: platform, overlays: [], build_kind: BuildKind::DEVELOPMENT,
+                                    tail: "initramfs #{INITRAMFS} 0x#{INITRAMFS_ADDRESS.to_s(16)}\n")
+    end
+
     # Lays the set of a run of benchmark name out into directory, an empty directory under
     # root, with its build record (BootPartition.write_set), which states what its
-    # config.txt sets as erXos's sets' do (BootPartition.card_settings): Linux's lock fetched, the
+    # config.txt sets as erXos's sets' do: Linux's lock fetched, the
     # initramfs built, BL31 built and the firmware as deps.lock pins it. Answers the walk's
     # subject of it (BoardRun::Subject): no banner names Linux's boot, and the walk waits
     # for its end as long as /init waits for the program.
@@ -105,7 +105,7 @@ module Erx
       record = { 'source' => (revision && { 'commit' => revision.commit, 'dirty' => revision.dirty }),
                  'inputs' => { 'platform' => platform.name, 'firmware' => pinned.map(&:first),
                                'bl31' => Bl31.record(root: root, compiler: compiler, linker: linker),
-                               'linux' => linux } }.merge(BootPartition.card_settings(platform).to_record)
+                               'linux' => linux } }
       written = BootPartition.write_set(root: root, directory: directory, plan: plan, record: record)
       BoardRun::Subject.new(set: Netboot.boot_set(File.dirname(written.record), record: BootPartition::SET_RECORD),
                             record: written.record, identity: nil, deadline_seconds: LinuxGuest::DEADLINE_SECONDS,

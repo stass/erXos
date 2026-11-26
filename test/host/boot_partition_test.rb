@@ -21,9 +21,10 @@ class BootPartitionTest < Minitest::Test
   # development card; BSC1's, UART3's and SPI0's pins from the header map, none for the
   # console's pins, which enable_uart sets, none for the gpio rows (GPIO 18 and 19, PWM0's,
   # among them), none for UART0's on-board pins to the Bluetooth controller, which the root
-  # sets at boot; the core clock fixed at the map's 500 MHz; and the record's ARM clock, held.
+  # sets at boot; and the core clock fixed at the map's 500 MHz. The ARM's clock is left to
+  # the firmware's dynamic clocking: only a bench set holds it.
   def test_config_txt_comes_from_the_record
-    assert_equal %w[arm_64bit=1 kernel=kernel8.img kernel_address=0x200000 armstub=bl31.bin arm_freq=1500 force_turbo=1 enable_uart=1
+    assert_equal %w[arm_64bit=1 kernel=kernel8.img kernel_address=0x200000 armstub=bl31.bin enable_uart=1
                     enable_jtag_gpio=1 init_uart_clock=48000000 total_mem=1024 gpu_mem=76 framebuffer_depth=32
                     framebuffer_ignore_alpha=1 max_framebuffers=1 disable_overscan=1
                     core_freq=500 core_freq_fixed=1
@@ -32,11 +33,13 @@ class BootPartitionTest < Minitest::Test
                  settings('development')
   end
 
-  # A set's build record states what the card's config.txt sets that a run's record keeps,
-  # from the values config_txt writes.
-  def test_a_sets_record_states_the_cards_clock_and_memory
-    assert_equal({ 'arm_clock_hz' => 1_500_000_000, 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(PI).to_record)
-    assert_equal({ 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(record(arm_clock_hz: nil)).to_record)
+  # A bench set holds the record's ARM clock and a card does not; both set the record's
+  # memory. A record that names no clock holds none, even on a bench set.
+  def test_only_a_bench_set_holds_the_arm_clock
+    assert_equal({ 'arm_clock_hz' => 1_500_000_000, 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(PI, bench: true).to_record)
+    assert_equal({ 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(PI, bench: false).to_record)
+    assert_equal({ 'total_mem_mib' => 1024 }, Erx::BootPartition.card_settings(record(arm_clock_hz: nil), bench: true).to_record)
+    assert_equal settings('development').insert(4, 'arm_freq=1500', 'force_turbo=1'), settings('development', bench: true)
   end
 
   # A release card leaves the firmware's log and the ARM's JTAG off the header: the jtag
@@ -44,7 +47,7 @@ class BootPartitionTest < Minitest::Test
   def test_only_a_development_card_has_jtag
     assert_equal settings('development') - %w[uart_2ndstage=1 enable_jtag_gpio=1], settings('release')
     assert_empty set_pins(settings('release')) & [*22..27]
-    error = assert_raises(Erx::Error) { Erx::BootPartition.config_txt(PI, overlays: [], build_kind: 'debug') }
+    error = assert_raises(Erx::Error) { config_txt(PI, overlays: [], build_kind: 'debug') }
     assert_match(/neither development nor release/, error.message)
   end
 
@@ -53,7 +56,7 @@ class BootPartitionTest < Minitest::Test
     entry, *others = PI.record.fetch('pins')
     rows = entry.fetch('rows').map { |row| row['use'] == 'jtag' ? { 'gpio' => row.fetch('gpio'), 'use' => 'reserved' } : row }
     platform = record(pins: [entry.merge('rows' => rows), *others])
-    lines = Erx::BootPartition.config_txt(platform, overlays: [], build_kind: 'development').lines(chomp: true)
+    lines = config_txt(platform, overlays: [], build_kind: 'development').lines(chomp: true)
     assert_includes lines, 'uart_2ndstage=1'
     refute_includes lines, 'enable_jtag_gpio=1'
   end
@@ -77,15 +80,20 @@ class BootPartitionTest < Minitest::Test
     end
   end
 
-  def settings(build_kind)
-    Erx::BootPartition.config_txt(PI, overlays: ['uart3'], build_kind: build_kind)
-                      .lines(chomp: true).reject { |line| line.start_with?('#') }
+  def settings(build_kind, bench: false)
+    config_txt(PI, overlays: ['uart3'], build_kind: build_kind, bench: bench).lines(chomp: true).reject { |line| line.start_with?('#') }
+  end
+
+  # platform's config.txt, as a card's (bench: false) or a bench set's settings write it.
+  def config_txt(platform, overlays:, build_kind:, bench: false)
+    Erx::BootPartition.config_txt(platform, overlays: overlays, build_kind: build_kind,
+                                            card: Erx::BootPartition.card_settings(platform, bench: bench))
   end
 
   # The board's RAM is the record's: total_mem less gpu_mem must be ram_bytes, so a
   # record measured at another size is refused, not written into a card that disagrees.
   def test_the_memory_config_txt_sets_is_the_records
-    error = assert_raises(Erx::Error) { Erx::BootPartition.config_txt(record(ram_bytes: PI.record.fetch('ram_bytes') + (1 << 20)), overlays: [], build_kind: 'development') }
+    error = assert_raises(Erx::Error) { config_txt(record(ram_bytes: PI.record.fetch('ram_bytes') + (1 << 20)), overlays: [], build_kind: 'development') }
     assert_match(/is not total_mem 1024 MiB less gpu_mem 76 MiB/, error.message)
   end
 
@@ -95,10 +103,10 @@ class BootPartitionTest < Minitest::Test
     units = PI.record.fetch('units').map do |unit|
       unit.merge('devices' => unit.fetch('devices').map { |device| device['clock'] == 500_000_000 ? device.merge('clock' => 500_000_001) : device })
     end
-    error = assert_raises(Erx::Error) { Erx::BootPartition.config_txt(record(units: units), overlays: [], build_kind: 'release') }
+    error = assert_raises(Erx::Error) { config_txt(record(units: units), overlays: [], build_kind: 'release') }
     assert_match(/one core clock in whole MHz/, error.message)
     error = assert_raises(Erx::Error) do
-      Erx::BootPartition.config_txt(Erx::Platform.new(name: 'raspi4b', record: PI.record.except('pins')), overlays: [], build_kind: 'release')
+      config_txt(Erx::Platform.new(name: 'raspi4b', record: PI.record.except('pins')), overlays: [], build_kind: 'release')
     end
     assert_match(/needs the record's pins/, error.message)
   end
@@ -171,6 +179,8 @@ class BootPartitionTest < Minitest::Test
                                                             .reject { |name| name == 'overlays' }.sort
       fsimg('Wd', '-f', slot_volume)
       assert_equal File.binread(File.join(output, 'boot/config.txt')), fsimg('x', '-O', '-f', slot_volume, 'config.txt')
+      assert_equal config_txt(PI, overlays: ['uart3'], build_kind: 'development'), File.read(File.join(output, 'boot/config.txt')),
+                   "a card's config.txt leaves the ARM's clock to the firmware"
       assert_equal 'kernel', fsimg('x', '-O', '-f', slot_volume, 'kernel8.img')
       assert_equal Erx::BootRecord.sector(:a), File.binread(image, sector, Erx::BootRecord::RECORD_OFFSET)
       assert_equal 'kernel', File.binread(image, 6, slot_start + Erx::PiMedium::BOOT_PLACE)
@@ -247,6 +257,25 @@ class BootPartitionTest < Minitest::Test
       assert_equal 'given', receipt.fetch('inputs')
       assert_equal Digest::SHA256.hexdigest('kernel'), Erx::BootPartition.listed_files(receipt).fetch('kernel8.img')
       assert_raises(Erx::Error) { Erx::BootPartition.write_set(root: root, directory: output, plan: plan(root), record: {}) }
+    end
+  end
+
+  # A bench set's config.txt holds the record's ARM clock, and its build record states the
+  # clock and memory that config.txt sets, from the one card write_set writes both from. A
+  # plan whose config.txt is given as text is refused: it would bypass the card.
+  def test_a_sets_config_txt_and_record_state_one_card
+    Dir.mktmpdir do |root|
+      output, given = %w[set given].map { |name| File.join(root, name).tap { |path| Dir.mkdir(path) } }
+      written = Erx::BootPartition.write_set(root: root, directory: output, plan: plan(root), record: { 'inputs' => 'given' })
+      card = Erx::BootPartition.card_settings(PI, bench: true)
+      assert_equal config_txt(PI, overlays: ['uart3'], build_kind: 'development', bench: true),
+                   File.read(File.join(written.files, 'config.txt'))
+      assert_equal card.to_record, JSON.parse(File.read(written.record)).slice(*card.to_record.keys)
+      error = assert_raises(Erx::Error) do
+        Erx::BootPartition.write_set(root: root, directory: given, record: {},
+                                     plan: plan(root).merge('config.txt' => Erx::BootPartition::Text.new("arm_freq=1800\n")))
+      end
+      assert_match(/config\.txt/, error.message)
     end
   end
 
@@ -352,10 +381,10 @@ class BootPartitionTest < Minitest::Test
   def test_refuses_a_file_that_names_the_build_path
     Dir.mktmpdir do |root|
       error = assert_raises(Erx::Error) do
-        write(root, root, { 'config.txt' => Erx::BootPartition::Text.new("built at #{File.realpath(root)}/x\n") })
+        write(root, root, plan(root).merge('cmdline.txt' => Erx::BootPartition::Text.new("built at #{File.realpath(root)}/x\n")))
       end
-      assert_match(/config.txt holds the build's path/, error.message)
-      assert_empty Dir.children(root).reject { |name| %w[logs pieces].include?(name) }
+      assert_match(/cmdline.txt holds the build's path/, error.message)
+      assert_empty Dir.children(root).reject { |name| %w[in logs pieces].include?(name) }
     end
   end
 
@@ -367,9 +396,9 @@ class BootPartitionTest < Minitest::Test
       link = File.join(scratch, 'link')
       File.symlink(tree, link)
       error = assert_raises(Erx::Error) do
-        write(link, link, { 'config.txt' => Erx::BootPartition::Text.new("built at #{link}/x\n") })
+        write(link, link, plan(link).merge('cmdline.txt' => Erx::BootPartition::Text.new("built at #{link}/x\n")))
       end
-      assert_match(%r{config.txt holds the build's path .*/link\z}, error.message)
+      assert_match(%r{cmdline.txt holds the build's path .*/link\z}, error.message)
     end
   end
 

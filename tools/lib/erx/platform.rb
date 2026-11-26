@@ -21,8 +21,8 @@ module Erx
   # is not a positive number of bytes, or with a site_leaves_out that is not a list of
   # domain names, is refused when it is loaded, before any tool uses it. A board's header
   # map, the record's pins, is checked as the record loads too (PinTable); pins is the
-  # checked map, nil for a board without one. A board whose cards hold one ARM clock names it
-  # in whole megahertz (arm_clock_hz, CardSettings).
+  # checked map, nil for a board without one. A board whose bench sets hold one ARM clock
+  # names it in whole megahertz (arm_clock_hz, CardSettings), checked as the record loads.
   Platform = Data.define(:name, :record, :pins)
   class Platform
     # The board the QEMU harnesses and `tools/erx` build for when no caller names another:
@@ -76,7 +76,8 @@ module Erx
       unknown = record.keys - KEYS
       raise Error, "#{self.class.record_path(name)}: unknown key #{unknown.first.inspect}" unless unknown.empty?
 
-      # Read only to refuse a clock config.txt could not set.
+      # The one check of the clock arm_clock_hz answers: a clock config.txt could not set
+      # is refused.
       CardSettings.clock_hz(record, label: self.class.record_path(name))
 
       MIB_FIELDS.each do |field, mib|
@@ -148,5 +149,8 @@ module Erx
     # What a boot keeps from RAM less fiasco_reserve besides the archive and the pool's
     # page index, in bytes (Manifest::RootStartup.boot_kept).
     def root_withheld = record.fetch('root_withheld')
+    # The ARM clock a bench set's config.txt holds, in hertz, checked as the record loaded;
+    # nil for a board that names none.
+    def arm_clock_hz = record[CardSettings::CLOCK_KEY]
   end
 end

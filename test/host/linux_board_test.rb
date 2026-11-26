@@ -30,9 +30,11 @@ class LinuxBoardTest < Minitest::Test
     assert_equal '/b/initramfs.cpio', laid.fetch('initramfs.cpio')
     assert_equal '/b/bl31.bin', laid.fetch('bl31.bin')
     assert_equal '/f/start4.elf', laid.fetch('start4.elf')
-    config = laid.fetch('config.txt').bytes
-    erxos = Erx::BootPartition.config_txt(PI, overlays: [], build_kind: Erx::BuildKind::DEVELOPMENT)
-    assert config.start_with?(erxos), "config.txt is not erXos's own"
+    # write_set writes config.txt with a bench set's settings.
+    card = Erx::BootPartition.card_settings(PI, bench: true)
+    config = laid.fetch('config.txt').text(card)
+    erxos = Erx::BootPartition.config_txt(PI, overlays: [], build_kind: Erx::BuildKind::DEVELOPMENT, card: card)
+    assert config.start_with?(erxos), "config.txt is not erXos's bench sets' own"
     assert config.end_with?("initramfs initramfs.cpio 0x10000000\n")
     refute_match(/^dtoverlay=/, config)
     assert_match(/^arm_freq=1500\nforce_turbo=1\n.*^total_mem=1024$/m, config)

@@ -135,7 +135,7 @@ module Erx
     # record at subject, written under history; answers [the run directory, the record].
     # What the set's config.txt set, the ARM clock and total_mem (CardSettings), comes
     # from the set's build record the run left beside log, whose SHA-256 the run's details
-    # keep, and is unknown without it.
+    # keep; a log without it is refused.
     # revision is the harness's (SourceRevision::Revision). A log in which Fiasco started
     # more than one CPU is refused: ipcbench's threads have a known placement only on one.
     def import(name, subject:, log:, root:, history:, revision:)
@@ -161,13 +161,14 @@ module Erx
     end
 
     # What the build record of the set the run booted, beside log, states of its card, and
-    # that record's SHA-256; an unknown card and nil without the record.
+    # that record's SHA-256. A log without the record is refused.
     def set_card(log)
       path = File.join(File.dirname(log), BootPartition::SET_RECORD)
-      return [CardSettings::UNKNOWN, nil] unless File.file?(path)
+      label = "bench import: #{path}"
+      raise Error, "#{label}: no build record of the set the run booted beside its log" unless File.file?(path)
 
       bytes = BoundedFile.read(path, maximum: BootPartition::RECORD_BYTES)
-      [CardSettings.read(JsonInput.parse(bytes, max_bytes: BootPartition::RECORD_BYTES, label: path), label: path),
+      [CardSettings.read(JsonInput.parse(bytes, max_bytes: BootPartition::RECORD_BYTES, label: label), label: label),
        Digest::SHA256.hexdigest(bytes)]
     end
 

@@ -135,6 +135,12 @@ class BoardRecordTest < Minitest::Test
     assert(kept.all? { |line| line.ascii_only? && !line.match?(/[[:cntrl:]]/) }, kept.inspect)
   end
 
+  def test_a_set_whose_record_states_a_broken_clock_is_refused_by_the_board_record
+    broken = set_directory('wake', kernel: '11' * 32, clock: 1_500_500_000)
+    error = assert_raises(Erx::Error) { Erx::BoardRecord.set(broken, benchmark: 'wake') }
+    assert_match(%r{\Aboard record: .*/boot\.receipt\.json: arm_clock_hz}, error.message)
+  end
+
   def test_a_set_whose_build_record_changed_since_the_walk_is_refused
     one = set_directory('wake', kernel: '11' * 32)
     File.write(File.join(one.directory, 'boot.receipt.json'), ' ', mode: 'a')
