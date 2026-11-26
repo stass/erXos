@@ -64,7 +64,7 @@ module Erx
 
     # The line typed at root's command shell: the program's posix benchmark at the boot's
     # CPU count, which the program places its threads by and never asks the system for.
-    def command(cpus) = "#{PROGRAM} posix #{cpus}\r"
+    def command(cpus) = "#{[PROGRAM, *PeerBench.arguments('posix', cpus: cpus)].join(' ')}\r"
 
     # The boot's checkpoints: the production boot to the system's command shell (points),
     # root's session's command shell, which the command is typed at, and the program's
@@ -137,7 +137,7 @@ module Erx
         measured = { serial: serial, image_sha256: report.fetch('image_sha256'), flags: @built.fetch(:flags),
                      compiler: @built.fetch(:compiler), workloads: { PROGRAM => @built.fetch(:program_sha256) },
                      qemu_version: report['qemu_version'], reused_from: report['reused_from'] }
-        BenchLanding.booted(measured, answer, memory_mib: @built.fetch(:machine).memory_mib)
+        BenchLanding.booted(measured, answer, memory_mib: @built.fetch(:machine).memory_mib, pinned: PeerBench.pins?(benchmark.name))
       end
     end
   end

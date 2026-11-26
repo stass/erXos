@@ -36,7 +36,8 @@ module Erx
     # One run's cell in a row: its status and reason, clock and summary form, the
     # statistics its summary reports, the ARM clock in hertz its cycles were converted at
     # (nil when they were not), its median over erXos's run of the same round, nil unless
-    # both are histograms in nanoseconds; unpinned when its run pinned no thread.
+    # both are histograms in nanoseconds; unpinned when its run placed its threads where
+    # the system chose (unpinned?).
     Entry = Data.define(:round, :status, :reason, :clock, :form, :values, :converted_hz, :ratio, :unpinned)
     # One system in a row: what it runs for the operation (nil for erXos, whose cell the
     # row is; 'none' where the system has no counterpart, and then no entries), and its
@@ -54,29 +55,32 @@ module Erx
 
     module_function
 
-    # The tables of benchmark's landing boots from runs, with a column for each of systems;
-    # runs of more than one environment kind or host model are refused. Each row reads the
-    # runs of its cell's CPU form; with forms false, as on the board, where each system
-    # boots in its own form, every run, and the row names no form.
-    def tables(benchmark, runs, systems:, forms: true)
+    # The tables of runs for each landing boot of benchmark, with a column for each of
+    # systems; runs of more than one environment kind or host model are refused. A
+    # session's tables (same_cpu given, the session's Plan#same_cpu) cover only the boots
+    # same_cpu names, read each boot's one-CPU cells at the count it gives and its other
+    # cells at the boot's count, and refuse a run that does not say whether its threads
+    # were pinned. The board's tables (same_cpu nil), where each system boots in its own
+    # form, read every run on each row and name no form; board records do not state
+    # pinning, so no board entry is marked unpinned.
+    def tables(benchmark, runs, systems:, same_cpu: nil)
       places = runs.map { |run| run.record.environment }.map { |environment| "#{environment.kind} #{environment.model}" }.uniq
       raise Error, "bench: runs of #{places.join(' and ')} are never set side by side" if places.size > 1
 
+      silent = same_cpu && runs.map { |run| run.record.environment }.find { |environment| ![true, false].include?(environment.details['pinned']) }
+      raise Error, "bench: the run #{silent.name} does not say whether its threads were pinned" if silent
+
       BenchSuite::BOOTS.filter_map do |boot, entry|
         cells = benchmark.landing[boot] or next
+        next if same_cpu && !same_cpu.key?(boot)
         rows = cells.map do |cell|
-          cpus = (cell.cpus == 1 ? fewest_cpus(runs, cell, benchmark.name) : entry.cpus if forms)
-          read = forms ? runs.select { |run| run.record.environment.cpus == cpus } : runs
+          cpus = (cell.cpus == 1 ? same_cpu.fetch(boot) : entry.cpus if same_cpu)
+          read = same_cpu ? runs.select { |run| run.record.environment.cpus == cpus } : runs
           Row.new(benchmark: benchmark.name, cell: cell, cpus: cpus, act: benchmark.operations.fetch(cell.operation).act,
                   columns: columns(benchmark, cell, read, systems))
         end
         Table.new(layer: entry.layer, benchmark: benchmark.name, rows: rows)
       end
-    end
-
-    # The fewest CPUs of a run holding cell, where a cell of one CPU is read; 1 when none does.
-    def fewest_cpus(runs, cell, benchmark)
-      runs.select { |run| entry(run, cell, benchmark) }.map { |run| run.record.environment.cpus }.min || 1
     end
 
     def columns(benchmark, cell, runs, systems)
@@ -94,6 +98,10 @@ module Erx
       end
     end
 
+    # Whether a run left its threads where the system placed them: it says it pinned none and
+    # had more than one CPU. On one CPU every thread shares it, so placement is known either way.
+    def unpinned?(environment) = environment.details['pinned'] == false && environment.cpus > 1
+
     # The entry of run's cell for the declared cell, matched by operation and the
     # conditions both systems share (load, placement, parameters); nil when the run has
     # no such cell.
@@ -110,7 +118,7 @@ module Erx
       hz = frequency(cell.conditions.clock, boot.clock, run)
       Entry.new(round: run.round, status: cell.status, reason: cell.reason, clock: cell.conditions.clock, form: cell.form,
                 values: values(cell, hz, cycles ? 'cycles' : 'ticks'), converted_hz: (hz if cycles), ratio: nil,
-                unpinned: run.record.environment.details['threads'] == 'unpinned')
+                unpinned: unpinned?(run.record.environment))
     end
 
     # The frequency a cell counted on clock_name is converted to nanoseconds at, from its
@@ -205,7 +213,7 @@ module Erx
       "#{amount.is_a?(Integer) ? amount : format('%.1f', amount)} #{quantity.unit}"
     end
 
-    private_class_method :fewest_cpus, :columns, :entry, :values, :reported, :mean, :amount, :ratio, :render_row, :parameters, :render_column,
+    private_class_method :unpinned?, :columns, :entry, :values, :reported, :mean, :amount, :ratio, :render_row, :parameters, :render_column,
                          :render_entry, :quantity_text
   end
 end

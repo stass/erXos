@@ -77,13 +77,16 @@ module Erx
     # "Counterparts"): the native boot's cells set the kernels' own paths beside each
     # other, the xdomain boot's Erlang cells the runtimes' messages, and the posix boot's
     # cells what a program pays for its POSIX calls (docs/design-bench.md, "What a program
-    # sees: `posix` and `erl`"). gate says whether the landing gate boots it: the program
-    # table's boots run in comparison sessions and on demand only.
-    Boot = Data.define(:kind, :cpus, :layer, :gate)
+    # sees: `posix` and `erl`"). The kind is the environment the landing gate boots it in,
+    # nil for a boot the gate does not boot: the program table's boots run in comparison
+    # sessions, which choose their accelerator, and on demand only.
+    Boot = Data.define(:kind, :cpus, :layer) do
+      def gate = !kind.nil?
+    end
     BOOTS = {
-      'native' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'kernel', gate: true),
-      'xdomain' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'Erlang', gate: true),
-      'posix' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'program', gate: false)
+      'native' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'kernel'),
+      'xdomain' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'Erlang'),
+      'posix' => Boot.new(kind: nil, cpus: 4, layer: 'program')
     }.freeze
 
     # A benchmark: its operations by name and its landing cells per boot, each naming a
@@ -112,7 +115,7 @@ module Erx
     # Linux's Erlang guest's boot: the xdomain benchmark on stock OTP at one CPU
     # (docs/design-bench.md, "Linux's Erlang guest"). It is no erXos boot, so it is not
     # one of BOOTS, whose layers the side-by-side tables and sessions read.
-    LINUX_ERLANG = Boot.new(kind: 'qemu-hvf', cpus: 1, layer: 'Erlang', gate: true)
+    LINUX_ERLANG = Boot.new(kind: 'qemu-hvf', cpus: 1, layer: 'Erlang')
     LINUX_ERLANG_BENCHMARK = 'xdomain'
 
     BENCHMARK_FILES = DeclarationFiles.new('benchmarks')

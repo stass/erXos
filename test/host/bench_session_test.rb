@@ -21,8 +21,9 @@ class BenchSessionTest < Minitest::Test
     attr_reader :accelerators
 
     def initialize(system, boot: 'native', one_cpu: false, profiles: %w[landing full], fail: false, accelerators: %w[hvf tcg],
-                   fixed: nil)
+                   fixed: nil, pinned: true)
       @system, @boot, @one_cpu, @profiles, @fail, @accelerators, @fixed = system, boot, one_cpu, profiles, fail, accelerators, fixed
+      @pinned = pinned
       @calls = []
     end
 
@@ -35,7 +36,7 @@ class BenchSessionTest < Minitest::Test
 
       Erx::BenchSystem::Booted.new(
         clock: {}, refused: [], environment: { 'memory_mib' => 512 }, subject: { 'image_sha256' => '0' * 64 },
-        logs: [], reused_from: nil,
+        logs: [], reused_from: nil, pinned: @pinned,
         cells: cells.map do |cell|
           Record::Cell.new(benchmark: benchmark.name, operation: cell.operation, status: 'unsupported', reason: 'test',
                            conditions: Record::Conditions.new(load: cell.load, placement: cell.placement,
@@ -56,7 +57,7 @@ class BenchSessionTest < Minitest::Test
   # beside erXos's own TCG rows of the same CPUs and never beside an HVF run.
   def test_a_tcg_only_guest_makes_the_session_tcg_at_its_cpu_count
     posix = Erx::BenchSuite.benchmark('posix')
-    genode = Guest.new('genode-hw', boot: 'posix', accelerators: %w[tcg], fixed: [4])
+    genode = Guest.new('genode-hw', boot: 'posix', accelerators: %w[tcg], fixed: [4], pinned: false)
     erxos = Guest.new('erxos', boot: 'posix')
     plan = Session.plan(posix, systems: %w[erxos genode-hw], profile: 'landing', guests: [erxos, genode])
     assert_equal ['tcg', [%w[erxos 4], %w[genode-hw 4]]], [plan.accel, plan.steps.map { |step| [step.system, step.cpus.to_s] }]
@@ -73,6 +74,27 @@ class BenchSessionTest < Minitest::Test
     assert_equal %w[qemu-tcg-Mac16,10-4cpu-erxos qemu-tcg-Mac16,10-4cpu-genode-hw], written
     assert_equal [[4, 'tcg']], genode.calls.map { |_, cpus, accel| [cpus, accel] }
     assert_empty result.fetch(:failed)
+    # The tables read the boot's same-CPU cells at the count the plan booted them at.
+    assert_equal({ 'posix' => 4 }, result.fetch(:same_cpu))
+    assert_equal [true, false], result.fetch(:runs).map { |run| run.record.environment.details.fetch('pinned') }
+  end
+
+  # Every record answers whether its threads were pinned, written by BenchSystem.record;
+  # a guest's boot that does not say is refused, never recorded as pinned.
+  def test_every_record_says_whether_its_threads_were_pinned
+    posix = Erx::BenchSuite.benchmark('posix')
+    silent = Guest.new('genode-hw', boot: 'posix', fixed: [4], pinned: nil)
+    error = assert_raises(Erx::Error) do
+      Erx::BenchSystem.boot(silent, posix, cells: [], cpus: 4, host: host.call('qemu-tcg'), started_by: 'manual', load: -> {})
+    end
+    assert_match(/pinned/, error.message)
+  end
+
+  # The landing gate boots a boot in the environment kind it names; the posix boot runs
+  # only in sessions, which choose their accelerator, so it names none.
+  def test_only_a_boot_the_gate_boots_names_an_environment_kind
+    boots = Erx::BenchSuite::BOOTS
+    assert_equal [%w[native xdomain], [nil]], [boots.select { |_, boot| boot.gate }.keys, [boots.fetch('posix').kind]]
   end
 
   def test_each_round_turns_the_order_by_one_system

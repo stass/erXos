@@ -33,7 +33,10 @@ module Erx
     Step = Data.define(:round, :system, :guest, :boot, :cells, :cpus)
     # The session's accelerator, its boots, and each [system, boot] whose cells no guest of
     # the system runs, which the session names instead of booting.
-    Plan = Data.define(:accel, :steps, :missing)
+    Plan = Data.define(:accel, :steps, :missing) do
+      # Each booted landing boot's fewest CPUs, where its same-CPU cells are read.
+      def same_cpu = steps.group_by(&:boot).transform_values { |booted| booted.map(&:cpus).min }
+    end
 
     module_function
 
@@ -64,11 +67,11 @@ module Erx
       raise Error, "bench: #{refusal}" if refusal
 
       chosen = booted.map { |system, boot| guest.call(system, boot) }
-      forms = forms(chosen)
+      counts = forms(chosen)
       steps = order(systems, rounds: rounds).each_with_index.flat_map do |turned, round|
         turned.flat_map { |system| booted.select { |entry| entry.first == system } }.flat_map do |system, boot|
           picked = guest.call(system, boot)
-          forms.fetch(picked).map do |cpus|
+          counts.fetch(picked).map do |cpus|
             Step.new(round: round, system: system, guest: picked, boot: boot, cells: cells(benchmark, boot, system),
                      cpus: cpus)
           end
@@ -132,11 +135,12 @@ module Erx
         @load = load
       end
 
-      # The runs booted (BenchSideBySide::Run), the run directories written, the boots
-      # that failed, and the notes, each escaped for the terminal.
+      # The runs booted (BenchSideBySide::Run), each booted boot's count its same-CPU cells
+      # are read at (Plan#same_cpu), the run directories written, the boots that failed,
+      # and the notes, each escaped for the terminal.
       def call(benchmark, systems:, profile:)
         plan = BenchSession.plan(benchmark, systems: systems, profile: profile, guests: @guests)
-        result = { runs: [], written: [], failed: [], notes: plan.missing.map do |system, boot|
+        result = { runs: [], same_cpu: plan.same_cpu, written: [], failed: [], notes: plan.missing.map do |system, boot|
           "#{system}: no guest runs the #{boot} boot's cells, so they are not booted"
         end }
         host = @host.call("qemu-#{plan.accel}")

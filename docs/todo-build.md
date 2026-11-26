@@ -488,6 +488,11 @@ design does not have, to be deleted so no side-by-side table can show it under s
   image, and whether init takes the documented configuration, are settled by its first run. Still to do: run the
   TCG session (`tools/erx bench posix --systems erxos,genode-hw`) once and import its records; the image is
   built for `GenodeBuild::MACHINE`'s four CPUs with its program unpinned.
+* [Medium] Genode's build record (`GenodeBuild.record`, `tools/lib/erx/genode_bench.rb`): it names the image,
+  the run script and the pins, but not the SHA-256 of the program's sources it staged (`GenodeBuild::SOURCES`),
+  so an image built before a change to `bench/peer/erx_peer_bench.c` boots and is recorded under the
+  harness's newer revision. Record the staged sources' digest and have `GenodeBench::Guest#call` refuse an
+  image whose digest differs from the tree's, as it refuses a record whose arguments differ.
 * [Medium] Genode's build, `CheckedTar` and the engine (`tools/lib/erx/genode_build.rb`): that no tool archive
   writes through a link of the image rests on the engine refusing a directory entry over a non-directory, as
   moby v27.5.1 does for `docker cp` (docs/design-bench.md, "Genode's guest"); nothing checks that the context's

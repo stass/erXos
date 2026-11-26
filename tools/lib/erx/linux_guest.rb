@@ -208,7 +208,8 @@ module Erx
                                                     .fetch(:memory_mib),
                          'machine' => 'virt',
                          'qemu' => report['qemu_version'] }.compact,
-          subject: @built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from']
+          subject: @built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from'],
+          pinned: PeerBench.pins?(benchmark.name)
         )
       end
     end

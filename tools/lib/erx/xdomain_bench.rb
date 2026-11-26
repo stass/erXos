@@ -26,6 +26,9 @@ module Erx
   # benchmark's cells from its guest module; BenchMeasurement.boot is their one judge.
   module XdomainBench
     BOOT = 'xdomain'
+    # Its cells time Erlang processes, which the runtime places; it binds none to a CPU
+    # (BenchSystem::Booted).
+    PINNED = false
     NODE = 'peer@erxos'
     # The guest module that times each benchmark's cells in this boot.
     GUESTS = { 'xdomain' => 'erx_xdomain_bench', 'wake' => 'erx_wake_bench' }.freeze
@@ -198,7 +201,7 @@ module Erx
         asked = XdomainBench.asked([benchmark])
         measured = @run.call(asked, accel: accel, cpus: cpus)
         answer = BenchMeasurement.boot(measured.fetch(:lines), asked, timed_out: !measured.fetch(:timed_out).nil?)
-        BenchLanding.booted(measured, answer, memory_mib: @run.memory_mib)
+        BenchLanding.booted(measured, answer, memory_mib: @run.memory_mib, pinned: PINNED)
       end
     end
 
@@ -216,7 +219,7 @@ module Erx
       # timeout that ended the boot early, if one did.
       def call(benchmarks, boot:, history:)
         asked = XdomainBench.asked(benchmarks)
-        @landing.call(asked, boot: boot, memory_mib: @run.memory_mib, history: history) do |accel|
+        @landing.call(asked, boot: boot, memory_mib: @run.memory_mib, pinned: PINNED, history: history) do |accel|
           @run.call(asked, accel: accel, cpus: boot.cpus)
         end
       end

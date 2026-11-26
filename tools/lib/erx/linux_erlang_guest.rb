@@ -381,7 +381,9 @@ module Erx
           clock: answer.fetch(:clock) || {}, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
           environment: { 'memory_mib' => NativeBench::MEMORY_MIB, 'machine' => 'virt', 'qemu' => report['qemu_version'],
                          'erts_schedulers' => LinuxErlangGuest.schedulers(cpus) }.compact,
-          subject: built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from']
+          subject: built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from'],
+          # Stock OTP's schedulers as erl starts them; the guest binds none to a CPU.
+          pinned: false
         )
       end
 

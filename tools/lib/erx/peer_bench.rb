@@ -26,6 +26,10 @@ module Erx
 
     module_function
 
+    # Whether a run of benchmark name binds its threads to CPUs, given pinned (false for a
+    # posix run told "unpinned"): every run but an xdomain run's pins.
+    def pins?(name, pinned: true) = BOOTS.fetch(name) != 'xdomain' && pinned
+
     # The -D flags of the source's build: the landing profiles' sizes and the xdomain
     # cells' parameters, as their declarations give them, and the run's deadline.
     def flags
@@ -38,7 +42,8 @@ module Erx
     # the count, which on erXos the program cannot ask the system for (docs/design-bench.md,
     # "The program's clock and placement"); a native-set or xdomain run asks. A posix run
     # on a system whose placement call is refused (pinned false, Genode's) is also told
-    # "unpinned": it pins nothing and reports its cross-CPU cells unsupported.
+    # "unpinned": it pins nothing and reports every cell that times a peer thread
+    # unsupported, on the same CPU or across CPUs.
     def arguments(name, cpus:, pinned: true)
       return [name, cpus.to_s, *(pinned ? [] : ['unpinned'])] if BOOTS.fetch(name) == 'posix'
       raise Error, "bench: only a posix run is ever unpinned, not #{name}" unless pinned

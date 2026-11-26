@@ -54,7 +54,7 @@ class BenchSideBySideTest < Minitest::Test
                      detail: { 'count' => 10_000, 'total' => total, 'mean' => printed })
   end
 
-  def boot(system, cpus, cells, clock:, round: 0, kind: 'qemu-hvf', details: {})
+  def boot(system, cpus, cells, clock:, round: 0, kind: 'qemu-hvf', details: { 'pinned' => true })
     record = Record::Record.new(
       environment: Record::Environment.new(kind: kind, model: 'Mac16,10', cpus: cpus, system: system, details: details),
       subject: Record::Subject.new(revision: 'a' * 40, dirty: false, details: {}),
@@ -75,7 +75,13 @@ class BenchSideBySideTest < Minitest::Test
      boot('linux', 1, [histogram('same', 'monotonic', 2000)], clock: LINUX_CLOCK, round: 1)]
   end
 
-  def table = Tables.tables(BENCHMARK, runs, systems: %w[erxos l4re linux]).first
+  # The tables of runs, the same-CPU cells of every boot read at fewest CPUs, as a
+  # session's plan gives them.
+  def sides(benchmark, runs, systems:, fewest: 1)
+    Tables.tables(benchmark, runs, systems: systems, same_cpu: benchmark.landing.keys.to_h { |boot| [boot, fewest] })
+  end
+
+  def table = sides(BENCHMARK, runs, systems: %w[erxos l4re linux]).first
   def column(row, system) = row.columns.find { |entry| entry.system == system }
   def ns(amount) = Tables::Quantity.new(amount: amount, unit: 'ns')
 
@@ -96,10 +102,10 @@ class BenchSideBySideTest < Minitest::Test
   # so the board table sets every run beside each cell and names no CPU form.
   def test_the_board_table_sets_each_systems_own_form_on_one_row
     board = [boot("erxos", 4, [histogram("same", "counter", 30)], clock: ERXOS_CLOCK), boot("l4re", 1, [mean("same")], clock: nil)]
-    same, = Tables.tables(BENCHMARK, board, systems: %w[erxos l4re], forms: false).first.rows
+    same, = Tables.tables(BENCHMARK, board, systems: %w[erxos l4re]).first.rows
     assert_nil same.cpus
     assert_equal [1, 1], %w[erxos l4re].map { |system| column(same, system).entries.size }
-    assert_includes Tables.render(Tables.tables(BENCHMARK, board, systems: %w[erxos l4re], forms: false)),
+    assert_includes Tables.render(Tables.tables(BENCHMARK, board, systems: %w[erxos l4re])),
                     "probe.same idle same-cpu, on the board"
   end
 
@@ -107,7 +113,7 @@ class BenchSideBySideTest < Minitest::Test
   def test_a_broken_arm_clock_is_refused_naming_its_run
     broken = boot('l4re', 1, [mean('same')], clock: nil, round: 2)
     broken = broken.with(record: broken.record.with(run: broken.record.run.with(details: { 'arm_clock_hz' => 1_500_500_000 })))
-    error = assert_raises(Erx::Error) { Tables.tables(BENCHMARK, [runs.first, broken], systems: %w[erxos l4re], forms: false) }
+    error = assert_raises(Erx::Error) { Tables.tables(BENCHMARK, [runs.first, broken], systems: %w[erxos l4re]) }
     assert_match(/\Abench: the record of round 2 in #{broken.record.environment.name}: arm_clock_hz/, error.message)
   end
 
@@ -115,7 +121,7 @@ class BenchSideBySideTest < Minitest::Test
   # run: the tables refuse runs of more than one environment kind or host model.
   def test_tcg_runs_are_never_set_beside_hvf_runs
     tcg = boot('linux', 1, [histogram('same', 'monotonic', 1500)], clock: LINUX_CLOCK, kind: 'qemu-tcg')
-    error = assert_raises(Erx::Error) { Tables.tables(BENCHMARK, [runs.first, tcg], systems: %w[erxos linux]) }
+    error = assert_raises(Erx::Error) { sides(BENCHMARK, [runs.first, tcg], systems: %w[erxos linux]) }
     assert_match(/qemu-hvf.*qemu-tcg|qemu-tcg.*qemu-hvf/, error.message)
   end
 
@@ -125,13 +131,37 @@ class BenchSideBySideTest < Minitest::Test
     tcg = [boot('erxos', 4, [histogram('same', 'counter', 30), histogram('cross', 'counter', 48)], clock: ERXOS_CLOCK,
                                                                                                    kind: 'qemu-tcg'),
            boot('linux', 4, [histogram('same', 'monotonic', 1500), unsupported('cross')], clock: LINUX_CLOCK, kind: 'qemu-tcg',
-                                                                                          details: { 'threads' => 'unpinned' })]
-    same, = Tables.tables(BENCHMARK, tcg, systems: %w[erxos linux]).first.rows
+                                                                                          details: { 'pinned' => false })]
+    same, = sides(BENCHMARK, tcg, systems: %w[erxos linux], fewest: 4).first.rows
     assert_equal 4, same.cpus
     assert_equal [[false], [true]], %w[erxos linux].map { |system| column(same, system).entries.map(&:unpinned) }
     # An unpinned run is never set in a ratio beside erXos's pinned one.
     assert_equal [nil], column(same, 'linux').entries.map(&:ratio)
-    assert(Tables.render(Tables.tables(BENCHMARK, tcg, systems: %w[erxos linux])).any? { |line| line.include?('unpinned, measured') })
+    assert(Tables.render(sides(BENCHMARK, tcg, systems: %w[erxos linux], fewest: 4)).any? { |line| line.include?('unpinned, measured') })
+  end
+
+  # The count a boot's same-CPU cells are read at is the session plan's, not the fewest
+  # CPUs of the runs that happen to hold the cell.
+  def test_same_cpu_cells_are_read_at_the_count_the_plan_gives
+    same, = sides(BENCHMARK, runs, systems: %w[erxos linux], fewest: 4).first.rows
+    assert_equal 4, same.cpus
+    assert_equal [ns(1250)], column(same, 'erxos').entries.map { |entry| entry.values.fetch('p50') }
+  end
+
+  # Every run says whether its threads were pinned; a run that does not is refused, never
+  # read as pinned.
+  def test_a_run_that_does_not_say_whether_it_pinned_is_refused
+    silent = boot('linux', 1, [histogram('same', 'monotonic', 1500)], clock: LINUX_CLOCK, details: {})
+    error = assert_raises(Erx::Error) { sides(BENCHMARK, [runs.first, silent], systems: %w[erxos linux]) }
+    assert_match(/pinned/, error.message)
+  end
+
+  # On one CPU every thread shares the CPU, so a run that pins nothing places its threads
+  # as a pinned run does: it is not marked and keeps its ratio.
+  def test_an_unpinned_one_cpu_run_is_not_marked
+    l4re = boot('l4re', 1, [histogram('same', 'counter', 48)], clock: ERXOS_CLOCK, details: { 'pinned' => false })
+    entry, = column(sides(BENCHMARK, [runs.first, l4re], systems: %w[erxos l4re]).first.rows.first, 'l4re').entries
+    assert_equal [false, 2r], [entry.unpinned, entry.ratio]
   end
 
   def test_a_cross_cpu_cell_is_read_from_the_four_cpu_form
@@ -150,7 +180,7 @@ class BenchSideBySideTest < Minitest::Test
     # A mean in nanoseconds beside erXos's median still takes no ratio.
     timed = boot('linux', 1, [histogram('cross', 'monotonic', 3000), mean('same').with(conditions: conditions('same', 'monotonic'))],
                  clock: LINUX_CLOCK)
-    mixed = Tables.tables(BENCHMARK, [runs.first, timed], systems: %w[erxos linux]).first
+    mixed = sides(BENCHMARK, [runs.first, timed], systems: %w[erxos linux]).first
     assert_equal [[Tables::Quantity.new(amount: 421.3, unit: 'ns'), nil]],
                  column(mixed.rows.first, 'linux').entries.map { |linux| [linux.values['mean'], linux.ratio] }
     assert_equal({ 'count' => Tables::Quantity.new(amount: 10_000, unit: 'operations'),
@@ -165,7 +195,7 @@ class BenchSideBySideTest < Minitest::Test
   def test_cycles_of_a_run_that_recorded_its_arm_clock_are_shown_in_ns
     held = boot('l4re', 1, [mean('same')], clock: nil)
     held = held.with(record: held.record.with(run: held.record.run.with(details: { 'arm_clock_hz' => 1_500_000_000 })))
-    board = Tables.tables(BENCHMARK, [runs.first, held], systems: %w[erxos l4re], forms: false).first
+    board = Tables.tables(BENCHMARK, [runs.first, held], systems: %w[erxos l4re]).first
     entry = column(board.rows.first, 'l4re').entries.first
     assert_equal [ns(Rational(4_213_000 * 1000, 10_000 * 1500)), 1_500_000_000, nil],
                  [entry.values.fetch('mean'), entry.converted_hz, entry.ratio]
@@ -177,7 +207,7 @@ class BenchSideBySideTest < Minitest::Test
   # shows the total over the calls, one round trip, beside erXos's round trips.
   def test_a_mean_is_shown_as_its_total_over_its_count
     halved = boot('l4re', 1, [mean('same', total: 4_200_000, printed: 210)], clock: nil)
-    l4re = column(Tables.tables(BENCHMARK, [runs.first, halved], systems: %w[erxos l4re]).first.rows.first, 'l4re')
+    l4re = column(sides(BENCHMARK, [runs.first, halved], systems: %w[erxos l4re]).first.rows.first, 'l4re')
     assert_equal Tables::Quantity.new(amount: 420.0, unit: 'cycles'), l4re.entries.first.values.fetch('mean')
   end
 
@@ -190,12 +220,12 @@ class BenchSideBySideTest < Minitest::Test
       profile: PROFILE, status: 'measured', reason: nil, counts: { 'lost' => 0, 'early' => 0, 'missed' => 0 },
       detail: { 'histogram' => [[4, 4, 15], [5, 5, 5]], 'min' => 4, 'max' => 5, 'total' => 3000 }
     )
-    erxos = column(Tables.tables(BENCHMARK, [boot('erxos', 1, [batched, unsupported('cross')], clock: ERXOS_CLOCK)],
+    erxos = column(sides(BENCHMARK, [boot('erxos', 1, [batched, unsupported('cross')], clock: ERXOS_CLOCK)],
                                  systems: %w[erxos]).first.rows.first, 'erxos')
     values = erxos.entries.first.values
     assert_equal [Tables::Quantity.new(amount: 640, unit: 'operations'), ns(3125 / 16r), ns(Rational(4_000, 24))],
                  values.values_at('count', 'mean', 'p50')
-    assert(Tables.render([Tables.tables(BENCHMARK, [boot('erxos', 1, [batched], clock: ERXOS_CLOCK)],
+    assert(Tables.render([sides(BENCHMARK, [boot('erxos', 1, [batched], clock: ERXOS_CLOCK)],
                                         systems: %w[erxos]).first]).any? { |text| text.include?('mean 195.3 ns') })
   end
 
@@ -241,7 +271,7 @@ def test_the_program_table_sets_each_cell_beside_linux_with_its_act
           boot('linux', 1, [program_cell('getpid', 'monotonic', total: 32_000),
                             program_cell('read', 'monotonic', total: 160_000, parameters: { 'bytes' => 4096 })],
                clock: LINUX_CLOCK)]
-  program = Tables.tables(PROGRAM, runs, systems: %w[erxos linux]).first
+  program = sides(PROGRAM, runs, systems: %w[erxos linux]).first
   assert_equal ['program', %w[getpid read]], [program.layer, program.rows.map { |row| row.cell.operation }]
   assert_equal ['nearest counterpart: erXos answers in user mode', 'same act'], program.rows.map(&:act)
   getpid = program.rows.first

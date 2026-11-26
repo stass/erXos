@@ -91,6 +91,9 @@ class PeerBenchTest < Minitest::Test
     assert_equal [], Erx::PeerBench.asked('posix', cpus: 4, clock: 'counter', pinned: false).pairs
     assert_equal [[0, 3]], Erx::PeerBench.asked('posix', cpus: 4, clock: 'counter').pairs
     assert_raises(Erx::Error) { Erx::PeerBench.arguments('wake', cpus: 4, pinned: false) }
+    # What its record says: an unpinned posix run and an xdomain run pin nothing.
+    assert_equal [true, false, false, true], [Erx::PeerBench.pins?('posix'), Erx::PeerBench.pins?('posix', pinned: false),
+                                              Erx::PeerBench.pins?('xdomain'), Erx::PeerBench.pins?('wake')]
   end
 
   # Both builds of the file generate code from one list of flags, NativeRoot's without its target.

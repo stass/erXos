@@ -28,6 +28,9 @@ module Erx
   # cell its fault fails.
   module NativeBench
     MEMORY_MIB = 512
+    # The image binds each thread its cells time to the CPU its placement names
+    # (BenchSystem::Booted).
+    PINNED = true
     GUEST = 'test/guest/native_bench'
     BENCH_LIBRARY = %w[bench_clock bench_hist bench_line bench_periodic].map { |name| "test/guest/bench/#{name}.c" }.freeze
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH, *BENCH_LIBRARY,
@@ -378,7 +381,7 @@ module Erx
       def call(benchmark, cells:, cpus:, accel:)
         measured = @run.call(benchmark.name, accel: accel, cpus: cpus)
         answer = BenchMeasurement.boot(measured.fetch(:lines), NativeBench.asked(benchmark, cpus: cpus, cells: cells))
-        BenchLanding.booted(measured, answer, memory_mib: MEMORY_MIB)
+        BenchLanding.booted(measured, answer, memory_mib: MEMORY_MIB, pinned: PINNED)
       end
     end
 
@@ -400,7 +403,7 @@ module Erx
       # names of the seeds whose boots did not show their fault.
       def call(benchmark, boot:, history:)
         asked = NativeBench.asked(benchmark, cpus: boot.cpus)
-        recorded = @landing.call(asked, boot: boot, memory_mib: MEMORY_MIB, history: history) do |accel|
+        recorded = @landing.call(asked, boot: boot, memory_mib: MEMORY_MIB, pinned: PINNED, history: history) do |accel|
           @run.call(benchmark.name, accel: accel, cpus: boot.cpus)
         end
         accel = boot.kind.delete_prefix('qemu-')

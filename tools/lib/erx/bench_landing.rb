@@ -24,13 +24,15 @@ module Erx
     # What an erXos boot gives back as a system's guest (BenchSystem::Booted): measured
     # is the boot's map (its serial log, image SHA-256, flags, compiler, workloads'
     # SHA-256, QEMU version and the stored log a replayed boot came from), answer its
-    # lines judged (BenchMeasurement.boot), memory_mib the machine's.
-    def self.booted(measured, answer, memory_mib:)
+    # lines judged (BenchMeasurement.boot), memory_mib the machine's, pinned whether its
+    # program bound each thread its cells time to a CPU (BenchSystem::Booted).
+    def self.booted(measured, answer, memory_mib:, pinned:)
       BenchSystem::Booted.new(
         clock: answer.fetch(:clock) || {}, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
         environment: { 'memory_mib' => memory_mib, 'machine' => 'virt', 'qemu' => measured.fetch(:qemu_version) }.compact,
         subject: measured.slice(:image_sha256, :flags, :compiler, :workloads).transform_keys(&:to_s),
-        logs: [{ serial: BenchRecord.boot_log(measured.fetch(:serial)) }], reused_from: measured.fetch(:reused_from)
+        logs: [{ serial: BenchRecord.boot_log(measured.fetch(:serial)) }], reused_from: measured.fetch(:reused_from),
+        pinned: pinned
       )
     end
 
@@ -39,7 +41,7 @@ module Erx
     # that ended a boot early), and judges its lines against asked: a cell a timed-out
     # boot did not report is timed_out. Answers the record, the run directory written
     # (nil for a replayed boot), the refused lines' reasons and the timeout.
-    def call(asked, boot:, memory_mib:, history:)
+    def call(asked, boot:, memory_mib:, pinned:, history:)
       host = BenchSystem.host(kind: boot.kind, root: @root, runner: @runner)
       date = Time.now.utc
       before = QemuGate.one_minute_load
@@ -47,7 +49,7 @@ module Erx
       after = QemuGate.one_minute_load
       timed_out = measured.fetch(:timed_out, nil)
       answer = BenchMeasurement.boot(measured.fetch(:lines), asked, timed_out: !timed_out.nil?)
-      booted = BenchLanding.booted(measured, answer, memory_mib: memory_mib)
+      booted = BenchLanding.booted(measured, answer, memory_mib: memory_mib, pinned: pinned)
       record = BenchSystem.record(booted, system: 'erxos', cpus: boot.cpus, host: host, date: date,
                                           started_by: 'landing', load: before && after && [before, after])
       written = (BenchRecord.write(record, history: history, erxos_root: @root, logs: booted.logs) unless record.run.replayed?)

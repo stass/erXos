@@ -40,8 +40,9 @@
  * benchmark runs on CPU 0, the service's CPU, and the pair its CLOCK line calibrates is
  * CPU 0 and the last, as a native boot's is; an xdomain run is not pinned. A posix run
  * given "unpinned" after its CPU count pins nothing, for a system whose placement call
- * is refused (Genode's): its same-CPU cells run wherever the system puts their threads,
- * its cross-CPU cells are unsupported, and its CLOCK line calibrates no pair.
+ * is refused (Genode's): its single-thread cells run wherever the system puts the thread,
+ * every cell that times a peer thread, on the same CPU or across CPUs, is unsupported,
+ * and its CLOCK line calibrates no pair.
  *
  * An operation the design's counterparts table names no counterpart for, or whose
  * counterpart the system or the machine cannot run, is reported unsupported with the
@@ -150,7 +151,7 @@ static uint64_t clock_hz;
 static uint64_t (*clock_read)(void);
 
 static unsigned cpus;
-/* Set by a posix run given "unpinned": no thread is pinned and no cell spans two CPUs. */
+/* Set by a posix run given "unpinned": no thread is pinned and no cell with a peer runs. */
 static bool unpinned;
 static const char *benchmark;
 static size_t page_bytes;
@@ -1593,8 +1594,10 @@ static uint8_t part_back[PART_BYTES];
 
 /*
  * One cell: its name, conditions and parameters as the declaration gives them, its
- * profile, its operation, and its untimed set-up, end and check after the loop, each
- * optional. The numeric parameters reach the acts through posix (posix_load).
+ * profile, whether it times a peer thread beside the main one (whose placement means
+ * something only where both are pinned), its operation, and its untimed set-up, end and
+ * check after the loop, each optional. The numeric parameters reach the acts through
+ * posix (posix_load).
  */
 typedef struct {
 	const char *operation;
@@ -1602,6 +1605,7 @@ typedef struct {
 	const erx_bench_param_t *params;
 	size_t nparams;
 	bool expensive;
+	bool peer;
 	peer_op_t op;
 	bool (*begin)(void);
 	void (*end)(void);
@@ -2424,25 +2428,25 @@ static const posix_cell_t posix_cells[] = {
 	{ "copy", "same-cpu", PARAMS(BYTES(BIG_BYTES)), .expensive = true, .op = { nothing, copy_through, nothing },
 	  .begin = copy_begin, .check = copy_check },
 	{ "pipe-rtt", "same-cpu", PARAMS(PEER_THREAD, BYTES(1)), .op = { nothing, round_trip, nothing },
-	  .begin = rtt_begin, .end = pipes_end },
+	  .peer = true, .begin = rtt_begin, .end = pipes_end },
 	{ "pipe-rtt", "same-cpu", PARAMS(PEER_THREAD, BYTES(65536)), .op = { nothing, round_trip, nothing },
-	  .begin = rtt_begin, .end = pipes_end },
+	  .peer = true, .begin = rtt_begin, .end = pipes_end },
 	{ "pipe-rtt", "cross-cpu", PARAMS(PEER_THREAD, BYTES(1)), .op = { nothing, round_trip, nothing },
-	  .begin = rtt_begin, .end = pipes_end },
+	  .peer = true, .begin = rtt_begin, .end = pipes_end },
 	{ "pipe-rtt", "cross-cpu", PARAMS(PEER_THREAD, BYTES(65536)), .op = { nothing, round_trip, nothing },
-	  .begin = rtt_begin, .end = pipes_end },
+	  .peer = true, .begin = rtt_begin, .end = pipes_end },
 	{ "poll-rtt", "same-cpu", PARAMS(PEER_THREAD, BYTES(1)), .op = { nothing, round_trip, nothing },
-	  .begin = poll_begin, .end = pipes_end },
+	  .peer = true, .begin = poll_begin, .end = pipes_end },
 	{ "pipe-stream", "same-cpu", PARAMS(PEER_THREAD, BYTES(STREAM_BYTES)), .expensive = true,
-	  .op = { nothing, stream_one, nothing }, .begin = stream_begin, .end = pipes_end },
-	{ "cond-pingpong", "same-cpu", .op = { nothing, pingpong_turn, nothing }, .begin = pingpong_begin,
-	  .end = pingpong_end },
+	  .op = { nothing, stream_one, nothing }, .peer = true, .begin = stream_begin, .end = pipes_end },
+	{ "cond-pingpong", "same-cpu", .op = { nothing, pingpong_turn, nothing },
+	  .peer = true, .begin = pingpong_begin, .end = pingpong_end },
 	{ "poll-rtt", "cross-cpu", PARAMS(PEER_THREAD, BYTES(1)), .op = { nothing, round_trip, nothing },
-	  .begin = poll_begin, .end = pipes_end },
+	  .peer = true, .begin = poll_begin, .end = pipes_end },
 	{ "pipe-stream", "cross-cpu", PARAMS(PEER_THREAD, BYTES(STREAM_BYTES)), .expensive = true,
-	  .op = { nothing, stream_one, nothing }, .begin = stream_begin, .end = pipes_end },
-	{ "cond-pingpong", "cross-cpu", .op = { nothing, pingpong_turn, nothing }, .begin = pingpong_begin,
-	  .end = pingpong_end },
+	  .op = { nothing, stream_one, nothing }, .peer = true, .begin = stream_begin, .end = pipes_end },
+	{ "cond-pingpong", "cross-cpu", .op = { nothing, pingpong_turn, nothing },
+	  .peer = true, .begin = pingpong_begin, .end = pingpong_end },
 	{ "thread-create-join", "same-cpu", .op = { nothing, create_join, nothing } },
 	{ "nanosleep", "same-cpu", PARAMS(NS(1000000)), .expensive = true,
 	  .op = { nothing, sleep_once, nothing } },
@@ -2454,7 +2458,10 @@ static const posix_cell_t posix_cells[] = {
 	{ "map-cycle", "same-cpu", PARAMS(PAGES(64)), .op = { nothing, map_cycle, nothing }, .check = cycle_check },
 };
 
-/* Runs one cell and prints it: unsupported on one CPU across CPUs, else as its probe and run leave it. */
+/*
+ * Runs one cell and prints it: unsupported where its threads are not pinned and it times a
+ * peer, and on one CPU across CPUs; else as its probe and run leave it.
+ */
 static void
 posix_cell_run(const posix_cell_t *spec)
 {
@@ -2464,9 +2471,15 @@ posix_cell_run(const posix_cell_t *spec)
 	cell.params = spec->params;
 	cell.nparams = spec->nparams;
 	cell.raw = spec->expensive ? samples : NULL;
-	if (strcmp(spec->placement, "cross-cpu") == 0 && (cpus == 1 || unpinned)) {
+	if (unpinned && spec->peer) {
 		cell.status = "unsupported";
-		cell.reason = unpinned ? UNPINNED : ONE_CPU;
+		cell.reason = UNPINNED;
+		peer_print(cell, samples, 0);
+		return;
+	}
+	if (strcmp(spec->placement, "cross-cpu") == 0 && cpus == 1) {
+		cell.status = "unsupported";
+		cell.reason = ONE_CPU;
 		peer_print(cell, samples, 0);
 		return;
 	}
@@ -2555,13 +2568,17 @@ main(int argc, char **argv)
 	const long page = sysconf(_SC_PAGESIZE);
 	size_t chosen = count;
 	long online = 0;
+	int wanted = 2;
 
 	for (size_t at = 0; argc >= 2 && at < count; at++)
 		if (strcmp(argv[1], benchmarks[at].name) == 0)
 			chosen = at;
-	if (chosen < count && benchmarks[chosen].given_cpus && argc == 4 && strcmp(argv[3], "unpinned") == 0)
-		unpinned = true;
-	if (chosen < count && argc == (benchmarks[chosen].given_cpus ? (unpinned ? 4 : 3) : 2))
+	/* A run given the CPU count takes it after the name, and "unpinned" after it. */
+	if (chosen < count && benchmarks[chosen].given_cpus) {
+		unpinned = argc == 4 && strcmp(argv[3], "unpinned") == 0;
+		wanted = unpinned ? 4 : 3;
+	}
+	if (chosen < count && argc == wanted)
 		online = benchmarks[chosen].given_cpus ? cpus_given(argv[2]) : 1;
 	if (online == 0) {
 #if !defined(ERX_PEER_ERXOS)

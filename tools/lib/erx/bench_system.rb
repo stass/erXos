@@ -19,6 +19,7 @@ module Erx
   # A guest answers:
   #   system          the system it runs, one of BenchRecord::SYSTEMS
   #   boot            the landing boot whose cells it runs (BenchSuite::BOOTS)
+  #   accelerators    the accelerators it boots under, of BenchSession::ACCELERATORS
   #   forms(cpus)     the CPU counts it boots in, given the landing boot's
   #   refusal(profile)
   #                   why it cannot boot at that profile form (landing, full) on this
@@ -26,7 +27,8 @@ module Erx
   #   call(benchmark, cells:, cpus:, accel:)
   #                   one boot of those cells at cpus CPUs, as a Booted; a guest whose
   #                   program reports every cell of the boot (LinuxGuest::Guest) answers
-  #                   them all, and its record keeps each
+  #                   them all, and its record keeps each; its Booted says whether the
+  #                   program bound to a CPU each thread whose work its cells time
   # erXos's are its native bench image (NativeBench::Guest) and its xdomain bench image
   # (XdomainBench::Guest); L4ReBench::Guest and LinuxGuest::Guest are the others.
   module BenchSystem
@@ -34,8 +36,10 @@ module Erx
     # judged to (clock nil for a guest whose program prints only means), the reasons of
     # the lines refused, the environment and subject facts only the guest knows (its
     # memory and QEMU's version; its image, flags and pins), the boot logs to keep as
-    # BenchRecord.write takes them, and the stored log a replayed boot came from.
-    Booted = Data.define(:clock, :cells, :refused, :environment, :subject, :logs, :reused_from)
+    # BenchRecord.write takes them, the stored log a replayed boot came from, and pinned,
+    # whether the program bound each thread its cells time to a CPU (true or false; a
+    # run that binds nothing answers false, on one CPU too).
+    Booted = Data.define(:clock, :cells, :refused, :environment, :subject, :logs, :reused_from, :pinned)
 
     # Where a session's boots run, read once: the environment kind, the host's model and
     # CPU count, and the harness's source revision, which every system's record keeps.
@@ -84,10 +88,15 @@ module Erx
 
     # The record of a boot, the one boot of its run: its environment is the host's kind
     # and model at cpus CPUs running system, with the accelerator and the host's
-    # operating system beside the guest's own facts; its subject is the harness's
-    # revision with the guest's facts.
+    # operating system and whether its threads were pinned beside the guest's own facts;
+    # its subject is the harness's revision with the guest's facts. A boot that does not
+    # say whether it pinned its threads is refused, never recorded as pinned.
     def record(booted, system:, cpus:, host:, date:, started_by:, load:)
-      details = { 'accelerator' => host.kind.delete_prefix('qemu-'), 'host_os' => RbConfig::CONFIG['host_os'] }
+      raise Error, "bench: #{system}'s boot does not say whether its threads were pinned" unless
+        [true, false].include?(booted.pinned)
+
+      details = { 'accelerator' => host.kind.delete_prefix('qemu-'), 'host_os' => RbConfig::CONFIG['host_os'],
+                  'pinned' => booted.pinned }
       BenchRecord::Record.new(
         environment: BenchRecord::Environment.new(kind: host.kind, model: host.model, cpus: cpus, system: system,
                                                   details: details.merge(booted.environment)),

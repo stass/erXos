@@ -1445,9 +1445,12 @@ cells are read from the fewest CPUs every system of the boot boots in,
 and no system boots a one-CPU form that another of the boot cannot
 share, so a guest that boots only at a fixed count, Genode's four,
 moves every system of its boot to that count: erXos's rows beside
-Genode's are its own TCG runs at four CPUs. A run whose program pinned
-no thread says so in its environment (`threads: unpinned`), and each
-of its entries in the tables shows it.
+Genode's are its own TCG runs at four CPUs. Every run's environment
+says whether its program bound each thread its cells time to a CPU
+(`pinned: true` or `false`), and the tables refuse a run that does not
+say. A run on more than one CPU that pinned nothing is marked unpinned
+on each of its entries and takes no ratio beside a pinned run; on one
+CPU every thread shares it, so such a run is not marked.
 
 The side-by-side table is three tables, the kernel table and the Erlang
 table of [Counterparts](#other-systems-on-the-same-raspberry-pi-4) and
@@ -2686,12 +2689,14 @@ call serves both; but the guest's boot shows Genode's library answering
 it "not implemented", and a pinned run then prints `FAILED` and no
 `CLOCK` line. So Genode's program runs unpinned: its image gives it
 `unpinned` after its CPU count, and it pins no thread, runs its
-same-CPU cells wherever Genode places their threads, reports every
-cross-CPU cell and `mutex-handoff` `unsupported` with the reason
-`threads are not pinned on this system`, and calibrates no pair in its
-`CLOCK` line. Each of its rows is marked unpinned
-([A comparison session](#a-comparison-session)), and a same-CPU row of
-Genode's is not a measurement of two threads sharing one CPU. The run
+single-thread cells wherever Genode places the thread, reports every
+cell that times a peer thread `unsupported` with the reason `threads
+are not pinned on this system` (the cross-CPU cells, `mutex-handoff`,
+and the same-CPU cells of `pipe-rtt`, `poll-rtt`, `pipe-stream` and
+`cond-pingpong`, whose meaning is two threads sharing one CPU), and
+calibrates no pair in its `CLOCK` line. Which cells time a peer is one
+fact of each cell in the program's table of cells. Each of its rows is
+marked unpinned ([A comparison session](#a-comparison-session)). The run
 script gives init an affinity space of the boot's CPUs in one row
 (`+ affinity-space | width: N | height: 1`) and the component's start
 node all of it (`+ affinity | xpos: 0 | ypos: 0 | width: N | height:

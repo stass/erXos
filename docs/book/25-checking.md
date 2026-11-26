@@ -817,7 +817,8 @@ pays the program's handler and the file server and a `getpid` pays no
 kernel at all. Genode, a microkernel system whose programs also reach
 their services in user mode, runs the same program on its own kernel;
 its C library cannot place a thread on a processor, so its rows are
-marked unpinned and its rows across two processors are unsupported.
+marked unpinned, and every row that times two threads, on one
+processor or across two, is unsupported.
 L4Re has no row there. Each call is tried once before it
 is timed, and one that answers that it is not implemented makes its row
 unsupported, so the table shows by itself which calls erXos's programs

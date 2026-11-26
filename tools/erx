@@ -1747,7 +1747,8 @@ module Erx
       result = session.call(benchmark, systems: systems, profile: options.fetch(:profile, 'landing'))
       result.fetch(:written).each { |run| Terminal.puts("bench: recorded #{run}") }
       result.fetch(:notes).each { |note| Terminal.puts(note) }
-      BenchSideBySide.render(BenchSideBySide.tables(benchmark, result.fetch(:runs), systems: systems)).each { |line| Terminal.puts(line) }
+      BenchSideBySide.render(BenchSideBySide.tables(benchmark, result.fetch(:runs), systems: systems,
+                                                    same_cpu: result.fetch(:same_cpu))).each { |line| Terminal.puts(line) }
       result.fetch(:failed).empty? ? 0 : 1
     end
 
