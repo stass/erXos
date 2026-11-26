@@ -54,15 +54,15 @@ of the entry it was walked by (place/0), so what the grant keeps for a fid
 is the same at any depth; no walk names `..`, which the grammar refuses, so
 the grant keeps no chain of directories back to its root. A fid's name is
 copied as it enters the fid, so it pins no larger binary it was carved
-from. A tree that offers `forget/2` holds each node its `walk/3` answers
-for the grant until the grant forgets it. `held` records those nodes, and
-`named` counts, per node, the fids that name it, which only `recount/3`
-changes. A node a walk answered, and one a fid stopped naming, is `loose`
-until the step ends: `drain/1`, which every step ends through, forgets
-each loose node that is held and named by no fid. So after every step the
-grant holds exactly the walked nodes its fids name, whichever way the step
-went: a walk that stopped, a reply the check rejected, a clunk, an owner's
-end.
+from. A tree that offers `forget/2` holds each node its `walk/3` and
+`make/4` answer for the grant until the grant forgets it. `held` records
+those nodes, and `named` counts, per node, the fids that name it, which
+only `recount/3` changes. A node a walk or make answered, and one a fid
+stopped naming, is `loose` until the step ends: `drain/1`, which every
+step ends through, forgets each loose node that is held and named by no
+fid. So after every step the grant holds exactly the answered nodes its
+fids name, whichever way the step went: a walk that stopped, a reply the
+check rejected, a clunk, an owner's end.
 """.
 
 -export([new/1, tree/1, rights/1, handle_frame/2, monitored/3, waiting/3, answered/3, down/3, client_ended/1,
@@ -953,9 +953,8 @@ walk_step(_, {_, {Type, _, _}, _}, Grant) when Type band ?ERX_P9_QTDIR =:= 0 ->
 walk_step(Name, {Dir, _, _}, Grant) ->
     Kept = kept_name(Name),
     case tree(walk, [Dir, Kept], Grant) of
-        {{ok, Node, Qid}, #grant{held = Held, loose = Loose} = Grant1} ->
-            {ok, {Node, Qid, {Dir, Kept}},
-             Grant1#grant{held = Held#{Node => []}, loose = [Node | Loose]}};
+        {{ok, Node, Qid}, Grant1} ->
+            {ok, {Node, Qid, {Dir, Kept}}, held_node(Node, Grant1)};
         {Other, Grant1} ->
             {error, Posix} = failed(Other),
             {error, Posix, Grant1}
@@ -1004,8 +1003,8 @@ lcreate({lcreate, Fid, Name, Flags, Mode, _} = Request,
                     Reply = {ok, Qid, ?IOUNIT},
                     case accepted(Request, Reply) of
                         true ->
-                            Grant1 = set_at(Fid, {Node, Qid, {Dir, Kept}}, Made),
-                            {Reply, opened(Fid, Handle, Grant1)};
+Grant1 = set_at(Fid, {Node, Qid, {Dir, Kept}}, held_node(Node, Made)),
+{Reply, opened(Fid, Handle, Grant1)};
                         false ->
                             {_, Clunked} = tree(clunk, [Handle], Made),
                             {{error, eio}, Clunked}
@@ -1021,12 +1020,17 @@ make(Dfid, Name, What, Grant) ->
     case node_of(Dfid, Grant) of
         {ok, Dir} ->
             case change(make, [Dir, Name, What], Grant) of
-                {{ok, _Node, Qid}, Grant1} -> {made_reply(What, Qid), Grant1};
-                {{error, _} = Error, Grant1} -> {Error, Grant1}
+{{ok, Node, Qid}, Grant1} -> {made_reply(What, Qid), held_node(Node, Grant1)};
+{{error, _} = Error, Grant1} -> {Error, Grant1}
             end;
         error ->
             {{error, ebadf}, Grant}
     end.
+
+%% Node, which a callback answered, held from that answer on and loose until the
+%% step ends (drain/1), so a node that no fid names is forgotten as the step ends.
+held_node(Node, #grant{held = Held, loose = Loose} = Grant) ->
+    Grant#grant{held = Held#{Node => []}, loose = [Node | Loose]}.
 
 made_reply({link, _}, _) -> ok;
 made_reply(_, Qid) -> {ok, Qid}.

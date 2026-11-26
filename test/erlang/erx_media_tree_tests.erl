@@ -15,6 +15,7 @@
 -export([init/1]).
 
 -import(erx_media_volume_tests, [image/1, proxy/2, mbr/2, sectors/1, facet/1]).
+-import(erx_media_volume_write_tests, [ram/2, ram_final/1, extracted/1]).
 
 -define(NOFID, 16#ffffffff).
 -define(START, 2048).
@@ -34,15 +35,24 @@ init(stand_in) ->
 %% proxy, and erx_media_sup is a stand-in supervisor with no child. The grant is rw, as
 %% the manifest grants root's session its media, so every refusal is the tree's own.
 start(Medium) ->
+    start_proxy(proxy(Medium, ok)).
+
+%% The same over the window proxy Proxy, which a test made.
+start_proxy(Proxy) ->
     ok = erx_media_volume:new_mounts(),
     {ok, Sup} = supervisor:start_link({local, erx_media_sup}, ?MODULE, stand_in),
-    Proxy = proxy(Medium, ok),
     Facet = spawn_link(fun() -> facet(Proxy) end),
     ok = erx_facets:install(#{{drive, 0} => {?ERX_SERVICE_DRIVE, Facet}}),
-    {ok, Grant, _} = erx_fs:start_link(erx_media_tree, media, rw),
-    [unlink(Pid) || Pid <- [Sup, Proxy, Facet, Grant]],
-    {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"root">>, <<"media">>, 0}),
+    Grant = attached(),
+    [unlink(Pid) || Pid <- [Sup, Proxy, Facet]],
     #{grant => Grant, proxy => Proxy, ended => [Grant, Sup, Facet, Proxy]}.
+
+%% A grant of the tree attached at fid 1, not linked to the test.
+attached() ->
+    {ok, Grant, _} = erx_fs:start_link(erx_media_tree, media, rw),
+    unlink(Grant),
+    {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"root">>, <<"media">>, 0}),
+    Grant.
 
 stop(#{ended := Pids}) ->
     lists:foreach(fun kill_and_wait/1, Pids).
@@ -147,33 +157,26 @@ exdev_is_decided_before_any_volume_is_asked_test() ->
     [One, Two] = [spawn(Asked), spawn(Asked)],
     Node = fun(Pid) -> {volume, Pid, dir, 1} end,
     ?assertEqual({error, exdev}, erx_media_tree:rename(Node(One), <<"a">>, Node(Two), <<"b">>, media)),
-    ?assertEqual({error, erofs}, erx_media_tree:rename(Node(One), <<"a">>, Node(One), <<"b">>, media)),
+    ?assertEqual({error, eacces}, erx_media_tree:rename(Node(One), <<"a">>, {drive, 0}, <<"b">>, media)),
     ?assertEqual([true, true], [is_process_alive(Pid) || Pid <- [One, Two]]),
     [exit(Pid, kill) || Pid <- [One, Two]].
 
-%% Nothing is written: a change of the tree's own entries answers eacces, one inside a
-%% volume erofs, and ctl takes eject alone, which finds no mounted medium on a drive
-%% the registry does not hold.
+%% The tree's own entries take no change (eacces), and ctl takes eject alone, which
+%% finds no mounted medium on a drive the registry does not hold.
 the_tree_refuses_every_change_test() ->
-    Volume = {volume, self(), dir, 1},
     Tree = [root, {drive, 0}],
     [?assertEqual({error, eacces}, erx_media_tree:make(Dir, <<"x">>, dir, media)) || Dir <- Tree],
     [?assertEqual({error, eacces}, erx_media_tree:unlink(Dir, <<"x">>, file, media)) || Dir <- Tree],
-    ?assertEqual({error, erofs}, erx_media_tree:make(Volume, <<"x">>, dir, media)),
-    ?assertEqual({error, erofs}, erx_media_tree:unlink(Volume, <<"x">>, file, media)),
-    ?assertEqual({error, eacces}, erx_media_tree:rename(Volume, <<"a">>, {drive, 0}, <<"b">>, media)),
     ?assertEqual({error, eacces}, erx_media_tree:rename(root, <<"a">>, root, <<"b">>, media)),
     ?assertEqual({error, eacces}, erx_media_tree:open({status, 0}, ?ERX_P9_O_WRONLY, media)),
     ?assertEqual({error, eacces}, erx_media_tree:open({drive, 0}, ?ERX_P9_O_RDWR, media)),
-    ?assertEqual({error, erofs}, erx_media_tree:open({volume, self(), file, 2}, ?ERX_P9_O_WRONLY, media)),
-    ?assertEqual({error, erofs}, erx_media_tree:write({file, self(), file_node}, 0, <<"x">>, media)),
+    ?assertEqual({error, eacces}, erx_media_tree:write({text, <<>>}, 0, <<"x">>, media)),
     ?assertEqual({error, enxio}, erx_media_tree:write({ctl, 9}, 0, <<"eject">>, media)),
     ?assertEqual({error, enxio}, erx_media_tree:write({ctl, 9}, 0, <<"eject\n">>, media)),
     [?assertEqual({error, einval}, erx_media_tree:write({ctl, 0}, 0, Command, media))
      || Command <- [<<"eject\n\n">>, <<"EJECT">>, <<" eject">>, <<>>]],
-    [?assertEqual({error, Refused}, erx_media_tree:setattr(Target, #{size => 0}, media))
-     || {Target, Refused} <- [{{node, Volume}, erofs}, {{node, {drive, 0}}, eacces},
-                              {{open, {file, self(), file_node}}, erofs}, {{open, {text, <<>>}}, eacces}]].
+    [?assertEqual({error, eacces}, erx_media_tree:setattr(Target, #{valid => 8, size => 0}, media))
+     || Target <- [{node, {drive, 0}}, {node, root}, {open, {text, <<>>}}]].
 
 %% ctl is reached as prim_file writes a file, by a create of the existing name: eject
 %% finishes the drive's medium, after which the drive's directory lists status and ctl
@@ -310,3 +313,216 @@ a_removed_stick_answers_eio_test() ->
     after
         stop(Tree)
     end.
+
+%% Writing -----------------------------------------------------------------
+
+-define(SET0, (maps:from_keys([valid, mode, uid, gid, size, atime_sec, atime_nsec, mtime_sec, mtime_nsec], 0))).
+
+%% A session that copies a file in, appends, truncates, makes a directory, moves the
+%% file into it, removes a file and an empty directory leaves an image fsimg verifies
+%% and extracts as the tree before with the moved file added.
+a_session_writes_a_volume_test_() ->
+    [{Name, {timeout, 300, fun() -> session(Name) end}} || Name <- ["fat16.img", "fat32.img"]].
+
+session(Name) ->
+    Base = image(Name),
+    Proxy = ram(Base, infinity),
+    #{grant := Grant} = Tree = start_proxy(Proxy),
+    try
+        Copied = << <<(I rem 251)>> || I <- lists:seq(1, 20000) >>,
+        {ok, _} = call(Grant, {walk, 1, 2, [<<"disk0">>, <<"s1">>]}),
+        Before = table_size(),
+        {ok, []} = call(Grant, {walk, 2, 3, []}),
+        {ok, _, _} = call(Grant, {lcreate, 3, <<"copy.txt">>, ?ERX_P9_O_WRONLY, 8#644, 0}),
+        ?assertEqual({ok, 20000, 0}, call(Grant, {write, 3, 0, Copied})),
+        ok = call(Grant, {clunk, 3}),
+        {ok, _} = call(Grant, {walk, 2, 3, [<<"copy.txt">>]}),
+        {ok, _, _} = call(Grant, {lopen, 3, ?ERX_P9_O_WRONLY bor ?ERX_P9_O_APPEND}),
+        ?assertEqual({ok, 5, 20000}, call(Grant, {write, 3, 0, <<"tail\n">>})),
+        ok = call(Grant, {clunk, 3}),
+        ?assertMatch({ok, #{size := 20005}}, getattr(Grant, [<<"disk0">>, <<"s1">>, <<"copy.txt">>], 3)),
+        {ok, _} = call(Grant, {walk, 2, 3, [<<"copy.txt">>]}),
+        ok = call(Grant, {setattr, 3, ?SET0#{valid => ?ERX_P9_SETATTR_VALID_SIZE, size => 12000}}),
+        ok = call(Grant, {clunk, 3}),
+        {ok, _} = call(Grant, {mkdir, 2, <<"New Dir">>, 8#755, 0}),
+        {ok, _} = call(Grant, {mkdir, 2, <<"Kept">>, 8#755, 0}),
+        {ok, _} = call(Grant, {walk, 2, 4, [<<"New Dir">>]}),
+        ok = call(Grant, {renameat, 2, <<"copy.txt">>, 4, <<"moved.txt">>}),
+        {ok, []} = call(Grant, {walk, 2, 3, []}),
+        {ok, _, _} = call(Grant, {lcreate, 3, <<"gone.txt">>, ?ERX_P9_O_WRONLY, 8#644, 0}),
+        ok = call(Grant, {clunk, 3}),
+        ok = call(Grant, {unlinkat, 2, <<"gone.txt">>, 0}),
+        {ok, _} = call(Grant, {mkdir, 2, <<"empty dir">>, 8#755, 0}),
+        ok = call(Grant, {unlinkat, 2, <<"empty dir">>, ?ERX_P9_AT_REMOVEDIR}),
+        Moved = binary:part(Copied, 0, 12000),
+        ?assertEqual({ok, Moved}, read_all(Grant, [<<"disk0">>, <<"s1">>, <<"New Dir">>, <<"moved.txt">>], 3)),
+        ?assertEqual({error, enoent}, call(Grant, {walk, 2, 3, [<<"copy.txt">>]})),
+        %% Every node a walk, create or mkdir answered is let go once no fid names it.
+        ok = call(Grant, {clunk, 4}),
+        ?assertEqual(Before, table_size()),
+        ok = call(Grant, {clunk, 2}),
+        finish_volume(),
+        {Medium, _, _} = ram_final(Proxy),
+        ?assertMatch({0, _}, erx_fat_alloc_tests:verify(Medium)),
+        ?assertEqual(lists:sort([{<<"New Dir/moved.txt">>, Moved} | extracted(Base)]), extracted(Medium))
+    after
+        stop(Tree)
+    end.
+
+%% Fids: a walk of three names, a clone and a second grant's walks each leave the
+%% volume's table as it was once their fids are clunked or their grant ends, and a
+%% removed file stays readable through any fid that still names it.
+fids_leave_the_table_as_they_found_it_test() ->
+    Base = image("fat16.img"),
+    #{grant := Grant} = Tree = start_proxy(ram(Base, infinity)),
+    try
+        {ok, _} = call(Grant, {walk, 1, 2, [<<"disk0">>, <<"s1">>]}),
+        Before = table_size(),
+        {ok, [_, _, _]} = call(Grant, {walk, 2, 3, [<<"sub">>, <<"Deeper">>, <<"x.TXT">>]}),
+        ?assertEqual(Before + 3, table_size()),
+        ok = call(Grant, {clunk, 3}),
+        ?assertEqual(Before, table_size()),
+        %% A clone, and the same node walked twice, hold one entry until the last clunk.
+        {ok, _} = call(Grant, {walk, 2, 3, [<<"hello.txt">>]}),
+        {ok, []} = call(Grant, {walk, 3, 4, []}),
+        {ok, _} = call(Grant, {walk, 2, 5, [<<"hello.txt">>]}),
+        ?assertEqual(Before + 1, table_size()),
+        [ok = call(Grant, {clunk, Fid}) || Fid <- [3, 5]],
+        ?assertEqual(Before + 1, table_size()),
+        ok = call(Grant, {clunk, 4}),
+        ?assertEqual(Before, table_size()),
+        %% A removed file read through the clone that alone still names it.
+        {ok, _} = call(Grant, {walk, 2, 3, [<<"hello.txt">>]}),
+        {ok, []} = call(Grant, {walk, 3, 4, []}),
+        ok = call(Grant, {clunk, 3}),
+        ok = call(Grant, {unlinkat, 2, <<"hello.txt">>, 0}),
+        {ok, _, _} = call(Grant, {lopen, 4, 0}),
+        ?assertEqual({ok, <<"hello, stick\n">>}, call(Grant, {read, 4, 0, 4096})),
+        ok = call(Grant, {clunk, 4}),
+        ?assertEqual(Before, table_size()),
+        %% Another grant's clunk leaves this grant's node, and its end lets go of its own.
+        Other = attached(),
+        {ok, _} = call(Grant, {walk, 2, 3, [<<"empty">>]}),
+        {ok, _} = call(Other, {walk, 1, 2, [<<"disk0">>, <<"s1">>, <<"empty">>]}),
+        {ok, _} = call(Other, {walk, 1, 3, [<<"disk0">>, <<"s1">>, <<"sub">>]}),
+        ok = call(Other, {clunk, 2}),
+        ?assertMatch({ok, #{size := 0}}, call(Grant, {getattr, 3, 16#7ff})),
+        ?assertEqual(Before + 2, table_size()),
+        kill_and_wait(Other),
+        ?assertEqual(Before + 1, table_size()),
+        ok = call(Grant, {clunk, 3}),
+        ?assertEqual(Before, table_size())
+    after
+        stop(Tree)
+    end.
+
+%% An open's access mode bounds its fid: one opened for reading neither writes nor
+%% truncates, one opened for writing does not read.
+an_open_fid_does_only_what_its_open_allows_test() ->
+    #{grant := Grant} = Tree = start_proxy(ram(image("fat16.img"), infinity)),
+    try
+        {ok, _} = call(Grant, {walk, 1, 2, [<<"disk0">>, <<"s1">>, <<"hello.txt">>]}),
+        {ok, _, _} = call(Grant, {lopen, 2, 0}),
+        ?assertEqual({error, ebadf}, call(Grant, {write, 2, 0, <<"x">>})),
+        ?assertEqual({error, einval}, call(Grant, {setattr, 2, ?SET0#{valid => ?ERX_P9_SETATTR_VALID_SIZE}})),
+        ok = call(Grant, {clunk, 2}),
+        {ok, _} = call(Grant, {walk, 1, 2, [<<"disk0">>, <<"s1">>, <<"hello.txt">>]}),
+        {ok, _, _} = call(Grant, {lopen, 2, ?ERX_P9_O_WRONLY}),
+        ?assertEqual({error, ebadf}, call(Grant, {read, 2, 0, 16})),
+        ok = call(Grant, {clunk, 2}),
+        ?assertEqual({ok, <<"hello, stick\n">>}, contents(Grant, [<<"disk0">>, <<"s1">>, <<"hello.txt">>], 2))
+    after
+        stop(Tree)
+    end.
+
+%% remove takes a name away only while it names the fid's node: after a rename and a
+%% new file of the old name, a remove of the old node answers enoent and both stay.
+remove_takes_only_the_node_its_fid_names_test() ->
+    #{grant := Grant} = Tree = start_proxy(ram(image("fat16.img"), infinity)),
+    try
+        {ok, <<"media">>, Root, _} = erx_media_tree:root(media),
+        {ok, Drive, _} = erx_media_tree:walk(Root, <<"disk0">>, media),
+        {ok, Volume, _} = erx_media_tree:walk(Drive, <<"s1">>, media),
+        {ok, Old, _} = erx_media_tree:walk(Volume, <<"hello.txt">>, media),
+        ok = erx_media_tree:rename(Volume, <<"hello.txt">>, Volume, <<"moved.txt">>, media),
+        {ok, _, _, _} = erx_media_tree:make(Volume, <<"hello.txt">>, {file, 8#644, ?ERX_P9_O_WRONLY}, media),
+        ?assertEqual({error, enoent}, erx_media_tree:unlink(Volume, <<"hello.txt">>, {node, Old}, media)),
+        ?assertMatch({ok, _, _}, erx_media_tree:walk(Volume, <<"hello.txt">>, media)),
+        ok = erx_media_tree:unlink(Volume, <<"moved.txt">>, {node, Old}, media),
+        ?assertEqual({error, enoent}, erx_media_tree:walk(Volume, <<"moved.txt">>, media)),
+        ?assertMatch({ok, _}, call(Grant, {walk, 1, 2, [<<"disk0">>]}))
+    after
+        stop(Tree)
+    end.
+
+%% A volume mounted read-only refuses every change with erofs, an open for writing among
+%% them, and its status says why.
+a_read_only_volume_refuses_every_change_test() ->
+    #{grant := Grant} = Tree = start_proxy(proxy(image("fat16.img"), {error, enotsup})),
+    try
+        {ok, _} = call(Grant, {walk, 1, 2, [<<"disk0">>, <<"s1">>]}),
+        {ok, []} = call(Grant, {walk, 2, 3, []}),
+        ?assertEqual({error, erofs}, call(Grant, {lcreate, 3, <<"n.txt">>, ?ERX_P9_O_WRONLY, 8#644, 0})),
+        ?assertEqual({error, erofs}, call(Grant, {mkdir, 2, <<"d">>, 8#755, 0})),
+        ?assertEqual({error, erofs}, call(Grant, {unlinkat, 2, <<"hello.txt">>, 0})),
+        ?assertEqual({error, erofs}, call(Grant, {renameat, 2, <<"hello.txt">>, 2, <<"h.txt">>})),
+        {ok, _} = call(Grant, {walk, 2, 4, [<<"hello.txt">>]}),
+        ?assertEqual({error, erofs}, call(Grant, {setattr, 4, ?SET0#{valid => ?ERX_P9_SETATTR_VALID_SIZE}})),
+        ?assertEqual({error, erofs}, call(Grant, {lopen, 4, ?ERX_P9_O_WRONLY})),
+        ?assertEqual({ok, <<"hello, stick\n">>}, contents(Grant, [<<"disk0">>, <<"s1">>, <<"hello.txt">>], 5)),
+        {ok, Status} = contents(Grant, [<<"disk0">>, <<"status">>], 5),
+        ?assertMatch({_, _}, binary:match(Status, <<"s1_mount\tro flush\n">>))
+    after
+        stop(Tree)
+    end.
+
+%% setattr's changes as FAT keeps them: a size, an mtime given or now, the mode's
+%% write bits as the read-only attribute; an owner's change eperm.
+setattr_changes_test() ->
+    ?assertEqual({ok, 7, #{}}, erx_media_tree:setattr_changes(?SET0#{valid => ?ERX_P9_SETATTR_VALID_SIZE, size => 7})),
+    ?assertEqual({ok, none, #{mtime => 99, read_only => true}},
+                 erx_media_tree:setattr_changes(?SET0#{valid => ?ERX_P9_SETATTR_VALID_MTIME bor ?ERX_P9_SETATTR_VALID_MTIME_SET
+                                                            bor ?ERX_P9_SETATTR_VALID_MODE, mtime_sec => 99, mode => 8#444})),
+    ?assertMatch({ok, none, #{mtime := Now}} when is_integer(Now),
+                 erx_media_tree:setattr_changes(?SET0#{valid => ?ERX_P9_SETATTR_VALID_MTIME})),
+    ?assertEqual({ok, none, #{read_only => false}},
+                 erx_media_tree:setattr_changes(?SET0#{valid => ?ERX_P9_SETATTR_VALID_MODE, mode => 8#600})),
+    ?assertEqual({error, eperm}, erx_media_tree:setattr_changes(?SET0#{valid => ?ERX_P9_SETATTR_VALID_UID})).
+
+getattr(Grant, Path, Spare) ->
+    {ok, _} = call(Grant, {walk, 1, Spare, Path}),
+    Attr = call(Grant, {getattr, Spare, 16#7ff}),
+    ok = call(Grant, {clunk, Spare}),
+    Attr.
+
+%% The whole file at Path, read 4 KiB at a time through fid Spare.
+read_all(Grant, Path, Spare) ->
+    {ok, _} = call(Grant, {walk, 1, Spare, Path}),
+    {ok, _, _} = call(Grant, {lopen, Spare, 0}),
+    Read = read_from(Grant, Spare, 0, <<>>),
+    ok = call(Grant, {clunk, Spare}),
+    Read.
+
+read_from(Grant, Fid, Offset, Acc) ->
+    case call(Grant, {read, Fid, Offset, 4096}) of
+        {ok, <<>>} -> {ok, Acc};
+        {ok, Bytes} -> read_from(Grant, Fid, Offset + byte_size(Bytes), <<Acc/binary, Bytes/binary>>);
+        {error, _} = Refused -> Refused
+    end.
+
+%% Drive 0's one volume.
+the_volume() ->
+    {ok, #{table := {_Scheme, [{_, Pid}], _Unserved}}} = erx_media_drive:medium(0),
+    Pid.
+
+%% The number of nodes the volume's table holds.
+table_size() ->
+    #{nodes := Nodes} = sys:get_state(the_volume()),
+    map_size(Nodes).
+
+%% The volume ended as its supervisor ends it, which writes its finish.
+finish_volume() ->
+    Pid = the_volume(),
+    Monitor = monitor(process, Pid),
+    ok = sys:terminate(Pid, shutdown),
+    receive {'DOWN', Monitor, process, Pid, _} -> ok end.

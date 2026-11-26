@@ -26,10 +26,18 @@ so no link a medium holds is ever followed through it.
   lists `status` and `ctl` alone and status shows the medium `idle ejected`; anything
   else answers `einval`.
 
-Nothing is written: no volume has a write path, so a write of a file and a create,
-remove or rename inside a volume answer `erofs`; one of an entry of the root or of a
-drive's directory answers `eacces`, and a rename between two volumes `exdev`, decided
-from the two nodes before any volume is asked ("Links and rights").
+**Changes.** A change inside a volume is the volume's call (erx_media_volume): a
+write, an append at the end for a fid opened with `O_APPEND`, a create (lcreate,
+which without `O_EXCL` opens a file already there), mkdir, setattr, unlink and
+rename, and fsync, each answered as the volume answers it, so a volume mounted `ro`
+answers every one `erofs`, an open for writing among them. setattr takes a file's
+size (a truncate), its mtime (the time given with `MTIME_SET`, else now) and its
+mode, whose write bits say whether FAT's read-only attribute is set; a change of
+owner or group answers `eperm`, and an access time is not kept. A change of an entry
+of the root or of a drive's directory answers `eacces`, and a rename between two
+volumes `exdev`, decided from the two nodes before any volume is asked ("Links and
+rights"). Each node a walk or create answers is held for the calling grant until the
+grant forgets it (`forget/2`), which the volume's table of files by fid follows.
 
 A qid's path is the node's volume's mount number in its high 24 bits and its path
 within the volume in its low 40 (erx_media_volume:path/0); the root, each `diskN`,
@@ -40,8 +48,9 @@ within the volume in its low 40 (erx_media_volume:path/0); the root, each `diskN
 
 -include("generated/erx_abi.hrl").
 
--export([init/1, root/1, walk/3, getattr/2, open/3, read/4, readdir/4, statfs/1, clunk/2,
-         write/4, make/4, setattr/3, unlink/4, rename/5]).
+-export([init/1, root/1, walk/3, forget/2, getattr/2, open/3, read/4, readdir/4, statfs/1, clunk/2,
+         write/4, make/4, setattr/3, unlink/4, rename/5, fsync/2]).
+-export([setattr_changes/1]).
 -export([status/3]).
 
 -define(TREE, <<"media">>).
@@ -94,6 +103,11 @@ drive_walk(N, _Medium) -> {ok, {drive, N}, qid({drive, N})}.
 named(Pid, {ok, Kind, Path}) -> {ok, {volume, Pid, Kind, Path}, qid(Kind, Path)};
 named(_Pid, {error, _} = Refused) -> Refused.
 
+%% The grant names the node by no fid any more: the volume lets it go for the grant.
+-doc false.
+forget({volume, Pid, _Kind, Path}, _Fs) -> erx_media_volume:forget(Pid, Path);
+forget(_TreeNode, _Fs) -> ok.
+
 -doc false.
 getattr(root, _Fs) -> erx_fs_node:attr(qid(root), dir, 8#555);
 getattr({drive, N}, _Fs) -> erx_fs_node:attr(qid({drive, N}), dir, 8#555);
@@ -101,21 +115,28 @@ getattr({status, N}, _Fs) -> erx_fs_node:attr(qid({status, N}), file, 8#444);
 getattr({ctl, N}, _Fs) -> erx_fs_node:attr(qid({ctl, N}), file, 8#200);
 getattr({volume, Pid, _Kind, Node}, _Fs) ->
     case erx_media_volume:attr(Pid, Node) of
-        {ok, #{kind := Kind, size := Size, mtime := Mtime}, Path} ->
-            {ok, Attr} = erx_fs_node:attr(qid(Kind, Path), Kind, mode(Kind)),
+        {ok, #{kind := Kind, size := Size, mtime := Mtime, read_only := ReadOnly}, Path} ->
+            {ok, Attr} = erx_fs_node:attr(qid(Kind, Path), Kind, mode(Kind, ReadOnly)),
             {ok, Attr#{size := Size, blocks := (Size + 511) div 512, mtime_sec := Mtime, ctime_sec := Mtime}};
         {error, _} = Refused ->
             Refused
     end.
 
-mode(dir) -> 8#555;
-mode(file) -> 8#444.
+%% FAT keeps no owner and no modes but its read-only attribute, which takes a file's
+%% write bits away.
+mode(dir, _ReadOnly) -> 8#755;
+mode(file, true) -> 8#444;
+mode(file, false) -> 8#644.
 
 -doc false.
 open({ctl, N}, _Flags, _Fs) ->
     {ok, {ctl, N}};
-open(Node, Flags, _Fs) when Flags band ?ERX_P9_O_ACCMODE =/= ?READ ->
-    {error, refused_write(Node)};
+open({volume, Pid, file, File}, Flags, _Fs) when Flags band ?ERX_P9_O_ACCMODE =/= ?READ ->
+    opened_for_write(Pid, File, Flags);
+open({volume, _Pid, dir, _Dir}, Flags, _Fs) when Flags band ?ERX_P9_O_ACCMODE =/= ?READ ->
+    {error, eisdir};
+open(_TreeNode, Flags, _Fs) when Flags band ?ERX_P9_O_ACCMODE =/= ?READ ->
+    {error, eacces};
 open(root, _Flags, _Fs) ->
     {ok, erx_fs_node:listing([{qid({drive, N}), ?ERX_P9_DT_DIR, name(<<"disk">>, N)} || N <- drives()])};
 %% Every volume of the table is listed, by its root's qid, whatever its outcome: one that
@@ -142,8 +163,34 @@ open({volume, Pid, dir, Dir}, _Flags, _Fs) ->
         {error, _} = Refused ->
             Refused
     end;
-open({volume, Pid, file, File}, _Flags, _Fs) ->
-    {ok, {file, Pid, File}}.
+open({volume, Pid, file, File}, Flags, _Fs) ->
+    {ok, file_handle(Pid, File, Flags)}.
+
+%% A file opened for writing, once its volume writes: emptied first for O_TRUNC.
+opened_for_write(Pid, File, Flags) ->
+    case {writes(Pid), Flags band ?ERX_P9_O_TRUNC} of
+        {false, _} -> {error, erofs};
+        {true, 0} -> {ok, file_handle(Pid, File, Flags)};
+        {true, _} -> answered(erx_media_volume:truncate(Pid, File, 0), file_handle(Pid, File, Flags))
+    end.
+
+%% Whether the volume Pid is mounted `rw`, so its changes are written.
+writes(Pid) ->
+    try erx_media_volume:outcome(Pid) of
+        #{mount := rw} -> true;
+        #{} -> false
+    catch exit:_Ended -> false
+    end.
+
+%% An open file: its volume, its path and what the open allows, so a fid opened for
+%% reading never writes and one opened for writing never reads.
+file_handle(Pid, File, Flags) ->
+    Access = Flags band ?ERX_P9_O_ACCMODE,
+    {file, Pid, File, #{read => Access =/= ?ERX_P9_O_WRONLY, write => Access =/= ?READ,
+                        append => Flags band ?ERX_P9_O_APPEND =/= 0}}.
+
+answered(ok, Value) -> {ok, Value};
+answered({error, _} = Refused, _Value) -> Refused.
 
 dirent_type(dir) -> ?ERX_P9_DT_DIR;
 dirent_type(file) -> ?ERX_P9_DT_REG.
@@ -151,8 +198,10 @@ dirent_type(file) -> ?ERX_P9_DT_REG.
 -doc false.
 read({text, Text}, Offset, Count, _Fs) ->
     {ok, binary:part(Text, min(Offset, byte_size(Text)), min(Count, max(byte_size(Text) - Offset, 0)))};
-read({file, Pid, File}, Offset, Count, _Fs) ->
+read({file, Pid, File, #{read := true}}, Offset, Count, _Fs) ->
     {wait, Pid, {read, File, Offset, Count}};
+read({file, _Pid, _File, #{read := false}}, _Offset, _Count, _Fs) ->
+    {error, ebadf};
 read({ctl, _N}, _Offset, _Count, _Fs) ->
     {ok, <<>>};
 read({entries, _}, _Offset, _Count, _Fs) ->
@@ -171,38 +220,121 @@ write({ctl, N}, Offset, Command, _Fs) when Command =:= <<"eject">>; Command =:= 
     end;
 write({ctl, _N}, _Offset, _Command, _Fs) ->
     {error, einval};
-write(_Handle, _Offset, _Bytes, _Fs) ->
-    {error, erofs}.
+write({file, _Pid, _File, #{write := false}}, _Offset, _Bytes, _Fs) ->
+    {error, ebadf};
+write({file, Pid, File, #{append := true}}, _Offset, Bytes, _Fs) ->
+    erx_media_volume:append(Pid, File, Bytes);
+write({file, Pid, File, #{append := false}}, Offset, Bytes, _Fs) ->
+    case erx_media_volume:write(Pid, File, Offset, Bytes) of
+        {ok, Count} -> {ok, Count, Offset};
+        {error, _} = Refused -> Refused
+    end;
+write(_TreeHandle, _Offset, _Bytes, _Fs) ->
+    {error, eacces}.
 
 %% A create of status or ctl opens it, as prim_file opens every file it writes
-%% (erx_fs_node:open_by_create/4), so `echo eject > ctl` reaches ctl's command.
+%% (erx_fs_node:open_by_create/4), so `echo eject > ctl` reaches ctl's command. A
+%% file created in a volume is opened as lcreate asks; without O_EXCL a regular file
+%% already there is opened instead.
 -doc false.
 make({drive, N}, Name, {file, _Mode, Flags}, Fs) when Name =:= <<"status">>; Name =:= <<"ctl">> ->
     {ok, Node, Qid} = walk({drive, N}, Name, Fs),
     erx_fs_node:open_by_create(Node, Qid, Flags, fun(Opened) -> open(Node, Opened, Fs) end);
-make(Dir, _Name, _What, _Fs) -> {error, refused_write(Dir)}.
+make({volume, Pid, dir, Dir} = Parent, Name, {file, _Mode, Flags}, Fs) ->
+    case {named(Pid, erx_media_volume:create(Pid, Dir, Name)), Flags band ?ERX_P9_O_EXCL} of
+        {{ok, {volume, Pid, file, File} = Node, Qid}, _} -> {ok, Node, Qid, file_handle(Pid, File, Flags)};
+        {{error, eexist}, 0} -> opened_existing(walk(Parent, Name, Fs), Flags, Fs);
+        {{error, _} = Refused, _} -> Refused
+    end;
+make({volume, Pid, dir, Dir}, Name, {directory, _Mode, _Owner}, _Fs) ->
+    named(Pid, erx_media_volume:mkdir(Pid, Dir, Name));
+make({volume, _, _, _}, _Name, _What, _Fs) -> {error, eperm};
+make(_TreeNode, _Name, _What, _Fs) -> {error, eacces}.
 
-%% A change of attributes, a truncate among them, as any other change.
+%% The file lcreate found already there, opened as it asks.
+opened_existing({ok, {volume, _, file, _} = Node, Qid}, Flags, Fs) ->
+    case open(Node, Flags, Fs) of
+        {ok, Handle} -> {ok, Node, Qid, Handle};
+        {error, _} = Refused -> Refused
+    end;
+opened_existing({ok, {volume, _, dir, _}, _Qid}, _Flags, _Fs) -> {error, eisdir};
+opened_existing({error, _} = Refused, _Flags, _Fs) -> Refused.
+
+%% A change of attributes of a volume's node, as setattr_changes/1 reads it; a
+%% change of the tree's own nodes answers eacces.
 -doc false.
-setattr({node, Node}, _Changes, _Fs) -> {error, refused_write(Node)};
-setattr({open, {file, _Pid, _File}}, _Changes, _Fs) -> {error, erofs};
-setattr({open, _TreeHandle}, _Changes, _Fs) -> {error, eacces}.
+setattr({node, {volume, Pid, Kind, Path}}, Changes, _Fs) -> changed_attrs(Pid, Kind, Path, Changes);
+%% A size change through an open fid needs one opened for writing (einval, as
+%% FreeBSD's ftruncate answers).
+setattr({open, {file, _Pid, _File, #{write := false}}}, #{valid := Valid}, _Fs)
+  when Valid band ?ERX_P9_SETATTR_VALID_SIZE =/= 0 ->
+    {error, einval};
+setattr({open, {file, Pid, File, _Opened}}, Changes, _Fs) ->
+    changed_attrs(Pid, file, File, Changes);
+setattr(_TreeNodeOrHandle, _Changes, _Fs) -> {error, eacces}.
+
+changed_attrs(Pid, Kind, Path, Changes) ->
+    case {setattr_changes(Changes), Kind} of
+        {{error, _} = Refused, _} -> Refused;
+        {{ok, none, Attrs}, _} -> attrs_changed(Pid, Path, Attrs);
+        {{ok, _Size, _Attrs}, dir} -> {error, eisdir};
+        {{ok, Size, Attrs}, file} ->
+            case erx_media_volume:truncate(Pid, Path, Size) of
+                ok -> attrs_changed(Pid, Path, Attrs);
+                {error, _} = Refused -> Refused
+            end
+    end.
+
+attrs_changed(_Pid, _Path, Attrs) when map_size(Attrs) =:= 0 -> ok;
+attrs_changed(Pid, Path, Attrs) -> erx_media_volume:setattr(Pid, Path, Attrs).
+
+-doc """
+A 9P setattr's Changes (the map erx_fs's grant passes) as FAT keeps them: the size
+to cut or grow a file to, or none, and the volume's attributes, `mtime` (the time
+given with MTIME_SET, else now) and `read_only` (no write bit in the mode). A change
+of owner or group answers `eperm`; an access time and the rest of a mode are not
+kept, as FAT has no place for them.
+""".
+-spec setattr_changes(map()) -> {ok, non_neg_integer() | none, #{mtime => integer(), read_only => boolean()}}
+                                | {error, eperm}.
+setattr_changes(#{valid := Valid}) when Valid band (?ERX_P9_SETATTR_VALID_UID bor ?ERX_P9_SETATTR_VALID_GID) =/= 0 ->
+    {error, eperm};
+setattr_changes(#{valid := Valid, mode := Mode, size := Size, mtime_sec := Mtime}) ->
+    Attrs = maps:from_list([{mtime, mtime(Valid band ?ERX_P9_SETATTR_VALID_MTIME_SET, Mtime)}
+                            || Valid band ?ERX_P9_SETATTR_VALID_MTIME =/= 0]
+                           ++ [{read_only, Mode band 8#222 =:= 0} || Valid band ?ERX_P9_SETATTR_VALID_MODE =/= 0]),
+    Sized = case Valid band ?ERX_P9_SETATTR_VALID_SIZE of 0 -> none; _ -> Size end,
+    {ok, Sized, Attrs}.
+
+mtime(0, _Given) -> erlang:system_time(second);
+mtime(_Set, Given) -> Given.
 
 -doc false.
-unlink(Dir, _Name, _Kind, _Fs) -> {error, refused_write(Dir)}.
+%% unlinkat's file or directory by name; remove's node only while the name still
+%% names that node, decided by the volume in the one call (enoent otherwise).
+unlink({volume, Pid, dir, Dir}, Name, file, _Fs) -> erx_media_volume:remove(Pid, Dir, Name);
+unlink({volume, Pid, dir, Dir}, Name, directory, _Fs) -> erx_media_volume:rmdir(Pid, Dir, Name);
+unlink({volume, Pid, dir, Dir}, Name, {node, {volume, Pid, _Kind, Path}}, _Fs) ->
+    erx_media_volume:unlink_node(Pid, Dir, Name, Path);
+unlink({volume, _, dir, _}, _Name, {node, _OtherNode}, _Fs) -> {error, enoent};
+unlink({volume, _, file, _}, _Name, _Kind, _Fs) -> {error, enotdir};
+unlink(_TreeNode, _Name, _Kind, _Fs) -> {error, eacces}.
 
 -doc false.
 rename({volume, From, _, _}, _Name, {volume, To, _, _}, _NewName, _Fs) when From =/= To ->
     {error, exdev};
-rename(Dir, _Name, NewDir, _NewName, _Fs) ->
-    case {refused_write(Dir), refused_write(NewDir)} of
-        {erofs, erofs} -> {error, erofs};
-        _OfTheTree -> {error, eacces}
-    end.
+rename({volume, Pid, dir, Dir}, Name, {volume, Pid, dir, NewDir}, NewName, _Fs) ->
+    erx_media_volume:rename(Pid, Dir, Name, NewDir, NewName);
+rename({volume, _, _, _}, _Name, {volume, _, _, _}, _NewName, _Fs) ->
+    {error, enotdir};
+rename(_Dir, _Name, _NewDir, _NewName, _Fs) ->
+    {error, eacces}.
 
-%% A change inside a volume, which has no write path, or of the tree's own entries.
-refused_write({volume, _, _, _}) -> erofs;
-refused_write(_TreeNode) -> eacces.
+%% Every change the handle's volume holds written; a handle of the tree's own, or of
+%% a directory, has nothing of its own to write.
+-doc false.
+fsync({file, Pid, _File, _Opened}, _Fs) -> erx_media_volume:fsync(Pid);
+fsync(_Handle, _Fs) -> ok.
 
 -doc false.
 statfs(_Fs) ->

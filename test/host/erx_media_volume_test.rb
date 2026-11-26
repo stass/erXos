@@ -94,12 +94,12 @@ class ErxMediaVolumeTest < Minitest::Test
               to: 'ok -> case erx_fat_alloc:writable(erx_fat:info(Fat)) of',
               caught_by: 'a_crossed_chain_mounts_read_only_test'),
     Fault.new(name: "a removed file's key kept", path: VOLUME,
-              from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Fids}}};',
-              to: 'State#{places := Places, nodes := Nodes#{Path := {removed, Node, Fids}}};',
+              from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Holders}}};',
+              to: 'State#{places := Places, nodes := Nodes#{Path := {removed, Node, Holders}}};',
               caught_by: 'a_removed_file_lives_by_its_fids_test'),
     Fault.new(name: "a removed file's chain released while fids name it", path: VOLUME,
-              from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Fids}}};',
-              to: 'released(Node, State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Fids}}});',
+              from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Holders}}};',
+              to: 'released(Node, State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Holders}}});',
               caught_by: 'a_removed_file_lives_by_its_fids_test')
   ].freeze
 

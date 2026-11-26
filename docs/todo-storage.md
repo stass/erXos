@@ -155,10 +155,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     path must route the tree's writes through the volume, refused unless its mount is `rw`.
   * [Low] `erx_media_tree` shows a drive status's `transport` and `flush` as `unknown`: the window's
     `info` answers neither (design-drives.md, "Status"). Show them once the window reports them.
-  * [Medium] `erx_media_volume`'s qid path table caps at 2^40 entries and frees none, where design-storage.md's
-    "File identity and version" caps it at 65,536 and drops an entry once no fid names it (the tree has no
-    `forget/2`); the table lives under the volume's heap bound, so a walk of a stick of some 20,000 files may
-    end the volume (estimated, not measured). Add `forget/2` and the cap, or bring the difference to the design.
   * [Low] `erx_media_tree`: a link across two volumes answers `erofs`, not "Links and rights"' `exdev`; a
     volume's waiting read answers its alias directly rather than through `erx_fs_waits`, as design-files.md's
     "Waiting requests" asks; a GPT entry's name and GUID do not show as `sN_label` and `sN_serial`; the

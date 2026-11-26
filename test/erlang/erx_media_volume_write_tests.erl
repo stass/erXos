@@ -11,6 +11,9 @@
 -module(erx_media_volume_write_tests).
 -include_lib("eunit/include/eunit.hrl").
 
+%% The RAM medium and fsimg's reading of an image, which erx_media_tree_tests shares.
+-export([ram/2, ram_final/1, extracted/1]).
+
 -define(SECTOR, 512).
 
 %% ---------------------------------------------------------------------------
@@ -142,7 +145,7 @@ changes(Pid) ->
     ?assertMatch({ok, #{size := 4}, Doomed}, erx_media_volume:attr(Pid, Doomed)),
     ?assertEqual({ok, 1}, erx_media_volume:write(Pid, Doomed, 4, <<"x">>)),
     ?assertEqual({ok, <<"bye\nx">>}, read(Pid, Doomed, 0, 10)),
-    ok = erx_media_volume:clunked(Pid, Doomed),
+    ok = erx_media_volume:forget(Pid, Doomed),
     ?assertEqual({error, enoent}, erx_media_volume:attr(Pid, Doomed)),
     fun(Tree) ->
             Hello = proplists:get_value(<<"hello.txt">>, Tree),
@@ -208,7 +211,7 @@ a_removed_file_lives_by_its_fids_test() ->
     New = pattern(30000, 2),
     {ok, file, Created} = erx_media_volume:create(Pid, Root, <<"slot">>),
     {ok, 9000} = erx_media_volume:write(Pid, Created, 0, Old),
-    ok = erx_media_volume:clunked(Pid, Created),
+    ok = erx_media_volume:forget(Pid, Created),
     {ok, file, Walked} = erx_media_volume:walk(Pid, Root, <<"slot">>),
     ok = erx_media_volume:fsync(Pid),
     ok = erx_media_volume:remove(Pid, Root, <<"slot">>),
@@ -227,7 +230,7 @@ a_removed_file_lives_by_its_fids_test() ->
     ?assertMatch({ok, #{size := 9002, read_only := true, mtime := 1700000000}, Walked},
                  erx_media_volume:attr(Pid, Walked)),
     ?assertEqual({ok, New}, read(Pid, Again, 0, 30000)),
-    ok = erx_media_volume:clunked(Pid, Walked),
+    ok = erx_media_volume:forget(Pid, Walked),
     ?assertEqual({error, enoent}, erx_media_volume:attr(Pid, Walked)),
     finish(Pid),
     {Medium, _, _} = ram_final(Proxy),
@@ -253,7 +256,7 @@ table_bound() ->
     ?assertEqual(length(Removed) + 1, map_size(Nodes)),
     #{size := Words} = erx_media_medium:memory_bound(),
     ?assert(erts_debug:flat_size({Nodes, Places}) =< Words div 8),
-    ok = erx_media_volume:clunked(Pid, hd(Removed)),
+    ok = erx_media_volume:forget(Pid, hd(Removed)),
     ?assertMatch({ok, file, _}, erx_media_volume:create(Pid, Root, <<"x">>)),
     finish(Pid).
 
@@ -275,6 +278,30 @@ pattern(N, Seed) -> << <<((I * 7 + Seed) rem 251)>> || I <- lists:seq(1, N) >>.
 %% A commit that cannot read the medium, as a stick pulled before an fsync, ends the
 %% volume: once a commit may have written part of a plan, the batch before it no
 %% longer describes the medium, so no later change may build on it.
+%% A crash report of a volume holding written data shows its outcome and counts, and
+%% neither the batch's bytes nor a request's: the report holds no file's contents and
+%% stays small whatever the batch holds.
+a_crash_report_holds_no_file_contents_test() ->
+    Base = image("fat16.img"),
+    Pid = volume(ram(Base, infinity), Base),
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    {ok, file, File} = erx_media_volume:create(Pid, Root, <<"secret.bin">>),
+    Secret = binary:copy(<<"SECRET-BYTES-">>, 2000),
+    {ok, _} = erx_media_volume:write(Pid, File, 0, Secret),
+    State = sys:get_state(Pid),
+    Shown = erx_media_volume:format_status(#{state => State, message => {write, File, 0, Secret},
+                                             reason => {function_clause, [{erx_fat_dir, write, [Secret], []}]},
+                                             log => [{in, Secret}]}),
+    Report = term_to_binary(Shown),
+    ?assertEqual(nomatch, binary:match(Report, <<"SECRET-BYTES-">>)),
+    ?assert(byte_size(Report) < 2048),
+    #{state := #{outcome := #{mount := rw}, nodes := Nodes, batch_sectors := Held}, message := Message,
+      reason := Reason, log := []} = Shown,
+    ?assert(Nodes >= 2 andalso Held > 0),
+    ?assertEqual(write, Message),
+    ?assertEqual(function_clause, Reason),
+    finish(Pid).
+
 a_commit_that_cannot_read_ends_the_volume_test() ->
     Base = image("fat16.img"),
     Proxy = ram(Base, infinity),
