@@ -305,8 +305,8 @@ class ErxFsTest < Minitest::Test
               caught_by: 'malformed_qids_change_nothing_test'),
     Fault.new(name: "a rejected lcreate leaves the tree's handle open", file: GRANT,
               from: "                            {_, Clunked} = tree(clunk, [Handle], Made),\n" \
-                    '                            {{error, eio}, Clunked}',
-              to: '                            {{error, eio}, element(2, {Handle, Made})}',
+                    '                            {{error, eio}, held_node(Node, Clunked)}',
+              to: '                            {{error, eio}, element(2, {Handle, held_node(Node, Made)})}',
               caught_by: 'malformed_qids_leave_the_grant_serving_test'),
     Fault.new(name: 'a listing with an improper tail crashes the grant', file: GRANT,
               from: '    case entries(Entries) of',
