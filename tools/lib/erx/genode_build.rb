@@ -46,11 +46,14 @@ module Erx
     # the guest's boots showed (docs/design-bench.md, "Genode's guest"): its image prints
     # only when QEMU enters it at the hypervisor's level (virtualization), which under
     # HVF it does not, so it boots under TCG alone; its bootstrap starts four CPUs
-    # whatever QEMU offers, so every boot has four; and its C library answers
-    # pthread_setaffinity_np "not implemented", so its program runs unpinned. The guest,
-    # its build and the session read these, and no caller passes any of them.
-    Machine = Data.define(:accelerators, :cpus, :virtualization, :pinned)
-    MACHINE = Machine.new(accelerators: %w[tcg].freeze, cpus: 4, virtualization: true, pinned: false)
+    # whatever QEMU offers, so every boot has four; its C library answers
+    # pthread_setaffinity_np "not implemented", so its program runs unpinned; and it does
+    # not power off when its program exits, so the harness ends the boot at its last
+    # checkpoint, the program's done line, as at any guest that does not end the machine
+    # itself (Qemu#run's machine_end). The guest, its build and the session read these,
+    # and no caller passes any of them.
+    Machine = Data.define(:accelerators, :cpus, :virtualization, :pinned, :powers_off)
+    MACHINE = Machine.new(accelerators: %w[tcg].freeze, cpus: 4, virtualization: true, pinned: false, powers_off: false)
     # The component's name: its target, its start node and its run script's.
     PROGRAM = 'erx_peer_bench'
     # What of erXos's tree the component's one C file includes, staged at its tree paths
@@ -166,17 +169,60 @@ module Erx
                        copies: [copy.call(tree, genode), copy.call("#{writable}/.", genode), copy.call(inputs, '/tmp/inputs')])
     end
 
+    # What a build for a posix run of arguments on cpus CPUs stages from erXos into the
+    # container's /tmp/inputs, by path under it, sorted: the container script, and erXos's
+    # Genode repository (the component's target description, its flags from their one
+    # source, PeerBench.flags, every regular file under SOURCES at its tree path under the
+    # component's root/, and the run script). The build writes exactly this map and its
+    # record names its digest (staged_sha256), so a boot recomputes it from the tree and
+    # refuses an image staged from anything else.
+    def staged_inputs(root, arguments:, cpus:)
+      app = "repo/src/app/#{PROGRAM}"
+      sources = SOURCES.flat_map { |path| tree_files(root, path) }
+                       .to_h { |path| ["#{app}/root/#{path}", tree_file(root, path)] }
+      { 'build.sh' => tree_file(root, SCRIPT), "#{app}/target.mk" => tree_file(root, TARGET),
+        "#{app}/flags.mk" => "CC_OPT += #{PeerBench.flags.join(' ')}\n",
+        "repo/run/#{PROGRAM}.run" => run_script(arguments: arguments, cpus: cpus), **sources }.sort.to_h
+    end
+
+    # The SHA-256 of a staged map: each path with its bytes' SHA-256.
+    def staged_sha256(staged)
+      Digest::SHA256.hexdigest(JSON.generate(staged.map { |path, bytes| [path, Digest::SHA256.hexdigest(bytes)] }))
+    end
+
+    # The tree paths of the regular files at path under root: path itself, or the files
+    # beneath it, leaving out dotfiles, which no build reads.
+    def tree_files(root, path)
+      tree = File.join(root, path)
+      return [path] unless File.directory?(tree)
+
+      Dir.glob('**/*', base: tree).map { |name| File.join(path, name) }.reject { |name| File.directory?(File.join(root, name)) }
+    end
+    private_class_method :tree_files
+
+    # The bytes of the tree file at path, which must be a regular file and not a link,
+    # so nothing outside the tree reaches the image.
+    def tree_file(root, path)
+      name = File.join(root, path)
+      raise Error, "Genode's build stages #{path}, which is not a regular file of the tree" unless
+        File.file?(name) && !File.symlink?(name)
+
+      File.binread(name)
+    end
+    private_class_method :tree_file
+
     # The build record (docs/design-bench.md, "The record"): the pins of every source,
     # the image, the tool chain's compiler, the kernel and board, the program's arguments,
-    # and the SHA-256 of the run script, which holds init's configuration the boot image
-    # carries, and of the boot image; cpus is the boot's CPU count the script was written for.
-    def record(sources:, image:, out:, arguments:, cpus:, script:)
+    # the SHA-256 of what the build staged from erXos (staged_sha256), of the run script,
+    # which holds init's configuration the boot image carries, and of the boot image; cpus
+    # is the boot's CPU count the script was written for.
+    def record(sources:, image:, out:, arguments:, cpus:, script:, staged_sha256:)
       {
         'sources' => sources.to_h { |source| [source.fetch('id'), source.fetch('kind') == 'git' ? source.fetch('commit') : source.fetch('sha256')] },
         'image' => image, 'platform' => PLATFORM, 'kernel' => KERNEL, 'board' => BOARD,
         'compiler' => GuestBuild.text(out, 'compiler', label: LABEL).lines.first.to_s.strip,
         'compiler_flags' => "Genode's own for this board, and erx_peer_bench's (bench/genode/target.mk)",
-        'arguments' => arguments, 'cpus' => cpus,
+        'arguments' => arguments, 'cpus' => cpus, 'staged_sha256' => staged_sha256,
         'run_script_sha256' => Digest::SHA256.hexdigest(script),
         'image_sha256' => Digest::SHA256.file(File.join(out, 'image.elf')).hexdigest
       }
@@ -197,7 +243,8 @@ module Erx
       image = dependencies.image_for(IMAGE_ID).fetch('reference')
       work = OutputDirectory.prepare(root: root, path: File.join(root, 'build/genode-work'))
       directory = Dir.mktmpdir('build-', work)
-      inputs = stage_inputs(root: root, fetched: fetched, directory: directory, script: script)
+      staged = staged_inputs(root, arguments: arguments, cpus: cpus)
+      inputs = stage_inputs(staged: staged, fetched: fetched, directory: directory)
       writable = File.join(directory, 'writable')
       %w[contrib depot].each do |name|
         FileUtils.mkdir_p(File.join(writable, name))
@@ -216,27 +263,20 @@ module Erx
       out = File.join(directory, 'out')
       GuestBuild.unpack(archive: archive, out: out, outputs: OUTPUTS, label: LABEL)
       publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, arguments: arguments,
-                                                         cpus: cpus, script: script))
+                                                         cpus: cpus, script: script,
+                                                         staged_sha256: staged_sha256(staged)))
     ensure
       FileUtils.rm_rf(directory) if directory
     end
 
-    # The container's /tmp/inputs: the script, each port's archive under ports/<port>/
-    # with the name Genode's port tool asks for, and erXos's Genode repository: the
-    # component's target description, its flags from their one source (PeerBench.flags),
-    # the C files at their tree paths under its root/, and the run script.
-    def stage_inputs(root:, fetched:, directory:, script:)
+    # The container's /tmp/inputs: what staged_inputs names, and each port's archive under
+    # ports/<port>/ with the name Genode's port tool asks for.
+    def stage_inputs(staged:, fetched:, directory:)
       inputs = File.join(directory, 'inputs')
-      app = File.join(inputs, 'repo/src/app', PROGRAM)
-      FileUtils.mkdir_p([app, File.join(inputs, 'repo/run')])
-      FileUtils.copy_file(File.join(root, SCRIPT), File.join(inputs, 'build.sh'))
-      FileUtils.copy_file(File.join(root, TARGET), File.join(app, 'target.mk'))
-      File.write(File.join(app, 'flags.mk'), "CC_OPT += #{PeerBench.flags.join(' ')}\n")
-      SOURCES.each do |path|
-        FileUtils.mkdir_p(File.join(app, 'root', File.dirname(path)))
-        FileUtils.cp_r(File.join(root, path), File.join(app, 'root', path))
+      staged.each do |path, bytes|
+        FileUtils.mkdir_p(File.dirname(File.join(inputs, path)))
+        File.binwrite(File.join(inputs, path), bytes)
       end
-      File.write(File.join(inputs, 'repo/run', "#{PROGRAM}.run"), script)
       fetched.sources.select { |source| GenodeFetch::PORT.match?(source.fetch('id')) }.each do |source|
         port = File.join(inputs, 'ports', source.fetch('id').delete_prefix('genode-port-'))
         FileUtils.mkdir_p(port)

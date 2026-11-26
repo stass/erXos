@@ -301,7 +301,12 @@ deadline before reporting it, or `rejected` when one of the boot's
 `BENCH` lines was refused, since that line may have been its own. One
 `CLOCK` line serves every benchmark of a boot. A boot that ends at a
 deadline is still recorded, from the lines its serial log holds, and
-ends no other boot of the run.
+ends no other boot of the run. The harness ends a QEMU boot at its
+last checkpoint: it stops QEMU there and the boot has passed, and a
+boot at its deadline without that checkpoint is `timed_out`. Only a
+guest that ends the machine itself, as Linux's `/init` powers off, runs
+until QEMU exits, and is `timed_out` if it is still running at its
+deadline.
 
 ### The histogram
 
@@ -1477,7 +1482,7 @@ the guest was built from:
 | System | `subject` details beyond erXos's |
 | --- | --- |
 | `linux` | the kernel's pin (`deps.lock` id, version, SHA-256) and its command line, the initramfs's SHA-256, `erx_peer_bench`'s SHA-256, the compiler's version and complete flags, the C library's pin; for an Erlang boot, also the exported OTP tree's SHA-256, the OTP version and flavour the guest reported, the toolchain image's digest, and each packed library's SHA-256 |
-| `genode-hw`, `genode-sel4`, `genode-foc` | Genode's release and its SHA-256, the tool chain's version and SHA-256, the kernel and board the build named, the resolved run configuration's SHA-256, the boot image's SHA-256 |
+| `genode-hw`, `genode-sel4`, `genode-foc` | Genode's release and its SHA-256, the tool chain's version and SHA-256, the kernel and board the build named, the SHA-256 of everything the build staged from erXos (its script, the component's target, flags, sources and run script), which a boot refuses when the tree stages anything else, the resolved run configuration's SHA-256, the boot image's SHA-256 |
 | `l4re` | each L4Re repository's pinned commit, the resolved Fiasco configuration's SHA-256 and its difference from erXos's, the compiler's version and flags, the toolchain image's digest, `bootstrap.elf`'s SHA-256 |
 
 Each boot's serial log is kept in its run directory as every boot's is;
@@ -2727,7 +2732,8 @@ four CPUs whatever QEMU offers, and a boot with fewer reports the CPUs
 it could not start, so every boot has four and the image is built for
 four (`tools/erx build genode`). One declaration of the harness,
 `GenodeBuild::MACHINE`, states the accelerator, the CPU count, the
-machine option and that the program runs unpinned; the guest, its build
+machine option, that the program runs unpinned and that the guest does
+not power off; the guest, its build
 and the session read it, and no caller passes any of it. Genode's rows
 are therefore emulation numbers, published as such, at four CPUs and
 unpinned, and set beside erXos's TCG runs of the same session and
@@ -2736,8 +2742,10 @@ of its boot drops the label, as L4Re's drops ned's tag, and nothing else.
 Whether Genode's log carries a 64 KiB line whole is unverified; a cut
 line is `rejected`, which is visible and fails safe, and if lines are
 cut the program writes its lines through Genode's terminal path instead,
-settled when the guest is built. The boot ends at the program's `CLOCK`
-line, and QEMU is ended as at a checkpoint.
+settled when the guest is built. Genode does not power off when the
+program exits, so the boot ends at its last checkpoint, the program's
+`erx: bench: done` line, which follows its `CLOCK` line, and the
+harness stops QEMU there, as at any boot ([A benchmark](#a-benchmark)).
 
 ### How erXos runs the program
 

@@ -255,13 +255,40 @@ class GenodeBuildTest < Minitest::Test
       File.write(File.join(out, 'compiler'), "genode-aarch64-gcc (GCC) 14.2.0\n")
       record = Erx::GenodeBuild.record(sources: [{ 'id' => 'genode', 'kind' => 'git', 'commit' => 'c' * 40 }],
                                        image: IMAGE, out: out, arguments: %w[posix 1], cpus: 1,
-                                       script: Erx::GenodeBuild.run_script(arguments: %w[posix 1], cpus: 1))
+                                       script: Erx::GenodeBuild.run_script(arguments: %w[posix 1], cpus: 1),
+                                       staged_sha256: 'd' * 64)
       assert_equal Digest::SHA256.hexdigest('ELF'), record.fetch('image_sha256')
       assert_equal Digest::SHA256.hexdigest(Erx::GenodeBuild.run_script(arguments: %w[posix 1], cpus: 1)), record.fetch('run_script_sha256')
       assert_equal 'genode-aarch64-gcc (GCC) 14.2.0', record.fetch('compiler')
+      assert_equal 'd' * 64, record.fetch('staged_sha256')
       assert_equal({ 'genode' => 'c' * 40 }, record.fetch('sources'))
       File.write(File.join(out, 'compiler'), "gcc\e[31m\n")
-      assert_raises(Erx::Error) { Erx::GenodeBuild.record(sources: [], image: IMAGE, out: out, arguments: [], cpus: 1, script: '') }
+      assert_raises(Erx::Error) { Erx::GenodeBuild.record(sources: [], image: IMAGE, out: out, arguments: [], cpus: 1, script: '', staged_sha256: '') }
+    end
+  end
+
+  # What a build stages is one map: the script, the target description, the flags, the
+  # run script for its arguments and CPUs, and the source files under the component's
+  # root/; its digest follows any of them, and a link in the tree is refused.
+  def test_the_staged_inputs_are_one_map
+    root = File.expand_path('../..', __dir__)
+    staged = Erx::GenodeBuild.staged_inputs(root, arguments: %w[posix 4 unpinned], cpus: 4)
+    app = 'repo/src/app/erx_peer_bench'
+    assert_equal staged.keys.sort, staged.keys
+    assert_equal [], ['build.sh', "#{app}/target.mk", "#{app}/flags.mk", 'repo/run/erx_peer_bench.run',
+                      "#{app}/root/bench/peer/erx_peer_bench.c", "#{app}/root/test/guest/bench/bench_clock.h",
+                      "#{app}/root/liberx/backend/core/mem.h"] - staged.keys
+    assert_equal Erx::GenodeBuild.run_script(arguments: %w[posix 4 unpinned], cpus: 4), staged.fetch('repo/run/erx_peer_bench.run')
+    other = Erx::GenodeBuild.staged_inputs(root, arguments: %w[posix 2 unpinned], cpus: 2)
+    refute_equal Erx::GenodeBuild.staged_sha256(staged), Erx::GenodeBuild.staged_sha256(other)
+    Dir.mktmpdir do |tree|
+      [Erx::GenodeBuild::SCRIPT, Erx::GenodeBuild::TARGET, 'liberx/backend/core/mem.h', 'test/guest/bench/a.h'].each do |path|
+        FileUtils.mkdir_p(File.join(tree, File.dirname(path)))
+        File.write(File.join(tree, path), path)
+      end
+      FileUtils.mkdir_p(File.join(tree, 'bench/peer'))
+      File.symlink('/etc/hosts', File.join(tree, 'bench/peer/hosts.c'))
+      assert_raises(Erx::Error) { Erx::GenodeBuild.staged_inputs(tree, arguments: %w[posix 4], cpus: 4) }
     end
   end
 end

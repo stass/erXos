@@ -7,8 +7,10 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/genode_bench'
 
 # Genode's guest (docs/design-bench.md, "Genode's guest"): the importer of its serial log
-# and the build record it boots. The boot itself runs in the bench suite.
+# the build record it boots, and how its boot ends.
 class GenodeBenchTest < Minitest::Test
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
+
   # The program's lines are the ones behind its label, with the label dropped; Genode's
   # own lines, another component's, and an unlabelled line that looks like the
   # program's are not.
@@ -44,5 +46,77 @@ class GenodeBenchTest < Minitest::Test
       File.write(build.image, 'ELF2')
       assert_raises(Erx::Error) { build.record }
     end
+  end
+
+  # base-hw does not power off when its program exits, so its machine declaration says
+  # so and the harness ends the boot at its last checkpoint, the program's done line: a
+  # guest still running there passes and is stopped, not left to its deadline.
+  def test_the_boot_ends_at_the_programs_done_line
+    Dir.mktmpdir do |root|
+      build_from_tree(root)
+      label = Erx::GenodeBench::LABEL
+      serial = "#{label}erx: bench: timing\n#{label}erx: bench: done\n[init] child exited with exit value 0\n"
+      runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'logs'))
+      qemu = Erx::Qemu.new(root: root, runner: runner, program: lingering_guest(root, serial, seconds: 120))
+      guest = Erx::GenodeBench::Guest.new(root: root, runner: runner, platform: PLATFORM, qemu: qemu)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      guest.call(Data.define(:name).new(name: 'posix'), cells: nil, cpus: 4, accel: 'tcg')
+      assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 60
+      report = JSON.parse(File.read(Dir.glob(File.join(root, 'build/qemu/*/report.json')).fetch(0)))
+      assert_equal 'passed', report.fetch('state')
+    end
+    refute Erx::GenodeBuild::MACHINE.powers_off
+  end
+
+  # The record names the digest of what the build staged from the tree; a change to any
+  # staged file refuses the image built before it.
+  def test_an_image_staged_from_other_files_is_refused
+    Dir.mktmpdir do |root|
+      build_from_tree(root)
+      runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'logs'))
+      guest = Erx::GenodeBench::Guest.new(root: root, runner: runner, platform: PLATFORM, qemu: nil)
+      File.write(File.join(root, 'bench/peer/erx_peer_bench.c'), 'int main(void) { return 1; }')
+      error = assert_raises(Erx::Error) do
+        guest.call(Data.define(:name).new(name: 'posix'), cells: nil, cpus: 4, accel: 'tcg')
+      end
+      assert_match(/other inputs than the tree stages/, error.message)
+    end
+  end
+
+  private
+
+  # A tree of the program's files under root, and an image with the record a build of
+  # them writes.
+  def build_from_tree(root)
+    [Erx::GenodeBuild::SCRIPT, Erx::GenodeBuild::TARGET, 'bench/peer/erx_peer_bench.c', 'test/guest/bench/clock.h',
+     'liberx/backend/core/mem.h'].each do |path|
+      FileUtils.mkdir_p(File.join(root, File.dirname(path)))
+      File.write(File.join(root, path), path)
+    end
+    build = Erx::GenodeBench.build(root: root, cpus: 4)
+    FileUtils.mkdir_p(build.directory)
+    File.write(build.image, 'ELF')
+    File.write(build.record_path, JSON.generate('image_sha256' => Digest::SHA256.hexdigest('ELF'), 'cpus' => 4,
+                                                'arguments' => Erx::GenodeBuild.arguments,
+                                                'staged_sha256' => Erx::GenodeBuild.staged_sha256(
+                                                  Erx::GenodeBuild.staged_inputs(root, arguments: Erx::GenodeBuild.arguments, cpus: 4)
+                                                )))
+  end
+
+  # A QEMU that prints serial on its serial file and then stays up for seconds, as
+  # base-hw does after its program exits.
+  def lingering_guest(root, serial, seconds:)
+    path = File.join(root, 'fake-qemu')
+    File.write(path, <<~RUBY)
+      #!/usr/bin/env ruby
+      if ARGV.include?('--version')
+        puts 'QEMU emulator version 11.1.3 (fixture)'
+        exit 0
+      end
+      File.binwrite(ARGV.fetch(ARGV.index('-serial') + 1).delete_prefix('file:'), #{serial.dump})
+      sleep #{seconds}
+    RUBY
+    File.chmod(0o700, path)
+    path
   end
 end

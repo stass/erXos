@@ -589,6 +589,18 @@ class QemuTest < Minitest::Test
     assert_equal 'timed_out', error.result.fetch('state')
   end
 
+  # A guest that does not end the machine itself, still running once its last checkpoint
+  # is hit: the harness stops QEMU there and the boot passes, without waiting for its
+  # deadline. Without that checkpoint the same guest times out
+  # (test_checkpoint_expiry_is_reported_as_timeout).
+  def test_a_guest_still_running_at_its_last_checkpoint_is_stopped_and_passes
+    points = [{ name: 'only', pattern: /line\r?\n/n, seconds: 60 }].freeze
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: "line\r\n", linger: 120))
+    report = qemu.run(platform: PLATFORM, accel: 'tcg', image: image, checkpoints: points)
+    assert_equal 'passed', report.fetch('state')
+    assert_operator report.fetch('elapsed_seconds'), :<, 60
+  end
+
   def test_boot_with_consistent_bootstrap_memory_passes
     qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: RAM)))
     report = qemu.run(platform: PLATFORM, accel: 'tcg', image: image)

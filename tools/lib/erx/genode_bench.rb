@@ -75,10 +75,10 @@ module Erx
     # (PeerBench.flags). Its Booted answers its machine's pinned, so a run of an unpinned
     # machine says so in its record and each of its rows shows it.
     class Guest
-      def initialize(root:, runner:, platform: Platform.development(root))
+      def initialize(root:, runner:, platform: Platform.development(root), qemu: Qemu.new(root: root, runner: runner))
         @root = File.expand_path(root)
-        @runner = runner
         @platform = platform
+        @qemu = qemu
       end
 
       def system = SYSTEM
@@ -100,15 +100,18 @@ module Erx
 
         subject = build.record
         raise Error, "genode's guest runs only the posix benchmark, not #{benchmark.name}" unless benchmark.name == 'posix'
-        raise Error, "#{build.record_path} runs #{subject['arguments'].inspect} on #{subject['cpus'].inspect} CPUs, " \
-                     "not #{GenodeBuild.arguments.inspect} on #{cpus}: rebuild Genode's guest" unless
-          subject['arguments'] == GenodeBuild.arguments && subject['cpus'] == cpus
+        # What the tree stages for this run, its arguments and CPU count in the run script,
+        # is what the image was built from, or the image is stale.
+        staged = GenodeBuild.staged_inputs(@root, arguments: GenodeBuild.arguments, cpus: cpus)
+        raise Error, "#{build.record_path} was built from other inputs than the tree stages for " \
+                     "#{GenodeBuild.arguments.inspect} on #{cpus} CPUs: rebuild Genode's guest" unless
+          subject['staged_sha256'] == GenodeBuild.staged_sha256(staged)
 
         directory = File.join(@root, 'build/qemu', "genode-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
         memory = PosixBench.machine(@platform).memory_mib
-        report = Qemu.new(root: @root, runner: @runner).run(
+        report = @qemu.run(
           platform: @platform, accel: accel, cpus: cpus, memory_mib: memory, image: build.image,
-          hostlink: QemuPlan::NO_HOSTLINK, checkpoints: GenodeBench.checkpoints, machine_end: true, directory: directory,
+          hostlink: QemuPlan::NO_HOSTLINK, checkpoints: GenodeBench.checkpoints, machine_end: machine.powers_off, directory: directory,
           virtualization: machine.virtualization
         )
         # The image QEMU booted is the one the record names, even if it was rebuilt meanwhile.
