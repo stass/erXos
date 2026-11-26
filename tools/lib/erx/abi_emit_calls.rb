@@ -600,7 +600,7 @@ module Erx
          *constants.map { |item| CEmitter.constant_definition(item) },
          "#define ERX_CRASH_FAULT_KINDS UINT32_C(#{format('0x%x', kinds)})",
          "#define ERX_CRASH_REGS_BYTES #{regs.size}", '',
-         *CEmitter.seam_layouts(schema, 'abi_crash.h'), '',
+         *CEmitter.seam_declarations(schema, 'abi_crash.h'), '',
          *%w[boot_value boot_slot].flat_map { |name| CEmitter.enum_name_lookup(schema.types.fetch(name)) },
          '#endif /* ERX_CORE_ABI_CRASH_H */', ''].join("\n")
       end
@@ -631,7 +631,7 @@ module Erx
       # and C++, so the glue includes it.
       def stop_seam(schema)
         state = schema.types.fetch('stop_cpu_state')
-        enums = [state, schema.types.fetch('ram_class')]
+        enums = CEmitter.seam_enums(schema, 'abi_stop.h')
         members = enums.flat_map do |type|
           type.members.keys.sort.map { |member| schema.constants.fetch("#{Model.constant_prefix(type.name)}_#{member}") }
         end
@@ -639,8 +639,7 @@ module Erx
         [CEmitter::NOTICE, '#ifndef ERX_CORE_ABI_STOP_H', '#define ERX_CORE_ABI_STOP_H', '',
          '#include <stdbool.h>', '#include <stddef.h>', '#include <stdint.h>', '',
          *(constants + members).map { |item| CEmitter.constant_definition(item) },
-         '', *CEmitter.seam_layouts(schema, 'abi_stop.h'), '',
-         *enums.flat_map { |type| CEmitter.type_declaration(type) }, '',
+         '', *CEmitter.seam_declarations(schema, 'abi_stop.h'), '',
          *CEmitter.enum_attribute_predicate(state, 'registers', state.attributes.fetch('registers')),
          '#endif /* ERX_CORE_ABI_STOP_H */', ''].join("\n")
       end

@@ -67,9 +67,11 @@ module Erx
                '/* Only rights constructors publish values of this type. */', '']
         schema.constants.each_value { |item| out << constant_definition(item) }
         out << ''
+        # A schema without the seam types (a test's) has no shared enums.
+        shared = held_enums(SEAM_TYPES.keys.filter_map { |name| schema.types[name] }).map(&:name)
         schema.type_order.each do |type_name|
           type = schema.types.fetch(type_name)
-          out.concat(type_declaration(type))
+          out.concat(shared.include?(type_name) ? seam_enum(type) : type_declaration(type))
           out << ''
         end
         out.concat(note_declaration(schema))
@@ -496,25 +498,54 @@ module Erx
         extent = layout_extent(layout)
         typedef = "typedef struct #{tag} #{tag}_t;"
         return [*extent, typedef] if layout.private?
-        return seam_layout(layout) if SEAM_LAYOUTS.key?(layout.name)
+        return seam_layout(layout) if SEAM_TYPES.key?(layout.name)
 
         [*extent, *layout_offsets(layout), typedef, *layout_definition(layout)]
       end
 
-      # The layouts a seam header of include/erx/core/ also declares, each with
-      # the seam header that declares it, so a core and the Fiasco glue share
-      # the ABI type itself instead of a copy of it.
-      SEAM_LAYOUTS = { 'erx_ram_range' => 'abi_stop.h', 'erx_fault' => 'abi_crash.h',
-                       'erx_crash_cpu' => 'abi_crash.h' }.freeze
+      # The layouts and enums a seam header of include/erx/core/ also
+      # declares, each with the seam header that declares it, so a core and
+      # the Fiasco glue share the ABI type itself instead of a copy of it. A
+      # seam also declares every enum its layouts' fields hold.
+      SEAM_TYPES = { 'erx_ram_range' => 'abi_stop.h', 'stop_cpu_state' => 'abi_stop.h',
+                     'ram_class' => 'abi_stop.h', 'erx_fault' => 'abi_crash.h',
+                     'erx_crash_cpu' => 'abi_crash.h' }.freeze
 
-      # The layouts of one seam header, after the typedefs of the enums their
-      # fields hold, which include/erx/abi.h spells the same.
-      def seam_layouts(schema, header)
-        layouts = SEAM_LAYOUTS.filter_map { |name, seam| schema.types.fetch(name) if seam == header }
-        raise SchemaError, "no seam layouts for #{header}" if layouts.empty?
+      # The enums and layouts SEAM_TYPES lists for one seam header.
+      def seam_types(schema, header)
+        types = SEAM_TYPES.filter_map { |name, seam| schema.types.fetch(name) if seam == header }
+        raise SchemaError, "no seam types for #{header}" if types.empty?
 
-        enums = layouts.flat_map { |layout| layout.fields.map(&:type) }.grep(EnumType).uniq
-        [*enums.flat_map { |type| type_declaration(type) }, *layouts.flat_map { |layout| seam_layout(layout) }]
+        types
+      end
+
+      # The enums among types, and those their layouts' own fields hold; a
+      # seam lists only enums and flat layouts.
+      def held_enums(types)
+        types.flat_map { |type| type.is_a?(EnumType) ? [type] : type.fields.map(&:type).grep(EnumType) }.uniq
+      end
+
+      # The enums one seam header declares.
+      def seam_enums(schema, header) = held_enums(seam_types(schema, header))
+
+      # The declarations of one seam header: its enums first, since its
+      # layouts' fields hold them, then its layouts.
+      def seam_declarations(schema, header)
+        layouts = seam_types(schema, header).grep(Layout)
+        [*seam_enums(schema, header).flat_map { |type| seam_enum(type) },
+         *layouts.flat_map { |layout| seam_layout(layout) }]
+      end
+
+      # An enum's typedef as include/erx/abi.h and every seam header declare
+      # it: under one guard, since C99, which musl builds in, refuses a
+      # repeated typedef even when it names the same type.
+      def seam_enum(type) = guarded(c_type(type), type_declaration(type))
+
+      # Declarations of the type named typedef under the guard every header
+      # that declares it shares.
+      def guarded(typedef, lines)
+        guard = "#{typedef.upcase}_DEFINED"
+        ["#ifndef #{guard}", "#define #{guard}", *lines, "#endif /* #{guard} */"]
       end
 
       # A layout as include/erx/abi.h and a seam header both declare it: under
@@ -527,9 +558,8 @@ module Erx
         raise SchemaError, "seam layout #{layout.name} is not naturally aligned" unless natural == layout.alignment
 
         tag = name(layout.name)
-        guard = "#{constant(layout.name)}_T_DEFINED"
-        ["#ifndef #{guard}", "#define #{guard}", *layout_extent(layout), *layout_offsets(layout),
-         "typedef struct #{tag} #{tag}_t;", *layout_definition(layout, neutral: true), "#endif /* #{guard} */"]
+        guarded("#{tag}_t", [*layout_extent(layout), *layout_offsets(layout),
+                             "typedef struct #{tag} #{tag}_t;", *layout_definition(layout, neutral: true)])
       end
 
       def layout_offsets(layout)

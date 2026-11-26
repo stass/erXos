@@ -319,9 +319,10 @@ class AbiGenerationTest < Minitest::Test
   end
 
   # The boot, crash and stop seams spell each value as include/erx/abi.h does, so C
-  # that includes all three builds warning-free, the boot seam stays valid C++ for
-  # bootstrap and the crash and stop seams for the Fiasco glue; the handoff's cpu_id
-  # has one word per cpu_id_word member.
+  # that includes all three builds warning-free, in C17 and in musl's C99, where a
+  # repeated typedef is an error; the boot seam stays valid C++ for bootstrap and
+  # the crash and stop seams for the Fiasco glue; the handoff's cpu_id has one word
+  # per cpu_id_word member.
   def test_seams_match_the_abi_header
     seam = @plan.files.fetch('include/erx/core/abi_boot.h')
     words = @plan.schema.types.fetch('cpu_id_word').members.size
@@ -345,6 +346,8 @@ class AbiGenerationTest < Minitest::Test
       begin
         runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-I', directory,
                     '-fsyntax-only', File.join(directory, 'both.c')], name: 'both', deadline: 60)
+        runner.run(['clang', '-std=c99', '-Wall', '-Wextra', '-Werror', '-Wtypedef-redefinition', '-I', directory,
+                    '-fsyntax-only', File.join(directory, 'both.c')], name: 'both-c99', deadline: 60)
         runner.run(['clang++', '-std=c++17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-I', directory,
                     '-fsyntax-only', File.join(directory, 'seam.cc')], name: 'seam', deadline: 60)
       rescue Erx::CommandError => error
