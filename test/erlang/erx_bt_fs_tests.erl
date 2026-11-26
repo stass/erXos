@@ -136,9 +136,11 @@ under_sup(Prepare, Case) ->
     Volume = filename:absname("bt-volume"),
     _ = file:del_dir_r(Volume),
     ok = application:set_env(erx_bt, state_dir, filename:join(Volume, "bt")),
+    ok = application:set_env(erx_bt, services, []),
     try
         Prepare(Volume),
         {ok, {Flags, Children}} = erx_bt_sup:init([]),
+        ok = application:unset_env(erx_bt, services),
         Window = [Spec || #{id := Id} = Spec <- Children, Id =:= erx_bt_store orelse Id =:= erx_bt_fs],
         ?assertMatch([#{id := erx_bt_store}, #{id := erx_bt_fs}], Window),
         ?assertMatch(#{strategy := rest_for_one}, Flags),

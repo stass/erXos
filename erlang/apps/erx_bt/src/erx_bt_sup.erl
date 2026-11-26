@@ -13,7 +13,9 @@ every link it would have to answer, so it restarts the group after it; a group's
 restart, the one a radio peer's traffic can cause beyond its own link, leaves the store,
 its address, the handlers' attachments and the pairing wait alone.
 
-The registry is given GAP's values, the name and the appearance, read here once from
+The registry is given the services it serves, read here once from `erx_bt`'s `services`
+key, which the build derives from the manifest's `ble` rows, and GAP's values, the name
+and the appearance, read here once from
 `erx_bt`'s application keys; it lays them into the table's Device Name and Appearance and
 answers them to the controller group for its advertising, so the advertised name and GAP's
 Device Name have one source.
@@ -22,7 +24,7 @@ Device Name have one source.
 
 -export([start_link/0]).
 -export([init/1]).
--export([gap/3]).
+-export([gap/3, served/1]).
 
 -include("generated/erx_abi.hrl").
 
@@ -38,10 +40,21 @@ init([]) ->
            #{id => erx_bt_fs, start => {erx_bt_fs, start_link, []}},
            #{id => erx_bt_host_sup, start => {erx_bt_host_sup, start_link, []}, type => supervisor}]}}.
 
-%% The services the registry serves: every service abi/gatt declares, until the manifest's
-%% `ble` rows reach the domain (TODO.md, Bluetooth).
 served() ->
-    [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()].
+    served(application:get_env(erx_bt, services)).
+
+-doc """
+The services the registry serves (docs/design-bluetooth.md, "Declarations: `abi/gatt`"),
+from the `services` application key, as `application:get_env/2` answers it: the
+declarations of the names the key lists, which the build derives from the manifest's
+`ble` rows, the app template's included, so the domain serves no declaration none of
+its grants names. A domain without the key, or with one that is not a list, fails with
+`{bad_services, Key}`, so the stack stops at its start rather than serve a set no row
+states.
+""".
+-spec served(undefined | {ok, term()}) -> [erx_gatt_db:service()].
+served({ok, Names}) when is_list(Names) -> [erx_gatt_decl:service(Name) || Name <- Names];
+served(Key) -> error({bad_services, Key}).
 
 gap() ->
     gap(application:get_env(erx_bt, name), application:get_env(erx_bt, appearance), node()).

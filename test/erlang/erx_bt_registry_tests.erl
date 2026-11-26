@@ -390,8 +390,9 @@ notification_answered() ->
 %% the served services abi/gatt marks `advertise` that have a handler, and GAP's name and
 %% appearance; the controller process, registered as erx_bt_hci, hears `{advertised,
 %% Input}` at nus's attach and at its handler's end, and nothing for a service that does
-%% not say `advertise`. Every declared service is served (erx_bt_sup), so the declared set
-%% must fit the advertising data, which erx_bt_adv:data/1 refuses with badarg.
+%% not say `advertise`. Any declared service may be served (erx_bt_sup serves the set the
+%% manifest's ble rows name), so the declared set must fit the advertising data, which
+%% erx_bt_adv:data/1 refuses with badarg.
 advertised_test() ->
     Nus = erx_gatt_decl:service(nus),
     {ok, Pid} = erx_gatt_srv:start_link(?GAP, [Nus | services()]),
@@ -420,7 +421,9 @@ advertised_test() ->
 %% domain (docs/design-bluetooth.md, "Concurrency"): the registry's end, under erx_bt_sup's
 %% own flags and specification, ends the supervisor rather than restarting it.
 the_registrys_end_ends_the_stack_test() ->
+    ok = application:set_env(erx_bt, services, [nus]),
     {ok, {Flags, Children}} = erx_bt_sup:init([]),
+    ok = application:unset_env(erx_bt, services),
     [Store, Registry] = [Spec || #{id := Id} = Spec <- Children, Id =:= erx_bt_store orelse Id =:= erx_gatt_srv],
     ?assertMatch(#{restart := temporary, significant := true}, Store),
     {ok, Sup} = supervisor:start_link(?MODULE, {Flags, [Registry]}),
@@ -446,6 +449,15 @@ gap_from_the_keys_test() ->
     [?assertError({bad_name, Name}, erx_bt_sup:gap({ok, Name}, undefined, 'a@b'))
      || Name <- [<<Longest/binary, "a">>, <<16#FF>>, erxos]],
     [?assertError({bad_appearance, A}, erx_bt_sup:gap(undefined, {ok, A}, 'a@b')) || A <- [-1, 16#10000, foo]].
+
+%% The served set is the manifest's (docs/design-bluetooth.md, "Declarations: `abi/gatt`"):
+%% the declarations the `services` key names, which the build derives from the `ble` rows,
+%% and no other, so a declaration no grant names is not served; a domain without the key,
+%% or with a key that is not a list, does not start.
+served_from_the_key_test() ->
+    ?assertEqual([erx_gatt_decl:service(nus)], erx_bt_sup:served({ok, [nus]})),
+    ?assertEqual([], erx_bt_sup:served({ok, []})),
+    [?assertError({bad_services, Key}, erx_bt_sup:served(Key)) || Key <- [undefined, {ok, nus}]].
 
 %% GAP's values with the advertised Uuids.
 uuids(Uuids) -> maps:put(uuids, Uuids, ?GAP).

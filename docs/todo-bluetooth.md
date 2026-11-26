@@ -248,14 +248,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [High] bluetooth, the `ble` facet's side in other domains (docs/design-bluetooth.md "The `ble` facet",
   "Declarations: `abi/gatt`"): `erx_ble_facet` admits a grantee's operations and forwards them to the registry,
   and the Bluetooth suite's echo domain uses it for `nus`. Missing: `ble_grant`'s refusals (`tools/lib/erx/manifest.rb`, `check_ble_grants`) of
-  two served services of one UUID, and advertising data that do not fit (while every
-  declared service is served, `tools/lib/erx/gatt_decl.rb` can refuse `advertise` services whose UUIDs do not
-  fit 31 octets, which `erx_bt_adv` otherwise answers with `badarg` at the controller process's start; and a
+  two served services of one UUID, and advertising data that do not fit (until it does, `advertise` services
+  whose UUIDs do not fit 31 octets are answered `badarg` by `erx_bt_adv` at the controller process's start; and a
   declared 128-bit UUID whose value is below 0x10000 is advertised as a 16-bit one, since `erx_bt_hci` hands
   `erx_bt_adv` integers); a fuzz target
   of the client's readers, `erx_gatt:event/2` and `answer/2` (`erlang/apps/erx_bt_client`; branch
-  `bt-gatt-client`, commit bda412e16, has one written before the facet's redesign); and the served
-  services read from the manifest's rows, where `erx_bt_sup` serves every declared service. Whether the
+  `bt-gatt-client`, commit bda412e16, has one written before the facet's redesign). Whether the
   registry's monitor of a handler in another domain fires when that handler or its domain ends is unverified.
 * [High] bluetooth and packaging, an installed app's `ble` grant (docs/design-bluetooth.md "The `ble` facet", "Who
   holds `ble`"; docs/design-packaging.md "The `apps` row", "The declaration", "Admission", PK13): designed, partly built.

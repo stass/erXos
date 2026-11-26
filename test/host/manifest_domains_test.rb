@@ -4,6 +4,7 @@
 
 require 'json'
 require 'minitest/autorun'
+require 'open3'
 require_relative '../../tools/lib/erx/platform'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../fixtures/manifest_context'
@@ -1680,6 +1681,50 @@ class ManifestDomainsTest < Minitest::Test
     end
     assert_equal 'facet.parameter', error.field, error.message
     assert_match(/names "nus", which abi\/gatt does not declare/, error.message)
+  end
+
+  # The Bluetooth domain's served set (docs/design-bluetooth.md, "The Bluetooth domain" and
+  # "Declarations: `abi/gatt`"): the build derives the server's -erx_bt services, first
+  # among init's words after the boot binding and closed by --, from the ble rows alone:
+  # a grant naming nus serves nus and no other declaration of the tree's, bondcheck among
+  # them; a grant and the apps row's gatt serve their names together, sorted and quoted; a
+  # ble service with no grant serves none; and no other domain gets the key. A row naming
+  # the key itself is refused, as one naming -boot is, whether or not it serves ble. Plain
+  # words at the head of the row's init arguments stay plain arguments: under the
+  # oracle's erl, init and application_controller give the key the derived value alone.
+  def test_the_ble_server_serves_what_the_ble_rows_name
+    served = lambda do |source, context: @context|
+      view = @codec.open('manifest', admit(source, context: context).bytes)
+      rows(view, 'domains').to_h { |row| [view.string(row.fetch('name')), view.string(row.fetch('args'))] }
+    end
+    key = ->(names) { "\0--\0-erx_bt\0services\0#{names}\0--\0" }
+    granted = served.call(@source + ble_grant(%w[nus]))
+    assert_includes granted.fetch('beta'), key.call("['nus']")
+    refute_includes granted.fetch('alpha'), 'services'
+    offered = for_apps(@source + ble_grant(%w[nv]) + self.class.apps(services: 'ble', gatt: 'nus'), 8)
+    assert_includes served.call(offered, context: gatt_context).fetch('beta'), key.call("['nus','nv']")
+    assert_includes served.call(@source + "service ble\n  server @domain.beta\n  interface ble\n").fetch('beta'), key.call('[]')
+    ['-erx_bt services x', '-erx_bt name y services x', '-- -erx_bt services x -eval ok'].each do |args|
+      refused(Erx::Manifest::Invalid, 'domain.args', @source + "  args \"#{args}\"\n" + ble_grant(%w[nus]),
+              message: /the arguments name -erx_bt services, which the build derives/)
+    end
+    refused(Erx::Manifest::Invalid, 'domain.args', @source + "  args \"-erx_bt services x\"\n",
+            message: /the arguments name -erx_bt services, which the build derives/)
+    continued = served.call(@source + "  args \"-- services [bondcheck] -eval ok\"\n" + ble_grant(%w[nus])).fetch('beta')
+    assert_equal "{ok,[nus]} [\"services\",\"[bondcheck]\"]\n", erx_bt_keys(continued)
+  end
+
+  # What the oracle's erl makes of a domain's packed arguments past the boot binding:
+  # erx_bt's services key, as application_controller loads it, and the plain arguments.
+  def erx_bt_keys(packed)
+    words = packed.split("\0")
+    init = words.drop(words.index('-boot') + 3)
+    report = 'ok = application:load({application, erx_bt, [{env, []}]}), ' \
+             'io:format("~w ~p~n", [application:get_env(erx_bt, services), init:get_plain_arguments()]), halt().'
+    output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', *init, '-eval', report,
+                                     stdin_data: '')
+    assert status.success?, output
+    output
   end
 
   # A start row's template (docs/design-bluetooth.md, "Who holds `ble`"): a ble grant to

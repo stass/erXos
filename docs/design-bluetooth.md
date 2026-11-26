@@ -712,7 +712,11 @@ the release otherwise only loads, declared per script
   `application:get_env/2` reads, as the network domain's row sets
   `-erx_net interfaces` (`config/manifest/qemu-virt-development.txt`):
   `name`, `appearance`, `connections`, `patch`, a file of `erx_bt`'s
-  `priv` directory, `patch_manufacturer` and `services`. The host name is
+  `priv` directory, `patch_manufacturer` and `services`. The packer
+  writes `services` itself, a list of quoted atoms, after the boot
+  script's binding and closed by `--`, ahead of the row's own init
+  arguments, and refuses a row whose own arguments name it, so the
+  domain serves the set the rows give and no other. The host name is
   the host part of the domain's node name up to its first dot, so
   `bt@pi.example.com` advertises `pi`
   ([design-system.md](design-system.md#identifiers)). The release's boot

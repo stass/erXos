@@ -18,6 +18,7 @@ class ErxBtRegistryTest < Minitest::Test
   DEADLINE_SECONDS = '300'
   CORE = 'erlang/apps/erx_bt/src/erx_gatt_registry.erl'
   SRV = 'erlang/apps/erx_bt/src/erx_gatt_srv.erl'
+  SUP = 'erlang/apps/erx_bt/src/erx_bt_sup.erl'
 
   Seed = Data.define(:fault, :path, :anchor, :replacement, :catching_case)
 
@@ -66,7 +67,11 @@ class ErxBtRegistryTest < Minitest::Test
     Seed.new(fault: "a notification whose link ended left unanswered, so its caller waits",
              path: SRV, anchor: '            gen_server:reply(From, {error, gone}),',
              replacement: '            _ = From,',
-             catching_case: 'a link ending mid-notification answers gone')
+         catching_case: 'a link ending mid-notification answers gone'),
+Seed.new(fault: 'every declaration served again, whatever the ble rows name',
+         path: SUP, anchor: 'served({ok, Names}) when is_list(Names) -> [erx_gatt_decl:service(Name) || Name <- Names];',
+         replacement: 'served({ok, Names}) when is_list(Names) -> [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()];',
+         catching_case: 'served_from_the_key')
   ].freeze
 
   def test_registry_cases_pass_under_eunit

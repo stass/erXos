@@ -512,11 +512,11 @@ characteristic tx 6e400003-b5a3-f393-e0a9-e50e24dcca9e 244 notify open
 Each characteristic names its accesses and the level each requires:
 `open`, `encrypted`, `authenticated` or `bonded`, the last an
 authenticated link whose key is a kept bond's, which a pairing link
-reaches only once the bond is stored. The design has the domain serve
-every service that some `ble` grant of the machine names, a configured
-domain's or the one every installed app's grant is cut from (below);
-the domain serves every declared service, and reading the
-served set from the manifest's rows is designed and not built. The
+reaches only once the bond is stored. The domain serves every service
+that some `ble` grant of the machine names, a configured domain's or
+the one every installed app's grant is cut from (below), and no other
+declared service: the build derives that set from the manifest's rows
+and hands it to the domain as one of its arguments. The
 Bluetooth domain builds its attribute table once at its start, and nothing adds or moves an attribute while
 the domain lives, so no attribute handle moves under a connected
 phone.

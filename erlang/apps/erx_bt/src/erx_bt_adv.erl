@@ -17,8 +17,8 @@ structures, a length, a type and its data (Vol 3 Part C, 11), at most 31 octets:
 The UUIDs are those the registry answers, `erx_gatt_srv:advertised/0`, least significant
 octet first as ATT carries them, which is how AD carries them too. UUIDs that do not fit
 fail with `badarg`: the manifest check holds the served set to what fits
-(docs/todo-bluetooth.md, the `ble` facet's side), and while `erx_bt_sup` serves every
-declared service, a host test builds the advertising data of all of them. The name is
+(docs/todo-bluetooth.md, the `ble` facet's side), and a host test builds the advertising
+data of every declared service. The name is
 shortened rather than refused, at a character boundary.
 """.
 

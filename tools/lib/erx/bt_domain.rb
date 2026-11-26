@@ -112,12 +112,14 @@ module Erx
     # memory is the Bluetooth domain's MEMORY, reused unmeasured. Its arguments are
     # MediumBoot's without the halt, so it stays up.
     #
-    # Its one facet is ble for nus. The domain service makes it by introducing the two
+    # Its one facet is ble for nus and bondcheck, the bond check's service, which runs no
+    # handler (docs/design-bluetooth.md, "The bond check"): the grant names it so the
+    # Bluetooth domain serves it, and the echo attaches nus alone. The domain service makes it by introducing the two
     # domains, so the echo's limits allow one connection (the Bluetooth domain's already
     # allow one) and the machine's max_connections grows by ECHO_CONNECTIONS (manifest). The request
     # bound, 1,024 octets, is above the largest request a handler makes, a notify of tx's
     # 244 octets with its term's framing; 16 may be in flight.
-    # The connections the echo domain's one facet, ble for nus, adds to the machine's
+    # The connections the echo domain's one facet, ble for nus and bondcheck, adds to the machine's
     # max_connections (manifest).
     ECHO_CONNECTIONS = 1
     ECHO_DOMAIN = 'echo'
@@ -158,6 +160,7 @@ module Erx
         period_ns 1000000000
         max_heap_size 262144
         parameter services "nus"
+        parameter services "bondcheck"
     ROWS
     # The line grant (docs/design-bluetooth.md, "The controller's line"): the device the
     # platform's line unit holds, a virtio console, which states no rate or flow, and a

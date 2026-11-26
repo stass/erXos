@@ -44,6 +44,20 @@ class GattDeclTest < Minitest::Test
                  nus.characteristics.map { |c| [c.name, c.uuid, c.max, c.access, c.value] }
   end
 
+  # The bond check's service (docs/design-bluetooth.md, "On QEMU against Bumble", "The bond
+  # check"): three constants, each its own level's name in ASCII, read at the three levels
+  # above open, with no write, no subscription and no advertising.
+  def test_the_bondcheck_declaration_is_the_designs
+    path = 'abi/gatt/bondcheck.txt'
+    bondcheck = Erx::GattDecl.parse(path: path, text: File.read(File.join(ROOT, path)), vocabulary: VOCABULARY)
+    uuid = ->(digit) { Erx::GattDecl::Uuid.new(bits: 128, value: "eb417d#{digit}58b14f45b9f5e9e24e229b0f".to_i(16)) }
+    assert_equal ['bondcheck', uuid.call('8e'), false], [bondcheck.name, bondcheck.uuid, bondcheck.advertise]
+    assert_equal [['encrypted', uuid.call('8f'), 9, { 'read' => 'encrypted' }, 'encrypted'],
+                  ['authenticated', uuid.call('90'), 13, { 'read' => 'authenticated' }, 'authenticated'],
+                  ['bonded', uuid.call('91'), 6, { 'read' => 'bonded' }, 'bonded']],
+                 bondcheck.characteristics.map { |c| [c.name, c.uuid, c.max, c.access, c.value] }
+  end
+
   def test_a_missing_or_repeated_service_line_is_refused
     assert_refused(/no service line/, service: '# nothing declared')
     assert_refused(/svc.txt:1: a characteristic before the service line/, service: "#{CHAR} 244 read open")
@@ -175,7 +189,7 @@ class GattDeclTest < Minitest::Test
   # octet; a mismatch prints the module's answer.
   TERMS = <<~'ERLANG'
     Check = fun(Expected, Actual) -> io:format("~w~n", [Expected =:= Actual orelse Actual]) end,
-    Check(['empty', 'end', nus], erx_gatt_decl:names()),
+    Check([bondcheck, 'empty', 'end', nus], erx_gatt_decl:names()),
     Check([nus], erx_gatt_decl:advertised()),
     Check(#{name => 'end', uuid => <<16#0F, 16#18>>,
             characteristics => [#{name => level, uuid => <<16#19, 16#2A>>, max => 20,

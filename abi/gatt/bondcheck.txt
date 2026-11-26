@@ -1,0 +1,13 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# bondcheck: the bond check's test service (docs/design-bluetooth.md, "On QEMU against
+# Bumble", "The bond check"). Its three characteristics are constants read at the three
+# levels above open, each value its own level's name in ASCII, with no write, no
+# subscription and no handler: a declared value is served whether or not a handler runs.
+# A link with no key reads none of them; a Just Works bond's key reads encrypted alone; a
+# Passkey Entry bond's key reads all three, bonded once the store has kept the bond.
+service bondcheck eb417d8e-58b1-4f45-b9f5-e9e24e229b0f
+#              name          uuid                                 max accesses           initial value
+characteristic encrypted     eb417d8f-58b1-4f45-b9f5-e9e24e229b0f 9  read encrypted     value 656e63727970746564
+characteristic authenticated eb417d90-58b1-4f45-b9f5-e9e24e229b0f 13 read authenticated value 61757468656e74696361746564
+characteristic bonded        eb417d91-58b1-4f45-b9f5-e9e24e229b0f 6  read bonded        value 626f6e646564

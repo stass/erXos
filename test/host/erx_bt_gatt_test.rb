@@ -36,6 +36,13 @@ class ErxBtGattTest < Minitest::Test
              anchor: 'check(bonded, _Security) -> {error, insufficient_authentication}.',
              replacement: 'check(bonded, _Security) -> ok.',
              catching_case: 'gate_bonded_requires_the_kept_bond_test'),
+    Seed.new(fault: 'a value no handler has set read without the gate, as a handlerless service is',
+             module_path: SERVER,
+             anchor: 'readable(#{read := Level}, #{security := Security}, _Bearer) -> erx_gatt_gate:check(Level, Security).',
+             replacement: 'readable(#{read := Level, source := {value, Key, _}}, #{security := Security, values := Values}, ' \
+                          '_Bearer) when is_map_key(Key, Values) -> erx_gatt_gate:check(Level, Security); ' \
+                          'readable(#{read := _}, _Server, _Bearer) -> ok.',
+             catching_case: 'bondcheck_reads_only_through_the_gate_test'),
     Seed.new(fault: 'services laid out in manifest order',
              module_path: DB,
              anchor: 'Sorted = lists:sort(fun(#{name := A}, #{name := B}) -> A =< B end, Services),',

@@ -232,6 +232,28 @@ declared_services_build_the_table_test() ->
                            || #{name := Char} <- Chars]
                   end, Declared).
 
+%% The bond check (docs/design-bluetooth.md, "The bond check"): bondcheck runs no handler,
+%% so each characteristic answers its declared value through the gate alone. A link with no
+%% key reads none of the three, each answered Insufficient Authentication (0x05); a Just
+%% Works key reads encrypted alone; a Passkey Entry key reads encrypted and authenticated,
+%% and bonded once the store has kept the bond.
+bondcheck_reads_only_through_the_gate_test() ->
+    Table = erx_gatt_db:build(?GAP, [erx_gatt_decl:service(bondcheck)]),
+    Read = fun(Char, Security) ->
+                   {ok, #{value := Handle}} = erx_gatt_db:characteristic({bondcheck, Char}, Table),
+                   Server = #{table => Table, values => #{}, security => Security},
+                   case answer(read(Handle), Server, erx_gatt_server:new()) of
+                       <<16#0B, Value/binary>> -> Value;
+                       Refusal -> ?assertEqual(error_rsp(16#0A, Handle, 16#05), Refusal), refused
+                   end
+           end,
+    Rows = [{?OPEN, [refused, refused, refused]},
+            {?JUST_WORKS, [<<"encrypted">>, refused, refused]},
+            {?PASSKEY, [<<"encrypted">>, <<"authenticated">>, refused]},
+            {#{key => authenticated, encrypted => true, bonded => true}, [<<"encrypted">>, <<"authenticated">>, <<"bonded">>]}],
+    [?assertEqual({Security, Expected}, {Security, [Read(Char, Security) || Char <- [encrypted, authenticated, bonded]]})
+     || {Security, Expected} <- Rows].
+
 %% ATT carries a handle in 16 bits, so build/1, which gives every handle, refuses a table
 %% past 0xFFFF: GAP's and GATT's services (9 handles), a service of 32,762 characteristics
 %% that neither notify nor indicate (65,525) and one of none (1) fill it to 0xFFFF exactly,

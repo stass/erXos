@@ -101,8 +101,8 @@ state_refuses_a_shared_id_test() ->
 
 %% The largest state the served table lets the store write fits `bt_state_max`: a bond's
 %% subscriptions are its link's, so they name only characteristics of the table, each
-%% with a configuration attribute, and the table is every service abi/gatt declares, as
-%% erx_bt_sup serves it, with GAP's and GATT's own. So `bt_bonds_max` bonds, each with a
+%% with a configuration attribute, and the largest table is every service abi/gatt
+%% declares, the most erx_bt_sup can serve, with GAP's and GATT's own. So `bt_bonds_max` bonds, each with a
 %% table hash and subscribed to every such characteristic, are the largest state, and a
 %% declaration that would make a put `too_large` fails here.
 state_largest_fits_test() ->

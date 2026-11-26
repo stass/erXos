@@ -33,13 +33,14 @@ class BtDomainTest < Minitest::Test
     refute_match(/^  parameter (rate|flow)/, source[source.index("facet line\n")..])
   end
 
-  # The echo domain's grant of ble names nus alone, and its row boots the test-only
-  # release that starts erx_gatt_echo_test.
-  def test_the_manifest_grants_ble_for_nus_to_the_echo_domain
+  # The echo domain's grant of ble names nus, which its handler attaches, and bondcheck,
+  # which runs no handler (docs/design-bluetooth.md, "The bond check"), and its row boots
+  # the test-only release that starts erx_gatt_echo_test.
+  def test_the_manifest_grants_ble_for_nus_and_bondcheck_to_the_echo_domain
     source = Erx::BtDomain.manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
     grant = source[source.index("facet ble\n")..]
     assert grant.start_with?("facet ble\n  grantee @domain.echo\n  service @service.ble\n")
-    assert_equal ["  parameter services \"nus\"\n"], grant.lines.grep(/^  parameter /)
+    assert_equal ["  parameter services \"nus\"\n", "  parameter services \"bondcheck\"\n"], grant.lines.grep(/^  parameter /)
     assert_includes source, "domain echo\n"
     assert_includes source, "  release @artifact.#{Erx::BtDomain::ECHO_BOOT.name}\n"
     assert_includes Erx::BtDomain::ECHO_BOOT.applications, 'erx_gatt_echo_test'

@@ -752,6 +752,7 @@ module Erx
         app_services = check_apps(rows)
         rows['facets'], rows['facet_operations'], rows['facet_parameters'], facet_values =
           normalize_facets(services.map(&:first), rows, app_services)
+        rows['domains'] = domain_arguments(rows, facet_values)
         rows['pins'] = pins(rows, facet_values)
         rows['starts'] = normalize_starts(services.map(&:first), rows)
         rows['apps'], rows['app_services'] = apps_rows(app_services, rows)
@@ -1704,7 +1705,8 @@ module Erx
 
       # The configured domains in name order, which their references' indices follow.
       # A domain's runtime and release are artifacts of this pack: the runtime an
-      # executable entry, the release a domain release's run of entries.
+      # executable entry, the release a domain release's run of entries. Its arguments and
+      # environment are packed once the facets are known (domain_arguments).
       def normalize_domains(rows)
         principals = rows.fetch('principals').map { |row| row.fetch('name') }
         records('domain').sort_by(&:name).map do |record|
@@ -1712,10 +1714,6 @@ module Erx
           invalid('a configured domain\'s name has a pooled name\'s form', 'domain.name') if pooled&.[](:stem)&.match?(Frontend::IDENTIFIER)
           invalid('a configured domain shares a principal\'s name', 'domain.name') if principals.include?(record.name)
           invalid('the system domain\'s name is not a configured domain\'s', 'domain.name') if record.name == 'system'
-          args = boot_args(record, field: 'domain.args')
-          strings = args.bytesize + words(record, 'env').bytesize
-          invalid('arguments and environment exceed the boot page\'s strings', 'domain.args') if
-            strings > @codec.constant('boot_strings_max')
           kind = enum(record, 'kind', 'mf_kind')
           invalid('no secret domain until the vault at M11', 'domain.kind') unless kind == @codec.member('mf_kind', 'service')
           runtime = artifact(record, 'runtime', 'executable', field: 'domain.runtime')
@@ -1724,11 +1722,40 @@ module Erx
             'flags' => flags(record, 'flags', 'mf_domain_flags'), 'runtime' => runtime.fetch('entry'),
             'release' => release.fetch('entry'), 'release_files' => release.fetch('files'),
             'limits' => reference(record, 'limits', 'limits'), 'restarts' => number(record, 'restarts'),
-            'restart_period_s' => number(record, 'restart_period_s'),
-            'args' => args, 'env' => words(record, 'env') }
+            'restart_period_s' => number(record, 'restart_period_s') }
         end
       end
 
+      # The configured domains with their arguments and environment: each row's own
+      # arguments bound to its release's boot script (boot_args), the Bluetooth domain's
+      # with its served set (served_sets), refused past the boot page's strings.
+      def domain_arguments(tables, facet_values)
+        served = served_sets(tables, facet_values)
+        by_name = records('domain').to_h { |record| [record.name, record] }
+        tables.fetch('domains').each_with_index.map do |row, index|
+          record = by_name.fetch(row.fetch('name'))
+          args = boot_args(record, field: 'domain.args', served: served[index])
+          invalid('arguments and environment exceed the boot page\'s strings', 'domain.args') if
+            args.bytesize + words(record, 'env').bytesize > @codec.constant('boot_strings_max')
+          row.merge('args' => args, 'env' => words(record, 'env'))
+        end
+      end
+
+      # The services each domain that serves ble serves, by the domain's index: every name
+      # its ble rows give, the app template's included, sorted (docs/design-bluetooth.md,
+      # "The Bluetooth domain" and "Declarations: `abi/gatt`"), so it serves no declaration
+      # none of its grants names; with no grant, none. facet_values are parallel to the
+      # facets, and check_ble_grants has held every name to abi/gatt's names.
+      def served_sets(tables, facet_values)
+        services = tables.fetch('services')
+        ble = fetch_interface('ble')
+        served = services.select { |row| row.fetch('interface') == ble }.to_h { |row| [row.fetch('server'), []] }
+        tables.fetch('facets').zip(facet_values).each do |facet, values|
+          service = services.fetch(facet.fetch('service'))
+          served.fetch(service.fetch('server')).concat(values.fetch('services', [])) if service.fetch('interface') == ble
+        end
+        served.transform_values(&:sort)
+      end
       # Property 14: each session template, keyed by its principal, from which the
       # domain service makes every session of that principal on request
       # (docs/design-system.md, "The manifest"). A template is not a domain row,
@@ -1799,17 +1826,40 @@ module Erx
       # can make it a plain argument and leave init to its default script. Its own
       # arguments naming -boot are refused, since its release names the script.
       # erx_domain_srv:boot_args/2 binds a created domain's the same way.
-      def boot_args(record, field:)
+      #
+      # The Bluetooth domain's served set, served, is the application key SERVED_KEY, a
+      # list of quoted atoms (a reserved word such as `end` may name a service), put after
+      # the binding, so no word of the row's (-extra) can make it a plain argument, and
+      # closed by its own --, so no plain word at the head of the row's init arguments
+      # continues it. A row naming the key itself is refused, whichever domain it is, so the
+      # key has one value, the derived one.
+      def boot_args(record, field:, served: nil)
         args = words(record, 'args').split("\0")
         invalid('the arguments name -boot, which the release sets', field) if args.include?('-boot')
-        boot_page_args(args, release_name(record, field: field.sub('args', 'release')))
+        invalid("the arguments name #{SERVED_KEY.join(' ')}, which the build derives from the ble rows", field) if
+          application_keys(args, SERVED_KEY.first).include?(SERVED_KEY.last)
+        derived = served ? [*SERVED_KEY, "[#{served.map { |name| "'#{name}'" }.join(',')}]", '--'] : []
+        boot_page_args(args, release_name(record, field: field.sub('args', 'release')), derived: derived)
+      end
+
+      # The application key that carries the Bluetooth domain's served set
+      # (docs/design-bluetooth.md, "The Bluetooth domain"), which the build derives.
+      SERVED_KEY = %w[-erx_bt services].freeze
+
+      # The keys of every `flag Key Value ...` in args, as written: a flag's values run to
+      # the next word that begins with a dash, and application_controller takes them in
+      # pairs.
+      def application_keys(args, flag)
+        args.each_index.select { |at| args.fetch(at) == flag }.flat_map do |at|
+          args.drop(at + 1).take_while { |word| !word.start_with?('-') }.each_slice(2).map(&:first)
+        end
       end
 
       # A word list bound to the boot script of the release named name, as boot_args
-      # describes.
-      def boot_page_args(args, name)
+      # describes, with the derived words, closed by their own --, first among init's.
+      def boot_page_args(args, name, derived: [])
         emulator, init = args.index('--').then { |at| at ? [args[0...at], args[at + 1..]] : [args, []] }
-        [*emulator, '--', '-boot', "/bin/#{name}", '--', *init].map { |word| "#{word}\0" }.join.b
+        [*emulator, '--', '-boot', "/bin/#{name}", '--', *derived, *init].map { |word| "#{word}\0" }.join.b
       end
 
       # The <name> of a record's `release @artifact.<name>`, once artifact has checked that
