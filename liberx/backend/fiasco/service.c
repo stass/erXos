@@ -37,7 +37,6 @@
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/entropy.h"
 #include "liberx/backend/fiasco/exception.h"
-#include "liberx/backend/fiasco/end_record.h"
 #include "liberx/backend/fiasco/fault_gate.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/log.h"
@@ -150,7 +149,6 @@ erx_fiasco_service_boot(const erx_boot_handoff_view_t *handoff)
 	__builtin_memcpy(service_build, handoff->build_id, sizeof(service_build));
 	service_boot_value = handoff->boot.value;
 	service_boot_known = true;
-	erx_fiasco_end_boot(handoff->development);
 }
 
 const char *

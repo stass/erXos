@@ -142,8 +142,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Low] 0.2 on Fiasco, `liberx/backend/fiasco/root_handoff.c` and `test/guest/*`: a root decides whether the kernel's
   rings record as it reads its handoff, so the native test guests that read none (`native_crash`, `native_threads`
   and the others that pass `erx_fiasco_root_up` no archive) never decide: their crash records set `trace_none`
-  even in a development build whose rings record, and they map no window. No product root is among them; have
-  each read its handoff, or give the record a third state for a root that has not decided.
+  and keep the brief form even in a development build whose rings record, and they map no window. No product root
+  is among them; have each read its handoff, or give the record a third state for a root that has not decided.
 * [Low] 0.2 on Fiasco, `fiasco/kernel/src/erx/erx_trace.cpp` and `kern/task.cpp`: `map_trace`'s hardening.
   The claim is taken before the call is decided, so a malformed call racing
   a valid one makes the valid one fail; decide first and claim only on a map. `-L4_EEXIST` means both

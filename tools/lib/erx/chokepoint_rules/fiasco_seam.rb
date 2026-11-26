@@ -228,6 +228,9 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks",
           scope: ERXOS_C_OUTSIDE_FIASCO_BACKEND,
           pattern: %r{[<"]l4/|l4sys|l4re}i,
+          # The host's stand-ins for the few Fiasco names the backend's handoff code uses, which
+          # let fiasco_end_test build that code; they declare those names and call nothing.
+          sites: [Chokepoints::Site.new(glob: 'test/fixtures/l4_stub/**/*')],
           seed: { 'liberx/seeded.c' => "#include <l4/sys/ipc.h>\n", 'kernel/core/seeded.c' => "#include <l4/re/env.h>\n" }
         ),
         # Names the backend's headers outside it, so a plain include of a
@@ -288,6 +291,9 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks",
           scope: ERXOS_C_OUTSIDE_FIASCO_BACKEND,
           pattern: /\bl4(?:re|util)?_[A-Za-z0-9_]*/,
+          # The host's stand-ins for the few Fiasco names the backend's handoff code uses, which
+          # let fiasco_end_test build that code; they declare those names and call nothing.
+          sites: [Chokepoints::Site.new(glob: 'test/fixtures/l4_stub/**/*')],
           seed: { 'kernel/core/seeded.c' => "void f(void) { l4_ipc_call(0, 0, 0, 0); }\n",
                   'liberx/seeded.c' => "void f(void) { l4re_env(); }\n" }
         ),

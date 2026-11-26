@@ -19,7 +19,10 @@
  * crash core reads them only for the full form. No l4 call, so the host tests it.
  */
 
-/* The boot image's kind, from its handoff; until it is told, every record is brief. */
+/*
+ * The boot image's kind, from its handoff, as a root reads it (erx_fiasco_root_handoff);
+ * until it is told, every record is brief, so a root that reads no handoff writes brief.
+ */
 void		erx_fiasco_end_boot(bool development);
 /*
  * Whether the kernel's rings record in this boot (erx_fiasco_trace_boot). Until it is

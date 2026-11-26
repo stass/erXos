@@ -76,20 +76,25 @@ class FiascoEndTest < Minitest::Test
   # record's trace tail", "Who sees it").
   RECORD_CORE = 'liberx/backend/fiasco/end_record.c'
   RECORD_DRIVER = 'test/fixtures/fiasco_end_record_driver.c'
-  RECORD_SOURCES = %w[kernel/core/boot_args.c kernel/core/watchdog.c kernel/core/crash.c kernel/core/log.c kernel/core/trace_ring.c].freeze
+  HANDOFF = 'liberx/backend/fiasco/root_handoff.c'
+  RECORD_SOURCES = %W[#{HANDOFF} kernel/core/boot_args.c kernel/core/watchdog.c kernel/core/crash.c
+                      kernel/core/log.c kernel/core/trace_ring.c test/fixtures/l4_stub/sigma0_stub.c].freeze
+  # Stand-ins for Fiasco's headers and sigma0, for the handoff code's one sigma0 call.
+  L4_STUB = 'test/fixtures/l4_stub'
 
-  def build_record_driver(core)
+  def build_record_driver(core, sources:)
     output = File.join(@directory, 'end-record')
     log, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                                  *Erx::Generated.include_flags(root: ROOT), '-I', File.join(ROOT, 'include'), '-I', ROOT,
-                                  core, *RECORD_SOURCES.map { |file| File.join(ROOT, file) }, File.join(ROOT, RECORD_DRIVER),
+                                  '-I', File.join(ROOT, L4_STUB), *Erx::Generated.include_flags(root: ROOT),
+                                  '-I', File.join(ROOT, 'include'), '-I', ROOT,
+                                  core, *sources.map { |file| File.expand_path(file, ROOT) }, File.join(ROOT, RECORD_DRIVER),
                                   '-o', output, stdin_data: '')
     assert status.success?, log
     output
   end
 
-  def record_lines(core)
-    log, status = Open3.capture2e(build_record_driver(core), stdin_data: '')
+  def record_lines(core, sources: RECORD_SOURCES)
+    log, status = Open3.capture2e(build_record_driver(core, sources: sources), stdin_data: '')
     assert status.success?, log
     log.lines(chomp: true)
   end
@@ -103,7 +108,20 @@ class FiascoEndTest < Minitest::Test
     assert_match(/\Aa development image: full \d+ trace 12 flags 0\z/, lines.fetch(2))
     assert_match(/\Aa task's fault: full \d+ trace 0 flags 0\z/, lines.fetch(3))
     assert_equal "a release image with erx.trace=1: brief #{brief} trace 0 flags 0", lines.fetch(5)
-    assert_equal 6, lines.size
+    assert_equal 7, lines.size
+  end
+
+  # A root reads its handoff through erx_fiasco_root_handoff, the product root, the musl
+  # test root and the native bench root alike, so the image's form is decided there: a
+  # development root that serves nothing still writes the full form and the trace tail. The
+  # seeded fault takes the form's decision out of the handoff, and that root writes brief.
+  def test_a_root_that_only_reads_its_handoff_writes_the_images_form
+    assert_match(/\Aa root that only reads its handoff: full \d+ trace 12 flags 0\z/,
+                 record_lines(File.join(ROOT, RECORD_CORE)).fetch(6))
+    seeded = mutant("\t\terx_fiasco_end_boot(handoff->development);\n", '', source: File.join(ROOT, HANDOFF))
+    assert_match(/\Aa root that only reads its handoff: brief \d+ trace 0 flags 0\z/,
+                 record_lines(File.join(ROOT, RECORD_CORE), sources: [seeded, *(RECORD_SOURCES - [HANDOFF])]).fetch(6),
+                 'the seeded fault, no form from the handoff, survived')
   end
 
   # The root decides from its handoff's line whether the kernel's rings record, as the kernel
@@ -126,9 +144,9 @@ class FiascoEndTest < Minitest::Test
     end
   end
 
-  def mutant(from, to)
-    source = File.read(File.join(ROOT, RECORD_CORE))
-    assert_equal 1, source.scan(from).size
-    File.join(@directory, "end_record_mutant_#{source.index(from)}.c").tap { |path| File.write(path, source.sub(from, to)) }
+  def mutant(from, to, source: File.join(ROOT, RECORD_CORE))
+    text = File.read(source)
+    assert_equal 1, text.scan(from).size
+    File.join(@directory, "#{File.basename(source, '.c')}_mutant_#{text.index(from)}.c").tap { |path| File.write(path, text.sub(from, to)) }
   end
 end

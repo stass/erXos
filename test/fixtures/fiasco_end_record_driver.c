@@ -7,7 +7,9 @@
  * The root's crash records on the host (liberx/backend/fiasco/end_record.c): each
  * line names one end and the record it wrote, its form, its length, how many
  * trace slots it filled and its header's flags. The input names the full form every time; the boot image
- * decides, whatever the input names.
+ * decides, whatever the input names. Its last end is a root that only reads its handoff, as the
+ * musl test root and the native bench root do: the handoff alone (root_handoff.c, built here
+ * over test/fixtures/l4_stub, with the handoff's reader below) must give its records the image's form.
  */
 
 #include <stdbool.h>
@@ -20,12 +22,30 @@
 #include "erx/core/crash.h"
 #include "erx/core/trace_ring.h"
 #include "liberx/backend/fiasco/end_record.h"
+#include "liberx/backend/fiasco/root_handoff.h"
+#include "liberx/backend/fiasco/trace.h"
 
 #define DRIVER_RINGS	4u
 
 static erx_trace_ring_t driver_rings[DRIVER_RINGS];
 static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t driver_record[ERX_CRASH_SIZE];
 static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t driver_scratch[ERX_CRASH_SCRATCH_BYTES];
+
+/* A development image's handoff with an empty boot line. */
+const char *
+erx_boot_handoff_accept(const uint8_t *record, size_t length, erx_boot_handoff_view_t *handoff)
+{
+	(void)record, (void)length;
+	*handoff = (erx_boot_handoff_view_t){ .development = true, .bootargs = "", .bootargs_len = 0 };
+	return (NULL);
+}
+
+/* The trace layer's part of the decision (trace.c) is the record's trace_none bit. */
+void
+erx_fiasco_trace_boot(bool on)
+{
+	erx_fiasco_end_trace(on);
+}
 
 /* One end of the root: its record's form, length and filled trace slots. */
 static void
@@ -72,5 +92,12 @@ main(void)
 	erx_fiasco_end_boot(false);
 	erx_fiasco_end_trace(erx_boot_line_trace("erx.trace=1", 11, false));
 	driver_end("a release image with erx.trace=1", true);
+	/* As a fresh root's, the form is brief here: only the handoff can make it full. */
+	erx_fiasco_end_boot(false);
+	if (erx_fiasco_root_handoff(&(erx_boot_handoff_view_t){ 0 }) != NULL) {
+		puts("the stand-in handoff was refused");
+		return (1);
+	}
+	driver_end("a root that only reads its handoff", true);
 	return (0);
 }

@@ -19,6 +19,7 @@
 #include "erx/abi.h"
 #include "erx/core/boot_args.h"
 #include "erx/core/boot_handoff.h"
+#include "liberx/backend/fiasco/end_record.h"
 #include "liberx/backend/fiasco/root_handoff.h"
 #include "liberx/backend/fiasco/trace.h"
 #include "liberx/backend/fiasco/vm.h"
@@ -36,8 +37,16 @@ erx_fiasco_root_handoff(erx_boot_handoff_view_t *handoff)
 	/* A kernel started without bootstrap's handoff page has a user_ptr of 0. */
 	reason = erx_boot_handoff_accept((const uint8_t *)(uintptr_t)kip->user_ptr,
 	    ERX_BOOT_HANDOFF_SIZE, handoff);
-	if (reason == NULL)
+	/*
+	 * Every root that reads its handoff passes here, the product root, the musl
+	 * test root and the native bench root alike, so the boot's decisions for its
+	 * crash records are made here: the form from the image's kind, and whether the
+	 * kernel's rings record. A root that reads none keeps both undecided.
+	 */
+	if (reason == NULL) {
+		erx_fiasco_end_boot(handoff->development);
 		erx_fiasco_trace_boot(erx_boot_line_trace(handoff->bootargs, handoff->bootargs_len,
 		    handoff->development));
+	}
 	return (reason);
 }
