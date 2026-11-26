@@ -12,14 +12,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   what Fiasco lacks is published with it as the downsides of
   [design-fiasco.md](design-fiasco.md#downsides-against-erxoss-kernel).
   The tree's `kobject_rpc.h` is erXos's MIT clean-room replacement of
-  Fiasco's GPL-2.0 original (`fiasco/kernel/ORIGIN.md`); the one GPL-2.0 file a build carries is
-  the kernel debugger's `jdb_object.cpp`, which goes out only in 0.1's
-  images, which keep the debugger, with its source offered, and which the
-  release kernel's build leaves out (0.1's and
-  0.2's items below, [design.md](design.md#dependencies)); the debugger's
-  replacement takes the file out of the tree
-  ([design-debugger.md](design-debugger.md#on-fiasco), and its item in
-  [todo-fiasco.md](todo-fiasco.md)). Both kernels then link one stop core,
+  Fiasco's GPL-2.0 original (`fiasco/kernel/ORIGIN.md`); no kernel build compiles a GPL-2.0 file,
+  since Fiasco's kernel debugger with its `jdb_object.cpp` is excluded
+  from the import ([design-debugger.md](design-debugger.md#on-fiasco));
+  0.1's first published images, which keep the debugger, are rebuilt and
+  republished without it (its item in [todo-fiasco.md](todo-fiasco.md)). Both kernels then link one stop core,
   `kernel/core/machine_stop.c`, which is the kernel's panic path when
   erXos's kernel is built. The import also records the
   link closure of L4Re's `bootstrap` and `sigma0`, their `drivers-frst`

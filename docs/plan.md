@@ -177,7 +177,7 @@ numbers are names; the table's order is the order.
 | 1b-I The Raspberry Pi 4 on Fiasco | the Pi 4 boots from its firmware to the shell on its console; a file synced on its SD card survives a power cut; its Ethernet carries UDP echo and a TCP transfer; the kiosk shows on its screen; a clock module on its header keeps the time across a power cut; every guarantee deferred | estimated per part before it starts; the designs give no figure | part (a): Phase 1; (b): 1b-E; (c): 1b-E and 1b-G; (d): 1b-C's part 3; (e): (a) and 1b-E | GR |
 | 1b-J The Raspberry Pi 5 on Fiasco | the Pi 5 boots from its firmware to the shell on its debug UART; its Ethernet carries UDP echo and a TCP transfer through RP1; a USB keyboard and stick work on RP1's hosts; every guarantee deferred | estimated per part before it starts; the designs give no figure | (a), (b): 1b-I's part (a); (c): 1b-I's part (b); (d): 1b-E; (f): 1b-G; (g): 1b-C's part 3; (h): Track U's part (a) | GR5 |
 | 0.1 The preview, erXos's first public preview | a development build's published card boots a Raspberry Pi 4 to the kiosk with live quotes on its screen, root reaches `rc` over SSH with the key on the card's record partition, sets the clock and runs `ps` and `top`, `/data` survives a power cut and a fault or a hang resets the board; the QEMU image of the same build does the same, and Doom, in both images, plays on QEMU with the virtio keyboard and runs its demo loop on the Pi | the clean-room interface header (its images keep the kernel debugger by decision, with its source offered; leaving it out is 0.2's release kernel's), the end path's reset, the hardware watchdog on every boot, the set-time command and the login key's reader, each estimated before it starts; the milestones it takes carry their own figures | [0.1's dependencies](#01-the-preview) | |
-| 0.2 The first release, on Fiasco | a release build on QEMU `virt` and the Raspberry Pi 4 boots without the development banner, asks for a login and runs an installed app whose code is untrusted, which reaches no other domain, stops at its memory wall and spins in its own band without delaying the display or a driver; the release notes carry the downsides against erXos's kernel | the backend on Fiasco's own mechanisms and four Fiasco patches (the clean-room interface header, the release kernel's build without `jdb_object.cpp`, writable or executable, eager FP switching), five if the null-request bench shows that FD32's hardening of its entry costs nothing measurable, estimated before it starts; the milestones it takes carry their own figures | 0.1, Phase 1b and track A, and the Fiasco forms of M9's kernel part's devices, the rest of track P, M10, M12, track D's parts 5 and 9 and M11's closure | the gates of the milestones it takes: GP, G12, GN-board |
+| 0.2 The first release, on Fiasco | a release build on QEMU `virt` and the Raspberry Pi 4 boots without the development banner, asks for a login and runs an installed app whose code is untrusted, which reaches no other domain, stops at its memory wall and spins in its own band without delaying the display or a driver; the release notes carry the downsides against erXos's kernel | the backend on Fiasco's own mechanisms and four Fiasco patches (the clean-room interface header, the debugger's removal and the stop in its place, writable or executable, eager FP switching), five if the null-request bench shows that FD32's hardening of its entry costs nothing measurable, estimated before it starts; the milestones it takes carry their own figures | 0.1, Phase 1b and track A, and the Fiasco forms of M9's kernel part's devices, the rest of track P, M10, M12, track D's parts 5 and 9 and M11's closure | the gates of the milestones it takes: GP, G12, GN-board |
 | Track F Fiasco, improved to the decision | a closed IRQ handle whose slot was reused answers `ERX_ESTALE`; a debugger stops, reads and resumes a thread; a domain spinning in its band gets no more than its grant; a program borrows memory its session has free; a copy-on-write `fork` or a shared file mapping works on Fiasco through the root as pager; each stage removes or narrows its rows of the downsides | about 7,000 to 16,000 lines of C17 and C++ in the fork, the backend and the root, the scheduler stages' 2,000 to 4,050 among them (unverified estimates, none prototyped; [design-fiasco.md](design-fiasco.md#stages-beyond-bands)) | 0.2 | each stage by its tests, the scheduler stages by their before-and-after numbers on Fiasco over the workloads G8 names (E-S1, E-S3 to E-S9); then GF |
 | **Phase 2, if gate GF chooses erXos's kernel** | | | | |
 | Track K erXos's kernel | the pilot, then the kernel, booting 0.2's boot image and passing the conformance suite | 25,000 to 40,000 lines of C17, of which the capability core and the budget core exist; the pilot calibrates the figure | the pilot: M0, starting before Phase 1 is complete; the kernel in full: 1b-A and gate GF | GK1, GK2, GK3 |
@@ -406,12 +406,11 @@ clean-room header that takes its place in the tree, brought forward
 from 0.2's release build
 ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)), as
 CLAUDE.md's rule for release components requires. The kernel debugger's
-`jdb_object.cpp`, which a kernel with the debugger compiles, goes out
-only in 0.1's images, under CLAUDE.md's exception for the website's
-images with its source offered, until the stop of
-[design-debugger.md](design-debugger.md#decisions) has landed and the
-images are republished without it; no kernel build compiles it after
-that.
+`jdb_object.cpp` is excluded from the import, so no build of the tree
+compiles it. The first images published carry it, under CLAUDE.md's
+exception for the website's images with its source offered, until the
+stop of [design-debugger.md](design-debugger.md#decisions) has landed and
+the images are republished without it.
 `lld` installed.
 
 ## M1: The system boots on Fiasco
@@ -1617,8 +1616,8 @@ website's browser demo runs 0.1's image.
   requested power-off, `halt`, leaves the board halted until its power
   is cycled. Updates are by reflashing the card, which takes `/data`
   with it; no update service and no trial boot.
-* **The preview's kernel.** 0.1's images are development builds and
-  carry the development kernel, with the kernel debugger and the
+* **The preview's kernel.** 0.1's first published images are development
+  builds and carry the development kernel of their time, with the kernel debugger and the
   kernel's own console input, by decision
   ([design-fiasco.md](design-fiasco.md#boot-handoff)): a panic enters
   the debugger on the console, and on the Pi 4 the hardware watchdog,
@@ -1626,15 +1625,16 @@ website's browser demo runs 0.1's image.
   watchdog, so there a kernel panic stops in the debugger until the
   run's deadline or the user ends it. The debugger's `jdb_object.cpp`
   (GPL-2.0-only) goes out with its source offered, under CLAUDE.md's
-  exception for the website's images. The stop of
-  [design-debugger.md](design-debugger.md#decisions) takes the debugger
-  and that file out of every build, in 0.2, and 0.1's images are rebuilt
-  and republished once it has landed.
+  exception for the website's images. The fork has no
+  debugger and no such file, and the stop of
+  [design-debugger.md](design-debugger.md#decisions) takes the debugger's
+  place in 0.2; 0.1's images are rebuilt and republished once it has
+  landed.
 * **A distributable closure.** The shipped images' link closure is
   distributable under the license allowlist of
-  [design.md](design.md#licenses-and-notices), which admits Fiasco's
-  one GPL-headed file the images carry, `jdb_object.cpp`, only through
-  its row of the closed table, in development builds alone. The kernel
+  [design.md](design.md#licenses-and-notices), which admits only
+  Doom's archive, an `example`, through the closed table, in development
+  builds alone, and no Fiasco file under a license that is not permissive. The kernel
   takes the clean-room header of 0.2's release Fiasco build
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)):
   `kobject_rpc.h`, which the kernel cannot build without, rewritten

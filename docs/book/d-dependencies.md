@@ -6,8 +6,7 @@
 > provenance; the license rule `LicenseCheck` and its closed table; and
 > the `NOTICES` file that every packed system image carries as
 > `system/NOTICES`. Designed: a copy of `NOTICES` beside the boot image
-> in each slot's boot partition, the removal of Fiasco's kernel debugger
-> with its GPL file, and the rows below marked as designed.
+> in each slot's boot partition, and the rows below marked as designed.
 
 erXos is a small amount of new code standing on a large amount of old
 code. Its Erlang runs on OTP, its native programs link musl, its kernel
@@ -100,14 +99,12 @@ What the system builds from Fiasco is MIT, with two files to note.
 Fiasco's own `kobject_rpc.h` is GPL-2.0, and the tree holds instead
 erXos's MIT replacement, written from a description by someone who
 never read the original. The kernel debugger's `jdb_object.cpp` is
-GPL-2.0 too. Only a kernel built with the debugger compiles it, and
-the license rule takes it only in development builds. The images the
-website offers carry it and go out with a link to their source. The
-design takes Fiasco's debugger out of the tree, this file with it, and
-reads a stopped machine from the host instead
-([chapter 21](21-live-machine.md#2154-reading-a-stopped-machine)), after
-which no kernel build compiles a GPL file, and the website's images are
-rebuilt and republished without it. That removal is **Designed**.
+GPL-2.0 too. The import leaves Fiasco's debugger out, this file with it,
+and a stopped machine is read from the host instead
+([chapter 21](21-live-machine.md#2154-reading-a-stopped-machine)), so no
+kernel build compiles a GPL file. The first images the website offered
+carry it and went out with a link to their source; they are rebuilt and
+republished without it.
 
 Fiasco's imported tree leaves out the copyleft parts no build uses: Fiasco's own
 tests, a coverage module and a checksumming console stream that erXos
@@ -118,8 +115,8 @@ why. What `l4re-core` keeps is `sigma0` and, of the libraries it and
 `bootstrap` are built from, only the files those builds compile,
 include or install, with their license files, and the whole of
 `l4sys`'s generic and arm64 headers, the system-call API erXos's
-Fiasco backend is written against. The GPL files that remain are
-`jdb_object.cpp` and the configuration tool of the kernel and the
+Fiasco backend is written against. The one GPL file that remains is
+the configuration tool of the kernel and the
 build system, which runs on the development host while a build is
 configured and is compiled into nothing a boot image carries. The
 `kobject_rpc.h` every kernel build includes is not one of them: it
@@ -128,8 +125,7 @@ release build's check reads every executable a boot image carries,
 for every board: the kernel,
 `bootstrap`, `sigma0`, and the Raspberry Pi 4's own `bootstrap`. It
 fails if any file compiled or linked into one of them, headers
-included, has a license that is not permissive, apart from
-`jdb_object.cpp` in a kernel with the debugger.
+included, has a license that is not permissive.
 
 ### D.3.3 Storage, cryptography and small cores
 
@@ -257,12 +253,8 @@ A permissive license enters every build. A license that is not
 permissive enters only through one closed table, `LicenseCheck::TABLE`
 in `tools/lib/erx/license_check.rb`, whose every row names one input:
 its exact license, where the build reads it and which
-kinds of build take it. The table has two rows:
-
-1. Doom's archive, a demo program that is never part of the system,
-   in development builds only;
-2. Fiasco's `jdb_object.cpp`, in development builds only, a row the
-   designed removal of Fiasco's debugger deletes (D.3.2).
+kinds of build take it. The table has one row: Doom's archive, a demo program that is never
+part of the system, in development builds only.
 
 The design admits a few more files by name and place, outside every
 program and EROFS image: the Pi 4's device tree, with its source

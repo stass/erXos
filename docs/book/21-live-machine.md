@@ -936,11 +936,10 @@ On a recorded run it runs the machine backwards to the write that gave
 an attribute its value, which is the question a corrupted counter poses:
 who wrote this, and when.
 
-The stop, the hold and the tool are **Designed**. A development kernel
-in the tree carries Fiasco's own kernel debugger, a prompt on the
-console in which a kernel panic waits; the design removes it, and with
-it the one GPL file a kernel build compiles
-([appendix D](d-dependencies.md)).
+The stop, the hold and the tool are **Designed**. The fork carries no
+kernel debugger: Fiasco's own, a prompt on the console in which a kernel
+panic waits, is left out of the import, and with it the one GPL file a
+kernel build would compile ([appendix D](d-dependencies.md)).
 
 ## 21.6 Attributed text
 

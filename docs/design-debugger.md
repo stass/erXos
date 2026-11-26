@@ -39,8 +39,8 @@ file of one, is a target as [Targets](#targets) defines one.
 ## Context
 
 **JDB.** Fiasco's in-kernel debugger is 84 source files of 20,121 lines
-under `fiasco/kernel/src/jdb/` for the configurations erXos builds, all
-MIT. In a measured AArch64 build it and its trace buffer were 18,749 of
+under upstream's `src/jdb/` for the configurations erXos builds, all
+MIT, and the fork carries none of it; the paths below are upstream's. In a measured AArch64 build it and its trace buffer were 18,749 of
 66,837 preprocessed kernel lines, 28.1%
 ([research-hierarchical-scheduling.md](research-hierarchical-scheduling.md#fiasco-sizes)).
 It is a prompt on the kernel's console: object lists, thread control
@@ -70,8 +70,9 @@ debugger is for, on the machines erXos runs:
 * **Nothing uses it.** No erXos document describes its commands and the
   harness never drives it or looks for its prompt.
 
-**The Jdb kernel object.** `fiasco/kernel/src/kern/jdb_object.cpp` is
-GPL-2.0-only and is known to erXos only through a clean-room facts record
+**The Jdb kernel object.** Upstream's `src/kern/jdb_object.cpp` is
+GPL-2.0-only, is not in the fork, and is known to erXos only through a
+clean-room facts record
 ([References](#references)); nobody who writes erXos's code or documents
 opens it. It is the capability in slot 10 of the first task
 (`Initial_kobjects::Jdb`, `kern/globals.cpp`), through which user mode
@@ -81,13 +82,13 @@ and forwards debug requests to other objects; holding the capability is
 the only check. No erXos code names the capability or its calls: not
 `liberx`, the runtimes, the system services or the tools.
 
-**What erXos uses JDB for.** A development kernel carries JDB and the
-kernel's console input, so a fatal kernel error parks every CPU it
-reaches and waits on the console: on QEMU until the harness's deadline,
+**Why JDB leaves.** A kernel built with JDB and the kernel's console
+input, as upstream's development configuration is, parks every CPU a
+fatal kernel error reaches and waits on the console: on QEMU until the harness's deadline,
 on a Raspberry Pi 4 until the watchdog resets the board. A release kernel
 is built without both and resets at a panic
-(`FiascoConfig::RELEASE_UNSET`, `tools/lib/erx/fiasco_config.rb`). A
-development image, the website's among them, therefore carries a prompt
+(`FiascoConfig::RELEASE_UNSET`, `tools/lib/erx/fiasco_config.rb`). An
+image so built, the website's first images among them, carries a prompt
 that reads and writes kernel memory for whoever is at its console after a
 panic, and a GPL file.
 
@@ -1177,8 +1178,8 @@ attended, so no watchdog resets it while the probe holds it.
 
 **What leaves the tree.** `src/jdb/`, `src/kern/jdb_object.cpp` and the
 JDB menu of `src/Kconfig` leave the fork, the removed files as exclusion
-rows of `fiasco/kernel/ORIGIN.md` and the edited ones as rows of its
-`changes`, so no build can turn the debugger back on and no GPL file is
+rows of `fiasco/kernel/ORIGIN.md`, while the edited ones keep their
+inventory rows and carry erXos's change notice, so no build can turn the debugger back on and no GPL file is
 left among the kernel's sources. The `debug` and `log`
 preprocessor parts, which only `CONFIG_JDB` adds (`src/Modules.arm`), go
 with it, and with them every `[debug]` section of the files that stay.
@@ -1188,9 +1189,9 @@ for the list that links every kernel object
 (`Kobject_dbg::_kobjects`, `src/kern/kobject_dbg.cpp`), which is the
 walkers' root for Fiasco's own objects; the modules it builds from
 `src/jdb/` (`jdb_kobject`, `jdb_kobject_names`, `jdb_space`), and
-`jabi`'s `jdb_obj_info`, leave with the rest if the build shows nothing
-else needs them (unverified, P8), and
-`CONFIG_JDB_KMEM_STATS`, whose only trigger was the object, is off.
+`jabi`'s `jdb_obj_info`, leave with the rest, since no other source needs
+them (no source names their classes), and `CONFIG_JDB_KMEM_STATS`, whose only trigger was the
+object, is gone.
 `CONFIG_INPUT`, the kernel's console input, is forbidden in every build.
 `LicenseCheck::TABLE` loses its `jdb_object.cpp` row.
 
@@ -1550,7 +1551,7 @@ Each of these was a choice between designs, and is settled as stated.
    until then they are the builds [plan.md](plan.md#01-the-preview)
    describes, with JDB and its source offered.
 3. **Where the work lands.** In 0.2, in the place of the release kernel's
-   build without `jdb_object.cpp` and of the debugger's configuration
+   build without the debugger and of the debugger's configuration
    check ([plan.md](plan.md)), in three parts that each land alone: the
    stop with its record and JDB's removal; the host's tool over records
    and images, with the harness's reports; the hold. Stubs, replay and
@@ -1647,11 +1648,6 @@ this design establishes, with the probe that settles it.
   signal and the waiter's load, at the milestone gate, whose seeded fault
   is the store moved after the signal; the cell with a seeded lock wait,
   repeated under HVF; and the same seed on the board.
-* P8. Whether any Fiasco source outside `src/jdb/` needs `jdb_kobject`,
-  `jdb_kobject_names`, `jdb_space` or `jabi`'s `jdb_obj_info` when
-  `CONFIG_RT_DBG` stays on. Three files name their classes as friends
-  (`kern/task.cpp`, `kern/space.cpp`, `kern/semaphore.cpp`), which needs
-  no definition. Probe: the build.
 * P9. Whether `sigma0` ignores its object-naming calls failing on an
   empty slot 10. Probe: any full boot of a kernel without the object.
 * P10. Whether, on Fiasco, a stop request sent to a secondary CPU that is

@@ -4194,8 +4194,8 @@ no test can drive the change:
 * **The debugger out of the kernel, and the stop in its place.** The fork removes Fiasco's kernel debugger whole:
   `src/jdb/`, the debugger's kernel object `src/kern/jdb_object.cpp` (GPL-2.0-only), which upstream's `Modules.generic`
   lists for every kernel whatever `CONFIG_JDB` says, and the JDB menu of `src/Kconfig`; the removed files are exclusion
-  rows of `fiasco/kernel/ORIGIN.md` and the edited ones rows of its `changes`. The `debug` and `log` preprocessor parts,
-  which only the debugger turned on (`src/Modules.arm`), are built no more. No MIT file of the kernel refers to the object, and capability slot 10, which it filled, is
+  rows of `fiasco/kernel/ORIGIN.md`, and the edited ones keep their inventory rows and carry erXos's change notice. The `debug` and `log` preprocessor parts,
+  which only the debugger turned on (`src/Modules.arm`), go with it. No MIT file of the kernel refers to the object, and capability slot 10, which it filled, is
   empty in every build, which the boot workload (`std_workload.cpp`) already allows. `sigma0`'s calls that name its
   objects then fail; that `sigma0` ignores the failure is unverified, and any boot checks it. What erXos knows of the
   object comes from clean-room facts records, each written by an agent that writes none of erXos's code or documents
