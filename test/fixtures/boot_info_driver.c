@@ -24,7 +24,7 @@
 #include "erx/core/boot_pair.h"
 #include "liberx/backend/core/boot_info.h"
 #include "liberx/backend/core/boot_manifest.h"
-#include "liberx/backend/fiasco/boot_args.h"
+#include "erx/core/boot_args.h"
 
 #define CHECK(condition, ...) do {					\
 	if (!(condition)) {						\
@@ -624,6 +624,21 @@ test_command_line(void)
 	    "erx.hostlink=1 does not ask for the host link alone");
 	CHECK(erx_boot_args_parse("erx.det=1 erx.group_report=1", 28, &out) && !out.hostlink,
 	    "a line without erx.hostlink=1 asks for the host link");
+
+	/* erx.trace: either switch, the last word winning, and the image's form without one. */
+	CHECK(erx_boot_args_parse("erx.trace=0", 11, &out) && !erx_boot_args_trace(&out, true),
+	    "erx.trace=0 leaves a development build's rings on");
+	CHECK(erx_boot_args_parse("erx.trace=1", 11, &out) && erx_boot_args_trace(&out, false),
+	    "erx.trace=1 leaves a release build's rings off");
+	CHECK(erx_boot_args_parse("erx.trace=1 erx.trace=0", 23, &out) && !erx_boot_args_trace(&out, true),
+	    "a later erx.trace does not win");
+	CHECK(erx_boot_args_parse("erx.det=1", 9, &out) && erx_boot_args_trace(&out, true) &&
+	    !erx_boot_args_trace(&out, false), "without erx.trace the rings do not follow the image's form");
+	check_args("erx.trace=", false, "erx.trace", false, false, 0);
+	check_args("erx.trace", false, "erx.trace", false, false, 0);
+	check_args("erx.trace=2", false, "erx.trace", false, false, 0);
+	check_args("erx.trace=10", false, "erx.trace", false, false, 0);
+	check_args("erx.traces=1", false, "erx.traces", false, false, 0);
 
 	memcpy(line, "erx.arg=", head);
 	memset(line + head, 'x', ERX_BOOT_STRINGS_MAX - 1);

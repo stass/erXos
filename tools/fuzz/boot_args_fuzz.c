@@ -15,7 +15,7 @@
 #include <string.h>
 
 #include "erx/abi.h"
-#include "liberx/backend/fiasco/boot_args.h"
+#include "erx/core/boot_args.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 

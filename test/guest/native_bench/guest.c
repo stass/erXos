@@ -31,7 +31,7 @@
 #include "erx/abi.h"
 #include "erx/pack.h"
 #include "liberx/backend/api.h"
-#include "liberx/backend/fiasco/boot_args.h"
+#include "erx/core/boot_args.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/lock.h"
 #include "liberx/backend/fiasco/log.h"

@@ -90,7 +90,9 @@ erx_fiasco_trace_service(uint32_t event, uint64_t arg0, uint64_t arg1, uint64_t 
 /*
  * map_trace on the platform control object (docs/design-fiasco.md, "The kernel's trace
  * rings", "The root's window"): the kernel maps its rings read-only at the window's base and
- * answers how many it mapped. Once per boot, on the first thread.
+ * answers how many it mapped. Once per boot, on the first thread. False only for a refusal
+ * the boot reports: a boot whose rings are off (erx.trace) gets -L4_ENOSYS, maps nothing
+ * and is true, and its kernel rows stay unsupported.
  */
 bool
 erx_fiasco_trace_window_map(void)
@@ -105,6 +107,8 @@ erx_fiasco_trace_window_map(void)
 	tag = l4_ipc_call(L4_BASE_ICU_CAP, l4_utcb(),
 	    l4_msgtag(L4_PROTO_PLATFORM_CTL, ERX_FIASCO_PFC_MAP_TRACE_WORDS, 0, 0), L4_IPC_NEVER);
 	rings = l4_error(tag);
+	if (rings == -L4_ENOSYS)
+		return (true);
 	if (rings <= 0 || rings > (long)ERX_CPU_LIMIT)
 		return (false);
 	atomic_store_explicit(&trace_kernel_rings, (uint32_t)rings, memory_order_release);

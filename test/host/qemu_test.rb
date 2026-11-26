@@ -530,10 +530,13 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { transcript.consume(@serial, elapsed: 3) }
   end
 
+  # The kernel's line after the warning on a development boot, whose trace rings are on.
+  TRACE_RINGS_LINE = "kernel trace rings: on; expect slower IPC and switches (erx.trace=0 turns them off)\r\n"
+
   # The platform record's RAM as bootstrap prints it.
   RAM = "#{PLATFORM.memory_mib}.0 MiB"
 
-  def boot_transcript(available:, warning: "development build: trusted code only\r\n",
+  def boot_transcript(available:, warning: "development build: trusted code only\r\n#{TRACE_RINGS_LINE}",
                       art: "  \\___||_|   /_/\\_\\ \\___/ |___/\r\n")
     last = format('%016x', PLATFORM.ram_first + (PLATFORM.memory_mib << 20) - 1)
     "L4 Bootstrapper\r\n  RAM: #{format('%016x', PLATFORM.ram_first)} - #{last}: #{RAM}\r\n" \

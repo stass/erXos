@@ -13,13 +13,13 @@ require_relative '../fixtures/generated_tree'
 
 # The boot information page and the command line (docs/design-fiasco.md, "Boot
 # information" and "The command line"): liberx/backend/core/boot_info.c and
-# liberx/backend/fiasco/boot_args.c at every limit, with the holder records of
+# kernel/core/boot_args.c at every limit, with the holder records of
 # liberx/backend/core/boot_manifest.c, driven by
 # test/fixtures/boot_info_driver.c. Each seed below must make the driver name what it broke.
 class BootInfoTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   INFO = 'liberx/backend/core/boot_info.c'
-  ARGS = 'liberx/backend/fiasco/boot_args.c'
+  ARGS = 'kernel/core/boot_args.c'
   WATCHDOG = 'kernel/core/watchdog.c'
   MANIFEST = 'liberx/backend/core/boot_manifest.c'
   DRIVER = 'test/fixtures/boot_info_driver.c'
@@ -28,6 +28,8 @@ class BootInfoTest < Minitest::Test
   MUTANTS = {
     'an unchecked args_off' => [INFO, 'span_ok(info->args_off, info->args_len, fixed, size)', 'true', 'bounds'],
     'a strings limit one too wide' => [INFO, 'need > ERX_BOOT_STRINGS_MAX - *total', 'need > ERX_BOOT_STRINGS_MAX + 1 - *total', 'strings limit'],
+    'erx.trace overridden by the image form' => [ARGS, 'return (args->have_trace ? args->trace : development);', 'return ((void)args, development);',
+                                                'erx.trace=0 leaves'],
     'a word past the limit accepted' => [ARGS, 'length + 1 > ERX_BOOT_STRINGS_MAX - out->arg_bytes', 'false', 'erx.arg limit'],
     'the system node laid over the node' => [INFO, '(uint32_t)(fixed + inputs->node_len) : 0', '(uint32_t)fixed : 0', 'system node'],
     'the node let through as its own peer' => [INFO, 'return (peer_len != node_len || memcmp(peer, node, node_len) != 0);', 'return ((void)node, (void)node_len, (void)peer, true);', 'own peer'],

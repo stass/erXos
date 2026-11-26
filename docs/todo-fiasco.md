@@ -140,9 +140,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   root; and the before-and-after numbers of `tools/erx bench nullcall`, `wake` and
   `vm` ([todo-performance.md](todo-performance.md)).
 * [Low] 0.2 on Fiasco, `fiasco/kernel/src/erx/erx_trace.cpp` and `kern/task.cpp`: `map_trace`'s hardening.
-  The rings are aligned and padded to `ERX_PAGE_SIZE` while the map uses `Config::PAGE_SHIFT`, and nothing
-  asserts the two equal (a larger granule would show neighbouring kernel data); the glue sees no generated
-  page size to assert against. The claim is taken before the call is decided, so a malformed call racing
+  The claim is taken before the call is decided, so a malformed call racing
   a valid one makes the valid one fail; decide first and claim only on a map. `-L4_EEXIST` means both
   "already mapped" and "the window is occupied". `Task::erx_map_trace_rings` is public and safe only for
   its one caller; make it reachable from `Erx_trace` alone. The decision's `bytes` result is unused, and
@@ -532,6 +530,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Low] Fiasco kernel trace rings, `native_trace` ([The kernel's trace rings](design-fiasco.md#the-kernels-trace-rings)):
+  the production image pins no thread, so its threads share CPU 0, the idle CPUs write no `switch`
+  records, and the suite checks only the one ring that records. A check that every booted CPU's ring
+  records waits on a workload pinned to each CPU, and no Erlang path reaches
+  `erx_thread_set_affinity` (`liberx/backend/fiasco/service.c`) to pin one: add that path, or a
+  pinned test task, and make the suite check each CPU's ring.
 * [Medium] Release licensing, `tools/lib/erx/fiasco.rb` (`build_board_bootstrap`): a development
   medium for the Raspberry Pi 4 packs `images/bootstrap-raspi4b.raw` without any link audit; only
   `build release-kernel` runs `FiascoProvenance#certify` over the board's own bootstrap, so a

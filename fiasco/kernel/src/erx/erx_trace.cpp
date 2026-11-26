@@ -19,10 +19,17 @@ class Task;
 
 class Erx_trace
 {
+  // Only the handoff's banner decides the boot's erx.trace.
+  friend class Erx_handoff;
+
+  // Whether this boot writes the rings (erx.trace): set once by boot(), on the
+  // boot CPU before any other CPU runs, and only read after.
+  static bool _on;
 };
 
 IMPLEMENTATION:
 
+#include "erx/core/abi_stop.h"  // ERX_PAGE_SIZE: the glue sees the subjects' headers, not erx/abi.h
 #include "erx/core/clock_ns.h"
 #include "erx/core/trace_kernel.h"
 #include "erx/core/trace_window.h"
@@ -41,8 +48,25 @@ IMPLEMENTATION:
 static_assert(Config::Max_num_cpus <= ERX_TRACE_KERNEL_RINGS,
               "the kernel has more CPUs than trace rings");
 
+// The rings are padded and aligned to erXos's page (kernel/core/trace_rings.c), and
+// map_trace maps them in Fiasco's: were Fiasco's larger, the window would show the
+// kernel data beside them.
+static_assert((1UL << Config::PAGE_SHIFT) == ERX_PAGE_SIZE,
+              "Fiasco's page is erXos's, which the rings are padded to");
+
 static_assert(static_cast<Mword>(Platform_control_object::Op::Erx_map_trace) == ERX_FIASCO_PFC_MAP_TRACE,
               "map_trace's operation number is the core's");
+
+bool Erx_trace::_on;
+
+// This boot's erx.trace, as erx_boot_args_trace decided it from the command
+// line and the image's form (Erx_handoff::banner).
+PRIVATE static
+void
+Erx_trace::boot(bool on)
+{
+  _on = on;
+}
 
 // A thread's name in a record: Fiasco's object id plus one, so 0 stays
 // "none". Every Context is a Thread.
@@ -104,6 +128,8 @@ void
 Erx_trace::ipc_receive(Context const *sender, Context const *receiver,
                        Mword tag)
 {
+  if (!_on)
+    return;
   record(ERX_TRACE_EVENT_IPC_RECEIVE, trace_thread_id(sender),
          trace_thread_id(receiver), tag);
 }
@@ -113,6 +139,8 @@ PUBLIC static
 void
 Erx_trace::switch_to(Context const *next)
 {
+  if (!_on)
+    return;
   record(ERX_TRACE_EVENT_SWITCH, trace_thread_id(next), trace_space_id(next), 0);
 }
 
@@ -123,13 +151,17 @@ Erx_trace::switch_to(Context const *next)
 // words is its word count, and mempage, base and order its flexpage. Holding
 // that object is the authority, and only the root holds it.
 // erx_fiasco_trace_window decides; this maps. Answers the number of rings
-// mapped, or Fiasco's negative error: -L4_EINVAL for a malformed call or
+// mapped, or Fiasco's negative error: -L4_ENOSYS on a boot whose rings are
+// off (erx.trace), -L4_EINVAL for a malformed call or
 // window, -L4_EEXIST once the rings are mapped, or the map's own failure.
 PUBLIC static
 long
 Erx_trace::map_trace(Task *caller, unsigned words, bool mempage, Address base,
                      unsigned order)
 {
+  if (!_on)
+    return -L4_err::ENosys;
+
   size_t bytes = 0;
   (void)erx_trace_kernel_pages(&bytes);
   erx_trace_window_call_t call{};

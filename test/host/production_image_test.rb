@@ -693,7 +693,7 @@ class ProductionImageTest < Minitest::Test
       assert_raises(Erx::Error) { verify.call(redraw + trace_in.sub('<4.158.0>', pid)) }
     end
 
-    serial = ["{kernel_trace,true,true,0,true,4}\r\n", "{workload,<4.158.0>}\r\n",
+    serial = ["{kernel_trace,true,true,0,true,1}\r\n", "{workload,<4.158.0>}\r\n",
               "    0.389318458 backend wake result=ok slot=5 cpu=unknown thread=11 space=1 [liberx trace]\r\n",
               "    0.389327750 backend park deadline=18446744073709551615 slot=5 cpu=unknown thread=11 space=1 [liberx trace]\r\n",
               trace_in,
@@ -702,12 +702,12 @@ class ProductionImageTest < Minitest::Test
     ['<0.158.0>', '<5.158.0>'].each do |pid|
       assert_includes run.trace_problems(serial.gsub('<4.158.0>', pid)), 'the shell printed no {workload, Pid}'
     end
-    ['{kernel_trace,true,false,0,true,4}', '{kernel_trace,true,true,3,true,4}', '{kernel_trace,true,true,0,false,4}', '{kernel_trace,true,true,0,true,1}'].each do |summary|
-      refute_empty run.trace_problems(serial.sub('{kernel_trace,true,true,0,true,4}', summary)), summary
+    ['{kernel_trace,true,false,0,true,1}', '{kernel_trace,true,true,3,true,1}', '{kernel_trace,true,true,0,false,1}', '{kernel_trace,true,true,0,true,0}'].each do |summary|
+      refute_empty run.trace_problems(serial.sub('{kernel_trace,true,true,0,true,1}', summary)), summary
     end
     verify = run.trace_checkpoints(machine: DEVELOPMENT).find { |point| point.fetch(:name) == 'kernel-trace' }.fetch(:verify)
-    verify.call("3> {kernel_trace,true,true,0,true,4}\r\n")
-    assert_raises(Erx::Error) { verify.call("3> KR=lists:append([...]),{kernel_trace,true,true,0,true,4}.\r\n") }
+    verify.call("3> {kernel_trace,true,true,0,true,1}\r\n")
+    assert_raises(Erx::Error) { verify.call("3> KR=lists:append([...]),{kernel_trace,true,true,0,true,1}.\r\n") }
   end
 
   # The kernel records boot types erl at the command shell, each collector in turn at the

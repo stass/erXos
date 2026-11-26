@@ -74,9 +74,14 @@ machine booted `--hostlink`, shows the same records in a browser.
 Designed, not built: `/proc/kernel/crash`, the previous reset's crash
 record ([design-system.md](../design-system.md#the-crash-record)); the
 schema has no such path yet, and `dmesg -M` and `-N`, which would read a
-crash dump's buffer, are refused as usage errors. The kernel's trace rows
-are unsupported on Fiasco by design
-([design-fiasco.md](../design-fiasco.md#the-trace-ring)).
+crash dump's buffer, are refused as usage errors.
+
+The kernel's trace rows record when the boot line's `erx.trace` is on: on
+by default in a development build, off in a release build, and
+`erx.trace=1` turns them on in either, at some cost to IPC and switches,
+which a line at boot says. With the rings off the rows read as
+unsupported
+([design-fiasco.md](../design-fiasco.md#the-kernels-trace-rings)).
 
 ## Erlang crash reports
 

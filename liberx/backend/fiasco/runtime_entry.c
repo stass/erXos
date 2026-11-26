@@ -29,7 +29,7 @@
 #include "liberx/backend/core/cpu_features.h"
 #include "erx/dom_lib.h"
 #include "liberx/backend/fiasco/bcm2711_pins.h"
-#include "liberx/backend/fiasco/boot_args.h"
+#include "erx/core/boot_args.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/park.h"

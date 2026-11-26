@@ -790,8 +790,9 @@ module Erx
         seconds: 30 }.freeze
     ].freeze
 
-    # The kernel's line, right after the development warning, for an image whose archive
-    # carries ERX_PACK_TEST_CODE (ProductionImage's test entry point).
+    # The kernel's line after the development warning, and after the trace rings' line on a
+    # boot whose rings are on, for an image whose archive carries ERX_PACK_TEST_CODE
+    # (ProductionImage's test entry point). A checkpoint passes over the lines between.
     TEST_IMAGE_BANNER = { name: 'test-image', pattern: /test image: carries test code\r?\n/n, seconds: 30 }.freeze
 
     # QEMU's last line on its log when a signal stops it, after its program name:

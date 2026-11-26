@@ -1211,6 +1211,51 @@ module Erx
         { "#{accel}-#{count}cpu" => { serial: run.fetch('serial_log'), cpus: cpus }.freeze }
       end
 
+      # The native_trace_off cell: the trace case's image at count CPUs under accel, booted
+      # with erx.trace=0 (docs/design-fiasco.md, "The kernel's trace rings"). The kernel
+      # prints no rings line, the root refuses nothing, and the kernel's rows read as
+      # unsupported (trace_off_problems).
+      def trace_off(accel:, count:, jobs: 4, build: true)
+        fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
+        fiasco.build(jobs: jobs) if build
+        built = image(fiasco, directory: 'build/production-image/trace')
+        line = [COMMAND_LINES[accel], TRACE_OFF_WORD].compact.join(' ')
+        run = boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: false,
+                                        points: Run.trace_off_checkpoints(machine: @machine), command_line: line)
+        problems = Run.trace_off_problems(File.binread(run.fetch('serial_log')))
+        raise Error, "the rings-off boot: #{problems.join('; ')}" unless problems.empty?
+
+        { "#{accel}-#{count}cpu" => { serial: run.fetch('serial_log') }.freeze }
+      end
+
+      # The boot transcript with the line typed into its development warning that brings up
+      # the Erlang shell (ERL_LINE), for a case that works in that shell.
+      def self.erl_boot(machine:)
+        boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|
+          point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
+        end
+        raise Error, 'the boot transcript has no development warning to type at' unless boot.any? { |point| point.key?(:type) }
+
+        boot
+      end
+
+      def self.trace_off_checkpoints(machine:)
+        boot = erl_boot(machine: machine)
+        [*boot, SLOGAN,
+         console_point('release-shell', RELEASE_SHELL.fetch(:pattern)),
+         console_point('shell', ERLANG_SHELL.fetch(:pattern), type: TRACE_OFF_READ),
+         console_point('trace-off', /\{trace_off,\{/n, whole: TRACE_OFF_LINE)].freeze
+      end
+
+      # What the rings-off boot got wrong on its serial log: the kernel's rings line, or a read
+      # of the kernel's ring answered other than unsupported. The root refused nothing: the boot
+      # reached the shell.
+      def self.trace_off_problems(serial)
+        summary = serial.b[/\{trace_off,[a-z{},0-9]+\}/n]
+        [("the kernel printed #{TRACE_ON_LINE.inspect}" if serial.b.include?(TRACE_ON_LINE)),
+         ("the kernel ring's read is #{summary.inspect}, not #{TRACE_OFF_SUMMARY}" unless summary == TRACE_OFF_SUMMARY)].compact
+      end
+
       # accels run the whole matrix: every boot below at each CPU count. TCG is not one of them;
       # it runs only the smoke, which smoke: true adds as SMOKE_CELLS: the plain boot to the command shell
       # at one CPU, and the deterministic transcript, without the boots that probe refusals, the
@@ -1394,11 +1439,7 @@ module Erx
       # restarted console's `user` (docs/design-live.md, "Failure handling, diagnostics and
       # debuggability").
       def self.console_checkpoints(machine:)
-        boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|
-          point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
-        end
-        raise Error, 'the boot transcript has no development warning to type at' unless boot.any? { |point| point.key?(:type) }
-
+        boot = erl_boot(machine: machine)
         [*boot, SLOGAN,
          console_point('release-shell', RELEASE_SHELL.fetch(:pattern)),
          console_point('shell', ERLANG_SHELL.fetch(:pattern), type: "1+1.\r"),
@@ -1480,14 +1521,16 @@ module Erx
 
       # The tracer's case on four CPUs (docs/design-fiasco.md, Verification, "Trace on four
       # CPUs"). At the Erlang shell the person first reads every CPU's kernel ring through
-      # the root's window (KERNEL_READ, the BIF over erx_trace_read), whole: from its oldest
+      # the root's window (KERNEL_READ, the BIF over erx_trace_read) after noting the clock and
+      # sleeping 20 ms, which parks and wakes a scheduler, so a live ring records a switch after
+      # the noted time; each ring is read whole: from its oldest
       # record, at most eight reads of 512, a ring's 4,096, since an early part of a ring may
       # hold no message; the shell prints
       # one summary, {kernel_trace, Switches, Receives, ZeroIds, IdsAgree}: whether the
       # rings hold switch and ipc_receive records, how many of their thread and space ids
       # are 0, whether the two events name threads and spaces alike, and on how many CPUs
-      # the ring holds a switch record later than the first second of uptime, which every
-      # CPU's must, so a CPU whose ring stops after early boot, or never starts, is caught.
+      # the ring holds a switch record later than the noted time (TRACE_LIVE_CPUS), so a ring
+      # that stops after early boot, or never starts, is caught.
       # An ipc_receive
       # record's thread and space are the thread the CPU ran, the sender on do_ipc's path and
       # the receiver when it takes a queued sender; where that thread is one end of the
@@ -1514,23 +1557,34 @@ module Erx
       TRACE_CPUS = 4
       TRACE_SWITCH = ABI::Generated::CODEC.member('trace_event', 'switch')
       TRACE_RECEIVE = ABI::Generated::CODEC.member('trace_event', 'ipc_receive')
-      KERNEL_READ = "RA=fun RA(_,_,0)->[];RA(Q,U,K)->case erx_trace_ring:read(Q,U,512) of " \
+      KERNEL_READ = "{_,T0}=erx_trace_ring:clocks(),timer:sleep(20),RA=fun RA(_,_,0)->[];RA(Q,U,K)->case erx_trace_ring:read(Q,U,512) of " \
                     "{ok,[_|_]=Rs,N,_}->Rs++RA(Q,N,K-1);_->[] end end," \
                     "KP=[{C,RA({kernel,C},0,8)}||C<-lists:seq(0,#{TRACE_CPUS - 1})],KR=lists:append([Rs||{_,Rs}<-KP])," \
-                    "KC=length([C||{C,Rs}<-KP,lists:any(fun({Tm,Ev,_,_,_,_,_})->Ev=:=#{TRACE_SWITCH} andalso Tm>1000000000 end,Rs)])," \
+                    "KC=length([C||{C,Rs}<-KP,lists:any(fun({Tm,Ev,_,_,_,_,_})->Ev=:=#{TRACE_SWITCH} andalso Tm>T0 end,Rs)])," \
                     "KS=[{N,S}||{_,#{TRACE_SWITCH},_,_,_,_,{N,S,_}}<-KR],KM=maps:from_list(KS)," \
                     "KV=[{A,B}||{_,#{TRACE_RECEIVE},_,_,_,_,{A,B,_}}<-KR]," \
                     "KI=[{T,S}||{_,#{TRACE_RECEIVE},_,_,T,S,{A,B,_}}<-KR,T=:=A orelse T=:=B,maps:is_key(T,KM)]," \
                     '{kernel_trace,KS=/=[],KV=/=[],length([0||{X,Y}<-KS++KV,X*Y=:=0]),' \
                     "KI=/=[] andalso lists:all(fun({T,S})->maps:get(T,KM)=:=S end,KI),KC}.\r"
-      # The summary a working window gives: both events, no id 0, ids that agree, and every
-      # CPU's ring recording after the first second.
-      KERNEL_SUMMARY = "{kernel_trace,true,true,0,true,#{TRACE_CPUS}}".freeze
+      # The summary a working window gives: both events, no id 0, ids that agree, and one CPU's
+      # ring recording after the read began. The production image pins no thread, so Fiasco
+      # keeps every thread on the CPU that created it, CPU 0, and the other CPUs run only their
+      # idle threads, which they enter with no switch (docs/design-fiasco.md, "Threads, bands
+      # and stops": threads started with no mask share one CPU); their rings stay empty.
+      TRACE_LIVE_CPUS = 1
+      KERNEL_SUMMARY = "{kernel_trace,true,true,0,true,#{TRACE_LIVE_CPUS}}".freeze
       KERNEL_LINE = /\A#{TRACE_REDRAW}(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{kernel_trace,[a-z0-9,]+\}\r*\n\z/n
+      # The rings-off boot (trace_off): the word that turns the kernel's rings off, the
+      # shell's read of CPU 0's kernel ring, and the answer a boot with no rings gives.
+      TRACE_OFF_WORD = 'erx.trace=0'
+      TRACE_OFF_READ = "{trace_off,erx_trace_ring:read({kernel,0},0,1)}.\r"
+      TRACE_OFF_SUMMARY = '{trace_off,{error,unsupported}}'
+      TRACE_OFF_LINE = /\A#{TRACE_REDRAW}(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{trace_off,[a-z{},0-9]+\}\r*\n\z/n
+      # The line the kernel prints only with its rings on.
+      TRACE_ON_LINE = 'kernel trace rings: on'
+
       def self.trace_checkpoints(machine:)
-        boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|
-          point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
-        end
+        boot = erl_boot(machine: machine)
         [*boot, SLOGAN,
          console_point('release-shell', RELEASE_SHELL.fetch(:pattern)),
          console_point('shell', ERLANG_SHELL.fetch(:pattern), type: KERNEL_READ),

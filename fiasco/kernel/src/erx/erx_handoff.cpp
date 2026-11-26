@@ -23,6 +23,8 @@ IMPLEMENTATION:
 #include "kip.h"
 #include "koptions.h"
 #include "panic.h"
+#include "erx_trace.h"
+#include "erx/core/boot_args.h"
 
 static_assert(sizeof(Koptions::Options::erx_handoff) == ERX_BOOT_HANDOFF_SIZE,
               "the options block embeds the whole handoff record");
@@ -47,8 +49,16 @@ Erx_handoff::banner()
   erx_boot_handoff_view_t view = erx_handoff_accept();
 
   Erx_machine_stop::boot(view.development, view.build_id);
+  // A line the root's reader refuses keeps the rings off; the root then
+  // refuses the boot with its diagnostic.
+  erx_boot_args_t args;
+  bool const trace = erx_boot_args_parse(view.bootargs, view.bootargs_len, &args)
+                     && erx_boot_args_trace(&args, view.development);
+  Erx_trace::boot(trace);
   if (view.development)
     printf("development build: trusted code only\n");
+  if (trace)
+    printf("kernel trace rings: on; expect slower IPC and switches (erx.trace=0 turns them off)\n");
   if (view.test_code)
     printf("test image: carries test code\n");
   printf("erx: boot image build ");

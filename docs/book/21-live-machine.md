@@ -357,9 +357,12 @@ The `backend` row is the 4,096-record **trace ring** of
 [chapter 9](09-processes.md#971-one-timeline)
 (`liberx/backend/fiasco/trace.c`). The `kernel` row reads the rings
 that Fiasco's kernel writes, one for each CPU, in the same record
-format. They are always on, with no switch to turn them off, as long as
-they add no more than 5 % to a call from a task to the root service on
-the Raspberry Pi 4; if they cost more, their writer is made cheaper
+format. The boot option `erx.trace` turns them on or off for the whole
+boot: on by default in a development build, off in a release build, and
+`erx.trace=1` turns them on in either, with a line at boot warning that
+IPC and switches are slower. A development build keeps them on by
+default as long as they add no more than 5 % to a call from a task to
+the root service on the Raspberry Pi 4; if they cost more, their writer is made cheaper
 before any event is dropped, and the crash record's share of them is
 never dropped. The kernel maps them once, read-only, into the root, so
 a read never enters the kernel and can change nothing it reads

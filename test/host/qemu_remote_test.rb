@@ -105,7 +105,8 @@ class QemuRemoteTest < Minitest::Test
   end
 
   def boot_serial
-    "erx: bootstrap: memory #{128 << 20} bytes\n/_/\\_\\ \\___/ |___/\nerXos\ndevelopment build: trusted code only\n"
+    "erx: bootstrap: memory #{128 << 20} bytes\n/_/\\_\\ \\___/ |___/\nerXos\ndevelopment build: trusted code only\n" \
+      "kernel trace rings: on; expect slower IPC and switches (erx.trace=0 turns them off)\n"
   end
 
   def remote_run(boot_serial:, lost: {}, line_seconds: nil, exit_at: nil, machine_end: false,

@@ -195,8 +195,6 @@ module Erx
         liberx/backend/hosted/start.c
         liberx/backend/runtime_entry.h
         liberx/pthread_executor.h
-        liberx/backend/fiasco/boot_args.c
-        liberx/backend/fiasco/boot_args.h
         liberx/backend/hosted/generated/calls.c
         liberx/backend/hosted/generated/calls.h
         liberx/elf_plan.c

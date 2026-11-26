@@ -11,7 +11,7 @@
 #include "erx/core/dt.h"
 #include "liberx/backend/fiasco/bcm2711_pins.h"
 #include "liberx/backend/fiasco/entropy.h"
-#include "liberx/backend/fiasco/boot_args.h"
+#include "erx/core/boot_args.h"
 #include "liberx/backend/fiasco/libc_start.h"
 #include "liberx/backend/fiasco/pm_wdt.h"
 

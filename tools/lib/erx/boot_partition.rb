@@ -179,7 +179,7 @@ module Erx
 
     # The layout's cmdline.txt entry for platform and build_kind, or no entry for a card with
     # no command line. The firmware reads the file and the board's boot takes the line from
-    # /chosen/bootargs, where the root reads its erx. words (liberx/backend/fiasco/boot_args.c;
+    # /chosen/bootargs, where the root reads its erx. words (kernel/core/boot_args.c;
     # the firmware's own words are ignored there). A development card whose platform has a host
     # link UART asks for it, with the word QEMU's plan adds with its second serial line; a
     # release card has no command line and so no host link (docs/design-live.md, "The host

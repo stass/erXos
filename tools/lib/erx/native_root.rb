@@ -73,7 +73,7 @@ module Erx
                         liberx/system/dom_args.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c
                         liberx/system/dom_dump.c].freeze
     # The root's way to the archive: the record, the launcher and the manifest's reader.
-    LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/root_handoff.c #{BACKEND}/launcher.c #{BACKEND}/boot_args.c kernel/core/boot_handoff.c build/gen/liberx/generated/abi_reader.c].freeze
+    LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/root_handoff.c #{BACKEND}/launcher.c kernel/core/boot_args.c kernel/core/boot_handoff.c build/gen/liberx/generated/abi_reader.c].freeze
     # A task's own program: its entry, its console and memcpy, and the stubs and
     # threads it reaches the service through.
     TASK = %W[#{BACKEND}/arch/aarch64/task_start.S #{BACKEND}/task_start.c #{BACKEND}/console.c #{BACKEND}/root_mem.c

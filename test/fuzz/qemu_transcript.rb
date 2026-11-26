@@ -46,6 +46,7 @@ begin
       end
       if random.rand(2).zero?
         payload += "development build: trusted code only\n".b
+        payload += "kernel trace rings: on; expect slower IPC and switches (erx.trace=0 turns them off)\n".b if random.rand(2).zero?
       end
       File.binwrite(serial, payload)
       transcript = Erx::Transcript.new(checkpoints: checkpoints)
