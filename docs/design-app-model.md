@@ -66,10 +66,12 @@ Four things follow, and the rest of this document is their detail:
 * **An app's services are named in one place**, its declaration, and
   the board's offer is their ceiling. The settings below it have fields
   that take away and none that adds.
-* **A record on the data partition cannot add authority**, because no
+* **A setting on the data partition cannot add authority**, because no
   link below the declaration has a field that names a service, a grant
-  or a user. A storage domain that rewrites every such record gives an
-  app back, at most, what its sealed declaration asked for.
+  or a user. A storage domain that rewrites every setting can enable,
+  disable and lift a denial, and can offer any package a trusted key
+  signed, but gives no app more than its sealed declaration asked for
+  within the board's offer.
 * **The build's proof covers the top link alone** and holds whatever
   lies below it: the board's own domains keep their memory, CPU and
   devices whichever programs and apps arrive.
@@ -171,10 +173,12 @@ machinery:
   memory on a running machine, with no new image, within what the
   board offers.
 * **AM-R4.** Nothing below the manifest adds authority: no file of a
-  data partition names a service, a grant, a user or a start that the
-  boot image and a sealed declaration do not.
+  data partition gives an app a service, a grant or a user that the
+  boot image and a sealed declaration do not, and no setting creates
+  authority outside that ceiling.
 * **AM-R5.** The board's own domains keep what the build proved for
-  them whatever programs and apps run.
+  them whatever programs and apps run, and a person can log in at a
+  console line however much memory the apps have taken.
 * **AM-R6.** The manifest states no number the build can compute, and
   the machine's memory beyond the board's own is usable without an
   edit.
@@ -244,12 +248,12 @@ manifest names them.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **AM1.** Configuration only narrows: an app's session holds a service only if the board offers it, the app's declaration names it and the machine's settings do not deny it | the session's plan is `offered` intersected with `needs`, less `deny`; the declaration's grammar names services and one amount of memory; a start row's settings name services only in `deny` | a settings field that names a service to add; a plan that takes the union; a declaration field that carries a parameter | the plan's property test over generated offers, needs and denials; seeded: a plan that ignores `deny`, and a judgement that reads a `NAME_needs` line |
-| **AM2.** A program starts a file only through an entry of its own table that allows execution, and only if the file's mode has an execute bit | an entry's rights never exceed its grant's, bit by bit, and a grant allows execution only where its manifest row is marked; the handler's image check reads the entry the path resolved through and the file's mode before a code object is made or found, for a spawn, an `exec` and a code `map` alike | a resolution that keeps the rights a mount asked; a code object handed over without the check; a cache hit that skips it | a file run from a home, from `/tmp` and from a `noexec` bind of a home; a file without an execute bit; seeded: a check that ignores the entry, one that ignores the mode, and a lowering that takes either side's bit |
-| **AM3.** A tree is writable and executable at once only where the manifest marks a user's home so, and never for an app | the manifest check admits `exec` on a row that is `ro`, or on the `home` row the build derives for a session template whose `home` field says `exec`; every row of the app template is derived, and of those only `packages` and `system`, both `ro`, are marked | a source row with `rw` and `exec`; an `exec` mark on the app template's `data` row | the manifest check's seeded rows; a QEMU test that a native app's program cannot start a file it wrote to `/data` |
-| **AM4.** No file of a data partition adds a service, a grant, a user, a start row or, in a release build, a signer | the start table holds a row only for a manifest row or an admitted package (AP3 of [design-apps.md](design-apps.md#invariants)); settings have no adding field (AM1); a package's needs are sealed under a key the boot image trusts | a local line that adds a row; a signer read from the data partition in a release build | the merge's host test of unknown rows and fields; the signer tests of [design-packaging.md](design-packaging.md#invariants) |
-| **AM5.** The board's own domains keep their memory whatever runs for users | the root budget has two children that are walls: the system's, at the sum the build proves, and `users`, the remainder; every session, app and command domain is carved from `users` | a slice carved from the root; a `users` budget that borrows | a QEMU test that fills `users` and finds every configured domain's budget as the build planned it; seeded: a carve from the root budget |
-| **AM6.** Every app is a package, and an image's package and an installed one give the same session | one admission and one session plan (PK10 of [design-packaging.md](design-packaging.md#invariants)); the manifest's `app` row adds to the offer for a named package of the image and creates no session template | a session template whose release is an app's own; a second starter of app sessions | a build check that no release script is named for an app; the session plan's host test over one header admitted both ways |
+| **AM1.** Configuration only narrows: an app's session holds a service only if the board offers it, the app asks for it and the machine's settings do not deny it | the app's **requested services** are one set, its declaration's `needs` and `ble` when it names `gatt`; the session's plan is that set intersected with the offer, less `deny`; the declaration's grammar names services and one amount of memory; a start row's settings name services only in `deny`; the session's own trees and its `code_objects` facet are not services, and no setting names them | a settings field that names a service to add; a plan that takes the union; a `deny` judged against `needs` alone, so `ble` cannot be denied; a declaration field that carries a parameter | the plan's property test over generated offers, needs, `gatt` and denials; seeded: a plan that ignores `deny`, a denial judged against `needs` alone, and a judgement that reads a `NAME_needs` line |
+| **AM2.** A program starts or maps a file as code only through an entry of its own table that allows execution, and only if the file's mode has an execute bit | an entry's rights never exceed its grant's, bit by bit, and a grant allows execution only where its manifest row is marked; the handler's image check reads the entry the path resolved through and the file's mode before a code object is made or found, for a spawn, an `exec` and a code `map` alike | a resolution that keeps the rights a mount asked; a code object handed over without the check; a cache hit that skips it | a file run from a home, from `/tmp` and from a `noexec` bind of a home; a file without an execute bit; seeded: a check that ignores the entry, one that ignores the mode, and a lowering that takes either side's bit |
+| **AM3.** A tree is writable and executable at once only where the manifest marks a user's home so, and never for an app | the manifest check admits `exec` on a row that is `ro`, or on the `home` row the build derives for a session template whose `home` field says `exec`; every row of the app template is derived, and of those only `packages` and `system`, both `ro`, are marked | a source row with `rw` and `exec`; an `exec` mark on the app template's `data` row | the manifest check's seeded rows; a QEMU test that a native app's program cannot start or map a file it wrote to `/data` |
+| **AM4.** No file of a data partition gives an app a service, a grant or a user beyond its sealed declaration and the board's offer, or, in a release build, adds a signer | the start table holds a row only for a manifest row or an admitted package (AP3 of [design-apps.md](design-apps.md#invariants)); settings have no adding field (AM1); a package's needs are sealed under a key the boot image trusts | a local line that adds a row; a signer read from the data partition in a release build | the merge's host test of unknown rows and fields; the signer tests of [design-packaging.md](design-packaging.md#invariants) |
+| **AM5.** The board's own domains keep their memory, and each console line its login's, whatever runs for users | the root budget has two children that are walls: the system's, at the sum the build proves, and `users`, the remainder; at boot, before any app starts, each console line takes a wall from `users` that it holds for the boot, and its logins are carved inside it; every other session, app and command domain is carved from what remains of `users` | a slice carved from the root; a `users` budget that borrows; a console login carved from `users` directly | a QEMU test that fills `users` with apps, finds every configured domain's budget as the build planned it, and logs in at the console; seeded: a carve from the root budget, and a console login carved from `users` |
+| **AM6.** Every app is a package, and an image's package and an installed one give the same session | one admission and one session plan (PK10 of [design-packaging.md](design-packaging.md#invariants)); the manifest's `app` row and the facet rows granted to it add to the offer for a named package of the image and create no session template | a session template whose release is an app's own; a second starter of app sessions | a build check that no release script is named for an app; the session plan's host test over one header admitted both ways |
 
 ## A program is a file
 
@@ -303,10 +307,17 @@ marks it. What each tree of a session is:
 | a user's home, `/root` or `/home/NAME` | yes | where the session template says `home exec` | the place a person copies a program to; both development manifests say it |
 | `/tmp` | yes | no | a session's own RAM, an eighth of its memory; nothing is kept there |
 | `/media/...`, removable volumes | as the row says | no | a volume from outside the machine |
-| an app's `/data` | yes | no | an app's programs run only its package's code (AM3) |
+| an app's `/data` | yes | no | an app's programs start and map as code only files of its package and of the image (AM3) |
 | `/data`, the whole volume in a development build | yes | no | the same files run through the home's entry |
 | `/apps`, the package files | yes | no | a package is installed, not run from there |
 | `/proc`, `/svc`, `/dev`, `/etc` | as each is | no | state and control, not programs |
+
+`noexec` means what FreeBSD's means and no more: the handler refuses
+to start a file, or to map one as code, through the entry. A file read
+as data is not run, so an interpreter given a file as its argument
+(`rc file`) reads it whatever the mount says, and a session's own
+runtime loads what it chooses
+([What `noexec` does not promise](#what-noexec-does-not-promise)).
 
 `mount` shows each entry's options as FreeBSD's does, `ro` and
 `noexec` among them. `mount -o noexec SOURCE DIR` places a tree
@@ -320,8 +331,12 @@ A file runs only if its mode has an execute bit, any of the three,
 since grants and not owners decide access. `chmod +x` sets it and
 `chmod -x` clears it, through the `setattr` a server already takes; a
 server that records no mode reports no execute bit. `access` and
-`faccessat` answer `X_OK` from the entry and the mode together, so
-`test -x` predicts what a start does.
+`faccessat` answer `X_OK` for a file from the entry and the mode
+together, so `test -x` predicts what a start does, and for a directory
+from any entry, as they do now: a directory is searched, not run, so
+`/tmp` and every other `noexec` tree stay searchable
+([design-programs.md](design-programs.md#the-posix-lite-personality),
+"Users and files").
 
 The read and write bits are recorded and shown and gate nothing: what
 a session reads and writes is what its grants reach
@@ -332,32 +347,52 @@ never holds more than its starter.
 
 ### Scripts
 
-A file that begins with `#!` names an interpreter. The handler's
-resolve step reads the line, bounded by `interp_line_max`, as a path
-and at most one argument, and starts the interpreter with that
-argument, the script's path and the caller's arguments. The
-interpreter is resolved through the caller's table as any path is, and
-must itself be a command of `/bin` or an executable, not a script: one
-line is followed, and a second answers `ENOEXEC`. The script needs the
-same entry and execute bit as an executable does. As on FreeBSD, an
-interpreter given a file as an argument (`rc file`) reads it as data
-whatever the mount says.
+A file that begins with `#!` names an interpreter, and the construction
+is that **a script is read once, as an executable is, and its
+interpreter is handed the bytes that were read, never a path to open
+again**. The handler's resolve step resolves the script through the
+caller's table, before any narrowing, checks its entry and execute bit
+as it checks an executable's, and reads it whole, at most `script_max`
+bytes, keyed by the file's version as a code object is, so a file that
+changes during the read answers `ETXTBSY`. It parses the first line,
+bounded by `interp_line_max`, as a path and at most one argument, and
+starts the interpreter with that argument, the script's bytes, the
+script's path as its name (`$0`, `escript:script_name/0`) and the
+caller's arguments. Two consequences follow with no rule of their own:
+`within /root/in -- /root/job` runs `job` although the narrowed
+interpreter could not open it, as a narrowed executable runs, and a
+script replaced after the read does not change what runs.
+
+The interpreter is resolved through the caller's table and must be an
+Erlang command of `/bin`, which is what takes a script's bytes in its
+start; a native executable or another script on the line answers
+`ENOEXEC`. As on FreeBSD, an interpreter given a file as an argument
+(`rc file`) reads it as data whatever the mount says.
 
 * `#!/bin/rc` runs an rc script.
 * `#!/bin/escript` runs an Erlang script: `escript` is an Erlang
-  command that runs OTP's `escript` on the file, its `main/1` taking
-  the arguments and its exit status the one stock `escript` gives. It always
-  runs in a command domain
-  ([design-programs.md](design-programs.md#what-a-program-can-start),
-  "An Erlang command"), holding the caller's table and no more, so a
-  script's modules never load into the session's own runtime, where
-  the shell and the terminal relay run. An emulator flag on a `%%!`
-  line that a running command domain cannot apply is refused by name.
+  command that runs OTP's `escript` on the bytes, its `main/1` taking
+  the arguments and its exit status the one stock `escript` gives.
+
+Both run as every Erlang command of a program runs, in a command
+domain ([design-programs.md](design-programs.md#what-a-program-can-start),
+"An Erlang command"), holding the program's table and no more, so a
+script's code never loads into the session's own runtime, where the
+shell and the terminal relay run. An emulator flag on a `%%!` line
+that a running command domain cannot apply is refused by name. A
+command domain counts against its principal's `domains` quota, so in an
+app's session, whose principal holds one domain, its session, a script
+or an Erlang command started by one of its programs is refused as a
+spawn past a quota is, with `EAGAIN`
+([design-programs.md](design-programs.md#starting-a-program)). An app
+is therefore never a script ([One way to be an app](#one-way-to-be-an-app)).
 
 The line's reader is a parser of untrusted input, with a fuzz target.
 The bound and the grammar follow FreeBSD's `execve`; no FreeBSD source
 was read for this document, so both are pinned from
-`sys/kern/imgact_shell.c` when the reader is written.
+`sys/kern/imgact_shell.c`, with its tests as the oracle's cases, before
+the reader is written. `script_max` is set then too, within the bound
+of the start frame that carries the bytes to the command domain.
 
 ### Narrowing
 
@@ -370,12 +405,23 @@ right beyond files:
 | Right | What it allows |
 | --- | --- |
 | `inspect`, `signal` | as [design-programs.md](design-programs.md#facets) states |
-| `net` | `socket`: the handler refuses it with `EACCES` for a program without the right |
+| `net` | creating a socket: the handler refuses `socket` with `EACCES` for a program without the right |
 
 A program started without `within` holds its starter's network as it
 holds its starter's files; `within` hands over only what it names, so
-`within /tmp -- ./hello` has no network and `within -f net /tmp --
-./hello` has. `-m BYTES` gives the program's budget that cap, in place
+`within /tmp -- ./hello` cannot open a socket and `within -f net /tmp
+-- ./hello` can. `net` is the right to make sockets, as Capsicum's
+capability mode on FreeBSD takes away opening and keeps what is open:
+a socket the program already holds, inherited as a descriptor or
+passed to it with `SCM_RIGHTS`, works on, since a socket belongs to
+the session and its programs share it as any open-file description
+([design-network-stack.md](design-network-stack.md#the-interface-towards-posix-programs)). Whoever narrows
+a run and wants it without the network closes its sockets first, as
+on FreeBSD. A command domain that a program without the right starts
+gets no network facet, since it holds a facet only for each right the
+program holds
+([design-programs.md](design-programs.md#what-a-program-can-start),
+"An Erlang command"). `-m BYTES` gives the program's budget that cap, in place
 of its session's whole pool. On Fiasco a program's budget is a record
 that nothing enforces (FD25 of
 [design-fiasco.md](design-fiasco.md#downsides-against-erxoss-kernel)),
@@ -411,11 +457,17 @@ it and however it arrived:
 | an image builder's addition | `tools/erx pack --app` | its header's hash in the image's manifest |
 | the board's own apps, such as `ntpd` and `bleuart` | an `app` row of the manifest, packed from the tree by the build | the same |
 
-`erx-app pack FILE`, given one executable or script, writes the
-declaration itself: the file's name as the app's, the file as its
-`program`, no `needs`, the default memory. So the step from a program
-to a service is one command, and a declaration is written only when
-the app needs something:
+`erx-app pack FILE`, given one executable, writes the declaration
+itself: the file's name as the app's, the file as its `program`, no
+`needs`, the default memory. So the step from a native program to a
+service is one command, and a declaration is written only when the app
+needs something. The packer's check of `program` stays what it is, an
+executable `erx_elf_plan` accepts
+([design-packaging.md](design-packaging.md#building-and-packing)), and
+it refuses a script by name: a script runs in a command domain, which
+an app's one domain cannot hold ([Scripts](#scripts)), and an Erlang
+service is a package of OTP applications that its session runs in its
+own runtime, `erx-app pack DIR` with `applications`:
 
 ```text
 app hello
@@ -426,7 +478,7 @@ app hello
 `tools/erx app run`, which builds and boots a development image with
 the app under QEMU
 ([design-packaging.md](design-packaging.md#adding-an-app-to-an-image)),
-takes one file as it takes a directory.
+takes one executable as it takes a directory.
 
 No app is rows of the manifest. A board's own app is a package the
 build adds to the image, and the manifest's part is one `app` row
@@ -435,18 +487,27 @@ build adds to the image, and the manifest's part is one `app` row
 ### What an app holds
 
 ```text
-held = (the board's offer) intersected with (the declaration's needs), less (the machine's deny)
+held = (the board's offer) intersected with (the app's requested services), less (the machine's deny)
 ```
 
-with its own package, read-only and executable, which every app holds.
+with its own package and the image's `system` tree, read-only and
+executable, and its `code_objects` facet, which every app's session
+holds and which are not services, so no setting names or denies them
+([design-packaging.md](design-packaging.md#an-apps-session)).
 
 * **The offer** is the `apps` row's `services`, for every app, and for
-  a named package of the image what its `app` row adds. A development
+  a named package of the image the facet rows its manifest grants that
+  package ([The offer to apps](#the-offer-to-apps)). A development
   manifest offers every service an app can safely hold.
-* **The needs** are the declaration's, sealed in the package's header.
-  To give an app more, its author adds a word to `needs` and packs
-  again; copying the package over the installed one updates it.
-* **The deny** is the machine's own, below.
+* **The requested services** are the declaration's `needs`, sealed in
+  the package's header, and `ble` when it names `gatt`, since `gatt` is
+  how an app takes `ble`
+  ([design-packaging.md](design-packaging.md#the-declaration)). To give
+  an app more, its author adds a word to `needs` and packs again;
+  copying the package over the installed one updates it.
+* **The deny** is the machine's own, below, judged against the
+  requested services, so `bleuart_deny="ble"` takes away what `gatt`
+  asked for.
 
 By default an app holds nothing but its package: no network, no
 display, no directory, 64 MiB, its output in the log. Its writable
@@ -462,8 +523,8 @@ fields; the last two are this design's:
 | Field | Meaning | Default |
 | --- | --- | --- |
 | `enable`, `display`, `restarts`, `restart_period_s`, `flags` | as [design-apps.md](design-apps.md#the-start-table) states | |
-| `deny` | services of the app's needs that this machine withholds | none |
-| `memory` | the bytes of the app's slice, at least `app_memory_min` | the declaration's |
+| `deny` | services of the app's requested services that this machine withholds | none |
+| `memory` | the bytes of the app's session's own budget, at least `app_memory_min` | the declaration's |
 
 ```text
 hello_enable="YES"
@@ -475,14 +536,18 @@ hello_memory="134217728"
 ([design-apps.md](design-apps.md#interfaces)). A setting takes effect
 at the row's next start, as every setting does, so a running session
 keeps the grants and the memory it started with. A `deny` that names a
-service the app does not need, a `memory` below the least, and any
+service the app does not request, a `memory` below the least, and any
 field that is not one of the seven are skipped and reported at every
 read, as a line for an unknown row is.
 
-`memory` may raise as well as lower. It moves an app's slice inside
-the pool all users share ([Memory](#memory)) and reaches nothing the
-build proved for the board's own domains; and whoever can rewrite the
-file can already keep any app from running, by disabling its row.
+`memory` may raise as well as lower. The slice `users` is judged at is
+the session's whole wall: that own budget and the outer budget the
+domain service derives for its connections, never the own budget
+alone. A raised slice moves inside the part of `users` that apps and
+other logins share ([Memory](#memory)), and reaches nothing the build
+proved for the board's own domains and no console line's login; and
+whoever can rewrite the file can already keep any app from running, by
+disabling its row.
 
 ### Who may install
 
@@ -494,7 +559,8 @@ host that built the image
 ([design-packaging.md](design-packaging.md#where-a-package-lies)).
 [Open decisions](#open-decisions) asks whether a development build
 also trusts keys its medium carries, so that a downloaded image takes
-its user's apps.
+its user's apps, and what that makes the storage domain that serves
+them.
 
 ## The board is the manifest
 
@@ -512,45 +578,71 @@ apps
   max 8
   services display net data
 app ntpd
-  services clock
   enable YES
   flags "pool.ntp.org"
+facet ntpd_clock
+  name "clock"
+  grantee @app.ntpd
+  service @service.clock
+  operations sample
+facet ntpd_net
+  name "net"
+  grantee @app.ntpd
+  service @service.net
+  operations none
+  parameter sockets 2
+  parameter buffers 131072
 ```
 
-* **`apps`** offers `services` to every app and bounds how many apps a
-  boot holds. It states no memory.
+* **`apps`** offers `services` to every app, each at the defaults its
+  ABI file gives, and bounds how many apps a boot holds. It states no
+  memory.
 * **`app NAME`** names a package the board itself ships. The build
   packs it from the tree and adds it to the image, as it packs the
-  card's kiosk; the row adds `services`, and GATT services with
-  `gatt`, to what that one package may name in `needs`, and gives its
-  start row its defaults (`enable`, `published_enable`, `display`,
-  `flags`). It applies to the image's package of that name alone,
-  which its header's hash authenticates, and the build refuses an
-  `app` row with no package. Each service is taken at the defaults its
-  ABI file gives, as the `apps` row's are; the row has no field for a
-  parameter.
+  card's kiosk, and the row gives its start row its defaults
+  (`enable`, `published_enable`, `display`, `flags`). It applies to
+  the image's package of that name alone, which its header's hash
+  authenticates, and the build refuses an `app` row with no package.
+* **A facet row granted to `@app.NAME`** is the board's offer to that
+  one package, written as any facet row is, with its operations and
+  parameters, and checked by the rules that already hold every facet
+  row: each service's parameter checks and, for `login`, the holder
+  table of [design-login.md](design-login.md#who-holds-it), whose
+  `bleuart` holder is the image's package `bleuart`. The package takes
+  a row only for a service its needs name, as it takes the `apps`
+  row's offer, and a row for a service the `apps` row also offers
+  replaces that offer for this package. No package installed at run
+  time is ever such a grantee, so what an installed app may hold stays
+  the `apps` row's defaults.
 
-The build counts each package of the image at the needs it declares
-and each remaining place of `max` at the whole offer, so a board's own
-apps cost what they use and only the free places are counted at the
-worst.
+So the board's own apps keep the exact grants their configuration
+needs, `clock.sample` alone, a network bounded to two sockets, a login
+grant of `root_line` alone on `tty_line` with one row, and the
+integrator writes them in the one form the integrator already writes
+for every domain.
+
+The build counts every place of `max` at the whole `apps` offer, and
+each facet row granted to a package of the image once more, since only
+that package can take it. An image package that storage withholds at
+boot leaves a place an installed app may take at the whole offer,
+which is what that place was counted at, so no withheld header can
+make the tables, connections or pixel areas fall short.
 
 ### What the build derives
 
 | The manifest does not state | The build derives it from |
 | --- | --- |
 | `root_memory` | the system's sum and the least size of `users` ([Memory](#memory)) |
-| the system principal's `memory` | its domains' walls |
 | `max_domains`, `max_connections` and each server's connections | the domains, the templates' quotas, `max`, and each grant's grantee and server |
 | the display domain's outer budget | the pixel areas and lanes property 18 sums |
 | a facet row's `max_request`, `in_flight`, `reductions`, `period_ns` and `max_heap_size` | its service's `quantity` lines, unless the row states another |
 | a session template's argument line | the template's recipe, as the app template's is derived |
-| a principal, a session template, facet rows, a `start` row and a release script for each app of the board | one `app` row and the package's declaration |
+| a principal, a session template, a `start` row and a release script for each app of the board | its `app` row, the facet rows granted to it and the package's declaration |
 
 A manifest that states a value the build derives is refused, so no
-number is written by hand and then checked for agreement. The limits
-record's field that names a CPU share is `share`, since `grant` also
-names a facet's grant.
+number is written by hand and then checked for agreement. No principal
+states `memory`: a principal is an identity with quotas, and
+the memory its domains hold is their slices ([Memory](#memory)).
 
 ## Memory
 
@@ -566,52 +658,86 @@ The root budget has two children, as the root group has `system` and
 
 Both are walls. The build derives `root_memory`, the least root budget
 the image boots on, as the system's sum and the least `users` may be:
-the slices of the image's enabled packages, one login session and one
-ended slice not yet retired, or the machine record's `users_min` if
-that is more. A machine with less ends at boot with a crash record, as
-it does for a `root_memory` it cannot meet
+each console line's wall, the slices of the image's enabled packages
+and one ended slice not yet retired, or the machine record's
+`users_min` if that is more. A machine with less ends at boot with a
+crash record, as it does for a `root_memory` it cannot meet
 ([design-system.md](design-system.md#the-root-task)); a machine with
 more gives all of it to `users`.
 
 ### Slices
 
-Every domain that runs for a user is a wall carved from `users` when it
-starts and destroyed when it retires, which is how an app's wall is
-carved and destroyed
-([design-packaging.md](design-packaging.md#an-apps-principal)), for
-every domain a user starts:
+Every domain that runs for a user is a wall carved when it starts and
+destroyed when it retires, which is how an app's wall is carved and
+destroyed ([design-packaging.md](design-packaging.md#an-apps-principal)),
+for every domain a user starts. A slice is the domain's whole wall:
+its own budget and the outer budget the domain service derives for its
+connections.
 
-| Domain | Its slice |
-| --- | --- |
-| an app's session | the declaration's `memory`, 64 MiB when it states none, or the row's `memory` setting |
-| a login session | its template's `memory`; or, when the template states `share N` and that is more, one Nth of `users` as sized at boot |
-| a command domain | its limits record's `memory` |
+| Domain | Its slice | Carved from |
+| --- | --- | --- |
+| an app's session | the declaration's `memory`, 64 MiB when it states none, or the row's `memory` setting | `users` |
+| a login session at a console line | its template's `memory`; or, when the template states `share N` and that is more, one Nth of `users` as sized at boot | its line's wall |
+| any other login session | the same | `users` |
+| a command domain | its limits record's `memory` | `users` |
+
+**A console line holds its login's wall for the boot.** At boot,
+before the start service starts any app, the console takes from
+`users` one wall per line it serves (the UART, and the host link's
+`console` line where the machine has one), each the size of the
+slice its login's template gives, and carves each login's session at
+that line inside it. A session at the line that ends retires inside
+the line's wall, and the line offers its next login once it has
+retired, so the line never needs more than its wall and an app can
+never take what the next login at the console needs. So the person
+who administers the machine can always log in at its console and stop
+an app, however much the apps have taken; what that person's programs
+start beyond the session, a command domain, an escript, comes from
+`users` as anyone's does.
 
 A start that `users` cannot hold is refused with `no_memory`, and the
-row's reason at `/proc/apps` says so. Nothing is promised to a domain
-that is not running, so the apps that are installed and the people who
-could log in cost nothing. A person's principal keeps `memory` as a
-ceiling the domain service judges each of its starts against; nothing
-is reserved for it.
+row's reason at `/proc/apps` says so. Nothing else is promised to a
+domain that is not running, so the apps that are installed and the
+people who could log in elsewhere cost nothing.
+
+**A principal has no memory of its own.** A principal is an identity
+with quotas, and its domains' walls are their slices, carved from
+`users` or, for the board's configured domains, part of the system's
+sum. What one principal can hold at once is bounded by its `domains`
+quota, each a slice of a size its template, its limits records or its
+app's row fixes; so a principal has no separate memory ceiling to
+judge a start against, and no ceiling to disagree with a `share` that
+grows with the machine. What an ended domain keeps until it retires is
+bounded by its survivors' `connections` quotas, as
+[design-domains.md](design-domains.md#principals-sessions-and-quotas)
+and its connection rules state.
 
 A program has no slice. It lives in its session's pool for programs
 and draws on what its siblings do not use
 ([design-system.md](design-system.md#resource-policy), "Budgets").
 `share` is what lets a copied program run on a board with memory to
 spare: the development manifests give root's session an eighth of
-`users`, 36 MiB at the least.
+`users`, 36 MiB at the least. It sizes one session; it promises
+neither fairness among people nor room for a login anywhere but at a
+console line.
 
 Three sentences are the whole of what a user knows: the machine's
 memory is the system's and everyone else's; each app and each login
-takes a fixed amount of everyone else's when it starts; a start that
-does not fit is refused.
+takes a fixed amount of everyone else's when it starts, and the
+console always has room for one login per line; a start that does not
+fit is refused.
 
 ### On Fiasco
 
 Every budget on Fiasco is a wall (FD25 of
 [design-fiasco.md](design-fiasco.md#downsides-against-erxoss-kernel)),
 and this design asks for nothing else: `users` is a wall sized at
-boot, and each slice a wall carved at a start. The remainder sizes the
+boot, each console line's a wall carved from it at boot, and each slice
+a wall carved at a start, from `users` or from its line's wall, each a
+budget record of its parent with `used + carved <= wall`
+([design-fiasco.md](design-fiasco.md#budgets-and-groups-as-records)).
+More memory does not enlarge Fiasco's fixed kernel-memory shares or
+tables, and does not make a program's cap enforceable. The remainder sizes the
 pool's user pages; each domain's kernel memory stays the share its
 limits record fixes, so how many domains run at once is still bounded
 by the tables the build sums (clause 9 of
@@ -643,8 +769,8 @@ the kernel.
 
 | When | Who | What |
 | --- | --- | --- |
-| build | the manifest check | every device has one holder; the board's own domains fit the system's sum; `max` apps, each image package at its needs and each free place at the whole offer, fit every table, connection quota and pixel area; the `exec` marks (AM3); the image's packages pass admission; `root_memory` |
-| boot | the root task | the root budget is at least `root_memory`; `users` is the remainder |
+| build | the manifest check | every device has one holder; the board's own domains fit the system's sum; `max` places at the whole `apps` offer, and each facet row granted to an image package once more, fit every table, connection quota and pixel area; every facet row's parameter and holder checks, those granted to an app included; the `exec` marks (AM3); the image's packages pass admission; `root_memory` |
+| boot | the root task and the console | the root budget is at least `root_memory`; `users` is the remainder; each console line's wall is carved before any app starts |
 | install | the package process | the file check, the signature, admission: needs within the offer, GATT services apart, a free place of `max` |
 | start | the start service and the kernel | the row's settings, judged; the slice carved from `users` or refused; the display free |
 | run | the handler | the entry and the execute bit of every file started; the rights `within` left |
@@ -661,35 +787,71 @@ partition rewritten:
 
 | It can | It cannot |
 | --- | --- |
-| withhold a package, or put back an older one of the same signer ([design-packaging.md](design-packaging.md#where-a-package-lies)) | change a byte of a package that a session reads |
+| withhold a package, put back an older one of the same signer ([design-packaging.md](design-packaging.md#where-a-package-lies)), or offer any package a trusted key signed, which admission then registers as an app of its own with its start row | change a byte of a package that a session reads |
 | enable or disable declared rows, move a display among rows that may draw on it, change start flags | start a user that no manifest row or admitted package declares |
-| deny an app a service it needs | give an app a service its declaration does not name, or one the board does not offer |
-| set an app's `memory`, so that it or another app is refused its start | take memory from the board's own domains, or from a running domain |
-| read or destroy every user's files | make a file run in an app's session, whose writable trees are `noexec` |
+| deny an app a service it requests, or lift a denial the machine had set | give an app a service its declaration does not request, or one the board does not offer |
+| set an app's `memory`, so that it or another app is refused its start | take memory from the board's own domains, from a console line's login, or from a running domain |
+| read or destroy every user's files | make an app's program start or map as code a file it wrote, since its writable trees are `noexec` |
 | on a board whose manifest marks homes `exec`: replace a program in a home, which then runs with a person's rights when that person runs it | start anything without a person or a declared row; add a signer in a release build |
 
 The last row on the left is the price of copy and run, and it is the
 one FreeBSD and QNX pay: a machine that runs files from a disk trusts
-the disk. It is the manifest's choice, one field per session template,
-and a board whose templates do not say `home exec` keeps the property
-that every byte a program runs came from the image or a sealed
-package.
+the disk. It is the manifest's choice, one field per session template.
+A board whose templates do not say `home exec` removes that direct
+route: no program then starts a file the storage domain can replace.
+It does not make every byte that runs come from the image or a sealed
+package, for the reasons the next section gives.
+
+### What `noexec` does not promise
+
+`noexec`, and a home left unmarked, stop the handler from starting or
+mapping a file as code through the entry, and no more:
+
+* **Interpreted input is data.** An interpreter reads what it is given
+  as data, whatever the tree: `rc /data/job`, an escript that reads a
+  file and evaluates it, or a native program that interprets bytes it
+  read. So a file on a `noexec` tree still decides what such a program
+  does, within what that program holds.
+* **A session supplies its own code.** A session fills code objects
+  from any bytes and loads Erlang modules from any source
+  ([design-system.md](design-system.md#creating-a-domain), "Code
+  objects for a session"), an app's session as much as a person's.
+  Nothing below the session checks where they came from, and nothing
+  above it needs to: what runs holds only the session's grants.
+
+Neither is narrowed here; an interpreter that refused files of a
+`noexec` tree would be a rule that every interpreter must remember and
+that the next one forgets. What holds whatever runs is the ceiling of
+authenticated authority: a session holds its plan's grants, which no
+file of the data partition widens (AM1, AM4).
 
 ## Concurrency and failure
 
 * **A file that changes while it starts.** The code object is a sealed
   copy keyed by the file's version, so a program runs the bytes that
   were read, and a file that keeps changing during the read answers
-  `ETXTBSY` ([design-programs.md](design-programs.md#file-objects)).
-  Clearing the execute bit, or remounting `noexec`, stops the next
-  start and not a running program.
+  `ETXTBSY` ([design-programs.md](design-programs.md#file-objects)). A
+  script is read the same way, and its interpreter runs the bytes the
+  handler read, so a script replaced after the read changes nothing
+  that runs. Clearing the execute bit, or remounting `noexec`, stops the
+  next start and not a running program.
 * **A setting changed while its app runs** takes effect at the row's
   next start. The start service reads the file at boot and at each
   row's own command, as it does for every field.
 * **`users` full.** A start is refused with `no_memory` and counted
   against the row's intensity, and nothing that runs is touched: no
-  slice is shrunk for another, and nothing is killed.
-* **A script's interpreter that is missing or is itself a script**
+  slice is shrunk for another, and nothing is killed. A console line's
+  login still starts, inside its line's wall, and from it `service NAME
+  stop` frees what that app held once its session retires.
+* **A login at a console line after a logout.** The line offers its
+  next login once the ended session has retired inside the line's
+  wall, so a login never waits on memory an app holds and never finds
+  the wall short.
+* **An image package withheld at boot or recovery.** Its place of
+  `max` is free, and an installed app that takes it is counted at the
+  whole offer, as the build counted that place; its facet rows go
+  unused until the package returns.
+* **A script's interpreter that is missing, native or itself a script**
   refuses the start before anything is reserved.
 
 ## Refusals
@@ -698,22 +860,26 @@ package.
 | --- | --- |
 | a file through a `noexec` entry, or without an execute bit | `EACCES`, the shell's `permission denied` |
 | a file that is neither an executable `erx_elf_plan` accepts nor a script | `ENOEXEC` |
-| a `#!` line past `interp_line_max`, or an interpreter that is a script | `ENOEXEC` |
+| a `#!` line past `interp_line_max`, a script past `script_max`, or an interpreter that is not an Erlang command of `/bin` | `ENOEXEC` |
 | a `#!` interpreter that names nothing | `ENOENT` |
+| a script or an Erlang command started by a program of an app's session | `EAGAIN`: the app's principal holds one domain |
 | a mount asking for execution beneath an entry without it | `eacces`, before the table changes |
-| `socket` in a program narrowed without `-f net` | `EACCES` |
+| `socket` in a program narrowed without `-f net` | `EACCES`; a socket it already holds works on |
 | `within -m` on Fiasco | refused as unsupported |
+| `erx-app pack` of a script | refused by the packer, naming the file: an app is an executable or OTP applications |
 | a package whose needs pass the offer, or whose signer is not trusted | the copy's close fails with admission's or the file check's reason ([design-packaging.md](design-packaging.md#admission)) |
-| a `deny` of a service the app does not need, a `memory` below the least, an unknown field | the line is skipped and reported |
+| a `deny` of a service the app does not request, a `memory` below the least, an unknown field | the line is skipped and reported |
 | a start that `users` cannot hold | `no_memory`, shown at `/proc/apps` |
-| a manifest that states a derived value, an `app` row without its package, `rw` with `exec` outside a marked home | the build refuses the image, naming the row |
+| a manifest that states a derived value, an `app` row without its package, a facet row granted to an app the image does not hold, `rw` with `exec` outside a marked home | the build refuses the image, naming the row |
 
 ## Security
 
 **What is trusted.** The boot image, with its manifest and the signer
-keys it carries; the system domain; and, on a board whose manifest
-marks homes `exec`, the storage domain for the programs people run
-from their homes.
+keys it carries; the system domain; on a board whose manifest marks
+homes `exec`, the storage domain for the programs people run from
+their homes; and, in a development build that trusts package keys from
+its medium, the storage domain that serves them, for which packages
+may run ([Open decisions](#open-decisions), 10).
 
 **What is not.** A program, which holds what its starter gave it; an
 app's code, which holds its plan's grants; the data partition and
@@ -723,23 +889,31 @@ every setting on it.
   starter's table, there is no set-user-id, and no file's code is
   given a service. What a person risks by running a file is what they
   hold, as on UNIX, and `within` is how they risk less.
-* **What the old rule kept, and what remains.** With no writable tree
-  executable, a native program that an attacker steered could not turn
-  bytes it wrote into running code. That still holds wherever no
-  writable entry runs: in every app, in every narrowed program whose
-  table lacks the right to start commands, and on every board whose
-  templates do not mark homes. In a person's session on a board that
-  does, such a program can write a file and start it. It gains no
-  authority by that, and no mapping is ever writable and executable in
-  either case.
-* **An Erlang app's code was never only its package's.** A session's
-  own Erlang code may load modules and fill code objects from any
-  bytes ([design-system.md](design-system.md#creating-a-domain), "Code
-  objects for a session"). AM3 speaks of an app's native programs,
-  which hold no such facet.
+* **What a writable tree without execution keeps.** A native program
+  that an attacker steered cannot start or map as code a file it
+  wrote, wherever no writable entry runs: in every app, in every
+  narrowed program whose table lacks the right to start commands, and
+  on every board whose templates do not mark homes. In a person's
+  session on a board that does, such a program can write a file and
+  start it. It gains no authority by that, and no mapping is ever
+  writable and executable in either case.
+* **What it does not keep.** Interpreted input and the code a session
+  loads itself are outside `noexec`
+  ([What `noexec` does not promise](#what-noexec-does-not-promise)).
+  The guarantee that holds for them is the ceiling: a session's code,
+  whatever its origin, holds the session's plan and nothing more.
+* **Settings and packages stay under the ceiling.** A rewritten
+  `/etc/start.conf` can enable, disable, set memory and lift a denial;
+  a storage domain can offer any package a trusted key signed, which
+  admission registers with a principal and a start row of its own.
+  Neither gives any app a service its sealed declaration does not
+  request or the board does not offer.
 * **A script runs in a domain of its own**, so user Erlang code cannot
   reach the session's shell, relay or handlers except as any command
   does.
+* **The console stays reachable.** Each console line's login is carved
+  in a wall the line holds from boot, so no app's memory, raised by a
+  setting or not, keeps the person at the console from logging in.
 * **Text.** This design adds no sink that shows text: an app's name, a
   setting and a refusal's reason reach the log and `/proc` through the
   escaping those sinks already have.
@@ -753,18 +927,24 @@ under test ran.
 | --- | --- |
 | a static position-independent program built with the exported SDK, copied into root's home with mode 0755, runs under QEMU and prints | an image check that ignores the entry's `exec`, which the `/tmp` case catches |
 | the same file with mode 0644 fails with `EACCES`, and `test -x` says so | a check that ignores the mode; an `X_OK` answered from the entry alone |
-| a file in `/tmp`, in an app's `/data` and under `mount -o noexec` of a home fails with `EACCES` | a bind that keeps `exec` when `noexec` was asked; a lowering that takes either side's bit |
+| a file in `/tmp`, in an app's `/data` and under `mount -o noexec` of a home fails with `EACCES`, and a code `map` of it fails too | a bind that keeps `exec` when `noexec` was asked; a lowering that takes either side's bit; a `map` path that skips the check |
+| `test -x /tmp` and `test -x` of a directory in an app's `/data` succeed, `cd` into them works, and `test -x` of a file there fails | an `X_OK` that applies the file rule to a directory |
 | a mount that asks for execution beneath a `noexec` grant is refused and leaves the table as it was | an entry whose rights come from its options alone |
 | the manifest check refuses a source row with `rw` and `exec`, and `exec` on a row of the app template | each as a seeded row |
-| `#!/bin/rc` and `#!/bin/escript` scripts run by path with their arguments; a script naming a script fails with `ENOEXEC`; the line reader's fuzz target | a reader without its bound; a resolve that follows a second line |
+| `#!/bin/rc` and `#!/bin/escript` scripts run by path with their arguments; a script naming a script or a native interpreter fails with `ENOEXEC`; the line reader's fuzz target, with FreeBSD's cases as its oracle | a reader without its bound; a resolve that follows a second line |
+| `within /root/in -- /root/job` runs the script `job`; a script replaced between the handler's read and the interpreter's start runs the bytes that were read | an interpreter handed the path and opening it again, which both cases catch |
 | an `escript` run leaves the session's loaded modules as they were | an `escript` run in the session's domain |
-| `within /tmp -- prog` cannot open a socket and `within -f net /tmp -- prog` can | a handler that serves `socket` without the right |
-| the session plan's property: for generated offers, needs and denials, the plan is the intersection less the denial | a plan that ignores `deny`; a judgement that grants what `deny` names |
-| `NAME_memory` above the declaration starts the app at that size, and one above the pool refuses it with `no_memory` while every configured domain's budget stays as planned | a slice carved from the root budget |
+| a native app's program that starts `/bin/rc` with a script fails with `EAGAIN`, and `erx-app pack` of a script is refused naming it | a command domain created past the app principal's quota; a packer that accepts a script |
+| `within /tmp -- prog` cannot open a socket and `within -f net /tmp -- prog` can; a connected socket handed to a narrowed child without `net` still carries data, and a command domain that child starts holds no network facet | a handler that serves `socket` without the right; a command domain given a network facet its program lacked |
+| the session plan's property: for generated offers, needs, `gatt` and denials, the plan is the requested services intersected with the offer, less the denial; an app with `gatt nus` and `NAME_deny="ble"` holds no `ble` grant | a plan that ignores `deny`; a denial judged against `needs` alone; a judgement that grants what `deny` names |
+| with `max 2`, one image package that needs no display and `display` offered: storage withholds the image package's header at boot and at recovery, and two installed display apps start with their pixel areas | a count that takes image packages at their needs, on which the second app's pixel area is short |
+| `NAME_memory` above the declaration starts the app at that size, judged at its whole wall, and one above the pool refuses it with `no_memory` while every configured domain's budget stays as planned | a slice carved from the root budget; a judgement of the own budget alone |
+| apps fill `users`; root logs in at the UART, runs `service NAME stop`, logs out and logs in again, and logs in once more while the ended session is still retiring | a console login carved from `users` directly, on which the first login fails |
 | `erx-app pack hello` gives a package whose session holds its package and nothing else | a synthesized declaration that names every offered service |
-| each shipped manifest boots at exactly its derived `root_memory`, with every configured domain and enabled package started (property 12's planner) | a derivation that leaves out the outer budgets, on which the planner fails |
-| a machine with more memory than `root_memory` shows `users` as the remainder and starts two apps the least machine could not hold | a pool sized from `root_memory` on every machine |
-| `ntpd` as a package of the image holds the grants its manifest rows gave it, compared plan against plan, and the time suite passes | an `app` row whose `services` the plan ignores |
+| each shipped manifest boots at exactly its derived `root_memory`, with every configured domain, console line and enabled package started (property 12's planner) | a derivation that leaves out the outer budgets or the console lines, on which the planner fails |
+| a machine with more memory than `root_memory`, and one with sixteen times more, show `users` as the remainder, root's session at an eighth of it, and start two apps the least machine could not hold | a pool sized from `root_memory` on every machine; a principal ceiling left in the judgement, on which the larger machine's login is refused |
+| `ntpd` and `bleuart` as packages of the image hold the grants their manifest rows gave them, compared plan against plan, `bleuart`'s login row passes the holder table, and the time suite passes | an app's facet row the plan ignores; a `login` row granted to another app, which the holder check refuses |
+| a development build with a `package_keys` file of one key admits a package signed by it; a file with a malformed or partial blob trusts no key from it and reports it | a decoder that keeps the blobs before the malformed one |
 | `within -m` on Fiasco reports unsupported | a backend that accepts the cap and enforces nothing |
 
 ## Compatibility and migration
@@ -778,56 +958,67 @@ build, and an installation re-creates what an earlier build wrote.
 | --- | --- |
 | [design-files.md](design-files.md#invariants), F6 | replaced by AM2 and AM3: a program starts a file only through an entry that allows execution, and a tree writes and runs only as a marked home |
 | [design-files.md](design-files.md#namespaces), `rights()` | two bits, `write` and `exec`; `rx` is gone |
-| [design-files.md](design-files.md#building-binding-and-mounting), "Rights beneath an entry" and the EROFS mount | lowering is bit by bit, so `rw` and `rx` no longer meet at `ro`; an image mounts with `exec` only through a grant marked `exec` |
+| [design-files.md](design-files.md#building-binding-and-mounting), "Rights beneath an entry" and the EROFS mount | lowering is bit by bit, each of `write` and `exec` on its own; an image mounts with `exec` only through a grant marked `exec` |
 | `abi/services/files.txt` | `files_rights` is `ro` and `rw`; a second parameter `exec` |
 | [design-programs.md](design-programs.md#invariants), P10 | a program's image is never writable; it starts a file it wrote only through an entry that both writes and runs |
-| [design-programs.md](design-programs.md#starting-a-program), step 4, and [What a program can start](design-programs.md#what-a-program-can-start) | the image check is the entry's `exec` and the file's mode; a script is a fifth image; `ENOEXEC` |
-| [design-programs.md](design-programs.md#facets) | `net` is a right beyond files |
-| [design-programs.md](design-programs.md#the-posix-lite-personality), "Users and files" | `chmod`'s execute bit gates a start; `X_OK` reads both |
+| [design-programs.md](design-programs.md#starting-a-program), step 4, and [What a program can start](design-programs.md#what-a-program-can-start) | the image check is the entry's `exec` and the file's mode, for a code `map` as for a start; a script is a fifth image, read whole and handed to its interpreter, an Erlang command of `/bin`, as bytes; `ENOEXEC` |
+| [design-programs.md](design-programs.md#facets) | `net` is a right beyond files: creating a socket; held sockets work on |
+| [design-programs.md](design-programs.md#the-posix-lite-personality), "Users and files" | `chmod`'s execute bit gates a start; `X_OK` reads the entry and the mode for a file and any entry for a directory |
 | [design-shell.md](design-shell.md#commands) | a `#!` line is interpreted; `escript` |
 | [design-shell.md](design-shell.md#starting-programs) and [Interfaces](design-shell.md#interfaces) | `within -f net`, `within -m`; `mount -o` |
-| [design-system.md](design-system.md#the-manifest), property 4 and the machine record | the sums are derived; `users_min`; the `app` row; the `home` field; `share` |
-| [design-system.md](design-system.md#resource-policy), "Budgets" | the system's sum and `users`; every user's domain carved at its start |
+| [design-system.md](design-system.md#the-manifest), property 4 and the machine record | the sums are derived; `users_min`; the `app` row and facet rows granted to an app; the `home` field; `share` on a session template; no principal states `memory` |
+| [design-system.md](design-system.md#resource-policy), "Budgets" | the system's sum and `users`; each console line's wall carved at boot; every other user's domain carved at its start |
 | [design-system.md](design-system.md#creating-a-domain), "Code objects for a session" | the `rx` rule's sentence becomes AM2's |
-| [design-domains.md](design-domains.md#principals-sessions-and-quotas) | a person's `memory` is a ceiling, not a reservation |
+| [design-domains.md](design-domains.md#principals-sessions-and-quotas) | a principal has no budget and no memory quota: its domains' walls are their slices, and its `domains` quota bounds what it holds at once |
 | [design-apps.md](design-apps.md#an-app) and its opening | an app is a package; the three kinds of manifest rows are deleted |
 | [design-apps.md](design-apps.md#the-start-table), AP1 and [Security](design-apps.md#security) | seven fields; a row also carries `deny` and `memory`, which add nothing the manifest check proved |
-| [design-packaging.md](design-packaging.md#the-apps-row) and [The build's check](design-packaging.md#the-builds-check) | no `memory`; the derived `packages` and `system` rows are `ro` with `exec`; clause 2 counts image packages at their needs; clauses 4 and 5 read `users` |
+| [design-packaging.md](design-packaging.md#the-apps-row) and [The build's check](design-packaging.md#the-builds-check) | no `memory`; the derived `packages` and `system` rows are `ro` with `exec`; clause 2 counts every place at the whole offer and each facet row granted to an image package once more; the build check takes facet rows granted to an app of the image; clauses 4 and 5 read `users` |
 | [design-packaging.md](design-packaging.md#an-apps-principal) | the wall is carved from `users` |
-| [design-packaging.md](design-packaging.md#the-sdk) and [Building and packing](design-packaging.md#building-and-packing) | `erx-cc`; `erx-app pack FILE`; `tools/erx app run` |
+| [design-packaging.md](design-packaging.md#the-sdk) and [Building and packing](design-packaging.md#building-and-packing) | `erx-cc`; `erx-app pack FILE` for one executable, the packer's `program` check unchanged and a script refused by name; `tools/erx app run` |
 | [design-packaging.md](design-packaging.md#alternatives-considered) and decisions 2, 11 and 14 | the rows on elastic budgets, per-app rows and per-app parameters are restated against this document |
-| design-time.md and design-bluetooth.md, where `ntpd` and `bleuart` are configured | each is a package of the image with an `app` row |
+| design-time.md and design-bluetooth.md, where `ntpd` and `bleuart` are configured | each is a package of the image with an `app` row and the facet rows granted to it, with the operations and parameters its rows give today |
 | [design-fiasco.md](design-fiasco.md#downsides-against-erxoss-kernel), FD8 and FD25 | FD8 cites AM2 in F6's place; FD25's app sentence names `users` |
 | [design.md](design.md#invariants) and [Decisions](design.md#decisions) | the row "No grant writes and runs a file together", the decision "A program starts what its `/bin` lists", the decision "An app is a principal with a session template" and the format row of `/etc/start.conf` |
+| [design-login.md](design-login.md#who-holds-it) | the `bleuart` holder is the image's package `bleuart`, a grantee of the kind `app`, held to the same `line`, operations and `logins` |
+| [design-live.md](design-live.md#the-console) | each console line holds its login's wall from boot and offers its next login once the ended session has retired |
+| [design-ssh.md](design-ssh.md#roots-login-keys-on-the-medium) | in a development build, the same tree serves `package_keys` beside root's keys, if open decision 10 adopts it |
 | the book, chapters 13, 14, 20 and 23, and the guide | follow each design edit in its own commit; the guide gains "Run your own program" and "Write an app" |
 
 Deleted outright: the `rx` value and the rule that `rw` and `rx` meet
-at `ro`; the principal, session, facet and `start` rows, the release
-script and the argument and environment strings of `ntpd` and
-`bleuart`; `root_memory`, the system principal's `memory`,
-`max_domains`, `max_connections`, the display's outer budget and the
-`apps` row's `memory` as written values, with the comment blocks that
-reckon them; facet quantity lines that repeat their service's.
+at `ro`; the principal, session and `start` rows, the release script
+and the argument and environment strings of `ntpd` and `bleuart`,
+whose facet rows are kept and granted to `@app.NAME`; `root_memory`,
+every principal's `memory`, `max_domains`, `max_connections`, the
+display's outer budget and the `apps` row's `memory` as written
+values, with the comment blocks that reckon them; facet quantity lines
+that repeat their service's.
 
 ### The working agreement's list
 
 `CLAUDE.md` states two of these rules in its "by construction" list.
-The wording that matches this design:
+The wording that matches this design keeps three things apart: what
+the handler refuses to run, the ceiling on authenticated authority, and
+memory.
 
 * in place of "no file grant carries write and execute together, so a
-  program never runs what it could rewrite": **a program runs only a
-  sealed copy of a file whose execute bit is set, taken through a
-  namespace entry that allows execution; a files grant allows it only
-  where the manifest marks it, and writes and runs together only as a
-  user's home the manifest marks so, never for an app, so a native
-  app's programs run only its package's code;**
-* a new entry: **configuration only narrows: an app holds what its
-  sealed declaration names within what the board's manifest offers,
-  and no record on a data partition names a service, a grant, a user
-  or a start, so tampered storage gives an app at most what its
-  declaration asked for;**
-* the budgets entry stands as written. `users` and every slice are
-  walls.
+  program never runs what it could rewrite": **a program starts or
+  maps a file as code only as a sealed copy, read through a namespace
+  entry that allows execution and only if the file's execute bit is
+  set; a files grant allows execution only where the manifest marks
+  it, and writes and runs together only as a user's home the manifest
+  marks so, never for an app, so no app's program starts or maps a file
+  it could write; what an interpreter reads as data, and the code a
+  session loads itself, are outside this rule and held only by the
+  session's grants;**
+* a new entry: **configuration only narrows: an app holds the services
+  it requests in its sealed declaration, within what the board's
+  manifest offers it, less what the machine's settings deny; no setting
+  on a data partition has a field that names a service, a grant or a
+  user, so tampered storage can withhold, enable, disable and choose
+  among packages a trusted key signed, but never gives an app more
+  than its declaration requests and the board offers;**
+* the budgets entry stands as written: `users`, each console line's
+  wall and every slice are walls.
 
 Its list of parsers with fuzz targets gains the interpreter line of a
 script. Unchanged: no mapping is writable and executable; the right to
@@ -851,29 +1042,35 @@ is a new image.
    comment, with book chapters 13 and 14.
 3. **Execution, in the code.** The rights type and its lowering, the
    `exec` parameter and the manifest check's rule, the `home` field,
-   the handler's check, `X_OK`, `mount -o`, with AM2's and AM3's tests
-   and seeds.
-4. **Scripts.** `#!` in the handler's resolve step with its fuzz
-   target, `escript`, and the edits of design-shell.md and
-   design-programs.md.
-5. **The SDK's short path.** `erx-cc`, `erx-app pack FILE`,
-   `tools/erx app run`, and the guide's two pages.
-6. **Settings.** `deny` and `memory` in `abi/manifest.txt`, the
-   reader and the judgement, the session plan, and the edits of
-   design-apps.md and design-packaging.md.
+   the handler's check for a start and a code `map`, `X_OK` for files
+   and directories, `mount -o`, with AM2's and AM3's tests and seeds.
+4. **Scripts.** FreeBSD's line grammar and bound pinned from its
+   source first; then `#!` in the handler's resolve step with its fuzz
+   target, the bytes handed to `rc` and `escript`, and the edits of
+   design-shell.md and design-programs.md.
+5. **The SDK's short path.** `erx-cc`, `erx-app pack FILE` for an
+   executable, `tools/erx app run`, and the guide's two pages.
+6. **Denials.** `deny` in `abi/manifest.txt`, judged against the
+   requested services, the reader and the session plan, and the edits
+   of design-apps.md and design-packaging.md.
 7. **Derived sums, with no change of behaviour.** The build computes
    what the manifests state and the stated values are deleted; facet
    quantities default. Whether a source row may already omit its
    quantities is checked first.
-8. **The board's apps as packages.** The `app` row; `ntpd`, then
-   `bleuart` in a change of its own; their rows and release scripts
-   deleted. It stops and reports if either needs a parameter no ABI
-   default gives.
-9. **The `users` pool.** The two parts at boot, slices for every
-   user's domain, `share`, `users_min`, and the edits of
-   design-system.md and design-packaging.md. Planned against property
-   12's planner before any code.
-10. **`within -f net` and `-m`**, with the program's sockets.
+8. **The board's apps as packages.** The `app` row and facet rows
+   granted to `@app.NAME`, with the holder table's edit in
+   design-login.md; `ntpd`, then `bleuart` in a change of its own,
+   each passing the plan-against-plan test before its rows and release
+   script are deleted; clause 2's count at the whole offer.
+9. **The `users` pool.** The two parts at boot, the console lines'
+   walls, slices for every user's domain, the principal's budget and
+   memory quota deleted, `share`, `users_min`, and the edits of
+   design-system.md, design-domains.md, design-live.md and
+   design-packaging.md. Planned against property 12's planner, at the
+   least machine and at a large one, before any code.
+10. **Local memory.** The `memory` setting, judged at the whole wall
+    inside `users`, which needs step 9.
+11. **`within -f net` and `-m`**, with the program's sockets.
 
 ## Alternatives considered
 
@@ -882,13 +1079,20 @@ is a new image.
 | **Keep F6 and package every program** | A program takes nothing of its own, so a package for it declares nothing, and F6 never stood between a session and code. It costs the tier every other general-purpose system has |
 | **Three independent bits on every grant, enforced by servers** | A server cannot tell a read for code from another read, so `exec` enforced there would be a promise no server keeps. Two bits, with `exec` checked where code is made, is what the mechanism can honour |
 | **Every tree executable unless mounted `noexec`**, FreeBSD's default | Authority is an allow-list: a tree nobody marked would run files. Marking homes gives the same first experience and leaves `/tmp`, media and app data out |
+| **Interpreters that refuse files of a `noexec` tree**, so that `noexec` covers interpreted input | A rule every interpreter must remember, and the next one forgets; and it would still not cover a session's own code. `noexec` promises what the handler checks, and the ceiling covers the rest |
 | **Read and write mode bits that gate** | A second authority beside grants, checked by every server ([design-files.md](design-files.md#alternatives-considered)). The execute bit gates only what the handler already checks |
 | **A service as a file on the machine**, naming a program, a user and services, as an rc.d script does | It is a record on the data partition that names a user and services: whoever rewrites the partition would start code with a person's rights and nobody present (AP3). The package costs one command on the host and brings its own user, its sealed needs and its integrity |
 | **Needs approved by the administrator at install**, in place of the board's offer | The approval would be a record where the storage domain can write it. The offer stays in the image; a development image offers everything safe |
 | **A local setting that adds a service** | The same record. `deny` and `memory` are the two settings that cannot add |
-| **Manifest rows for each of the board's apps** | A second way to be an app, with its own release script and argument line ([design-packaging.md](design-packaging.md#alternatives-considered), "Rows generated into the manifest for each app"). An `app` row and a package give one |
-| **Parameters on an `app` row** | A rule for each parameter in admission and the mint. Defaults serve the apps that exist; the first app they do not serve is the evidence to add them on |
-| **A pixel area charged to the app**, so that `max` costs only table places | The display reads the area and pays for it so that a client's end never takes memory the display still maps (D16 of [design-domains.md](design-domains.md#invariants); [design-display.md](design-display.md#the-pixel-area)). Counting image packages at their needs removes most of the cost with no change there |
+| **Manifest rows for each of the board's apps** | A second way to be an app, with its own release script and argument line ([design-packaging.md](design-packaging.md#alternatives-considered), "Rows generated into the manifest for each app"). An `app` row, the facet rows granted to it and a package give one |
+| **Defaults alone for the board's own apps** | `ntpd` needs `clock.sample` alone and a network bounded to two sockets, and `bleuart` a login grant of `root_line` alone on `tty_line` with one row, which the login holder table requires exactly. Facet rows granted to the package keep those choices in the form every facet row has, and no installed app can be such a grantee |
+| **Parameters in an app's declaration** | A rule for each parameter in admission and the mint, reachable by any signer. Installed apps take the `apps` row's defaults; the board's own apps take facet rows the integrator writes and the build checks |
+| **Counting each image package at its needs** | A package that storage withholds frees a place an installed app can take at the whole offer, so the count falls short (PK2). Every place at the whole offer has no such case |
+| **Reserving an image package's place by name**, so that its count at its needs holds when it is withheld | It keeps the saving but adds a reservation kept for a name whose header may never be read. The saving is in pixel areas only, and the whole offer is the existing count |
+| **A pixel area charged to the app**, so that `max` costs only table places | The display reads the area and pays for it so that a client's end never takes memory the display still maps (D16 of [design-domains.md](design-domains.md#invariants); [design-display.md](design-display.md#the-pixel-area)) |
+| **A command domain for each app**, so that an app may be a script or start Erlang commands | Each place of `max` would cost a second domain in every table, name pool, connection and Fiasco kernel-memory share property 19 sums. An Erlang service runs in its session's own runtime as OTP applications, which costs nothing more |
+| **A separate pool for apps**, beside the logins' | A second number for the integrator to size and a split the machine's memory beyond the board's cannot cross. The console lines' walls keep the one login that must always work, and the rest shares one pool |
+| **A principal's memory as a ceiling** | It is fixed while `share` grows with the machine, so on a large machine the two disagree. A principal's domains are slices of fixed sizes, and its `domains` quota bounds how many |
 | **A session resized on request**, growing its pool when a start is refused | Elasticity rebuilt as policy, with a request path and a shrink path of its own. `share` sizes a session once, at its start |
 | **`limits` or `ulimit` for a program's memory** | Their limits are of address space and data size; the cap is of a budget. `within` already means "run this within these bounds" |
 
@@ -898,9 +1102,11 @@ is a new image.
 | --- | --- | --- | --- |
 | a person runs a file a compromised storage domain replaced | low | their session's rights | `home exec` is the manifest's choice; stated in the release's known limits |
 | an Erlang script costs a domain for each run | certain | slow, memory-heavy scripts | measured on the watch list ([todo-performance.md](todo-performance.md)); a command domain is kept while its program runs |
-| a board's app needs a parameter no default gives, such as a port below 1024 | medium | that app stays out of the model | step 8 stops and reports; parameters on an `app` row are the change it would justify |
-| `share` gives one login more than the next can have | medium | a second login refused with `no_memory` | the template's share and its principal's ceiling are the manifest's; the refusal names the pool |
+| apps fill `users`, so a login over SSH or the web, or another person's, is refused | medium | that login waits until an app stops | the console lines always admit; open decision 5 |
+| the console lines' walls hold memory nobody is using | certain | on a large machine an eighth of `users` per line | one wall per line the machine serves; `share` is the manifest's choice per template |
+| `share` gives one login more than the next can have | medium | a second login refused with `no_memory` | the template's share is the manifest's; the refusal names the pool |
 | `users` on the smallest board is tight once the board's apps are packages at the default 64 MiB | medium | an image that does not boot there | the board's apps declare their real memory; the build refuses the image, naming the sum |
+| an app wants to run a script or an Erlang command | medium | refused with `EAGAIN` | its Erlang part is OTP applications in its session; open decision 12 |
 
 Decisions:
 
@@ -910,61 +1116,126 @@ Decisions:
    at one link of it.
 3. **Execution is a fact of a namespace entry**, marked in the
    manifest and lowered by a mount, with the file's execute bit; `rx`
-   is gone.
+   is gone. `noexec` refuses starting and mapping a file as code, and
+   no more.
 4. **A tree writes and runs only as a user's home the manifest marks**,
    never for an app.
-5. **Every app is a package**; a board's own app is an `app` row.
+5. **Every app is a package**; a board's own app is an `app` row with
+   the facet rows granted to it.
 6. **Settings take away, and size memory inside `users`**; they add
    nothing.
 7. **Memory has two parts**, the system's and `users`, both walls;
-   every user's domain is a slice carved at its start.
+   each console line holds its login's wall from boot, and every other
+   user's domain is a slice carved at its start. A principal has no
+   memory of its own.
 8. **The manifest states no derived number.**
+9. **A script is read once and handed to its interpreter as bytes.**
 
 ### Open decisions
 
-Each has a recommendation.
+Each has a recommendation; where the external review recommends
+otherwise, both are given.
 
 1. **The wording of the working agreement's list**, as [The working
    agreement's list](#the-working-agreements-list) gives it.
-   Recommended: adopt both entries with step 2.
+   Recommended: adopt both entries with step 2. The review asked that
+   the wording keep direct execution, the authority ceiling and memory
+   apart and claim nothing about where code comes from; the wording
+   above does.
 2. **Which trees run files.** Recommended: the table of [Where
    execution is allowed](#where-execution-is-allowed): the image, a
    package and a marked home, with `/tmp` and removable media
-   `noexec`. The other choice is FreeBSD's, where `/tmp` runs files:
-   one constant, cheap to reverse.
+   `noexec`, `noexec` meaning only what
+   [What `noexec` does not promise](#what-noexec-does-not-promise)
+   says. The other choice is FreeBSD's, where `/tmp` runs files: one
+   constant, cheap to reverse. The review agrees.
 3. **Whether a release manifest marks homes `exec`.** Recommended:
    both development manifests do; a release's manifests are decided
    with that release's security closure, since the mark puts the
-   storage domain in the trusted base of every person who runs a file.
-4. **Read and write bits.** Recommended: only the execute bit gates. A
-   storage service may later refuse a write to a file without a write
-   bit, as a server's own refusal; nothing here needs it.
-5. **A local `memory` that raises.** Recommended: allowed, bounded by
-   `users`, for the reason in [The machine's
-   settings](#the-machines-settings).
-6. **Walls or caps under `users`.** Recommended: walls, with caps
+   storage domain in the trusted base for the code each person runs
+   from a home. The review agrees, and asks that the release's
+   acceptance name that widening of trust explicitly.
+4. **Read and write bits.** Recommended: only the execute bit gates,
+   and a `chmod` that clears a read or write bit is recorded and gates
+   nothing; `ls -l` shows the mode and the guide says that grants
+   decide. A storage service
+   may later refuse a write to a file without a write bit, as a
+   server's own refusal. The review recommends refusing, or at least
+   diagnosing, a `chmod` that tries to protect and would do nothing.
+   Refusing breaks `cp -p`, `tar` and `install -m 0444`, which set such
+   modes as a matter of course, so this document keeps the
+   recommendation and records the review's.
+5. **Apps and logins share `users`.** This changes a commitment: with
+   a separate pool, apps could not take memory another principal's
+   reservation held; here a large app, or many, can keep a login over
+   SSH or the web, another person's login and any command domain from
+   starting. Recommended: accept it, with the console lines' walls
+   ([Slices](#slices)), so that the person who administers the machine
+   can always log in at its console and stop an app; a login elsewhere
+   is refused with `no_memory` until memory is free. The other choice
+   is a pool for apps beside one for logins, which the manifest sizes,
+   at the cost of a number to write and memory that one side cannot
+   use. The review asks that this be decided explicitly; it does not
+   choose between them.
+6. **A local `memory` that raises.** Recommended: allowed, bounded by
+   `users`, judged at the whole wall, and introduced after `users`
+   (step 10), since with decision 5's console walls it cannot keep
+   anyone from the console. The review recommends accepting it only
+   once decision 5 is taken and with the whole wall judged, which this
+   recommendation includes.
+7. **Walls or caps under `users`.** Recommended: walls, with caps
    decided at the gate that chooses the kernel, since Fiasco cannot
    tell the two apart ([Caps](#caps-the-alternative-that-changes-a-commitment)).
-7. **A login session's `share`.** Recommended: an eighth of `users`
-   for root's session in the development manifests. Stating bytes
-   alone is the other choice, and leaves a larger board's memory
-   unused by programs.
-8. **The network as a right of `within`.** Recommended: `net`,
-   inherited without `within` and dropped by it unless named.
-9. **Package keys on a development medium.** A downloaded development
-   image trusts no key its user holds, so it takes none of their apps
-   without a rebuild. Recommended: a development build also trusts the
-   keys of a `package_keys` file that whoever prepares the medium
-   writes beside root's `authorized_keys`
-   ([design-ssh.md](design-ssh.md#login-keys)), with the limitation
-   that file already has: in a development build, whoever writes the
-   medium decides. A release build trusts the boot image's keys alone.
-   Which domain serves that partition at each boot was not read for
-   this document and is checked before the change.
-10. **A prebuilt SDK.** Recommended: publish one beside each published
-    image, from the same commit, so that building a program does not
-    need building erXos. It ships once the image license check covers
-    the libraries of its `sysroot`.
+   The review agrees, and asks that FD25's reporting and the refusal
+   of elastic budgets stay as they are.
+8. **A login session's `share`.** Recommended: an eighth of `users`
+   for root's session in the development manifests, with no principal
+   ceiling to disagree with it on a large machine. Stating bytes alone
+   is the other choice, and leaves a larger board's memory unused by
+   programs. The review agrees as a development default and notes that
+   `share` gives neither fairness nor admission; admission at the
+   console comes from the line's wall, not from `share`.
+9. **The network as a right of `within`.** Recommended: `net`, the
+   right to create sockets, inherited without `within` and dropped by
+   it unless named; sockets already held work on, and a command domain
+   gets a network facet only when its program holds `net`. The review
+   agrees with those semantics stated.
+10. **Package keys on a development medium.** A downloaded development
+    image trusts no key its user holds, so it takes none of their apps
+    without a rebuild. Recommended: a development build also trusts
+    the keys of a `package_keys` file beside root's `authorized_keys`,
+    served the way root's medium keys are
+    ([design-ssh.md](design-ssh.md#roots-login-keys-on-the-medium)):
+    the storage domain that serves `system` reads it through a
+    read-only window, decodes at most 16 lines, and serves only
+    fixed-size Ed25519 key blobs, which the package process checks
+    whole; a file with any malformed line trusts no key from it and is
+    reported. That makes the storage domain a package-signing authority
+    for that boot, and this is accepted, not hidden: in a development
+    build the same domain already supplies root's login keys, which
+    give more than a package can, since an app takes only the board's
+    offer. A release build trusts the boot image's keys alone. The
+    review recommends either accepting the storage domain as that
+    authority explicitly, as this does, or reading the keys from an
+    authenticated boot input; the second needs a boot-chain input that
+    no design read for this document provides.
+11. **A prebuilt SDK.** Recommended: publish one beside each published
+    image, from the same commit and for its ABI version, so that
+    building a program does not need building erXos. It ships once the
+    image license check covers the libraries of its `sysroot`. The
+    review agrees.
+12. **What a script can be.** Recommended: a script's interpreter is
+    an Erlang command of `/bin`, handed the bytes the handler read, and
+    an app is never a script. A native interpreter on a `#!` line
+    answers `ENOEXEC`, which differs from FreeBSD; erXos ships no native
+    interpreter, and handing a native one the bytes would need a
+    descriptor or a file the narrowed program may not hold. The other
+    choices are an interpreter handed the path, which breaks `within`
+    and runs bytes the handler did not check, and a command domain for
+    every app, which costs a domain in every table for each place of
+    `max`. The review offered the second and running packaged scripts
+    in the app's own runtime; this document takes neither and keeps an
+    app's Erlang in OTP applications.
 
 ## References
 
