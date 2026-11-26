@@ -1879,8 +1879,9 @@ module Erx
       # parameter), since an app's row is granted with no parameter stated, and every
       # quantity (derived_quantities). A service of the inspect interface is refused until
       # the scope an app principal gets is checked to be its own, never all, and one of
-      # the files interface until the storage service's `tree apps` roots its grant at
-      # the app's own directory, by interface, whatever its name.
+      # the files or media interface (an interface files_grant checks) until the storage
+      # service's `tree apps` roots its grant at the app's own directory, by interface,
+      # whatever its name.
       def check_apps(tables)
         invalid('a facet of the source carries a tree, which only the rows the build derives may', 'facet.parameter') if
           records('facet').any? { |record| record.parameters.any? { |key, _value| key.value == 'tree' } }

@@ -1175,10 +1175,14 @@ class ManifestDomainsTest < Minitest::Test
             message: /not the name of one service/)
     refused(Erx::Manifest::Invalid, 'apps.services', for_apps(@source + self.class.apps(services: 'data data'), 8),
             message: /twice/)
-    # Seed: a files service accepted, whose grant no tree apps roots at the app's directory.
-    refused(Erx::Manifest::Unsupported, 'apps.services',
-            for_apps(with_display(grants: [], served: "service b\n  server @domain.beta\n  interface files\n") +
-                      self.class.apps(services: 'b'), 8), message: /files interface/)
+    # Seed: a service of the files or of the media interface that passes the name checks
+    # above, whose grant no tree apps roots at the app's directory.
+    %w[files media].each do |interface|
+      refused(Erx::Manifest::Unsupported, 'apps.services',
+              for_apps(with_display(grants: [], served: "service b\n  server @domain.beta\n  interface #{interface}\n") +
+                        self.class.apps(services: 'b'), 8),
+              message: /services names b, of a files or media interface, whose grant/)
+    end
     refused(Erx::Manifest::Invalid, 'apps.services', for_apps(with_display(grants: []) + self.class.apps(services: 'b'), 8),
             message: /no ABI file declares/)
     two = with_display(grants: [], served: "service b\n  server @domain.beta\n  interface files\n" \
