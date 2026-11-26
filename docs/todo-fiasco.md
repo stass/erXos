@@ -95,18 +95,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   ([plan.md](plan.md)).
 * [High] 0.2 on Fiasco, the kernel debugger's replacement ([design-debugger.md](design-debugger.md)): the fork
   has no JDB, no console input and no `jdb_object.cpp` (GPL-2.0-only); a panic, a failed assertion and
-  `kdb_ke` stop every CPU, print the report and the crash record and reset, and the rest of the stop is to come. To land,
+  `kdb_ke` and a kernel trap stop every CPU, print the report and the crash record and reset, and the rest of the stop is to come. To land,
   in parts that each stand alone:
   1. the rest of the stop (the glue `fiasco/kernel/src/erx/erx_machine_stop.cpp`, its routes from `panic`,
-     `assert_fail` and `kdb_ke`, the park in the debug inter-processor interrupt's handler, the admission, the
+     `assert_fail`, `kdb_ke` and the kernel traps, the park in the debug inter-processor interrupt's handler, the admission, the
      census, the bounded take of the printf lock, the panic stacks shaped as Fiasco's `Context` and the
-     report are in the tree, checked by the `native_machine_stop` cell's `stopped` and `lock-held` runs): the
-     route from a kernel trap and the three trap reports that panic, whose `Trap_state::dump` still takes
-     the printf lock without bound through `Erx_console_ring::close`, the check in the spinlock's wait, a
+     report are in the tree, checked by the `native_machine_stop` cell's `stopped` and `lock-held` runs and
+     the `native_kernel_trap` seed): the check in the spinlock's wait, a
      drain of the ring at the stop bounded by construction (an unanswered writer racing the unlocked
      close can move `open` behind the drain's tail, so the drain runs until the index wraps), the
      platform control object's shutdown that names the root's cause; the report's message through the console's one escaping function (`erx_log_escape`, whose `include/erx/log.h` the kernel's glue does not see); one routine for the depth that each stop path now counts on its own; cells for a
-     nested stop and the brief form's report; every development boot is one of a kernel without the
+     nested stop and the brief form's report, a kernel trap's among them; the census's clock read in program
+     order as the binding asks (an ISB around `CNTVCT_EL0`, which the glue cannot write while only listed
+     functions hold inline assembly); `ivt.S`'s stop offsets from the generated layout rather than held to it by
+     `erx_machine_stop.cpp`'s assertion, which needs the seam's offsets in a header that `ivt.S`, an inherited
+     module, may include (`Makeconf` gives the core's include directory to the glue's modules alone); every development boot is one of a kernel without the
      object, and a boot checks that `sigma0` ignores its object-naming calls failing (P9);
   2. `tools/erx debug` over crash records and memory images, the debug bundle with its layout table and
      walkers, and the harness's image and report on a failing QEMU run;

@@ -342,6 +342,9 @@ erx_stop_entry(erx_crash_cpu_t *entry, erx_stop_cpu_state_t state,
 static uint32_t
 erx_stop_walk(erx_stop_regs_t const &regs, uint64_t *frames)
 {
+  // Only a kernel-mode stack (EL1) holds the kernel's frames.
+  if ((regs.regs.state & 0xc) != 0x4)
+    return 0;
   Mword const sp = regs.regs.sp;
   Mword const top = (sp & ~Mword{Context_base::Size - 1}) + Context_base::Size;
   Mword fp = regs.regs.gpr[29];
@@ -597,7 +600,11 @@ Erx_machine_stop::trap(Trap_state const *ts, char const *what)
   erx_stop_regs_t regs = {};
   for (unsigned r = 0; r < 31; ++r)
     regs.regs.gpr[r] = ts->r[r];
-  regs.regs.sp = reinterpret_cast<Mword>(static_cast<Return_frame const *>(ts) + 1);
+  // A trap from user mode (EL0t), sigma0's, keeps the user's stack pointer
+  // in the frame; a kernel-mode trap's is where its frame ends.
+  regs.regs.sp = (ts->pstate & 0xf) == 0
+    ? ts->usp
+    : reinterpret_cast<Mword>(static_cast<Return_frame const *>(ts) + 1);
   regs.regs.pc = ts->pc;
   regs.regs.state = ts->pstate;
   Erx_stop_live live;

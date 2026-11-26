@@ -2,7 +2,8 @@
 // Modified by erXos: a receive from the thread itself whose timeout hit
 // before it would wait yields the time slice (docs/design-fiasco.md, "Scheduling"),
 // and a test kernel's seeded warning at the marked one (ERX_TEST_KERNEL_WARN,
-// tools/lib/erx/native_console_ring.rb); no other kernel builds it.
+// tools/lib/erx/native_console_ring.rb); no other kernel builds it. Sigma0's
+// exception enters the machine stop without printing (docs/design-debugger.md).
 INTERFACE:
 
 #include "l4_buf_iter.h"
@@ -113,6 +114,7 @@ IMPLEMENTATION:
 
 #include "config.h"
 #include "cpu_lock.h"
+#include "erx_machine_stop.h"
 #include "ipc_remote_timeout.h"
 #include "ipc_timeout.h"
 #include "lock_guard.h"
@@ -1065,10 +1067,7 @@ Thread::send_exception(Trap_state *ts)
       LOG_TRACE("Exception invalid handler", "ieh", this, Log_exc_invalid,
                 l->cap_idx = _exc_handler.raw());
       if (space()->is_sigma0()) [[unlikely]]
-        {
-          ts->dump();
-          panic("Sigma0 raised an exception");
-        }
+        Erx_machine_stop::trap(ts, "Sigma0 raised an exception");
 
       handler = this; // block on ourselves
     }
