@@ -643,6 +643,10 @@ scripts live in `~/erxos-scratch/tools/`.
       owner did not admit: every such message arrives as
       `{erx_origin, D, Msg}`, with no flag and no exception, and only each
       protocol's owner takes the envelope off its own shapes, never `sys`;
+    * a group leader never crosses a domain: a spawn request's child takes
+      its own domain's `init`, `group_leader/2` refuses a leader or member
+      of another domain, and the frame grammar has no `GROUP_LEADER`, so no
+      io request or reply crosses a domain;
     * the kernel, `liberx` and its backends, the runtimes and Erlang agree
       on the ABI because all of them are generated from `abi/erx_abi.txt`
       (on Fiasco: FD24).
