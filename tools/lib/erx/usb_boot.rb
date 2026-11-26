@@ -179,9 +179,7 @@ module Erx
 
       # Whether the image bytes, read back after the boot, hold volume, the bytes the
       # harness wrote, unchanged at the volume's place. Pure.
-      def volume_unchanged?(bytes, volume) =
-        Digest::SHA256.digest(bytes.b.byteslice(VOLUME_START * SECTOR, VOLUME_SECTORS * SECTOR).to_s) ==
-        Digest::SHA256.digest(volume.b)
+      def volume_unchanged?(bytes, volume) = bytes.b.byteslice(VOLUME_START * SECTOR, VOLUME_SECTORS * SECTOR) == volume.b
     end
 
     # The console's lines of the stick's medium: served with the image's capacity, then

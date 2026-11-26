@@ -79,7 +79,12 @@ class ErxMediaVolumeTest < Minitest::Test
               caught_by: 'the_finish_answers_what_came_before_and_refuses_what_comes_after_test'),
     Fault.new(name: "an eject that leaves the medium's supervisor running", path: DRIVE,
               from: "    Answer = finish(Volumes),\n    stop(Sup),\n", to: "    Answer = finish(Volumes),\n",
-              caught_by: 'eject_finishes_every_volume_then_ends_the_medium_test')
+              caught_by: 'eject_finishes_every_volume_then_ends_the_medium_test'),
+    Fault.new(name: 'a waiting read admitted after the finish', path: VOLUME,
+              from: "handle_info(?ERX_FS_WAIT({_Grant, Alias}, _Request), \#{finished := true} = State) ->\n" \
+                    "    Alias ! ?ERX_FS_ANSWER(Alias, {error, eio}),\n    {noreply, State};\n",
+              to: '',
+              caught_by: 'the_finish_answers_what_came_before_and_refuses_what_comes_after_test')
   ].freeze
 
   def self.images

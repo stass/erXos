@@ -248,6 +248,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] media, an eject waits inside the ejecting grant (`erx_media_tree:write/4` on `ctl`,
+  `erx_media_drive`'s `eject`): the finish answers every request a volume holds first, so a slow or
+  stalled stick with many reads queued holds the drive process, every walk of `diskN` and `status`
+  open behind it, and the writer's grant, for as long as those reads take, each bounded by the
+  window's deadline; a grant's callback otherwise waits on no event (`erx_fs`). Answer the eject as a
+  waiting request whose keeper is the drive process, so only the writer waits.
 * [Medium] files, the client's frame bound unproven (`otp/erts/preloaded/src/erx_file_remote.erl`, `posted/2`):
   the client refuses a request whose message passes `files_max_frame_min` as `erlang:external_size/1`
   measures it, which rests on two facts nothing checks. That size equals the frame's `payload_len`

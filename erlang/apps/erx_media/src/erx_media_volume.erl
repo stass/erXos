@@ -254,7 +254,7 @@ handle_cast(_Other, State) ->
 %% A read is a waiting request whose keeper is the volume, answered once its sectors
 %% are read; a flush that follows its answer finds nothing to flush.
 -doc false.
-handle_info(?ERX_FS_WAIT({_Grant, Alias}, {read, _File, _Offset, _Count}), #{finished := true} = State) ->
+handle_info(?ERX_FS_WAIT({_Grant, Alias}, _Request), #{finished := true} = State) ->
     Alias ! ?ERX_FS_ANSWER(Alias, {error, eio}),
     {noreply, State};
 handle_info(?ERX_FS_WAIT({_Grant, Alias}, {read, File, Offset, Count}), #{fat := Mounted} = State) ->
@@ -284,8 +284,7 @@ finished(#{}) ->
     ok.
 
 %% What a writable volume has not yet written: FAT's last batch with its dirty flag
-%% cleared. No format here has a write path (WRITE_PATHS), so there is none; the write
-%% path fills this in.
+%% cleared. No format here has a write path (WRITE_PATHS), so there is nothing to write.
 last_batch(#{}) ->
     ok.
 

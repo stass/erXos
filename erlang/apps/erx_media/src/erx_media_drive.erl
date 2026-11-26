@@ -36,7 +36,8 @@ behind it:
   medium ended either way, and `enxio` when the drive holds no mounted medium.
 * freeze/1, the media service's part of the ordered end, finishes every volume of
   every drive it names and keeps each medium as it is; it answers `ok` once all have,
-  or the first failure.
+  or the first failure. An eject after it finds every volume already finished, and so
+  answers `eio`; the ordered end that freezes ejects nothing.
 """.
 
 -behaviour(gen_server).
@@ -163,10 +164,9 @@ answers(Requests) ->
      end || Request <- Requests].
 
 first_failure(Answers) ->
-    case [Failed || Failed <- Answers, Failed =/= ok] of
+    case [Failed || {error, _} = Failed <- Answers] of
         [] -> ok;
-        [{error, Reason} | _] when is_atom(Reason) -> {error, Reason};
-        [_Malformed | _] -> {error, eio}
+        [First | _] -> First
     end.
 
 %% Stops the medium's supervisor Sup, which ends its volumes, unlinked first so that its
