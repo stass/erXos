@@ -979,10 +979,10 @@ class DomPlannerTest < Minitest::Test
     services = [%w[clock none clock], %w[code_objects none code_objects], %w[data 4 files],
                 %w[display 0 windows], %w[home 4 files], %w[inspect none inspect], %w[install none code],
                 %w[line none line],
-                %w[log none log], %w[login none login], %w[login_keys 4 files], %w[machine none files], %w[media 1 media], %w[net 2 net],
+                %w[log none log], %w[login none login], %w[login_keys 4 files], %w[machine none svc], %w[media 1 media], %w[net 2 net],
                 %w[network_ctl 2 driver_control],
                 %w[packages 4 files], %w[pci none pci], %w[pci_bus none pci_bus], %w[pcie 3 pcie],
-                %w[start none files], %w[storage_ctl 4 driver_control],
+                %w[start none svc], %w[storage_ctl 4 driver_control],
                 %w[system 4 files], %w[usb_input 5 input], %w[web 6 web]]
     assert_equal services.each_with_index.map { |(name, server, kind), index|
                    "service #{index} name=#{name} server=#{server} interface=#{interface.call(kind)}"

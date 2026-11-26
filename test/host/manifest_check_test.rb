@@ -896,6 +896,55 @@ class ManifestCheckTest < Minitest::Test
     assert_match(/parameter rights is one of ro, rw/, error.message)
   end
 
+  # The system domain's own service trees, the start table's and the machine's, are
+  # trees of the svc interface (docs/design-app-trees.md, "Interfaces").
+  def test_the_start_and_machine_services_are_svc_trees
+    view = @codec.open('manifest', admit.bytes)
+    services = view.count('services').times.map { |index| view.fetch('services', index) }
+    interfaces = services.to_h { |row| [view.string(row.fetch('name')), row.fetch('interface')] }
+    svc = @codec.schema.services.find { |service| service.fetch(:name) == 'svc' }.fetch(:number)
+    assert_equal({ 'machine' => svc, 'start' => svc }, interfaces.slice('machine', 'start'))
+  end
+
+  # A service tree of interface svc named name served by a configured domain, under the
+  # source alias as, since two rows may share a name but not an alias.
+  def svc_tree(name, server: '@domain.web', as: name)
+    "service #{as}\n  name \"#{name}\"\n  server #{server}\n  interface svc\n"
+  end
+
+  # No two service trees share a name (docs/design-app-trees.md, AT9): two services of
+  # interface svc named wifi on two servers are refused, as one beside a files service of
+  # that name is not, since only svc services are trees at /svc.
+  def test_two_svc_services_of_one_name_are_refused
+    admit(@source + svc_tree('wifi') + "service wifi_files\n  name \"wifi\"\n  server @domain.network\n  interface files\n")
+    refused(Erx::Manifest::Invalid, 'service.name',
+            @source + svc_tree('wifi') + svc_tree('wifi', server: '@domain.network', as: 'wifi_network'),
+            message: /two services of interface svc share the name wifi/)
+  end
+
+  # Every start row's name is a principal's, so no svc service is named like a principal
+  # (AT9): beside a principal wifi, which takes one of the system principal's domains and
+  # 36 MiB of its memory, a service tree named wifi is refused, and one named otherwise is
+  # admitted.
+  def test_an_svc_service_named_like_a_principal_is_refused
+    system = "principal system\n  memory 353419264\n  grant @share.users\n  domains 8\n"
+    wifi = "principal wifi\n  memory 37748736\n  grant @share.users\n  domains 1\n  names 1\n" \
+           "  default_limits @limits.native\n  ceiling_limits @limits.native\n"
+    source = changed(@source.sub(system, "principal system\n  memory 315670528\n  grant @share.users\n  domains 7\n")) + wifi
+    admit(source + svc_tree('bluetooth'))
+    refused(Erx::Manifest::Invalid, 'service.name', source + svc_tree('wifi'),
+            message: /service wifi of interface svc is named like principal wifi/)
+  end
+
+  # The system domain holds no svc grant (AT8): a facet row granting a service tree of a
+  # configured domain to the system domain is refused, and one granting it to root's
+  # session template is admitted.
+  def test_an_svc_facet_granted_to_the_system_domain_is_refused
+    admit(@source + svc_tree('bluetooth') + files_facet('bluetooth', '@session.system'))
+    refused(Erx::Manifest::Invalid, 'facet.grantee', @source + svc_tree('bluetooth') + files_facet('bluetooth', 'system'),
+            message: /the system domain holds no facet of interface svc: bluetooth/)
+  end
+
   # Property 4: budgets, grants and the root startup rule.
   # The development manifest's system_baseline, which the sums below fit against.
   def baseline = Integer(@source[/^  system_baseline (\d+)$/, 1])

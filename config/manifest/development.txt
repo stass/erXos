@@ -533,15 +533,16 @@ facet inspect
   period_ns 1000000000
   max_heap_size 65536
 # start: the start service's tree, /etc/start/ctl alone (docs/design-apps.md,
-# "Interfaces"), for each session made from root's template: one erx_fs grant served by
+# "Interfaces"), a service tree of the svc interface (docs/design-app-trees.md), for each
+# session made from root's template: one erx_fs grant served by
 # the system domain, bound to the session and ending with it, so it travels on the
 # session's system connection and takes none of max_connections. Its max_request is
-# files_max_frame_min (property 16), as for every files grant; a ctl write is one line of at most
+# files_max_frame_min (property 16), as for every grant of a tree; a ctl write is one line of at most
 # 4 KiB, so in_flight is small; max_heap_size, in words (1 MiB), bounds the grant's
 # process, which holds its fids and the line it answers.
 service start
   server system
-  interface files
+  interface svc
 facet start
   grantee @session.system
   service @service.start
@@ -552,7 +553,8 @@ facet start
   period_ns 1000000000
   max_heap_size 131072
 # machine: the domain service's tree, /machine/ctl, through which a session asks for the
-# machine's end (docs/design-system.md, "A session's request"), for each session made
+# machine's end (docs/design-system.md, "A session's request"), a service tree of the svc
+# interface (docs/design-app-trees.md), for each session made
 # from root's template alone: one erx_fs grant served by the system domain, bound to the
 # session, ending with it and started with its principal, so it travels on the session's
 # system connection and takes none of max_connections. Holding the grant is the right to
@@ -561,7 +563,7 @@ facet start
 # grant's process, which holds only its fids.
 service machine
   server system
-  interface files
+  interface svc
 facet machine
   grantee @session.system
   service @service.machine

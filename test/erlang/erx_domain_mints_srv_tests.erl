@@ -659,18 +659,19 @@ session_line_grant_test() ->
         files_cleanup(Started)
     end.
 
-%% A session of the system principal holds a machine grant that names it by its user
+%% A session of the system principal holds a machine grant, a tree of the svc interface as
+%% the manifest declares it, that names it by its user
 %% name, root, as every mint request does (docs/design-system.md, "A session's
 %% request"), so the machine's end is logged by the name the session logs in as.
 session_machine_grant_test() ->
-    Started = tree_setup(machine, ?ERX_SERVICE_FILES, [{{template, 0}, machine, system, #{max_request => 131072}}],
+    Started = tree_setup(machine, ?ERX_SERVICE_SVC, [{{template, 0}, machine, system, #{max_request => 131072}}],
                          fun() -> erx_fs_grants:start_link(erx_machine_fs) end),
     {module, _} = code:ensure_loaded(erx_machine_fs),
     1 = erlang:trace_pattern({erx_machine_fs, init, 1}, true, [local]),
     erlang:trace(all, true, [call, {tracer, self()}]),
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
-        #{machine := {?ERX_SERVICE_FILES, {_Grant, <<"machine">>, rw}}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
+        #{machine := {?ERX_SERVICE_SVC, {_Grant, <<"machine">>, rw}}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
         ?assertEqual([<<"root">>], [Arg || {trace, _, call, {erx_machine_fs, init, [Arg]}} <- flush_traces()])
     after
         erlang:trace(all, false, [call]),

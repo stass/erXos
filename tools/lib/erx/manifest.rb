@@ -747,6 +747,7 @@ module Erx
         rows['services'] = services.map(&:last)
         invalid('two services of one server share a name', 'service.name') unless
           rows['services'].map { |row| row.values_at('server', 'name') }.uniq.size == services.size
+        check_service_tree_names(rows)
         rows['introductions'] = normalize_introductions
         app_services = check_apps(rows)
         rows['facets'], rows['facet_operations'], rows['facet_parameters'], facet_values =
@@ -2415,6 +2416,7 @@ module Erx
           rows.map { |row| [grantee.call(row), row.fetch('name')] }.uniq.size == rows.size
         invalid('the system domain takes no facet of its own service', 'facet.grantee') if
           rows.any? { |row| row.fetch('grantee_kind') == grantee_kind('system') && server.call(row) == none }
+        check_no_system_service_trees(rows, service_rows)
         control = fetch_interface('driver_control')
         invalid('only the system domain holds a driver-control facet', 'facet.grantee') if
           rows.any? { |row| row.fetch('grantee_kind') != grantee_kind('system') && service_rows.fetch(row.fetch('service')).fetch('interface') == control }
@@ -3087,7 +3089,7 @@ module Erx
       end
 
       # Property 16: every domain that receives the files protocol of a facet of an
-      # interface abi/services declares served_as tree (files, media, windows, line and
+      # interface abi/services declares served_as tree (files, media, svc, windows, line and
       # input, compared by number), its
       # grantee (the system domain, a configured domain or a session template) and its
       # server, takes frames of at least files_max_frame_min bytes under its own runtime
@@ -3219,6 +3221,33 @@ module Erx
           what = by_number[row.fetch('interface')]
           invalid("service #{name} is of #{what}, which no manifest row grants", 'service.interface') if what
         end
+      end
+
+      # AT9 of docs/design-app-trees.md: no two service trees share a name. A service of
+      # the svc interface is a tree a reader reaches at /svc/NAME, as an app's tree is at
+      # /svc/APP, an app being named like its start row, whose name is a principal's; so no
+      # two svc services share a name, whatever their servers, and none is named like a
+      # principal. A service row holds its name as bytes and a principal row as text, so the
+      # principals' names are compared as bytes.
+      def check_service_tree_names(rows)
+        svc = fetch_interface('svc')
+        names = rows.fetch('services').filter_map { |row| row.fetch('name') if row.fetch('interface') == svc }
+        shared = names.tally.find { |_name, count| count > 1 }
+        invalid("two services of interface svc share the name #{shared.first}", 'service.name') if shared
+        principal = (names & rows.fetch('principals').map { |row| row.fetch('name').b }).first
+        invalid("service #{principal} of interface svc is named like principal #{principal}, whose app tree " \
+                "would be /svc/#{principal}", 'service.name') if principal
+      end
+
+      # AT8 of docs/design-app-trees.md: the system domain holds no svc grant. It serves
+      # its own trees and mounts them itself, and a configured domain's tree reaches only
+      # the grantees of its facet rows, none of them the system domain.
+      def check_no_system_service_trees(facets, service_rows)
+        svc = fetch_interface('svc')
+        granted = facets.find do |row|
+          row.fetch('grantee_kind') == grantee_kind('system') && service_rows.fetch(row.fetch('service')).fetch('interface') == svc
+        end
+        invalid("the system domain holds no facet of interface svc: #{granted.fetch('name')}", 'facet.grantee') if granted
       end
 
       # The facet rows of the interface abi/services declares as NAME, compared by number.

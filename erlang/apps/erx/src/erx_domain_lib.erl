@@ -275,8 +275,7 @@ boot_timeout_max_s. The rest: the machine's
 host name, the configured domains, in row order, the services, each its
 server, a configured domain's row or system, its name and the abi/services
 number of the interface it serves (erx_abi.hrl's ERX_SERVICE_* macros, so
-a holder's driver-control facet is found by ?ERX_SERVICE_DRIVER_CONTROL,
-and a files service the system domain serves by ?ERX_SERVICE_FILES),
+a holder's driver-control facet is found by ?ERX_SERVICE_DRIVER_CONTROL),
 and the facet rows, each
 its grantee, a configured row, system, or {template, Template} for the
 sessions made from session template Template, the service's name, its server, a

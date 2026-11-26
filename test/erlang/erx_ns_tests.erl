@@ -409,7 +409,7 @@ facets_mount_only_where_granted() ->
                   #{point => [<<"media">>], provider => ended, root => [], rights => rw}],
                  at_use()).
 
-%% The system domain's files services, apps, start and machine, have their places too:
+%% The system domain's trees, apps, start and machine, have their places too:
 %% a session that holds their facets mounts each where the system domain mounts its own
 %% grant of it (docs/design-shell.md, "Interfaces"). The apps tree mounts at /apps, read
 %% and written as /data is (docs/design-packaging.md, "/apps"), and the start service's

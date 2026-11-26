@@ -44,8 +44,8 @@
 %% tree the registry holds with it, with the lesser of the entry's rights and the
 %% grant's, or as ended when it holds none
 %% (erx_facets:table/1, through prim_file:erx_table/0). That resolution also marks every
-%% entry on a facet of the media interface nofollow, from the facet's interface number,
-%% so no link on a drive is followed; no entry of this table holds the mark.
+%% entry on a facet of an interface whose row says links none (media, svc) nofollow, from
+%% the facet's interface number, so no link on a drive or in a service's tree is followed; no entry of this table holds the mark.
 %% This is how a domain reaches a grant of another domain by path: a re-grant, such as
 %% the one a restarted server's domain is given, serves the next lookup with no change
 %% to the table, and the process monitors no facet's grant. A grant that has ended
@@ -171,8 +171,8 @@ mount_own(Name, Grant) ->
 %% a resolution lowers to the rights the facet's grant
 %% carries (erx_facets:table/1), so a domain writes there only through an rw grant:
 %% data, the storage domain's tree, at /data; media, the media domain's tree of every
-%% drive, at /media (docs/design-drives.md, "Mounting it"); the system domain's files
-%% services: the package application's apps tree at /apps (docs/design-packaging.md,
+%% drive, at /media (docs/design-drives.md, "Mounting it"); the system domain's trees,
+%% each of the files or the svc interface: the package application's apps tree at /apps (docs/design-packaging.md,
 %% "/apps"), the start service's tree, start, at /etc/start, the domain service's
 %% machine at /machine, and the line service's tree, line, at /line
 %% (docs/design-apps.md, "Interfaces"; docs/design-system.md, "A session's request";

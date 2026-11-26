@@ -2767,15 +2767,16 @@ and sends it in the ready answer with any other facet the domain gets
 there. So these facets reach every incarnation and every session with
 its ready answer, before any installation, and end with it, or with the
 process behind them. For a service of an interface `abi/services` declares
-`served_as tree` (`files` and `line`; `windows` is left out because
+`served_as tree` (`files`, `svc` and `line`; `windows` is left out because
 property 18 makes a configured domain, never the system domain, the server of
 every `windows` service) the process
 behind it is the supervisor of its tree's grants (`erx_fs_grants`), and
 the domain service asks it for an `erx_fs` grant bound to the grantee and
 ending with its domain pid, whose start answers the grant's tree with
 its pid, in place of a facet in front of it, as a
-files service's mint does for its grantees (`start`, served by the start
-service, and `apps`, served by the package process, are such). A
+files service's mint does for its grantees (`start` and `machine`, of
+interface `svc`, served by the start service and the domain service, and
+`apps`, served by the package process, are such). A
 service that has named no living process by then is left out and logged; the domain finds the name absent, as it
 finds any unavailable service, until it restarts. The domain service
 creates the configured domains as it starts, so a service whose facets
