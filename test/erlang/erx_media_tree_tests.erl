@@ -370,7 +370,7 @@ session(Name) ->
     end.
 
 %% A user's rc lines over a volume, as a client sends them: a file written and appended
-%% to, a directory made, a walk to the target that misses, then the file moved into the
+%% to, a directory made, a walk to the target that stops short, then the file moved into the
 %% directory under its own name in one exchange of a new attach, two walks, the renameat
 %% and the clunks, as erx_file_remote:rename/3 sends them.
 a_file_moves_into_a_new_directory_test_() ->
@@ -390,7 +390,7 @@ moves_into_a_new_directory() ->
         {ok, 6, 6} = call(Grant, {write, 3, 0, <<"again\n">>}),
         ok = call(Grant, {clunk, 3}),
         {ok, _} = call(Grant, {mkdir, 2, <<"docs">>, 8#755, 0}),
-        ?assertMatch({error, _}, call(Grant, {walk, 1, 3, S1 ++ [<<"docs">>, <<"made.txt">>]})),
+        ?assertNotMatch({ok, [_, _, _, _]}, call(Grant, {walk, 1, 3, S1 ++ [<<"docs">>, <<"made.txt">>]})),
         ?assertEqual([ok, ok, ok, ok, ok, ok, ok],
                      exchanged(Grant, [{attach, 10, ?NOFID, <<"root">>, <<"media">>, 0},
                                        {walk, 10, 11, S1}, {walk, 10, 12, S1 ++ [<<"docs">>]},

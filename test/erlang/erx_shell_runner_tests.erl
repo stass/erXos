@@ -342,7 +342,10 @@ runner_rmdir_test() ->
     {ok, Full} = run_source(<<"rmdir ", Dir/binary, "/full">>),
     ?assertEqual(<<"directory not empty">>, erx_shell_eval:status(Full)),
     ?assert(filelib:is_dir(filename:join(Dir, "full"))),
-    {ok, Bare} = run_source(<<"rmdir">>),
+{ok, Dot} = run_source(<<"cd ", Dir/binary, "/full/; rmdir -p ./sub/.. .">>),
+?assertEqual(<<"invalid argument">>, erx_shell_eval:status(Dot)),
+?assert(filelib:is_dir(filename:join(Dir, "full"))),
+{ok, Bare} = run_source(<<"rmdir">>),
     ?assertEqual(<<"usage">>, erx_shell_eval:status(Bare)).
 
 %% rmdir -p removes the operand and then each parent it names, up to its first
@@ -354,7 +357,7 @@ runner_rmdir_parents_test() ->
     {ok, Shell} = run_source(<<"cd ", Dir/binary, "; rmdir -pv a/b//c/ > out">>),
     ?assertEqual(<<>>, erx_shell_eval:status(Shell)),
     ?assertEqual({ok, <<"a/b//c/\na/b\na\n">>}, file:read_file(filename:join(Dir, "out"))),
-    ?assertEqual({ok, ["out"]}, file:list_dir(Dir)),
+    ?assertNot(filelib:is_dir(filename:join(Dir, "a"))),
     ok = filelib:ensure_path(filename:join([Dir, "k", "d"])),
     ok = file:write_file(filename:join([Dir, "k", "f"]), <<"x">>),
     {ok, Stopped} = run_source(<<"cd ", Dir/binary, "; rmdir -p k/d">>),

@@ -45,18 +45,38 @@ parents(Dir, Flags, Ctx) ->
     end.
 
 %% The operand with its last component and the slashes before it taken
-%% off, or none once no slash is left or only the leading ones are.
+%% off, or none once no slash is left or only the leading ones are. Bytes,
+%% not characters: a name need not be UTF-8.
 parent(Dir) ->
-    case string:split(string:trim(Dir, trailing, "/"), <<"/">>, trailing) of
-        [_Last] -> none;
-        [Head, _Last] ->
-            case string:trim(Head, trailing, "/") of
+    Trimmed = slashless(Dir),
+    case binary:matches(Trimmed, <<"/">>) of
+        [] -> none;
+        Slashes ->
+            {At, _} = lists:last(Slashes),
+            case slashless(binary:part(Trimmed, 0, At)) of
                 <<>> -> none;
                 Parent -> Parent
             end
     end.
 
+%% Dir without its trailing slashes.
+slashless(Dir) ->
+    case binary:last(<<"x", Dir/binary>>) of
+        $/ -> slashless(binary:part(Dir, 0, byte_size(Dir) - 1));
+        _ -> Dir
+    end.
+
+%% A directory whose last component, as written, is empty, `.` or `..` is
+%% refused before the path is resolved, as FreeBSD's rmdir(2) refuses `.`
+%% with EINVAL: resolved, it would name the working directory or a parent.
 removed(Dir, Flags, Ctx) ->
+    Last = lists:last([<<>> | binary:split(Dir, <<"/">>, [global, trim_all])]),
+    case lists:member(Last, [<<>>, <<".">>, <<"..">>]) of
+        true -> erx_cmd:report(Ctx, Dir, einval), {error, einval};
+        false -> deleted(Dir, Flags, Ctx)
+    end.
+
+deleted(Dir, Flags, Ctx) ->
     case file:del_dir(erx_cmd:path(Ctx, Dir)) of
         ok ->
             _ = lists:member($v, Flags) andalso erx_cmd:write(Ctx, [Dir, $\n]),
