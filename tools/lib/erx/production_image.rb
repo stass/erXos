@@ -1481,13 +1481,14 @@ module Erx
       # The tracer's case on four CPUs (docs/design-fiasco.md, Verification, "Trace on four
       # CPUs"). At the Erlang shell the person first reads every CPU's kernel ring through
       # the root's window (KERNEL_READ, the BIF over erx_trace_read) and the shell prints
-      # one summary, {kernel_trace, Switches, Receives, ZeroIds, IntraSpace}: whether the
+      # one summary, {kernel_trace, Switches, Receives, ZeroIds, IdsAgree}: whether the
       # rings hold switch and ipc_receive records, how many of their thread and space ids
-      # are 0, and whether some message went between two threads of one space, as the root's
-      # own threads' calls of its service do. An ipc_receive record's thread and space are
-      # the thread the CPU ran, the sender on do_ipc's path and the receiver when it takes a
-      # queued sender; where that thread is one end, the record's space is that end's, and
-      # the other end's comes from a switch record naming it. Then the person spawns a
+      # are 0, and whether the two events name threads and spaces alike. An ipc_receive
+      # record's thread and space are the thread the CPU ran, the sender on do_ipc's path and
+      # the receiver when it takes a queued sender; where that thread is one end of the
+      # message and a switch record names it, the switch's space must be the record's, and
+      # at least one record must be such. (The idle machine's messages go between the system
+      # domain's task and the root's, not between two threads of one task.) Then the person spawns a
       # workload, which waits for a message or 20 ms and loops, and starts erx:trace over it
       # with the backend row, without the kernel's, whose printing would feed itself; the shell prints
       # {workload, Pid}; a message sent to the workload, then the workload's first erts in,
@@ -1511,10 +1512,10 @@ module Erx
       KERNEL_READ = "KR=lists:append([element(2,erx_trace_ring:read({kernel,C},0,512))||C<-lists:seq(0,#{TRACE_CPUS - 1})])," \
                     "KS=[{N,S}||{_,#{TRACE_SWITCH},_,_,_,_,{N,S,_}}<-KR],KM=maps:from_list(KS)," \
                     "KV=[{A,B}||{_,#{TRACE_RECEIVE},_,_,_,_,{A,B,_}}<-KR]," \
-                    "KI=[{if T=:=A->B;true->A end,S}||{_,#{TRACE_RECEIVE},_,_,T,S,{A,B,_}}<-KR,T=:=A orelse T=:=B]," \
+                    "KI=[{T,S}||{_,#{TRACE_RECEIVE},_,_,T,S,{A,B,_}}<-KR,T=:=A orelse T=:=B,maps:is_key(T,KM)]," \
                     '{kernel_trace,KS=/=[],KV=/=[],length([0||{X,Y}<-KS++KV,X*Y=:=0]),' \
-                    "lists:any(fun({O,S})->maps:get(O,KM,none)=:=S end,KI)}.\r"
-      # The summary a working window gives: both events, no id 0, and the root's own calls.
+                    "KI=/=[] andalso lists:all(fun({T,S})->maps:get(T,KM)=:=S end,KI)}.\r"
+      # The summary a working window gives: both events, no id 0, and ids that agree.
       KERNEL_SUMMARY = '{kernel_trace,true,true,0,true}'
       KERNEL_LINE = /\A#{TRACE_REDRAW}(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{kernel_trace,[a-z0-9,]+\}\r*\n\z/n
       def self.trace_checkpoints(machine:)
