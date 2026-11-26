@@ -3164,9 +3164,16 @@ without pairing.
   ([design-bluetooth.md](design-bluetooth.md#the-console),
   [design-login.md](design-login.md#build-order), package 7).
 * **(c) Stage 4 on QEMU `virt`.** The Security Manager as responder,
-  the pairing window with its pairing wait and the control tree, the store with its
-  development backend, reconnection with bonds and Service Changed, and
-  the stage 4 peers.
+  the pairing window with its pairing wait, reconnection with bonds and
+  Service Changed, and the stage 4 peers, with the pairing path built
+  as one piece, without which no image pairs
+  ([design-bluetooth.md](design-bluetooth.md#decisions), 15): both
+  mints before the ready report, the store's grant with its development
+  backend and the grants of the control tree, the service `bluetooth`
+  at `/svc/bluetooth`, in the development manifests; the bond's id;
+  `btpair` with `erx_bt_pair`'s bounded reading and one bond record;
+  the test service `bondcheck`; and the pairing, reconnection and
+  `forget` cells.
 * **(d) The Raspberry Pi 4, on Fiasco.** Board probes B-P1 to B-P6,
   `erx_pl011`'s fresh start with hardware flow control, the system
   domain's line groups for the host link and the line trees, the Pi 4's
@@ -3187,8 +3194,9 @@ without pairing.
   [M12](#m12-storage-networking-boards), where the firmware notification
   is a kernel operation.
 
-Wi-Fi provisioning, HID over GATT and classic Bluetooth are not parts
-of the track ([Beyond the plan](#beyond-the-plan)).
+A service's advertised payload, Wi-Fi provisioning, the central role
+with apps as centrals and HID over GATT, and classic Bluetooth are not
+parts of the track; each waits for a consumer ([Beyond the plan](#beyond-the-plan)).
 
 **Testing.** `make check` runs (a)'s host tests. The QEMU suite
 against Bumble runs at the landing gate when a change touches the
@@ -3765,5 +3773,5 @@ Phase 2:   (if GF chooses erXos's kernel) M7 --> M2 --> M5's and M9's kernel par
 | Audio | not needed for the thesis | not planned |
 | GPU acceleration | the desktop and the kiosks run on software rendering first; OpenGL-class rendering needs research and a design of its own | planned, [Track D](#track-d-windows-widgets-and-the-web) part 10 |
 | USB | not needed for the thesis; wanted for keyboards, pointers and USB sticks on QEMU and the Raspberry Pi 4 | [Track U](#track-u-usb), in Phase 1b below the first two apps |
-| Bluetooth's later stages: Wi-Fi provisioning from a phone, HID over GATT, classic Bluetooth | track B's first consumer is a phone talking to a peripheral; provisioning needs 1b-I's WiFi, part (f), and HID over GATT the central role and the USB design's HID cores ([design-bluetooth.md](design-bluetooth.md#later-stages)) | in that order, each when its consumer is named |
+| Bluetooth's later stages: a service's advertised payload, Wi-Fi provisioning from a phone, the central role with apps as centrals and HID over GATT, classic Bluetooth | track B's first consumer is a phone talking to a peripheral; provisioning needs 1b-I's WiFi, part (f), and HID over GATT the central role and the USB design's HID cores ([design-bluetooth.md](design-bluetooth.md#later-stages)) | in that order, each when its consumer is named |
 | x86-64 | out of scope | not planned |

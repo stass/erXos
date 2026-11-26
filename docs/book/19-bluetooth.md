@@ -23,7 +23,7 @@
 > notifications, `bleuart`, root's shell over the serial service,
 > and tests against a Bumble peer that scans, connects, reads, streams
 > and pairs. Also designed and not built: the control tree's place at
-> `/bluetooth`, its grant and the `btpair` command, without which no
+> `/svc/bluetooth`, its grant and the `btpair` command, without which no
 > image can pair; an id for each bond, which a handler hears in place of
 > an address, and the list of bonds; a service's own octets in the
 > advertising; and apps as centrals, which scan and read other devices.
@@ -180,8 +180,8 @@ power line, and after its reset the controller answers and advertises, so
 the cycle runs on the board; the pin and polarity were not probed on their
 own.
 
-The Bluetooth domain mounts its grant of the line at `/line` and
-opens `/line/data` and `/line/ctl` as ordinary files. Its manifest
+The Bluetooth domain mounts its grant of the line at `/dev/line` and
+opens `/dev/line/data` and `/dev/line/ctl` as ordinary files. Its manifest
 row holds that grant and a store for its bonds (19.6). The manifest
 check is designed to refuse anything more, because a stranger in radio
 range reaches whatever the domain holds through a parser defect; that
@@ -603,9 +603,11 @@ every window. A pairing never replaces a bond; only an explicit
 A bond belongs to the machine and reaches every service at its level,
 whichever app handles it.
 
-Who opens the window? Whoever the manifest grants the control tree. In
-the design the tree is mounted at `/bluetooth`, and a development
-manifest grants it to root's session. A command, `btpair`, drives a
+Who opens the window? Whoever the manifest grants the control tree. It
+is the service `bluetooth`, a second service of the Bluetooth domain
+beside `ble`, and a holder finds it at `/svc/bluetooth`, where every
+service's control tree is found; a development manifest grants it to
+root's session. A command, `btpair`, drives a
 window from a shell and prints the passkey to type on the phone, since
 the shell cannot open one file for both reading and writing. The maker
 of a device may grant the tree to the device's own app instead, which
@@ -618,8 +620,12 @@ reports ready, as every mint must be, and its grants wait for the
 window process, which starts with the rest of the stack.
 A window admits one pairing, whichever side starts it: a phone, or the
 machine itself as a central. It does not choose the peer; the passkey
-line and the bonded line name it, and a wrong bond is forgotten.
-No link in the tree is followed, as in a removable drive's
+line and the bonded line name it, and a wrong bond is forgotten. A
+window offers Passkey Entry, with the machine showing the passkey, or
+Just Works, and never Numeric Comparison: every device that could
+offer it has a screen, and offering it would let an attacker in the
+middle run it with the machine while the phone runs Passkey Entry.
+No link in the tree is followed, as in every service's
 tree. The Bluetooth domain parses what strangers send, and a domain
 taken over from radio range must not be able to turn an administrator's
 write to `ctl` into a write of one of the administrator's own files
@@ -789,7 +795,7 @@ bring-up on QEMU against a Bumble controller, and on the Pi 4 it
 advertises, but no phone has connected, read or paired there; an
 installed app's grant, a service's handler as the owner of its state
 and advertised service UUIDs are designed. So is the rest of what a
-device's maker uses: the control tree at `/bluetooth` with `btpair`, a
+device's maker uses: the control tree at `/svc/bluetooth` with `btpair`, a
 drawn id by which a handler knows a bonded phone, a service's own
 octets in the advertising, and apps that scan and read other devices.
 
