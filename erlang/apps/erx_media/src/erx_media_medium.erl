@@ -135,7 +135,8 @@ A window request through the proxy Proxy, for the reader and the volumes: the
 window answers within its own deadline, so the call needs no timer of its own, and
 a proxy that has ended answers `{error, eio}`.
 """.
--spec window(pid(), {read, non_neg_integer(), pos_integer()} | flush | info) -> term().
+-spec window(pid(), {read, non_neg_integer(), pos_integer()} | {write, non_neg_integer(), binary()}
+                    | flush | info) -> term().
 window(Proxy, Request) ->
     try
         gen_server:call(Proxy, Request, infinity)

@@ -21,8 +21,10 @@ so no link a medium holds is ever followed through it.
   request on a volume's node goes to the process the node names, so an old fid never
   reaches the next medium's files; a read is a waiting request whose keeper is that
   process, and every other operation a call that ends when it answers or ends.
-* `status` is status/3's text, made at its open; `ctl` takes `eject`, which answers
-  `enotsup` until the finish is built, and anything else `einval`.
+* `status` is status/3's text, made at its open; `ctl` takes `eject`, which finishes
+  the drive's medium (erx_media_drive:eject/1), after which the drive's directory
+  lists `status` and `ctl` alone and status shows the medium `idle ejected`; anything
+  else answers `einval`.
 
 Nothing is written: no volume has a write path, so a write of a file and a create,
 remove or rename inside a volume answer `erofs`; one of an entry of the root or of a
@@ -162,8 +164,11 @@ readdir(Handle, Offset, Max, _Fs) ->
 
 %% `eject`, compared as bytes, its trailing newline optional ("Commands").
 -doc false.
-write({ctl, _N}, _Offset, Command, _Fs) when Command =:= <<"eject">>; Command =:= <<"eject\n">> ->
-    {error, enotsup};
+write({ctl, N}, Offset, Command, _Fs) when Command =:= <<"eject">>; Command =:= <<"eject\n">> ->
+    case eject(N) of
+        ok -> {ok, byte_size(Command), Offset};
+        {error, _} = Refused -> Refused
+    end;
 write({ctl, _N}, _Offset, _Command, _Fs) ->
     {error, einval};
 write(_Handle, _Offset, _Bytes, _Fs) ->
@@ -221,13 +226,14 @@ to `info` and the table the medium's reader answered, or none for no medium, wit
 each served volume's outcome from Outcome. The window does not say its transport or
 whether it flushes, so both are `unknown`.
 """.
--spec status(term(), erx_media_medium:table() | none, fun((pid()) -> erx_media_volume:outcome())) -> binary().
+-spec status(term(), erx_media_medium:table() | ejected | none, fun((pid()) -> erx_media_volume:outcome())) -> binary().
 status(_Info, none, _Outcome) ->
     lines([{medium, none}]);
 status(Info, Table, Outcome) ->
     lines([{medium, medium_line(Table)}, {transport, unknown}, {sectors, sectors(Info)}, {flush, unknown}
            | table(Table, Outcome)]).
 
+medium_line(ejected) -> [idle, ejected];
 medium_line({refused, _Finding}) -> [idle, table];
 medium_line({failed, Why}) -> [idle, failed, Why];
 medium_line({_Scheme, _Volumes, _Unserved}) -> ready.
@@ -235,6 +241,8 @@ medium_line({_Scheme, _Volumes, _Unserved}) -> ready.
 sectors({ok, #{sectors := Sectors}}) when is_integer(Sectors) -> Sectors;
 sectors(_Info) -> unknown.
 
+table(ejected, _Outcome) ->
+    [];
 table({refused, Finding}, _Outcome) ->
     [{table, [refused, Finding]}];
 table({failed, _Why}, _Outcome) ->
@@ -301,6 +309,10 @@ name(Prefix, N) -> <<Prefix/binary, (integer_to_binary(N))/binary>>.
 %% answer and not its grant.
 medium(N) ->
     try erx_media_drive:medium(N) catch exit:_Ended -> {error, eio} end.
+
+%% Drive N's eject, or eio for a drive process that ended during it.
+eject(N) ->
+    try erx_media_drive:eject(N) catch exit:_Ended -> {error, eio} end.
 
 %% The number a name of Prefix followed by a decimal number, written as
 %% integer_to_binary/1 writes it, names.

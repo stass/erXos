@@ -9,12 +9,13 @@ started at the first ask for it under the id `{drive, N}` and restarted if it en
 that the registry's drives, and no name a caller makes up, bound how many there are;
 and the mint of the files service `media`, whose tree is erx_media_tree (erx_fs_mint),
 the one child it starts with. It makes the domain's mount counter
-(erx_media_volume:new_mounts/0) before any volume can start.
+(erx_media_volume:new_mounts/0) before any volume can start. freeze/0 is the media
+service's part of the ordered end (docs/design-drives.md, "Finishing a volume").
 """.
 
 -behaviour(supervisor).
 
--export([start_link/0, drive/1]).
+-export([start_link/0, drive/1, freeze/0]).
 -export([init/1]).
 
 -doc "Starts the supervisor, registered under its module's name, with no drive process.".
@@ -33,6 +34,14 @@ drive(N) when is_integer(N), N >= 0 ->
         {ok, Pid} -> Pid;
         {error, {already_started, Pid}} -> Pid
     end.
+
+-doc """
+Finishes every mounted volume of every drive at once (erx_media_drive:freeze/1): `ok`
+once all have, else the first failure.
+""".
+-spec freeze() -> ok | {error, atom()}.
+freeze() ->
+    erx_media_drive:freeze([Pid || {{drive, _N}, Pid, _, _} <- supervisor:which_children(?MODULE), is_pid(Pid)]).
 
 -doc false.
 init([]) ->

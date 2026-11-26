@@ -378,7 +378,10 @@ Eshell V17.1.1 (type help(). for help)
 * On QEMU `virt` a USB stick's FAT volume is read from root's session: the
   media domain gives the stick the drive `disk0`, mounts its first
   partition, and the `usb` suite lists `/media/disk0/s1` and reads its
-  file there with `file:list_dir` and `file:read_file`. On the Pi 4 the
+  file there with `file:list_dir` and `file:read_file`, then writes
+  `eject` to `/media/disk0/ctl`, which finishes the volume and ends the
+  drive's mounts, its status showing the medium `idle ejected` and the
+  stick's volume unchanged. On the Pi 4 the
   media domain gives a stick the drive `disk0` too and shows its partition
   table in `/media/disk0/status`; reading a FAT volume there has not been
   seen on the board yet.

@@ -91,22 +91,49 @@ class UsbBootTest < Minitest::Test
     Erx::UsbBoot.passed("{usb_stick,#{output}}", tag: 'usb_stick')
   end
 
+  # Seeded: eject_body, run on the host's emulator over a stand-in drive directory whose
+  # status shows the medium ejected, passes all three stages; a status still ready fails
+  # status_ejected, and a volume left in the directory fails mounts_ended.
+  def test_eject_body_passes_only_an_ejected_drive
+    drive = File.join(@directory, 'disk0')
+    FileUtils.mkdir_p(drive)
+    File.binwrite(File.join(drive, 'status'), "medium\tidle ejected\nsectors\t18432\n")
+    assert_equal %w[ejected status_ejected mounts_ended], eject_stages(drive)
+    assert_equal "eject\n", File.binread(File.join(drive, 'ctl'))
+    File.binwrite(File.join(drive, 'status'), "medium\tready\n")
+    assert_equal %w[ejected mounts_ended], eject_stages(drive)
+    FileUtils.mkdir_p(File.join(drive, 's1'))
+    assert_equal %w[ejected], eject_stages(drive)
+  end
+
+  def eject_stages(drive)
+    program = "io:format(\"~p\", [begin #{Erx::UsbBoot.eject_body(drive: drive)} end]), halt()."
+    output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', '-eval', program,
+                                     stdin_data: '')
+    assert status.success?, output
+    Erx::UsbBoot.passed("{usb_stick,#{output}}", tag: 'usb_stick')
+  end
+
   # Seeded: the image after the boot passes persisted only with the written pattern in
-  # place, and a console passes each logged stage only with its own line, the served one
-  # at the image's capacity.
+  # place, volume_unchanged only with the volume's bytes as the harness wrote them, and a
+  # console passes each logged stage only with its own line, the served one at the
+  # image's capacity.
   def test_host_stages_need_the_pattern_on_the_image_and_each_line_on_the_console
     written = STICK.image(volume_bytes)
     written[STICK::WRITE_SECTOR * 512, STICK.written.bytesize] = STICK.written
-    assert_equal %w[persisted logged_served logged_ended],
-                 Erx::UsbBoot.host_passed(image: written, console: SERVED + ENDED)
+    assert_equal %w[persisted volume_unchanged logged_served logged_ended],
+                 Erx::UsbBoot.host_passed(image: written, volume: volume_bytes, console: SERVED + ENDED)
+    dirtied = written.dup
+    dirtied[(STICK::VOLUME_START * 512) + 0x25] = "\x01"
+    assert_equal %w[persisted], Erx::UsbBoot.host_passed(image: dirtied, volume: volume_bytes, console: '')
     off_by_one = written.dup
     off_by_one[(STICK::WRITE_SECTOR * 512) + 7] = 'X'
-    assert_equal [], Erx::UsbBoot.host_passed(image: off_by_one, console: '')
-    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: ENDED)
+    assert_equal [], Erx::UsbBoot.host_passed(image: off_by_one, volume: '', console: '')
+    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), volume: '', console: ENDED)
     short = SERVED.sub("#{STICK::SECTORS} blocks", "#{STICK::SECTORS - 1} blocks")
-    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: short)
-    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: SERVED)
-    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), console: ENDED + SERVED)
+    assert_equal [], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), volume: '', console: short)
+    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), volume: '', console: SERVED)
+    assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image(volume_bytes), volume: '', console: ENDED + SERVED)
   end
 
   # The stick's answer, the USB domain's text and then the media domain's, names its stages

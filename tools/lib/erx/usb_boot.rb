@@ -51,11 +51,16 @@ module Erx
   # all in the gap before the medium's one volume, a FAT16 volume: the medium's path from
   # the stick to the media domain (docs/design-drives.md, "How the grant reaches the media
   # domain"). Last, at root's session's node, it lists the volume at /media/disk0/s1 and
-  # reads its one file (root_body), through the session's own namespace. Then the harness
+  # reads its one file (root_body), through the session's own namespace, and writes
+  # `eject` to the drive's ctl (eject_body): the write answers ok, status shows the medium
+  # `idle ejected`, and the drive's directory lists status and ctl alone, its mounts
+  # ended (docs/design-drives.md, "Finishing a volume"). Then the harness
   # ejects the stick's medium through QMP, and a fourth line (ended_line)
   # waits for its transport to end while the function runs on; then it unplugs the stick
   # through device_del, and a fifth (gone_line) waits for the function to end. After QEMU
-  # stops, the harness checks HOST_STAGES itself: the image holds the written pattern, and
+  # stops, the harness checks HOST_STAGES itself: the image holds the written pattern, its
+  # volume's bytes are those it wrote, so the read-only volume's mount and finish wrote
+  # nothing, and
   # the console shows the medium's served line and then its ended one.
   #
   # The restart cell is a second boot at each CPU count (BOOTS), whose manifest alone allows the
@@ -87,8 +92,9 @@ module Erx
     # The keyboard's five stages, in order; the stick's, read at the USB domain; and those
     # the harness reads after the boot. Each is a side cell.
     STAGES = %w[started connected addressed described typed].freeze
-    STICK_STAGES = %w[reported sized read written read_back flushed listed file_read ended unplugged].freeze
-    HOST_STAGES = %w[persisted logged_served logged_ended].freeze
+    STICK_STAGES = %w[reported sized read written read_back flushed listed file_read ejected status_ejected mounts_ended
+                      ended unplugged].freeze
+    HOST_STAGES = %w[persisted volume_unchanged logged_served logged_ended].freeze
     # The restart boot's cells, by the stage of its answers each is: the first key typed;
     # after the kill, another incarnation ready, its keyboard described and the follower on
     # its tree; and the second key typed.
@@ -170,6 +176,12 @@ module Erx
       # Whether the image bytes, read back after the boot, hold the written pattern where
       # the third line wrote it. Pure.
       def persisted?(bytes) = bytes.b.byteslice(WRITE_SECTOR * SECTOR, WRITE_SECTORS * SECTOR) == written
+
+      # Whether the image bytes, read back after the boot, hold volume, the bytes the
+      # harness wrote, unchanged at the volume's place. Pure.
+      def volume_unchanged?(bytes, volume) =
+        Digest::SHA256.digest(bytes.b.byteslice(VOLUME_START * SECTOR, VOLUME_SECTORS * SECTOR).to_s) ==
+        Digest::SHA256.digest(volume.b)
     end
 
     # The console's lines of the stick's medium: served with the image's capacity, then
@@ -177,11 +189,12 @@ module Erx
     SERVED_LINE = /erx_usb_bot: medium LUN 0 ready: #{Stick::SECTORS} blocks of #{Stick::SECTOR} bytes/n
     ENDED_LINE = /erx_usb_bot: medium LUN 0 ended: /n
 
-    # The host stages the image's bytes and the console's text show passed: the ended line
-    # counts only after the served one. Pure.
-    def self.host_passed(image:, console:)
+    # The host stages the image's bytes, the volume's bytes the harness wrote and the
+    # console's text show passed: the ended line counts only after the served one. Pure.
+    def self.host_passed(image:, volume:, console:)
       served = console.b =~ SERVED_LINE
-      { 'persisted' => Stick.persisted?(image), 'logged_served' => !served.nil?,
+      { 'persisted' => Stick.persisted?(image), 'volume_unchanged' => Stick.volume_unchanged?(image, volume),
+        'logged_served' => !served.nil?,
         'logged_ended' => !served.nil? && console.b.index(ENDED_LINE, served).is_a?(Integer) }
         .filter_map { |stage, passed| stage if passed }
     end
@@ -364,6 +377,25 @@ MEDIA_BODY = [
       'binary:part(RtText,0,min(byte_size(RtText),1000))'
     ].join(',').freeze
 
+    # The stick's drive in root's session's namespace.
+    STICK_DRIVE = '/media/disk0'
+
+    # The body of the fun the third line runs after root_body, in root's session: whether
+    # writing `eject` to drive's ctl answers ok, drive's status then shows the medium
+    # `idle ejected`, and drive's directory lists status and ctl alone. The paths and the
+    # bytes are written as lists of numbers, as root_body writes its own.
+    def self.eject_body(drive: STICK_DRIVE) = [
+      "EjWrite=file:write_file(#{chars("#{drive}/ctl")},<<#{"eject\n".bytes.join(',')}>>)",
+      "EjStatus=file:read_file(#{chars("#{drive}/status")})",
+      "EjList=file:list_dir(#{chars(drive)})",
+      "EjAnswer={[{ejected,EjWrite=:=ok},{status_ejected,case EjStatus of {ok,EjText}->" \
+      "binary:match(EjText,<<#{"medium\tidle ejected\n".bytes.join(',')}>>)=/=nomatch;_->false end}," \
+      "{mounts_ended,case EjList of {ok,EjNames}->lists:sort(EjNames)=:=[#{chars('ctl')},#{chars('status')}];" \
+      "_->false end}],{EjWrite,EjStatus,EjList}}",
+      'EjOut=iolist_to_binary(io_lib:format("~0kP",[EjAnswer,40]))',
+      'binary:part(EjOut,0,min(byte_size(EjOut),1000))'
+    ].join(',').freeze
+
     # text, UTF-8, as an Erlang string written as the list of its characters' code
     # points, which Erlang reads as that string whatever the text holds. Pure.
     private_class_method def self.chars(text) = "[#{text.encode(Encoding::UTF_8).codepoints.join(',')}]"
@@ -438,7 +470,7 @@ MEDIA_BODY = [
     def self.retyped_line = typed_line(tag: 'usb_retyped')
 
     # The third line's calls, in order: each a node and the body of the fun UbAt runs there.
-    STICK_CALLS = [[NODE, STICK_BODY], [MEDIA_NODE, MEDIA_BODY], [ROOT_NODE, root_body]].freeze
+    STICK_CALLS = [[NODE, STICK_BODY], [MEDIA_NODE, MEDIA_BODY], [ROOT_NODE, root_body], [ROOT_NODE, eject_body]].freeze
     # How long the third line may take: each of its calls bounded by AT_SECONDS, and ten
     # seconds more for the shell to print the answer.
     STICK_SECONDS = (STICK_CALLS.size * AT_SECONDS) + 10
@@ -631,7 +663,8 @@ MEDIA_BODY = [
                                                             note: ->(text) { @notes << "#{cell}: #{text}" }))
         return passed unless kind.reads_stick
 
-        passed + UsbBoot.host_passed(image: BoundedFile.read(stick, maximum: Stick::SECTORS * Stick::SECTOR),
+        volume = BoundedFile.read(File.join(boot, 'stick-volume.img'), maximum: Stick::VOLUME_SECTORS * Stick::SECTOR)
+        passed + UsbBoot.host_passed(image: BoundedFile.read(stick, maximum: Stick::SECTORS * Stick::SECTOR), volume: volume,
                                      console: BoundedFile.read(Qemu.serial_log(boot), maximum: MAX_CONSOLE_BYTES))
                         .map { |stage| "-#{stage}" }
       end

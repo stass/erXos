@@ -24,11 +24,24 @@ the volume processes ("Reading a medium"), so the answer that follows names ever
 volume. A table refused or a reading that failed leaves the medium idle: held, with
 no volume, until its proxy ends. The proxy's end ends the supervisor, and every volume
 of the medium with it. The media tree's walk of `diskN` makes the ask, medium/1.
+
+Two requests finish a medium's volumes ("Finishing a volume"), each sending every
+volume its finish at once and waiting for each answer, while asks of the drive wait
+behind it:
+
+* eject/1, a write of `eject` to the drive's `ctl`, then ends the medium's supervisor
+  and holds the medium idle as ejected, its table `ejected`, until its proxy ends, so
+  an ejected medium mounts again only once it has ended. It answers `ok` when every
+  finish answered `ok`, `eio` when one did not or its volume had already ended, the
+  medium ended either way, and `enxio` when the drive holds no mounted medium.
+* freeze/1, the media service's part of the ordered end, finishes every volume of
+  every drive it names and keeps each medium as it is; it answers `ok` once all have,
+  or the first failure.
 """.
 
 -behaviour(gen_server).
 
--export([medium/1, start_link/2]).
+-export([medium/1, eject/1, freeze/1, start_link/2]).
 -export_type([medium/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -36,7 +49,7 @@ of the medium with it. The media tree's walk of `diskN` makes the ask, medium/1.
 %% erx_blk_drive's CALL_TIMEOUT.
 -define(ASK_TIMEOUT, 60000).
 
--type medium() :: #{proxy := pid(), table := erx_media_medium:table()}.
+-type medium() :: #{proxy := pid(), table := erx_media_medium:table() | ejected}.
 
 -doc """
 The medium of the drive the registry holds as `{drive, N}`: `{ok, Medium}`, its window
@@ -50,6 +63,27 @@ medium(N) when is_integer(N), N >= 0 ->
         undefined -> {error, no_drive};
         _Facet -> gen_server:call(erx_media_sup:drive(N), medium, infinity)
     end.
+
+-doc """
+Ejects the medium of the drive the registry holds as `{drive, N}`: `ok`, `{error, eio}`
+or `{error, enxio}` as the module's description gives, `enxio` too while the registry
+holds no such drive.
+""".
+-spec eject(non_neg_integer()) -> ok | {error, eio | enxio}.
+eject(N) when is_integer(N), N >= 0 ->
+    case erx:cap({drive, N}) of
+        undefined -> {error, enxio};
+        _Facet -> gen_server:call(erx_media_sup:drive(N), eject, infinity)
+    end.
+
+-doc """
+Finishes every mounted volume of the drive processes Drives at once: `ok` once every
+finish answered `ok`, else the first failure, `eio` for a drive process or a volume
+that has ended.
+""".
+-spec freeze([pid()]) -> ok | {error, atom()}.
+freeze(Drives) ->
+    first_failure(answers([gen_server:send_request(Drive, freeze) || Drive <- Drives])).
 
 -doc """
 Starts the drive process of drive N, linked to the caller, erx_media_sup. Find answers
@@ -74,6 +108,18 @@ handle_call(medium, _From, #{find := Find} = State) ->
         no_medium ->
             {reply, {error, no_medium}, State}
     end;
+handle_call(eject, _From, #{medium := #{sup := Sup, table := {_Scheme, Volumes, _Unserved}} = Held} = State)
+  when is_pid(Sup) ->
+    Answer = finish(Volumes),
+    stop(Sup),
+    {reply, Answer, State#{medium := Held#{table := ejected, sup := none}}};
+handle_call(eject, _From, State) ->
+    {reply, {error, enxio}, State};
+handle_call(freeze, _From, #{medium := #{sup := Sup, table := {_Scheme, Volumes, _Unserved}}} = State)
+  when is_pid(Sup) ->
+    {reply, finish(Volumes), State};
+handle_call(freeze, _From, State) ->
+    {reply, ok, State};
 handle_call(_Other, _From, State) ->
     {reply, {error, badarg}, State}.
 
@@ -103,6 +149,25 @@ held(Proxy) ->
     #{proxy => Proxy, table => Table, monitor => Monitor, sup => Served}.
 
 answer(Held) -> maps:with([proxy, table], Held).
+
+%% Every volume of a medium's table sent its finish at once, and the first failure of
+%% their answers, or ok.
+finish(Volumes) ->
+    first_failure(answers([gen_server:send_request(Pid, finish) || {_Volume, Pid} <- Volumes, is_pid(Pid)])).
+
+%% Each request's answer, eio for a process that ended before it answered.
+answers(Requests) ->
+    [case gen_server:receive_response(Request, infinity) of
+         {reply, Answer} -> Answer;
+         {error, {_Reason, _Server}} -> {error, eio}
+     end || Request <- Requests].
+
+first_failure(Answers) ->
+    case [Failed || Failed <- Answers, Failed =/= ok] of
+        [] -> ok;
+        [{error, Reason} | _] when is_atom(Reason) -> {error, Reason};
+        [_Malformed | _] -> {error, eio}
+    end.
 
 %% Stops the medium's supervisor Sup, which ends its volumes, unlinked first so that its
 %% end is not the drive process's; an idle medium has none.

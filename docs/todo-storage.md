@@ -54,10 +54,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      seeds; FAT's row through the FAT server's boot-sector decoder, FAT12 refused by name.
   4. The `erx_media` application (`erx_media_app` and `erx_media_sup` are built, and of the drive
      process, `erx_media_drive`, its ask through the registry's facet and its proxy's end): the
-     drive process's medium supervisor, eject and finish, the medium supervisor and reader, the volume
+     drive process's medium supervisor, the medium supervisor and reader, the volume
      process with its probe and memory bound, the media tree with `status`, `ctl` and the two-volume
-     `exdev` rule, the writable rule over the formats the build writes, the finish shared by `eject` and the freezing
-     checkpoint; the drive grants of design-drives.md's "How the grant reaches the media domain":
+     `exdev` rule, the writable rule over the formats the build writes (built, with the volume's
+     finish, the drive's `eject` through `ctl`, and `erx_media_sup:freeze/0`, which finishes every
+     mounted volume of every drive); the freezing checkpoint around that freeze: `erx_fs` closing
+     mutation admission at every `media` grant and letting each finish the writes it admitted, then
+     calling the freeze, and answering every later write `erofs`, reached through the durability
+     facet below; the drive grants of design-drives.md's "How the grant reaches the media domain":
      `abi/services/drive.txt`, one operation `window` and the five quantities design-drives.md
      gives, marked `served_by drive` (a value the closed set of `tools/lib/erx/abi_contracts.rb`
      gains, whose quantity rule it meets); the domain service's grant for each drive window row and

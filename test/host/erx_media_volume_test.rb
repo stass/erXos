@@ -72,7 +72,14 @@ class ErxMediaVolumeTest < Minitest::Test
     Fault.new(name: "a qid path without its volume's mount number", path: VOLUME,
               from: "\#{Key := Number} ->\n            {ok, (Mount bsl ?NODE_BITS) bor Number, State};",
               to: "\#{Key := Number} ->\n            {ok, Number, State};",
-              caught_by: 'two_mounts_are_distinct_test')
+              caught_by: 'two_mounts_are_distinct_test'),
+    Fault.new(name: 'a request admitted after the finish', path: VOLUME,
+              from: "handle_call(_Request, _From, \#{finished := true} = State) ->\n    {reply, {error, eio}, State};\n",
+              to: '',
+              caught_by: 'the_finish_answers_what_came_before_and_refuses_what_comes_after_test'),
+    Fault.new(name: "an eject that leaves the medium's supervisor running", path: DRIVE,
+              from: "    Answer = finish(Volumes),\n    stop(Sup),\n", to: "    Answer = finish(Volumes),\n",
+              caught_by: 'eject_finishes_every_volume_then_ends_the_medium_test')
   ].freeze
 
   def self.images

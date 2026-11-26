@@ -37,6 +37,15 @@ The formats served are FAT16 and FAT32, through the FAT server (erx_fat); no oth
 format falls back to another. Every byte of the volume is untrusted, and its label
 reaches no sink here: the media tree shows it through the field escape.
 
+Its last request is finish/1 ("Finishing a volume"), the volume's one admission
+barrier: the process takes its requests one at a time, so every request sent before
+the finish is answered before it. A writable volume then writes what it holds, its
+format's last batch (last_batch/1, which writes nothing while no format here has a
+write path), and has the window flush; a read-only volume, or one that mounted no
+files, has nothing to write. From then the volume is finished: every later request,
+a second finish among them, answers `eio` without reaching its format, while
+outcome/1 and root_path/1, which only describe the mount, still answer.
+
 Once mounted it serves its files to the media tree (erx_media_tree, "The media tree"):
 root/1, walk/3, attr/2 and list/2 are calls, each naming a node by its FAT node and
 its qid path (path/0), and a read is a waiting request whose keeper is this process,
@@ -58,7 +67,7 @@ answers `enfile`.
 -behaviour(gen_server).
 
 -export([start_link/2, outcome/1, writable/4, ro_reason/1, new_mounts/0]).
--export([root/1, root_path/1, walk/3, attr/2, list/2]).
+-export([root/1, root_path/1, walk/3, attr/2, list/2, finish/1]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
 -export_type([outcome/0, mount/0, path/0]).
 
@@ -128,6 +137,14 @@ attr(Pid, Node) -> call(Pid, {attr, Node}).
 -spec list(pid(), erx_fat:fat_node()) -> {ok, [{binary(), dir | file, path()}]} | {error, errno()}.
 list(Pid, Dir) -> call(Pid, {list, Dir}).
 
+-doc """
+Finishes the volume Pid: `ok` once every request before it is answered and what a
+writable volume holds is written and flushed; the first failure of those writes or
+the flush; or `eio` for a volume already finished or ended.
+""".
+-spec finish(pid()) -> ok | {error, atom()}.
+finish(Pid) -> call(Pid, finish).
+
 call(Pid, Request) ->
     try gen_server:call(Pid, Request, infinity) catch exit:_Ended -> {error, eio} end.
 
@@ -182,7 +199,7 @@ reason(Format, no_write_path) -> <<"erXos has no ", (atom_to_binary(Format))/bin
 -doc false.
 init({Proxy, Volume}) ->
     process_flag(max_heap_size, erx_media_medium:memory_bound()),
-    {ok, #{proxy => Proxy, volume => Volume}, {continue, mount}}.
+    {ok, #{proxy => Proxy, volume => Volume, finished => false}, {continue, mount}}.
 
 -doc false.
 handle_continue(mount, #{proxy := Proxy, volume := #{length := Length} = Volume} = State) ->
@@ -204,6 +221,10 @@ handle_call(root_path, _From, #{mount := none} = State) ->
     {reply, {error, enfile}, State};
 handle_call(root_path, _From, #{mount := Mount} = State) ->
     {reply, {ok, Mount bsl ?NODE_BITS}, State};
+handle_call(_Request, _From, #{finished := true} = State) ->
+    {reply, {error, eio}, State};
+handle_call(finish, _From, State) ->
+    {reply, finished(State), State#{finished := true}};
 handle_call(_Files, _From, #{fat := none} = State) ->
     {reply, {error, eio}, State};
 handle_call(root, _From, #{fat := Fat} = State) ->
@@ -233,6 +254,9 @@ handle_cast(_Other, State) ->
 %% A read is a waiting request whose keeper is the volume, answered once its sectors
 %% are read; a flush that follows its answer finds nothing to flush.
 -doc false.
+handle_info(?ERX_FS_WAIT({_Grant, Alias}, {read, _File, _Offset, _Count}), #{finished := true} = State) ->
+    Alias ! ?ERX_FS_ANSWER(Alias, {error, eio}),
+    {noreply, State};
 handle_info(?ERX_FS_WAIT({_Grant, Alias}, {read, File, Offset, Count}), #{fat := Mounted} = State) ->
     Alias ! ?ERX_FS_ANSWER(Alias, read(File, Offset, Count, Mounted)),
     {noreply, State};
@@ -246,6 +270,28 @@ read(File, Offset, Count, Fat) ->
         {ok, Bytes} -> {ok, Bytes};
         {error, Why} -> {error, errno(Why)}
     end.
+
+%% The finish --------------------------------------------------------------------
+
+%% The finish's answer: a writable volume's last batch written, then the window's
+%% flush; any other volume wrote nothing, so has nothing to flush.
+finished(#{outcome := #{mount := rw}, proxy := Proxy} = State) ->
+    case last_batch(State) of
+        ok -> flush_answer(erx_media_medium:window(Proxy, flush));
+        {error, _} = Failed -> Failed
+    end;
+finished(#{}) ->
+    ok.
+
+%% What a writable volume has not yet written: FAT's last batch with its dirty flag
+%% cleared. No format here has a write path (WRITE_PATHS), so there is none; the write
+%% path fills this in.
+last_batch(#{}) ->
+    ok.
+
+flush_answer(ok) -> ok;
+flush_answer({error, Reason}) when is_atom(Reason) -> {error, Reason};
+flush_answer(_Malformed) -> {error, eio}.
 
 %% The files --------------------------------------------------------------------
 
