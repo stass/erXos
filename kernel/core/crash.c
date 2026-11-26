@@ -74,7 +74,7 @@ static size_t erx_crash_log_tail(const erx_log_t *, erx_crash_scratch_t *, char 
 static void erx_crash_settle(const erx_crash_input_t *, erx_crash_brief_t *);
 static void erx_crash_write_cpus(const erx_crash_input_t *, erx_crash_record_t *);
 static void erx_crash_write_trace(const erx_crash_input_t *, erx_crash_record_t *);
-static bool erx_crash_trace_fits(const uint8_t *);
+static bool erx_crash_trace_fits(const uint8_t *, bool);
 static bool erx_crash_trace_one(const erx_trace_ring_t *, uint64_t, uint32_t,
     erx_trace_record_wire_t *);
 static uint32_t erx_crash_write_body(const erx_crash_input_t *, erx_crash_record_t *,
@@ -178,6 +178,7 @@ erx_crash_settle(const erx_crash_input_t *input, erx_crash_brief_t *header)
 	    sizeof(header->build_id));
 	header->boot_value = pair ? input->boot_value : ERX_BOOT_VALUE_UNKNOWN;
 	header->boot_slot = pair ? input->boot_slot : ERX_BOOT_SLOT_NONE;
+	header->flags = input->trace_none ? ERX_CRASH_TRACE_NONE : 0;
 	header->fault = input->fault;
 }
 
@@ -337,7 +338,8 @@ erx_crash_trace_one(const erx_trace_ring_t *ring, uint64_t index, uint32_t cpu,
  * never pass ERX_CRASH_TRACE_RECORDS; each share's indices below its loaded
  * head are read oldest first, and the kept records fill the slots in CPU order
  * with no gap, leaving the rest zero. A ring at or past ERX_CPU_LIMIT is never
- * covered, so no record names a CPU the check refuses.
+ * covered, so no record names a CPU the check refuses. A boot whose rings did
+ * not record (trace_none) gets no tail, whatever rings it hands over.
  */
 static void
 erx_crash_write_trace(const erx_crash_input_t *input, erx_crash_record_t *record)
@@ -347,7 +349,7 @@ erx_crash_write_trace(const erx_crash_input_t *input, erx_crash_record_t *record
 	uint32_t cpus[ERX_CRASH_CPUS], covered, share, slot;
 
 	rings = input->trace;
-	if (rings == NULL)
+	if (rings == NULL || input->trace_none)
 		return;
 	covered = 0;
 	for (uint32_t ring = 0; ring < input->ntrace && ring < ERX_CPU_LIMIT &&
@@ -473,10 +475,11 @@ erx_crash_cpus_fit(const uint8_t *bytes, uint32_t ncpus)
  * The trace tail's order: its records fill the slots from the first with no
  * gap; each has an even, nonzero seq and a cpu below ERX_CPU_LIMIT; and each
  * comes after the one before in CPU order and, within one CPU, oldest first,
- * so one CPU's records stand together.
+ * so one CPU's records stand together. A boot whose rings did not record
+ * (none, the header's trace_none) has no tail at all.
  */
 static bool
-erx_crash_trace_fits(const uint8_t *bytes)
+erx_crash_trace_fits(const uint8_t *bytes, bool none)
 {
 	erx_trace_record_wire_t slot, last = { 0 };
 	const uint8_t *at;
@@ -489,7 +492,8 @@ erx_crash_trace_fits(const uint8_t *bytes)
 			continue;
 		}
 		__builtin_memcpy(&slot, at, sizeof(slot));
-		if (ended || slot.seq == 0 || slot.seq % 2 != 0 || slot.cpu >= ERX_CPU_LIMIT)
+		if (none || ended || slot.seq == 0 || slot.seq % 2 != 0 ||
+		    slot.cpu >= ERX_CPU_LIMIT)
 			return (false);
 		if (index != 0 && (slot.cpu < last.cpu ||
 		    (slot.cpu == last.cpu && slot.seq <= last.seq)))
@@ -516,7 +520,7 @@ erx_crash_check_body(const uint8_t *bytes, const erx_crash_brief_t *header)
 		return (ERX_CRASH_CHECK_FRAMES);
 	if (!erx_crash_cpus_fit(bytes, header->ncpus))
 		return (ERX_CRASH_CHECK_CPUS);
-	if (!erx_crash_trace_fits(bytes))
+	if (!erx_crash_trace_fits(bytes, (header->flags & ERX_CRASH_TRACE_NONE) != 0))
 		return (ERX_CRASH_CHECK_TRACE);
 	for (uint32_t index = ERX_CRASH_RECORD_SIZE; index < header->length; index++) {
 		byte = bytes[index];
@@ -560,6 +564,8 @@ erx_crash_check(const void *bytes, size_t available)
 	if (erx_crash_crc32c(in + ERX_CRASH_CRC_START,
 	    header.length - ERX_CRASH_CRC_START) != header.crc)
 		return (ERX_CRASH_CHECK_CRC);
+	if ((header.flags & ~ERX_CRASH_FLAGS_KNOWN) != 0)
+		return (ERX_CRASH_CHECK_FLAGS);
 	if (!erx_crash_cause_known(header.cause))
 		return (ERX_CRASH_CHECK_CAUSE);
 	if (header.cpu >= ERX_CPU_LIMIT)
@@ -593,6 +599,7 @@ erx_crash_check_reason(erx_crash_check_t status)
 		[ERX_CRASH_CHECK_FORM] = "the form is neither brief nor full",
 		[ERX_CRASH_CHECK_LENGTH] = "the length is outside what the form admits",
 		[ERX_CRASH_CHECK_CRC] = "the CRC does not match",
+		[ERX_CRASH_CHECK_FLAGS] = "a flag the record's version does not declare is set",
 		[ERX_CRASH_CHECK_CAUSE] = "the cause is not one of the four",
 		[ERX_CRASH_CHECK_CPU] = "the CPU is past the limit",
 		[ERX_CRASH_CHECK_BOOT] = "the boot value and slot are no allowed pair",

@@ -25,8 +25,17 @@ void	erx_fiasco_trace_service(uint32_t event, uint64_t arg0, uint64_t arg1, uint
 void	erx_fiasco_trace_set_mask(uint32_t index, uint64_t mask);
 
 /*
+ * Whether the kernel's rings record in this boot, from the handoff's line
+ * (erx_fiasco_root_handoff): the crash records' trace_none follows it at once, and only a
+ * boot whose rings record asks for the window. A root that reads no handoff never decides.
+ */
+void	erx_fiasco_trace_boot(bool on);
+
+/*
  * Asks the kernel to map its trace rings into the root's window; false when it refused, and
- * erx_trace_read then answers ERX_ENOTSUP for the boot. The root's first thread, once.
+ * erx_trace_read then answers ERX_ENOTSUP for the boot. The root's first thread, once. A boot
+ * whose rings are off asks nothing and is true; with them on, the answer confirms the
+ * decision and never makes it, so a refusal is an error the root reports.
  */
 bool	erx_fiasco_trace_window_map(void);
 

@@ -141,7 +141,13 @@ layout erx_fault wire_le 8 48
   field thread u64 24
   field space u64 32
   field status i64 40
-layout erx_crash_brief wire_le 8 120
+# What the record says of the boot it ends (docs/design-debugger.md, "The
+# record's trace tail"): trace_none, the kernel's trace rings did not
+# record in this boot (erx.trace=0, a release build's default, or a stop
+# before the boot decided), so the record carries no tail.
+flags crash_flags u32
+  bit trace_none 0
+layout erx_crash_brief wire_le 8 128
   field magic u64 0
   field version u32 8
   field length u32 12
@@ -156,7 +162,9 @@ layout erx_crash_brief wire_le 8 120
   field boot_slot boot_slot 60
   field nframes u32 64
   field ncpus u32 68
-  field fault erx_fault 72
+  field flags crash_flags 72
+  padding 76 4
+  field fault erx_fault 80
 # One CPU's entry in the full form, entry N for CPU N (docs/design-debugger.md,
 # "The record's CPU entries"): its stop state and, for a state with registers,
 # where it was; every other byte is zero.
@@ -172,12 +180,12 @@ layout erx_crash_cpu wire_le 8 56
 # The full form's text starts at this fixed prefix's generated size. trace is
 # the trace tail, records of the kernel's trace rings in the trace record's
 # wire form (docs/design-debugger.md, "The record's trace tail").
-layout erx_crash_record wire_le 8 3848
+layout erx_crash_record wire_le 8 3856
   field header erx_crash_brief 0
-  field regs erx_regs 120
-  field frames u64 392 count @crash_frames
-  field cpus erx_crash_cpu 904 count @crash_cpus
-  field trace erx_trace_record 1800 count @crash_trace_records
+  field regs erx_regs 128
+  field frames u64 400 count @crash_frames
+  field cpus erx_crash_cpu 912 count @crash_cpus
+  field trace erx_trace_record 1808 count @crash_trace_records
 
 layout erx_msgtag wire_le 8 8
   field raw u64 0

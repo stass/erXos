@@ -5,8 +5,8 @@
 
 /*
  * The root's crash records on the host (liberx/backend/fiasco/end_record.c): each
- * line names one end and the record it wrote, its form, its length and how many
- * trace slots it filled. The input names the full form every time; the boot image
+ * line names one end and the record it wrote, its form, its length, how many
+ * trace slots it filled and its header's flags. The input names the full form every time; the boot image
  * decides, whatever the input names.
  */
 
@@ -16,6 +16,7 @@
 #include <stdio.h>
 
 #include "erx/abi.h"
+#include "erx/core/boot_args.h"
 #include "erx/core/crash.h"
 #include "erx/core/trace_ring.h"
 #include "liberx/backend/fiasco/end_record.h"
@@ -42,8 +43,9 @@ driver_end(const char *name, bool trace)
 		for (size_t slot = 0; slot < ERX_CRASH_TRACE_RECORDS; slot++)
 			slots += record->trace[slot].seq != 0;
 	}
-	printf("%s: %s %u trace %u\n", name, record->header.form == ERX_CRASH_FORM_FULL ? "full" :
-	    record->header.form == ERX_CRASH_FORM_BRIEF ? "brief" : "neither", length, slots);
+	printf("%s: %s %u trace %u flags %u\n", name, record->header.form == ERX_CRASH_FORM_FULL ? "full" :
+	    record->header.form == ERX_CRASH_FORM_BRIEF ? "brief" : "neither", length, slots,
+	    record->header.flags);
 }
 
 int
@@ -56,10 +58,19 @@ main(void)
 	}
 	erx_fiasco_end_trace_rings(driver_rings, DRIVER_RINGS);
 	driver_end("before the handoff", true);
+	/* A release image's line without erx.trace: the rings are off from the root's start. */
 	erx_fiasco_end_boot(false);
+	erx_fiasco_end_trace(erx_boot_line_trace("", 0, false));
 	driver_end("a release image", true);
 	erx_fiasco_end_boot(true);
+	erx_fiasco_end_trace(erx_boot_line_trace("", 0, true));
 	driver_end("a development image", true);
 	driver_end("a task's fault", false);
+	/* The rings stay in memory; the bit alone keeps them out of the record. */
+	erx_fiasco_end_trace(erx_boot_line_trace("erx.trace=0", 11, true));
+	driver_end("rings that did not record", true);
+	erx_fiasco_end_boot(false);
+	erx_fiasco_end_trace(erx_boot_line_trace("erx.trace=1", 11, false));
+	driver_end("a release image with erx.trace=1", true);
 	return (0);
 }

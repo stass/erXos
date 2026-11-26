@@ -55,6 +55,11 @@ module Erx
     TRACE_RECORDS = CODEC.constant('crash_trace_records')
     TRACE_SIZE = CODEC.layout_size('erx_trace_record_wire')
     TRACE_EVENTS = SCHEMA.types.fetch('trace_event').members.invert.freeze
+    # The header's flags: every bit crash_flags declares, and the one that says the boot's
+    # kernel trace rings did not record.
+    FLAGS = SCHEMA.types.fetch('crash_flags').members
+    FLAGS_KNOWN = CODEC.constant('crash_flags_known')
+    TRACE_NONE = FLAGS.fetch('trace_none')
 
     # A field's offset from the generated schema, never a copied number.
     def self.offset(layout, field)
@@ -115,7 +120,8 @@ module Erx
     end
 
     # Lines for a terminal, each one already escaped: the record's fields, a
-    # line for each CPU entry, the text, and a failed frame's own lines.
+    # line for each CPU entry, the trace tail or "kernel trace rings did not record" for a boot whose rings
+    # were off, the text, and a failed frame's own lines.
     def report(result)
       head = ["crash frame: #{result.status}#{" (#{result.reason})" if result.reason}" \
               "#{" check #{result.check}" if result.check}"]
@@ -123,6 +129,7 @@ module Erx
       fields = record.except('cpus', 'trace').map { |name, value| "#{name}: #{value}" }
       cpus = record.fetch('cpus', []).map { |entry| cpu_line(entry) }
       trace = record.fetch('trace', []).map { |entry| trace_line(entry) }
+      trace = ['kernel trace rings did not record'] if (record.fetch('flags', 0) & TRACE_NONE) != 0
       text = (result.text || '').split("\n", -1)
       kept = result.status == :valid ? [] : result.lines
       [*head, *fields, *cpus, *trace, *text, *kept].map { |line| Terminal.escape(line) }
@@ -309,6 +316,8 @@ module Erx
     private_class_method :boot_pair?
 
     def fields(header, bytes)
+      return :flags unless (header.fetch('flags') & ~FLAGS_KNOWN).zero?
+
       cause = header.fetch('cause')
       return :cause unless CAUSE.value?(cause)
       return :cpu unless header.fetch('cpu') < CPU_LIMIT
@@ -345,7 +354,7 @@ module Erx
       unused = FRAMES_OFFSET + header.fetch('nframes') * 8
       return :frames unless zero?(bytes.byteslice(unused, CPUS_OFFSET - unused))
       return :cpus unless cpus_fit?(bytes, header.fetch('ncpus'))
-      return :trace unless trace_fits?(bytes)
+      return :trace unless trace_fits?(bytes, none: (header.fetch('flags') & TRACE_NONE) != 0)
 
       text = bytes.byteslice(RECORD_SIZE, header.fetch('length') - RECORD_SIZE)
       text.match?(/\A[\x20-\x7e\n]*\z/n) ? nil : :text
@@ -365,10 +374,12 @@ module Erx
     # The trace tail's order, as erx_crash_check has it: no record after an
     # empty slot; each with an even, nonzero seq and a CPU below the limit; and
     # each after the one before in CPU order and, within one CPU, oldest first.
-    def trace_fits?(bytes)
+    # A boot whose rings did not record (none, the header's trace_none) has no tail.
+    def trace_fits?(bytes, none:)
       slots = TRACE_RECORDS.times.map { |index| bytes.byteslice(TRACE_OFFSET + index * TRACE_SIZE, TRACE_SIZE) }
       used = slots.take_while { |raw| !zero?(raw) }
       return false unless slots.drop(used.size).all? { |raw| zero?(raw) }
+      return used.empty? if none
 
       keys = used.map { |raw| CODEC.decode_layout('erx_trace_record_wire', raw).values_at('cpu', 'seq') }
       keys.all? { |cpu, seq| seq.positive? && seq.even? && cpu < CPU_LIMIT } &&

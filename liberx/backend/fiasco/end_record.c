@@ -21,12 +21,19 @@
 static _Atomic uint32_t end_form = ERX_CRASH_FORM_BRIEF;
 static const void *_Atomic end_rings;
 static _Atomic uint32_t end_ring_count;
+static atomic_bool end_trace_none = true;
 
 void
 erx_fiasco_end_boot(bool development)
 {
 	atomic_store_explicit(&end_form, development ? ERX_CRASH_FORM_FULL : ERX_CRASH_FORM_BRIEF,
 	    memory_order_release);
+}
+
+void
+erx_fiasco_end_trace(bool on)
+{
+	atomic_store_explicit(&end_trace_none, !on, memory_order_release);
 }
 
 void
@@ -40,6 +47,7 @@ uint32_t
 erx_fiasco_end_record_write(erx_crash_input_t input, bool trace, void *record, void *scratch)
 {
 	input.form = atomic_load_explicit(&end_form, memory_order_acquire);
+	input.trace_none = atomic_load_explicit(&end_trace_none, memory_order_acquire);
 	if (trace) {
 		input.ntrace = atomic_load_explicit(&end_ring_count, memory_order_acquire);
 		input.trace = input.ntrace != 0 ?

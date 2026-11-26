@@ -37,6 +37,7 @@ typedef enum erx_crash_check {
 	ERX_CRASH_CHECK_FORM,
 	ERX_CRASH_CHECK_LENGTH,		/* outside what the form admits */
 	ERX_CRASH_CHECK_CRC,
+	ERX_CRASH_CHECK_FLAGS,		/* a bit crash_flags does not declare */
 	ERX_CRASH_CHECK_CAUSE,
 	ERX_CRASH_CHECK_CPU,
 	ERX_CRASH_CHECK_BOOT,		/* boot value and slot are no allowed pair */

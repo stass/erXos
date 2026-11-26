@@ -68,6 +68,14 @@ Erx_trace::boot(bool on)
   _on = on;
 }
 
+// Whether this boot writes the rings, for the crash record's flags.
+PUBLIC static inline
+bool
+Erx_trace::on()
+{
+  return _on;
+}
+
 // A thread's name in a record: Fiasco's object id plus one, so 0 stays
 // "none". Every Context is a Thread.
 static Unsigned64

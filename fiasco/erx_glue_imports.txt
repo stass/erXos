@@ -12,6 +12,7 @@ _ZN16Cpu_pm_callbacks5_listE machine-stop erx_machine_stop.cpp
 _ZN16Erx_console_ring10write_uartEPKcm machine-stop erx_machine_stop.cpp
 _ZN16Erx_console_ring13close_at_stopEv machine-stop erx_machine_stop.cpp
 _ZN16Erx_machine_stop4bootEbPKh boot-handoff erx_handoff.cpp
+_ZN9Erx_trace3_onE machine-stop erx_machine_stop.cpp
 _ZN9Erx_trace4bootEb boot-handoff erx_handoff.cpp
 _ZN3Cpu12_online_maskE machine-stop erx_machine_stop.cpp
 _ZN3Kip10global_kipE boot-handoff erx_handoff.cpp

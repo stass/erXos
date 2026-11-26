@@ -55,6 +55,7 @@ IMPLEMENTATION:
 #include "erx/core/machine_stop.h"
 #include "erx/core/trace_kernel.h"
 #include "config.h"
+#include "erx_trace.h"
 #include "context_base.h"
 #include "cpu.h"
 #include "entry_frame.h"
@@ -501,6 +502,7 @@ erx_stop_lead(void *arg)
   size_t trace_bytes = 0;
   input.trace = erx_trace_kernel_pages(&trace_bytes);
   input.ntrace = ERX_TRACE_KERNEL_RINGS;
+  input.trace_none = !Erx_trace::on();
   input.message = erx_stop_message;
   input.message_length = length < 0 ? 0 : (size_t(length) < sizeof(erx_stop_message) ? size_t(length) : sizeof(erx_stop_message) - 1);
   (void)erx_crash_record_write(&input, erx_crash_buffer, erx_crash_scratch);

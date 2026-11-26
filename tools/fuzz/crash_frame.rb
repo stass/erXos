@@ -33,7 +33,7 @@ module Erx
       fields = { 'magic' => FRAME::CODEC.constant('crash_magic'), 'version' => FRAME::CODEC.constant('crash_version'),
                  'length' => FRAME::BRIEF_SIZE + body.bytesize, 'crc' => 0, 'form' => FRAME::FORMS.fetch(form_name),
                  'cause' => FRAME::CAUSE.fetch(cause), 'cpu' => 0, 'uptime_ns' => 1, 'since_pet_ns' => 1,
-                 'build_id' => 'BUILDID8', 'boot_value' => FRAME::VALUE_UNKNOWN, 'boot_slot' => FRAME::SLOT_NONE,
+                 'build_id' => 'BUILDID8', 'flags' => 0, 'boot_value' => FRAME::VALUE_UNKNOWN, 'boot_slot' => FRAME::SLOT_NONE,
                  'nframes' => 0, 'ncpus' => 0, 'fault' => fault }
       record = FRAME::CODEC.encode_layout('erx_crash_brief', fields) + body
       record[FRAME::CRC_START - 4, 4] = [FRAME.crc32c(record.byteslice(FRAME::CRC_START..))].pack('L<')

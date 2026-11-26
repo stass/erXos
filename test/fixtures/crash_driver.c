@@ -29,7 +29,9 @@
  * for no entries (a NULL pointer). Every entry handed over has all its
  * register words set and a cpu field the writer must not copy.
  *
- * TRACE is "-" for no rings (a NULL pointer), or the kernel's rings 0, 1, ...
+ * TRACE is "-" for no rings (a NULL pointer), "none" for none in a boot whose
+ * rings did not record (trace_none), "none:RINGS" for that boot handed RINGS
+ * all the same, or the kernel's rings 0, 1, ...
  * joined by commas, each its head in decimal, or "x" for an exhausted ring,
  * followed by any of "hINDEX", that index's record left half written, and
  * "oINDEX", that index's record carrying the next CPU's number. A ring holds
@@ -74,7 +76,7 @@ static size_t driver_unhex(const char *);
 static void driver_write(char *);
 
 static const char *const driver_checks[] = {
-	"ok", "short", "magic", "version", "form", "length", "crc", "cause", "cpu",
+	"ok", "short", "magic", "version", "form", "length", "crc", "flags", "cause", "cpu",
 	"boot", "ncpus", "nframes", "fault", "regs", "frames", "cpus", "trace", "text",
 	"not_run",
 };
@@ -288,7 +290,9 @@ driver_write(char *arguments)
 	input.frames = has_frames != 0 ? frames : NULL;
 	input.ncpus = ncpus;
 	input.cpus = driver_cpus(states);
-	input.ntrace = driver_trace(trace);
+	input.trace_none = strncmp(trace, "none", 4) == 0;
+	input.ntrace = !input.trace_none ? driver_trace(trace) :
+	    trace[4] == ':' ? driver_trace(trace + 5) : 0;
 	input.trace = input.ntrace != 0 ? driver_rings : NULL;
 	input.message = strcmp(message_hex, "-") == 0 ? NULL : message;
 	input.message_length = message_length;

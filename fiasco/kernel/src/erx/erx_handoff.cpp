@@ -51,9 +51,7 @@ Erx_handoff::banner()
   Erx_machine_stop::boot(view.development, view.build_id);
   // A line the root's reader refuses keeps the rings off; the root then
   // refuses the boot with its diagnostic.
-  erx_boot_args_t args;
-  bool const trace = erx_boot_args_parse(view.bootargs, view.bootargs_len, &args)
-                     && erx_boot_args_trace(&args, view.development);
+  bool const trace = erx_boot_line_trace(view.bootargs, view.bootargs_len, view.development);
   Erx_trace::boot(trace);
   if (view.development)
     printf("development build: trusted code only\n");

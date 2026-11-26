@@ -38,11 +38,21 @@ _Static_assert(ERX_FIASCO_TRACE_WINDOW + (UINT64_C(1) << ERX_FIASCO_TRACE_WINDOW
 
 /*
  * How many of the kernel's rings the window holds: 0 until map_trace answers, and for a
- * boot whose kernel refused it. Written once on the first thread, before the service runs.
+ * boot whose rings are off or whose kernel refused it. Written once on the first thread,
+ * before the service runs.
  */
 static _Atomic uint32_t trace_kernel_rings;
 /* Each root thread's affinity mask, as the service last set it; 0 for wherever it was created. */
 static _Atomic uint64_t trace_mask[ERX_FIASCO_THREADS_MAX];
+/* The boot's decision (erx_fiasco_trace_boot), on the first thread before any other runs. */
+static bool trace_on;
+
+void
+erx_fiasco_trace_boot(bool on)
+{
+	trace_on = on;
+	erx_fiasco_end_trace(on);
+}
 
 void
 erx_fiasco_trace_set_mask(uint32_t index, uint64_t mask)
@@ -90,9 +100,8 @@ erx_fiasco_trace_service(uint32_t event, uint64_t arg0, uint64_t arg1, uint64_t 
 /*
  * map_trace on the platform control object (docs/design-fiasco.md, "The kernel's trace
  * rings", "The root's window"): the kernel maps its rings read-only at the window's base and
- * answers how many it mapped. Once per boot, on the first thread. False only for a refusal
- * the boot reports: a boot whose rings are off (erx.trace) gets -L4_ENOSYS, maps nothing
- * and is true, and its kernel rows stay unsupported.
+ * answers how many it mapped. Once per boot, on the first thread, in a boot whose line
+ * turns the rings on; false for any refusal, which the boot reports.
  */
 bool
 erx_fiasco_trace_window_map(void)
@@ -101,14 +110,14 @@ erx_fiasco_trace_window_map(void)
 	l4_msgtag_t tag;
 	long rings;
 
+	if (!trace_on)
+		return (true);
 	mr->mr[0] = ERX_FIASCO_PFC_MAP_TRACE;
 	mr->mr[1] = l4_fpage(ERX_FIASCO_TRACE_WINDOW, ERX_FIASCO_TRACE_WINDOW_ORDER, L4_FPAGE_RO).raw;
 
 	tag = l4_ipc_call(L4_BASE_ICU_CAP, l4_utcb(),
 	    l4_msgtag(L4_PROTO_PLATFORM_CTL, ERX_FIASCO_PFC_MAP_TRACE_WORDS, 0, 0), L4_IPC_NEVER);
 	rings = l4_error(tag);
-	if (rings == -L4_ENOSYS)
-		return (true);
 	if (rings <= 0 || rings > (long)ERX_CPU_LIMIT)
 		return (false);
 	atomic_store_explicit(&trace_kernel_rings, (uint32_t)rings, memory_order_release);

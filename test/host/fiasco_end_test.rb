@@ -76,7 +76,7 @@ class FiascoEndTest < Minitest::Test
   # record's trace tail", "Who sees it").
   RECORD_CORE = 'liberx/backend/fiasco/end_record.c'
   RECORD_DRIVER = 'test/fixtures/fiasco_end_record_driver.c'
-  RECORD_SOURCES = %w[kernel/core/crash.c kernel/core/log.c kernel/core/trace_ring.c].freeze
+  RECORD_SOURCES = %w[kernel/core/boot_args.c kernel/core/watchdog.c kernel/core/crash.c kernel/core/log.c kernel/core/trace_ring.c].freeze
 
   def build_record_driver(core)
     output = File.join(@directory, 'end-record')
@@ -97,9 +97,38 @@ class FiascoEndTest < Minitest::Test
   def test_only_a_development_image_writes_the_full_form_and_the_trace_tail
     brief = Erx::CrashFrame::BRIEF_SIZE
     lines = record_lines(File.join(ROOT, RECORD_CORE))
-    assert_equal ["before the handoff: brief #{brief} trace 0", "a release image: brief #{brief} trace 0"], lines.first(2)
-    assert_match(/\Aa development image: full \d+ trace 12\z/, lines.fetch(2))
-    assert_match(/\Aa task's fault: full \d+ trace 0\z/, lines.fetch(3))
-    assert_equal 4, lines.size
+    none = Erx::CrashFrame::TRACE_NONE
+    assert_equal ["before the handoff: brief #{brief} trace 0 flags #{none}", "a release image: brief #{brief} trace 0 flags #{none}"],
+                 lines.first(2)
+    assert_match(/\Aa development image: full \d+ trace 12 flags 0\z/, lines.fetch(2))
+    assert_match(/\Aa task's fault: full \d+ trace 0 flags 0\z/, lines.fetch(3))
+    assert_equal "a release image with erx.trace=1: brief #{brief} trace 0 flags 0", lines.fetch(5)
+    assert_equal 6, lines.size
+  end
+
+  # The root decides from its handoff's line whether the kernel's rings record, as the kernel
+  # does, as it reads its handoff (liberx/backend/fiasco/root_handoff.c); the decision reaches
+  # every record as the header's trace_none bit, and the record then carries no tail. Each
+  # seeded fault, the root dropping the bit, ignoring the decision or claiming the rings
+  # recorded before it decided, fails here.
+  def test_a_boot_whose_rings_did_not_record_says_so_in_the_roots_record
+    none = Erx::CrashFrame::TRACE_NONE
+    assert_match(/\Arings that did not record: full \d+ trace 0 flags #{none}\z/,
+                 record_lines(File.join(ROOT, RECORD_CORE)).fetch(4))
+    {
+      'input.trace_none = atomic_load_explicit(&end_trace_none, memory_order_acquire);' =>
+        ['input.trace_none = false;', 4],
+      'atomic_store_explicit(&end_trace_none, !on, memory_order_release);' =>
+        ['(void)on; atomic_store_explicit(&end_trace_none, false, memory_order_release);', 1],
+      'static atomic_bool end_trace_none = true;' => ['static atomic_bool end_trace_none = false;', 0]
+    }.each do |from, (to, line)|
+      assert_match(/ flags 0\z/, record_lines(mutant(from, to)).fetch(line), "the seeded fault #{to} survived")
+    end
+  end
+
+  def mutant(from, to)
+    source = File.read(File.join(ROOT, RECORD_CORE))
+    assert_equal 1, source.scan(from).size
+    File.join(@directory, "end_record_mutant_#{source.index(from)}.c").tap { |path| File.write(path, source.sub(from, to)) }
   end
 end

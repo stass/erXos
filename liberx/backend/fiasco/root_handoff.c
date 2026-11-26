@@ -17,20 +17,27 @@
 #include <l4/sys/kip.h>
 
 #include "erx/abi.h"
+#include "erx/core/boot_args.h"
 #include "erx/core/boot_handoff.h"
 #include "liberx/backend/fiasco/root_handoff.h"
+#include "liberx/backend/fiasco/trace.h"
 #include "liberx/backend/fiasco/vm.h"
 
 const char *
 erx_fiasco_root_handoff(erx_boot_handoff_view_t *handoff)
 {
 	const l4_kernel_info_t *kip;
+	const char *reason;
 
 	kip = l4sigma0_map_kip(L4_BASE_PAGER_CAP, (void *)ERX_FIASCO_KIP_WINDOW,
 	    L4_PAGESHIFT);
 	if (kip == NULL)
 		return ("kernel information page: not mapped");
 	/* A kernel started without bootstrap's handoff page has a user_ptr of 0. */
-	return (erx_boot_handoff_accept((const uint8_t *)(uintptr_t)kip->user_ptr,
-	    ERX_BOOT_HANDOFF_SIZE, handoff));
+	reason = erx_boot_handoff_accept((const uint8_t *)(uintptr_t)kip->user_ptr,
+	    ERX_BOOT_HANDOFF_SIZE, handoff);
+	if (reason == NULL)
+		erx_fiasco_trace_boot(erx_boot_line_trace(handoff->bootargs, handoff->bootargs_len,
+		    handoff->development));
+	return (reason);
 }

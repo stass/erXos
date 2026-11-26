@@ -46,6 +46,11 @@ bool	erx_boot_args_next_arg(const char *bytes, size_t length, size_t *cursor, co
  * the line's erx.trace if it has one, else on in a development build and off in a release build.
  */
 bool	erx_boot_args_trace(const erx_boot_args_t *args, bool development);
+/*
+ * The same decision from the line's bytes, as the kernel and every root make it: a line the
+ * reader refuses leaves the rings off.
+ */
+bool	erx_boot_line_trace(const char *bytes, size_t length, bool development);
 
 #ifdef __cplusplus
 }

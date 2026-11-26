@@ -24,7 +24,7 @@ module Erx
     # musl supplies memcpy, bcopy and the rest of what root_mem.c gives a freestanding root.
     SOURCES = [*(NativeRoot::RUNTIME - ["#{BACKEND}/root_mem.c"]), *NativeRoot::VM, *NativeRoot::SERVICE,
                "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/libc_root_write.c", *NativeRoot::OUTPUT_LINE, "#{BACKEND}/libc_root.c",
-               "#{BACKEND}/root_handoff.c", 'kernel/core/boot_handoff.c', 'liberx/backend/core/arch/aarch64/cpu_features.c'].freeze
+               "#{BACKEND}/root_handoff.c", 'kernel/core/boot_args.c', 'kernel/core/boot_handoff.c', 'liberx/backend/core/arch/aarch64/cpu_features.c'].freeze
     GUEST = 'test/guest/native_musl/guest.c'
     GUEST_FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -O2 -nostdinc -fno-stack-protector
                      -mno-outline-atomics].freeze

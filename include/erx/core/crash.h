@@ -19,6 +19,7 @@
  * carves the buffer.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -49,6 +50,10 @@ extern "C" {
  * as erx_trace_kernel_pages gives them, for the record's trace tail
  * (docs/design-debugger.md, "The record's trace tail"); NULL for none, as a
  * task's fault the machine survives passes. ntrace counts rings, not CPUs.
+ * trace_none says the kernel's rings did not record in this boot (erx.trace=0,
+ * a release build's default, or a stop before the boot decided), which the
+ * header's flags say in either form, so a reader tells it from an empty tail;
+ * the writer then writes no tail, whatever trace holds.
  */
 typedef struct erx_crash_input {
 	uint32_t	 form;		/* ERX_CRASH_FORM_*, from the boot image */
@@ -70,6 +75,7 @@ typedef struct erx_crash_input {
 	const void	*log;
 	const void	*trace;
 	uint32_t	 ntrace;
+	bool		 trace_none;
 } erx_crash_input_t;
 
 /*

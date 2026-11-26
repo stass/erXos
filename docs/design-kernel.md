@@ -2552,7 +2552,7 @@ fixed fields and the rest for the log's tail). It has two
   the system domain shows a record only to the system shell (below).
 
 Its layouts are `erx_crash_header` and `erx_crash_record` in
-`abi/kernel.txt`: a 120-byte header, and a 3,848-byte fixed prefix that
+`abi/kernel.txt`: a 128-byte header, and a 3,856-byte fixed prefix that
 adds registers, a backtrace, 16 CPU entries of 56 bytes
 (`erx_crash_cpu`) and the trace tail's 32 records before the text. Both forms are that prefix; the brief
 form fills fewer of its fields and carries no text but a kernel panic's
@@ -2564,7 +2564,11 @@ monotonic time at the end, the time since the root task's last pet (or
 its start, before the first), the build identifier, the boot value and
 slot the kernel holds, the number of backtrace frames (full form and
 `PANIC` only), and `ncpus`, the number of CPUs the stop's census covered
-(full form only, and zero in a record written without a census). Its
+(full form only, and zero in a record written without a census), and
+`flags`, whose one bit, `trace_none`, says the kernel's trace rings did
+not record in this boot (`erx.trace=0`, a release build's default, or a
+stop before the boot decided), in either form, and then the record
+carries no tail. Its
 `fault` is the fault record for `FAULT`, the exit
 record for `HALT`, the exception's cause, address and program counter
 for `PANIC`, and zero for `WATCHDOG`. The full form adds the thread's
@@ -2634,7 +2638,7 @@ marker only as a whole line, passes over it:
   a payload line when the form or the length is outside these rules,
   reads exactly the lines the length names, and accepts the record only
   if `magic`, `version`, `form` and `length` equal the frame's, the CRC
-  matches, `cause` is one of the four, `cpu` is below `ERX_CPU_LIMIT`,
+  matches, `flags` holds no bit `crash_flags` does not declare, `cause` is one of the four, `cpu` is below `ERX_CPU_LIMIT`,
   `boot_value` and `boot_slot` are one of the machine page's pairs,
   `nframes` is at most 64 and zero unless the cause is `PANIC`, `ncpus`
   is at most `ERX_CPU_LIMIT`, in the brief form `regs`, the backtrace and

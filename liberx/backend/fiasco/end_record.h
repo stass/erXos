@@ -22,6 +22,11 @@
 /* The boot image's kind, from its handoff; until it is told, every record is brief. */
 void		erx_fiasco_end_boot(bool development);
 /*
+ * Whether the kernel's rings record in this boot (erx_fiasco_trace_boot). Until it is
+ * told, every record sets trace_none: a root that has not decided cannot say they recorded.
+ */
+void		erx_fiasco_end_trace(bool on);
+/*
  * The kernel's rings, count of them, at rings: the trace window, once it maps. A
  * boot whose window did not map never calls it, and its records carry no tail.
  */

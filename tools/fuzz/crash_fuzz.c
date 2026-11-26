@@ -26,7 +26,8 @@
  *      and first records are the input's bytes, 2 frames, 4 a log, 8 the
  *      full form, 0x40
  *      the form as the input has it, 0x80 scribble on the log's counters and
- *      ring; 0x30 scales the log's lines. The frame is written and read back
+ *      ring; 0x30 scales the log's lines. trace_none is its input byte's low
+ *      bit. The frame is written and read back
  *      for both kinds of end
  */
 
@@ -36,7 +37,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
 static void fuzz_check(const uint8_t *, size_t);
 static bool fuzz_entries_expected(const uint8_t *, uint32_t);
-static bool fuzz_tail_expected(const uint8_t *);
+static bool fuzz_tail_expected(const uint8_t *, bool);
 static bool fuzz_expected(const uint8_t *);
 static void fuzz_fixed(const uint8_t *, size_t);
 static void fuzz_handed_on(const uint8_t *, size_t);
@@ -122,6 +123,8 @@ fuzz_expected(const uint8_t *bytes)
 	ncpus = fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_NCPUS);
 	kind = fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_FAULT);
 
+	if (fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_FLAGS) > 1)
+		return (false);
 	if (cause < 1 || cause > 4 || fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_CPU) >= 64)
 		return (false);
 	if (value < 1 || value > 3 || slot > 2 || (value == 1) != (slot == 0))
@@ -148,7 +151,8 @@ fuzz_expected(const uint8_t *bytes)
 		if (bytes[index] != 0)
 			return (false);
 	}
-	if (!fuzz_entries_expected(bytes, ncpus) || !fuzz_tail_expected(bytes))
+	if (!fuzz_entries_expected(bytes, ncpus) ||
+	    !fuzz_tail_expected(bytes, fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_FLAGS) == 1))
 		return (false);
 	for (size_t index = ERX_CRASH_RECORD_SIZE; index < length; index++) {
 		if (bytes[index] != '\n' && (bytes[index] < 0x20 || bytes[index] > 0x7e))
@@ -160,10 +164,11 @@ fuzz_expected(const uint8_t *bytes)
 /*
  * The trace tail's rules, read on their own: no record after an empty slot;
  * each with an even, nonzero seq and a CPU below 64; and each after the one
- * before in CPU order and, within one CPU, by seq.
+ * before in CPU order and, within one CPU, by seq; and no record at all in a
+ * boot whose rings did not record (trace_none, the flags' bit 0).
  */
 static bool
-fuzz_tail_expected(const uint8_t *bytes)
+fuzz_tail_expected(const uint8_t *bytes, bool trace_none)
 {
 	static const uint8_t none[ERX_TRACE_RECORD_WIRE_SIZE];
 	const uint8_t *slot;
@@ -180,7 +185,7 @@ fuzz_tail_expected(const uint8_t *bytes)
 		memcpy(&seq, slot + ERX_TRACE_RECORD_WIRE_OFF_SEQ, sizeof(seq));
 		cpu = (uint32_t)slot[ERX_TRACE_RECORD_WIRE_OFF_CPU] |
 		    (uint32_t)slot[ERX_TRACE_RECORD_WIRE_OFF_CPU + 1] << 8;
-		if (ended || seq == 0 || seq % 2 != 0 || cpu >= 64)
+		if (trace_none || ended || seq == 0 || seq % 2 != 0 || cpu >= 64)
 			return (false);
 		if (any && (cpu < last_cpu || (cpu == last_cpu && seq <= last_seq)))
 			return (false);
@@ -346,6 +351,9 @@ fuzz_write(const uint8_t *bytes, size_t length)
 	memset(&input, 0, sizeof(input));
 	used = length < sizeof(input) ? length : sizeof(input);
 	memcpy(&input, bytes, used);
+	/* A bool holds only 0 or 1: its byte's low bit, so some inputs set the bit. */
+	input.trace_none = used > offsetof(erx_crash_input_t, trace_none) &&
+	    (bytes[offsetof(erx_crash_input_t, trace_none)] & 1) != 0;
 	bytes += used;
 	length -= used;
 	if ((selector & 0x40) == 0) {
@@ -386,6 +394,8 @@ fuzz_write(const uint8_t *bytes, size_t length)
 
 	used = erx_crash_record_write(&input, fuzz_record, fuzz_scratch);
 	if (used > ERX_CRASH_SIZE || erx_crash_check(fuzz_record, used) != ERX_CRASH_CHECK_OK)
+		abort();
+	if (fuzz_u32(fuzz_record, ERX_CRASH_BRIEF_OFF_FLAGS) != (input.trace_none ? 1u : 0u))
 		abort();
 	if (input.form != ERX_CRASH_FORM_FULL && used != ERX_CRASH_BRIEF_SIZE)
 		abort();

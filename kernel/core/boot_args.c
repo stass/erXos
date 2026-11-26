@@ -155,3 +155,11 @@ erx_boot_args_trace(const erx_boot_args_t *args, bool development)
 {
 	return (args->have_trace ? args->trace : development);
 }
+
+bool
+erx_boot_line_trace(const char *bytes, size_t length, bool development)
+{
+	erx_boot_args_t args;
+
+	return (erx_boot_args_parse(bytes, length, &args) && erx_boot_args_trace(&args, development));
+}

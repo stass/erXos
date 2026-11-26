@@ -2934,8 +2934,8 @@ Fiasco's events, reported by `kernel`, and are `unsupported` only in a boot whos
 A kernel developer needs the kernel's own history: which thread ran, what it sent and to whom, which faults it took and how
 they ended, which interrupts arrived. Upstream kept it in the debugger's trace buffer, which leaves the fork with the debugger
 ([design-debugger.md](design-debugger.md#on-fiasco)). The fork gives Fiasco erXos's kernel's rings in its place
-([Trace ring](design-kernel.md#trace-ring)): one ring of 4,096 `erx_trace_record` records for each CPU, always on in every
-build, in the layout of the root's ring above, written by the same core and read by the same reader. Fiasco adds events to
+([Trace ring](design-kernel.md#trace-ring)): one ring of 4,096 `erx_trace_record` records for each CPU, on or off for the
+whole boot by the boot option `erx.trace` (**On and off**, below), in the layout of the root's ring above, written by the same core and read by the same reader. Fiasco adds events to
 the ABI's enum and no format.
 
 **The construction.** Each CPU writes only its own ring, with interrupts masked, and nothing reads a ring by entering the
@@ -2953,6 +2953,24 @@ properties follow, and the rest of this section is their detail:
   write a ring; a read is loads alone, so it neither enters the kernel nor adds a record to the ring it reads.
 * **Only the root reads.** Only the root's space maps the rings, and only the root holds the platform control object through
   which it asked for the mapping.
+
+**On and off.** The boot line's `erx.trace=0` or `erx.trace=1` decides, once a boot, whether the kernel's rings record. A
+development build's default is on and a release build's is off, and `erx.trace=1` is honoured in either. The kernel reads
+the option from the boot line its handoff carries, with the root's own reader of that line (`erx_boot_args_parse` and
+`erx_boot_args_trace`, `kernel/core/boot_args.c`), as it prints the banner (`Erx_handoff::banner`), before any other CPU
+runs; nothing after the handoff writes the decision, so no domain can turn the rings on or off, and a line the reader
+refuses leaves them off, the root then refusing the boot with its diagnostic. A boot with its rings on prints, after the
+banner, `kernel trace rings: on; expect slower IPC and switches (erx.trace=0 turns them off)`. A release build with
+`erx.trace=1` records as a development build does, but its crash records stay in the brief form, which carries no tail,
+and only the root can map the rings, as in any boot. The root makes the same decision itself, with the same reader over
+the same line, as it reads its handoff and before anything can end it, so its crash records carry the decision from
+its first moment; it asks for the window only in a boot whose rings are on, where `map_trace` confirms the decision and
+a refusal is an error the root prints, never a sign that the rings are off. A boot with its rings off records nothing:
+every hook returns at its first test, the root maps no window (`map_trace` would answer `-L4_ENOSYS`) and reports the
+kernel's rows of `erx:trace` unsupported, and every crash record of the boot sets the header's `trace_none` bit and
+carries no tail. The bit says
+that the kernel's rings did not record in this boot, whether the option turned them off, the release default left them
+off, or the machine stopped before the boot decided ([design-debugger.md](design-debugger.md#the-records-trace-tail)).
 
 **Events.** Fiasco's rings write the events below, numbered on from 6 in `abi/kernel.txt`, each with its `args` line
 ([Trace ring](design-kernel.md#trace-ring)); erXos's kernel writes the same events where it does the same thing. Each is
@@ -3106,7 +3124,7 @@ root writes about six records (a send, a receive, a switch, a reply, a receive a
 `virt` under HVF with four CPUs and on the Raspberry Pi 4, once more with a reader following every CPU's `kernel` row, and
 [todo-performance.md](todo-performance.md) holds the item until they have.
 
-**What the rings may cost.** The rings stay always on and unconditional, with no build or boot switch, as long as
+**What the rings may cost.** A development build keeps the rings on by default as long as
 `nullcall.root-cross-space` on the Raspberry Pi 4 rises by no more than 5 % with them. Past that, the writer is made cheaper
 first: the counter converted to nanoseconds by a multiply and a shift in place of two divisions, and one release fence
 before the closing `seq` in place of a release store for each field, which the record's `atomic` lines then say and an
@@ -4722,7 +4740,8 @@ ran the code it claims to:
 | **Task fault**: the record appears and the machine continues | the fault ending the machine |
 | **Interrupt**, `native_irq` and `fiasco_time_test.rb`: a UART line and a software object wake a parked executor across CPUs through the root's dispatcher; ack opens the line; a holder binds and acks its own line and is refused the root's group | ack removed; the listed flag ignored: a label reported twice; the interlock removed: the early trigger lost; the dispatcher's trigger removed; the hooked trigger removed; the home check of a task's bind removed |
 | **Trace ring**, `trace_ring_test.rb` and TSan: lapping, overwrite during a read, bounds, a task's call `ERX_ENOTSUP` | the second `seq` load removed; the head start returning 0; the skip counted one short; the cursor check removed: stale slots copied; the `max` bound removed; a read that ignores `max`: a copy past its slot; the terminal check removed; the exhausted head's check removed; the odd store removed; the ring linked into a task in place of the stub: the link lists' test fails |
-| **Trace on four CPUs**, `native_trace`: a backend `park` and `wake`, the workload's `in` not `late`; and from the kernel's rings, on every CPU, `switch` records, the test task's `object_create` with the slot the root's table holds it in and the task named by the root's record, a task made before the trace began shown by its id with the root's name unknown, an `ipc_send` from the test task's thread naming the root service's thread and the `ipc_receive` naming the same two as sender and receiver, for one of its requests on an open wait, a `fault` and `fault_end` for its first touch of a page, and an `irq` for its device line, each between the backend records around it on the one clock | the park core's `trace` effect removed; the clock offset's sign flipped; the hook in `Thread::do_ipc` removed: no `ipc_send`; the receive hook given `do_ipc_receive`'s `sender` in place of `transfer_msg`'s: the open wait's `ipc_receive` names no sender; the name given without its `object_create` in the trace: the earlier task is named; the reader's even-count check inverted: no kernel record kept; `map_trace` answered with no mapping: the kernel row is `unsupported` |
+| **Trace with four CPUs booted**, `native_trace`: a backend `park` and `wake`, the workload's `in` not `late`; and from the kernel's rings, on every ring that records, `switch` records (the production image pins no thread, so its threads share CPU 0 and an idle CPU writes no switch: the one live ring; a check across four CPUs waits on a pinned workload), the test task's `object_create` with the slot the root's table holds it in and the task named by the root's record, a task made before the trace began shown by its id with the root's name unknown, an `ipc_send` from the test task's thread naming the root service's thread and the `ipc_receive` naming the same two as sender and receiver, for one of its requests on an open wait, a `fault` and `fault_end` for its first touch of a page, and an `irq` for its device line, each between the backend records around it on the one clock | the park core's `trace` effect removed; the clock offset's sign flipped; the hook in `Thread::do_ipc` removed: no `ipc_send`; the receive hook given `do_ipc_receive`'s `sender` in place of `transfer_msg`'s: the open wait's `ipc_receive` names no sender; the name given without its `object_create` in the trace: the earlier task is named; the reader's even-count check inverted: no kernel record kept; `map_trace` answered with no mapping: the kernel row is `unsupported` |
+| **Rings off**, `native_trace_off`: the production image booted with `erx.trace=0` | the kernel prints no `kernel trace rings: on` line, the boot reaches the shell, and a read of a kernel ring through `erx_trace_ring:read` answers `{error,unsupported}` | the hooks' and `map_trace`'s test of the boot's decision removed: the rings line is printed and the kernel ring reads |
 | **The window is read-only**, a test root of `native_trace` that stores to its window after mapping it | the root faults at the window's address and its crash frame says so | the window mapped with write rights: the store succeeds and the test root reports it |
 | **The reader of a kernel ring**, `tools/fuzz/trace_ring_fuzz.c` with the CPU number in its input, over a set of rings the input writes freely, heads and counts no writer would leave among them | whatever the rings hold, a read answers `ERX_OK`, `ERX_EINVAL` or `ERX_ELIMIT`, touches no ring past the count mapped, writes no record past `max`, accounts for every index between the cursor and the next, and keeps only records whose count is the even count of an index it read | the CPU's bound check against the rings mapped removed: AddressSanitizer on the read past the last ring; the count's check reduced to evenness: a record of an earlier lap is kept and the target's assertion fails |
 | **The window's refusals**, host test of `erx_fiasco_trace_window` | a window smaller than the rings, one outside user space and a second call are refused, an exact window is accepted | the size check removed: the small window is accepted |

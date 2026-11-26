@@ -32,6 +32,10 @@ class CrashTest < Minitest::Test
   CRC_OFFSET = FRAME::CRC_START - 4
   CAUSE_OFFSET = 24
   NCPUS_OFFSET = 68
+  BRIEF_FIELDS = FRAME::SCHEMA.types.fetch('erx_crash_brief').fields.to_h { |field| [field.name, field.offset] }.freeze
+  FLAGS_OFFSET = BRIEF_FIELDS.fetch('flags')
+  FAULT_OFFSET = BRIEF_FIELDS.fetch('fault')
+  TRACE_NONE = FRAME::TRACE_NONE
   STATE = FRAME::SCHEMA.types.fetch('stop_cpu_state').members.freeze
   DRIVER_SECONDS = 30
 
@@ -255,10 +259,10 @@ class CrashTest < Minitest::Test
     end
   end
 
-  def test_the_brief_form_is_120_bytes_and_carries_nothing_else
+  def test_the_brief_form_is_128_bytes_and_carries_nothing_else
     written = write(form: BRIEF, cause: CAUSE.fetch(:fault), kind: MEMORY, message: 'passphrase', lines: 4)
     assert_equal FRAME::BRIEF_SIZE, written.length
-    assert_equal 120, written.length
+    assert_equal 128, written.length
     refute_includes written.record, 'passphrase'
     refute_includes written.record, 'log'
     assert_equal 0, FRAME.read(written.frame).record.fetch('nframes')
@@ -499,7 +503,8 @@ class CrashTest < Minitest::Test
       boot: patch(brief, 60, [SLOT_NONE].pack('L<')),
       ncpus: patch(brief, NCPUS_OFFSET, [1].pack('L<')),
       nframes: patch(brief, 64, [1].pack('L<')),
-      fault: patch(patch(brief, CAUSE_OFFSET, [CAUSE.fetch(:fault)].pack('L<')), 72, [99].pack('L<')),
+      flags: patch(brief, FLAGS_OFFSET, [TRACE_NONE << 1].pack('L<')),
+      fault: patch(patch(brief, CAUSE_OFFSET, [CAUSE.fetch(:fault)].pack('L<')), FAULT_OFFSET, [99].pack('L<')),
       regs: patch(patch(full, CAUSE_OFFSET, [CAUSE.fetch(:watchdog)].pack('L<')).then { |record| zero_frames(record) },
                   FRAME::REGS_OFFSET, "\1"),
       frames: patch(full, FRAME::CPUS_OFFSET - 8, "\1"),
@@ -527,8 +532,8 @@ class CrashTest < Minitest::Test
       assert_equal name, FRAME.check(record), "ruby #{name}"
       assert_equal name, check_c(record), "c #{name}"
     end
-    assert_equal :short, check_c(brief.byteslice(0, 119))
-    assert_equal :short, FRAME.check(brief.byteslice(0, 119))
+    assert_equal :short, check_c(brief.byteslice(0, FRAME::BRIEF_SIZE - 1))
+    assert_equal :short, FRAME.check(brief.byteslice(0, FRAME::BRIEF_SIZE - 1))
     assert_equal :short, check_c(full.byteslice(0, full.bytesize - 1))
     assert_equal :short, FRAME.check(full.byteslice(0, full.bytesize - 1))
     assert_equal :length, check_c(patch(full, 12, [FRAME::RECORD_SIZE - 1].pack('L<')))
@@ -536,7 +541,7 @@ class CrashTest < Minitest::Test
   end
 
   def test_an_all_zero_or_max_field_never_overruns_the_check
-    %W[#{"\0".b * 120} #{"\xFF".b * 120} #{"\xFF".b * 16_384}].each do |bytes|
+    %W[#{"\0".b * FRAME::BRIEF_SIZE} #{"\xFF".b * FRAME::BRIEF_SIZE} #{"\xFF".b * 16_384}].each do |bytes|
       assert_equal :magic, check_c(bytes)
       assert_equal :magic, FRAME.check(bytes)
     end
@@ -754,6 +759,37 @@ class CrashTest < Minitest::Test
     assert_includes FRAME.report(FRAME.read(write(trace: '3').frame)), 'trace cpu 0 index 2 time_ns 1000002 park'
   end
 
+  # A boot whose kernel trace rings did not record (erx.trace=0, a release build's
+  # default, or a stop before the boot decided) says so in either form, and the report
+  # says "kernel trace rings did not record" where the tail would be, which an empty
+  # tail does not (docs/design-debugger.md, "The record's trace tail"). The seeded
+  # fault, the writer dropping the bit, fails here.
+  def test_a_boot_whose_rings_did_not_record_says_so_in_either_form
+    [FULL, BRIEF].each do |form|
+      read = read_both(write(form: form, trace: 'none').frame)
+      assert_equal TRACE_NONE, read.record.fetch('flags'), "form #{form}"
+      assert_empty read.record.fetch('trace', [])
+      assert_includes FRAME.report(read), 'kernel trace rings did not record'
+    end
+    [write(trace: nil), write(trace: '3')].each do |written|
+      read = read_both(written.frame)
+      assert_equal 0, read.record.fetch('flags')
+      refute_includes FRAME.report(read), 'kernel trace rings did not record'
+    end
+  end
+
+  # The bit and a tail never stand together: the writer handed rings in such a boot
+  # writes no tail, and both checks refuse a record that carries both.
+  def test_a_record_with_the_bit_carries_no_tail
+    written = write(trace: 'none:100,100', lines: 0)
+    assert_equal 'ok', written.check
+    assert_equal [], tail_of(written)
+    with_tail = write(trace: '100,100', lines: 0).record
+    both = patch(with_tail, FLAGS_OFFSET, [TRACE_NONE].pack('L<'))
+    assert_equal :trace, FRAME.check(both), 'ruby'
+    assert_equal :trace, check_c(both), 'c'
+  end
+
   def test_no_rings_rings_never_written_and_the_brief_form_carry_no_tail
     [write(trace: nil), write(trace: Array.new(8, '0').join(','))].each do |written|
       assert_equal [], tail_of(written)
@@ -806,7 +842,10 @@ class CrashTest < Minitest::Test
             driver: driver).fetch(0)
     end
     apart = patch(write(trace: '100,100,100,100', lines: 0).record, FRAME::TRACE_OFFSET + 31 * FRAME::TRACE_SIZE + 20, [0].pack('S<'))
-    written + drive(["check #{hex(apart)}"], driver: driver)
+    none = drive(["write #{FULL} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} 0 1 0 0 - 0 fault 0 - none:100,100"],
+                 driver: driver)
+    both = patch(write(trace: '100,100', lines: 0).record, FLAGS_OFFSET, [TRACE_NONE].pack('L<'))
+    written + none + drive(["check #{hex(apart)}", "check #{hex(both)}"], driver: driver)
   end
 
   # One-line mutants of the core: each must change what these cases see.
@@ -820,6 +859,10 @@ class CrashTest < Minitest::Test
       ['the writer leaves the buffer', '__builtin_memset(buffer, 0, ERX_CRASH_SIZE);', '(void)0;'],
       ['the check accepts a state outside the enum', 'erx_stop_cpu_state_name(entry.state) == NULL',
        'entry.state == 0'],
+      ['the tail is written in a boot whose rings did not record', 'if (rings == NULL || input->trace_none)',
+       'if (rings == NULL)'],
+      ['the check lets a tail through with the bit', 'erx_crash_trace_fits(bytes, (header->flags & ERX_CRASH_TRACE_NONE) != 0)',
+       'erx_crash_trace_fits(bytes, false)'],
       ['the tail is not written', "	erx_crash_write_trace(input, record);", "	(void)erx_crash_write_trace;"],
       ["the writer keeps a record of another CPU", 'seq != 2 * index + 2 || owner != cpu',
        'seq != 2 * index + 2 || (owner != cpu && cpu >= ERX_CPU_LIMIT)'],

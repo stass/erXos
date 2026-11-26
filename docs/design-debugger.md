@@ -210,7 +210,7 @@ by something erXos already has:
 | disassembler (off in erXos's configuration) | reading code at an address | `llvm-objdump` on the host, over the build's image |
 | breakpoints and watchpoints (32-bit Arm only) | kernel development | `break`, `watch` and `when`, the hardware's, on a target that stops from outside |
 | halting a thread | none: thread control is the backend's | dropped |
-| IPC and page-fault logging, log event switches, trace buffer, counters, performance events | event history; performance work | the trace rings, always on, read live through `erx:trace` and after a stop through the record's tail and `trace`, on Fiasco as the fork's rings ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)); benchmarks are `tools/erx bench`'s |
+| IPC and page-fault logging, log event switches, trace buffer, counters, performance events | event history; performance work | the trace rings, on by default in a development build (`erx.trace`), read live through `erx:trace` and after a stop through the record's tail and `trace`, on Fiasco as the fork's rings ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)); benchmarks are `tools/erx bench`'s |
 | entry from user mode, keystroke injection, raw console output, trace-buffer control and mapping (the Jdb object) | none: nothing in erXos calls it | dropped with the object |
 | object names set from user mode | none | dropped with the object; names come from the root's records |
 | entry at boot and by a console key | none: erXos passes the kernel no such option | dropped |
@@ -514,7 +514,7 @@ the frames from the release's published image. What this exposes is the
 security section's ([Security](#security)).
 
 In `abi/kernel.txt` this changes names and sizes, not fields: the
-120-byte layout `erx_crash_brief` becomes `erx_crash_header`, the header
+128-byte layout `erx_crash_brief` becomes `erx_crash_header`, the header
 of both forms, which `erx_crash_record`'s first field names; the brief
 form has no layout of its own, since it is `erx_crash_record` with the
 brief form's fields filled, so `ERX_CRASH_BRIEF_SIZE`, the old layout's
@@ -554,7 +554,7 @@ holds still says what each CPU did last: a boot whose firmware started the
 watchdog, a board with nothing attached but a serial log, or a harness
 run that keeps only the console. `trace`, the field after the CPU
 entries, is `crash_trace_records` (32) records in `erx_trace_record`'s
-layout, 2,048 bytes, so the fixed prefix grows from 1,800 to 3,848 bytes,
+layout, 2,048 bytes, so the fixed prefix grows from 1,808 to 3,856 bytes,
 inside `crash_size`, and at 115,200 baud the frame takes about a quarter
 of a second longer. The record is a copy, written once by one writer, so
 the ABI file declares the field as an array of the trace record's layout
@@ -567,6 +567,16 @@ declaration of the record.
 Fiasco, for the root's own crash record, the root's read-only window onto
 the same rings ([design-fiasco.md](design-fiasco.md#the-kernels-trace-rings)).
 The root's own ring is not among them; the root's record carries its log.
+A boot whose kernel rings did not record has nothing to give: its rings
+were off by `erx.trace=0` or by a release build's default, or the machine
+stopped before the boot decided. Its writers set the header's
+`trace_none` bit, the kernel's from its boot decision and the root's from
+the same decision over the same boot line, made as it reads its handoff,
+and write no tail, whatever rings they hold, so the
+bit and a tail never stand together and the checks refuse a record that
+has both. A reader of the record says "kernel trace rings did not
+record" where an empty tail would leave the person wondering whether the
+CPUs did nothing.
 `ntrace` is how many rings there are, not how many CPUs ran: Fiasco has
 eight rings however many CPUs start, and a board of four leaves four of
 them empty. The CPUs the tail covers follow from the rings themselves:
