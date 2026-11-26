@@ -514,7 +514,9 @@ scripts live in `~/erxos-scratch/tools/`.
   `abi/inspection.txt`, shown at `/proc`; what an app says about itself,
   bytes someone keeps, or a thing someone commands is a file tree its
   owner serves and the reader mounts, with a `status` file to read and a
-  `ctl` file for one-shot control; a live conversation is a declared
+  `ctl` file for one-shot control (service control trees are mounted at
+  `/svc/NAME`; device trees stay under `/dev`; stored files stay where
+  their meaning fits); a live conversation is a declared
   protocol with its own design. When a change needs
   something the design does not name, stop and bring the question to the
   design (and to me when it is architectural) instead of building it.
