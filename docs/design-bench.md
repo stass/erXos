@@ -2692,27 +2692,36 @@ without `munmap`) has none.
   each pass and counts the pass in the window that read falls in, so a
   pass that crosses a window's end counts once, in the window where it
   ended; passes ending in the warm-up count nowhere, and the copy stops
-  at the first read past the plan's end. Beside each window's count a
-  copy keeps its longest pass in ticks. The cell asks nothing of how
-  closely the CPUs' counters agree: an offset of d between two CPUs moves
-  at most d's worth of passes across a window's edge, and a window is a
-  second or more, so a rate cell calibrates no CPU pair beyond those the
-  boot's `CLOCK` line already calibrates.
+  at the first read past the plan's end. A copy keeps only the count of
+  each window and times no pass, so every reading it makes places a pass
+  or its own start against the plan's fixed edges and none is
+  subtracted from another to be reported. The cell asks of the CPUs'
+  counters only that they agree within much less than a window: an
+  offset of d between two CPUs moves at most d's worth of passes across
+  a window's edge, and a window is a second or more, so a rate cell
+  calibrates no CPU pair beyond those the boot's `CLOCK` line already
+  calibrates.
 * **The report.** No copy writes during the plan. At its end each
   started copy writes its windows to copy 0 and exits 0; copy 0 reads
   them, waits for every copy, and writes one `WINDOW` line per window
   and copy, window by window and copy by copy, and then the cell's
   `BENCH` line, as a sustained cell's lines are written
   ([A sustained cell](#a-sustained-cell)). A rate cell's `WINDOW` line
-  carries `window`, `worker` (the copy), `iterations` (the passes ended
-  in the window) and `longest`; `lost` and `waited` belong to a
-  sustained cell's accounting of a shared CPU and a rate cell's line
-  carries neither. `BenchMeasurement` holds a rate cell's lines to the
+  carries `window`, `worker` (the copy) and `iterations` (the passes
+  ended in the window), and no interval: `longest` would be two counter
+  reads of an unbound copy, which may lie on two CPUs, and an interval
+  across CPUs is reported only with the bound calibration proved for it,
+  as this document's opening says, and a rate cell asks for no
+  calibration of its own; `lost` and `waited` belong to a sustained cell's
+  accounting of a shared CPU. A rate cell's line carries none of the
+  three. `BenchMeasurement` holds a rate cell's lines to the
   cell exactly as it holds a sustained cell's: one line per window and
   worker, in order, or the cell is `rejected`.
 * **The score.** A rate cell's summary is its **score**: every copy's
-  passes over all windows, divided by the plan's measured span (the
-  windows, not the warm-up), as a rate per second; the shell rows print
+  passes over all windows, divided by the windows' length (their count
+  times `window-ms`, not the warm-up), which the plan fixes from its
+  start, so the score divides by no measured interval, as a rate per
+  second; the shell rows print
   it per minute, as UnixBench does, and the copy rows print bytes per
   second, the score times the buffer. Beside it the summary keeps each
   window's summed rate, the lowest and the highest, and each copy's
@@ -2906,16 +2915,29 @@ L4Re, for every row above: kernel rows only; none.
 **Calls a C library may lack.** `fork-wait`, `fork-exec` and `exec-loop`
 call `fork` and `execve`, which erXos's first-tier C library leaves out
 by design, so that a program calling them fails to link
-([design-programs.md](design-programs.md#the-posix-lite-personality)). The program
-declares both weak (`#pragma weak fork`, `#pragma weak execve`), so on
-every system it links, and an undefined weak reference takes the address
-0; each such cell's probe tests the address before any call and reports
-`unsupported: fork absent from the C library`. The C library is not
-changed: it still has no `fork`, and a program that calls `fork` without
-the test still fails to link. That an undefined weak reference resolves
-to 0 in a static link with the tree's linker is ELF's rule and is
-unverified here; the first build of the program on erXos settles it, and
-a test checks it (below).
+([design-programs.md](design-programs.md#the-posix-lite-personality)). The build
+asks the C library itself. A builder that links the program statically,
+erXos's (`PosixBench`) and Linux's guest's (`LinuxGuest`), lists the
+external symbols defined by the very `libc.a` its link names, with
+`llvm-nm --defined-only --extern-only`, and passes the program
+`-DERX_PEER_NO_FORK` when `fork` is not among them and
+`-DERX_PEER_NO_EXECVE` when `execve` is not; one function of
+`PeerBench` turns the listing into the flags, so both builders ask the
+same question. Under either define the code of the rows that call the
+function is not compiled, and each such cell's probe answers
+`unsupported: fork absent from the C library` (or `execve`). Without
+it the calls are ordinary references, which pull `fork` and `execve`
+out of Linux's `libc.a` (musl defines both,
+`musl/src/process/fork.c`, `execve.c`) as they do the program's other
+calls. The define says only that something is absent, so a build that
+does not ask, such as Genode's, built by Genode's own make, compiles the
+calls, and a C library without them fails that link with the name of
+the missing function instead of a cell reporting an absence no one
+looked for. The program's other `fork` calls (`echo_process` and
+`write_faults`, compiled only off erXos,
+`bench/peer/erx_peer_bench.c:871`) are unchanged. The C library is not
+changed either: it still has no `fork`, and a program that calls `fork`
+still fails to link.
 
 **The Erlang rows.** The Erlang rule applies: a row is here only where
 the act is one an Erlang program does.
@@ -3311,16 +3333,33 @@ of 8,000 KiB, 62.5 MiB of 4 KiB chunks, and eight nodes and entries of
 `/tmp`'s fixed charges ([design-tmp.md](design-tmp.md#data-model)), under
 64 MiB. The Erlang rows' files, in the same session's `/tmp`, are the
 same `copy-blocks` shapes and no larger. `/tmp` is charged to the
-session's budget as it is used, so the build grows by the same 64 MiB
-each budget that holds it: the session's memory (`limits session`), the
-system principal's memory, which admits the session, and the machine's
+session's budget as it is used, and of that budget the session keeps
+half for its own services and carves the other half as the wall of its
+programs' pool ([design-system.md](design-system.md#resource-policy)), so `/tmp` is charged to the services' half.
+The development manifest gives a session 36 MiB
+(`config/manifest/development.txt:136`), 18 MiB on each side, the
+services' 18 MiB holding the shell, the terminal relay, the handler, the
+pipe server and the 2 MiB `/tmp` the development manifest allows. For
+the services' half to hold the 64 MiB cap beside those 18 MiB, the
+build grows the session's memory (`limits session`) by twice the cap,
+128 MiB, to 164 MiB: 82 MiB for the services and `/tmp`, and 82 MiB of
+pool for the program, its rate copies and what they start. The same
+128 MiB grows each budget that holds the session's: the system
+principal's memory, which admits the session, and the machine's
 `root_memory`, which holds the principal's
 (`config/manifest/qemu-virt-development.txt:268`, `:303`); QEMU's RAM
-grows by as much (`PosixBench.machine`, 768 MiB on QEMU `virt`). No
-cell's private memory comes near that: a rate copy is one more instance
+grows by as much (`PosixBench.machine`, 832 MiB on QEMU `virt`, whose
+own is 704 MiB, `config/platforms/qemu-virt.json:7`). No cell's private
+memory comes near the pool's 82 MiB: a rate copy is one more instance
 of the program, and the largest mapping is `map-file`'s 1,000 pages,
 4 MiB; the one row that would hold much, LEBench's 12,000-page `fork`,
-is not here ([The other suites' operations](#the-other-suites-operations)). A
+is not here ([The other suites' operations](#the-other-suites-operations)).
+The Erlang rows run in the session's own node and draw on the services'
+half: their files are `/tmp`'s, within the cap, and their processes'
+heaps come from the services' 18 MiB beside it. How much those heaps
+take is not measured; a charge refused there ends the row, or the
+node, with an error, so a services' half too small for them shows as
+cells `failed` or never reported, never as a number. A
 session's runtime limits must lie within its principal's ceiling
 (`dom_limits_within`, `liberx/system/dom_core.c:295-305`, called at
 `:1235`), and the system principal's ceiling is the system domain's own
@@ -3429,8 +3468,11 @@ Each is new and named here; nothing else is added.
   taking the run's benchmark and adding its rate cells' plans at the
   compiled sizes, and every caller of it (the program's flags, each
   boot's `done` checkpoint) passing the benchmark.
-* **The weak declarations** of `fork` and `execve` in
-  `erx_peer_bench.c`, and the probe that tests their addresses.
+* **The C library's answer**: `PeerBench`'s one function from the
+  `llvm-nm` listing of a `libc.a` to `-DERX_PEER_NO_FORK` and
+  `-DERX_PEER_NO_EXECVE`, called by `PosixBench` and `LinuxGuest` on the
+  archive each links, and the rows' code in `erx_peer_bench.c` compiled
+  only without the define, whose probe answers `unsupported` under it.
 * **The script, its input and its expected output**, from the generator
   above; on Linux's initramfs, toybox's `sort`, `sed` and its `sh` at
   `/bin/sh` beside the applets it already gains.
@@ -3470,7 +3512,7 @@ Each is new and named here; nothing else is added.
 | the run's deadline (on the host) | `PeerBench.run_deadline` for a landing `rate` run under HVF is 388 s and for a `posix` run 300 s | the shell cells' `window-ms` ignored: the `rate` run's deadline comes out 364 s |
 | `pipe-self` | every read equals its write | a seeded build that skips the read once in a hundred passes: the next read returns the older bytes, its sequence number is wrong and the cell is `failed` |
 | `exec-loop` | every image's `getpid` equals the copy's id | a seeded build whose `exec-loop` mode starts the next image with `posix_spawn` and exits: the id differs and the cell is `failed`, which shows the row timed a real `exec` |
-| the weak declarations | the program links on erXos, whose first-tier C library has neither `fork` nor `execve`, and `fork-wait`, `fork-exec` and `exec-loop` come back `unsupported: fork absent from the C library` (or `execve`) while Linux's run measures them | the `#pragma weak` lines removed: the erXos build fails to link, which shows the declarations are what lets it link |
+| the C library's answer | on the host, `PeerBench`'s function gives both defines for erXos's `libc.a` and none for Linux's; the program links on erXos, whose first-tier C library has neither `fork` nor `execve`, and `fork-wait`, `fork-exec` and `exec-loop` come back `unsupported: fork absent from the C library` (or `execve`), while Linux's run measures them, each passing its own check | the function seeded to find `fork` absent from every listing: Linux's build gets `-DERX_PEER_NO_FORK` and its `fork-wait` comes back `unsupported`, failing the expectation that Linux measures it; and the define dropped from erXos's flags: the erXos build fails to link on `fork`, which shows the define is what lets it link |
 | `copy-blocks` | B equals A after the cell, in C and in Erlang, at each of the three shapes | a seeded build that writes every transfer at offset 0: B differs and the cell is `failed` |
 | `shell-script` | each shell's output equals the expected output | each of the three stages left out of the script in turn: the output differs and the cell is `failed`, naming the first differing line |
 | the script | on the host, `erx_shell_parse` parses it and the host's `/bin/sh` running it on the input prints the expected output | a script holding `$(...)`, which only a POSIX shell spells so: rc's parser refuses it |

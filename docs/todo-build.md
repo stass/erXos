@@ -227,9 +227,10 @@ design does not have, to be deleted so no side-by-side table can show it under s
   the `rate` profile, its `WINDOW` lines, score and placement `unbound`; the `rate` and `erl-rate`
   benchmarks (`tools/lib/erx/benches/rate.rb`, `erl_rate.rb`), the program's copy mode, start and
   `exec-loop` mode in `bench/peer/erx_peer_bench.c`, and the Erlang module (`bench/erx_erl_bench.erl`,
-  not yet written); `PeerBench.run_deadline` derived from a run's rate cells; the weak `fork` and
-  `execve` declarations; the shell script, its input and expected output from the generator, and
-  toybox's `sort`, `sed` and `sh` in Linux's initramfs; the posix image's 64 MiB `/tmp`, every cell
+  not yet written); `PeerBench.run_deadline` derived from a run's rate cells; `-DERX_PEER_NO_FORK` and
+  `-DERX_PEER_NO_EXECVE` from the `llvm-nm` listing of the `libc.a` each static build links; the shell
+  script, its input and expected output from the generator, and toybox's `sort`, `sed` and `sh` in
+  Linux's initramfs; the posix image's 64 MiB `/tmp` with its session grown by twice that, every cell
   removing its own files, and `erl` and `erl-rate` at root's session's Erlang shell; the index in
   `Erx::BenchSideBySide`; and the other suites' rows
   ([design-bench.md](design-bench.md#the-other-suites-operations)) are designed and not built.
