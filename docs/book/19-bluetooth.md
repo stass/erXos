@@ -666,7 +666,7 @@ crypto of `erx_smp_crypto`, is a pure state machine run by the link's
 core; the window, the control tree and the bond store, `erx_bt_store`,
 are processes of `erx_bt_sup`. All are built, with host tests and fuzz
 targets (`erx_bt_smp_tests`, `erx_bt_window_tests`, `erx_bt_store_tests`,
-`erx_bt_smp_fuzz`, `erx_bt_pair_fuzz`). The store keeps its bonds in a
+`erx_bt_smp_fuzz`, `erx_bt_window_mode_fuzz`). The store keeps its bonds in a
 development state file; a store behind the system's vault is designed
 and not built.
 

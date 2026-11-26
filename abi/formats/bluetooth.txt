@@ -172,9 +172,13 @@ limit bt_store_timeout_ms u32 5000
 # admits a pairing; the longest first write of its `pair` file, `display` or `nodisplay`;
 # and SMP's pairing wait (Vol 3 Part H, 2.3.6): the minimum for the first failure, then
 # twice the last failure's wait halved for each whole decay interval since it, kept
-# between the minimum and the maximum.
+# between the minimum and the maximum. A reader of the control tree's lines, a window's
+# or the bonds list's (docs/design-bluetooth.md, "The client", erx_bt_pair:next/1), holds
+# at most bt_pair_line_max + 1 octets that end no line; the longest line the window
+# composes is 80.
 limit bt_pair_window_s u32 120
 limit bt_pair_write_max u32 16
+limit bt_pair_line_max u32 128
 limit bt_pair_wait_min_s u32 2
 limit bt_pair_wait_max_s u32 64
 limit bt_pair_wait_decay_s u32 600

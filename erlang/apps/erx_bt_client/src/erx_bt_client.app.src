@@ -3,13 +3,14 @@
 
 %% The app side of the Bluetooth domain's `ble` facet (docs/design-bluetooth.md, "The
 %% client"): erx_gatt, the facet's calls and the one reader of the events a handler
-%% receives; erx_gatt_service, the behaviour of one service's handler; and erx_gatt_serial,
-%% the serial service over it. A library: it starts no process, so a domain's release
+%% receives; erx_gatt_service, the behaviour of one service's handler; erx_gatt_serial,
+%% the serial service over it; and erx_bt_pair, the grammar of the control tree's lines
+%% and the bounded reading of them. A library: it starts no process, so a domain's release
 %% takes it without erx_bt, whose start brings up the controller.
 {application, erx_bt_client,
  [{description, "erXos Bluetooth LE client"},
   {vsn, "1"},
-  {modules, [erx_gatt, erx_gatt_service, erx_gatt_serial]},
+  {modules, [erx_bt_pair, erx_gatt, erx_gatt_service, erx_gatt_serial]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.
