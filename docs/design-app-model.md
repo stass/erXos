@@ -67,8 +67,8 @@ Four things follow, and the rest of this document is their detail:
   the board's offer is their ceiling. The settings below it have fields
   that take away and none that adds.
 * **A setting on the data partition cannot add authority**, because no
-  link below the declaration has a field that names a service, a grant
-  or a user. A storage domain that rewrites every setting can enable,
+  link below the declaration has a field that can name a service, a
+  grant or a user to add it. A storage domain that rewrites every setting can enable,
   disable and lift a denial, and can offer any package a trusted key
   signed, but gives no app more than its sealed declaration asked for
   within the board's offer.
@@ -355,9 +355,10 @@ copy, and its interpreter is handed that copy, never a path to open
 again**. The handler's resolve step resolves the script through the
 caller's table, before any narrowing, checks its entry and execute bit
 as it checks an executable's, and reads it whole, at most `script_max`
-bytes, into a data object keyed by the file's version
-([design-programs.md](design-programs.md#file-objects)), so a file that
-changes during the read answers `ETXTBSY`. It parses the first line as
+bytes, into a memory object charged to the session's budget, which it
+seals once the read has filled it; it checks the file's version
+([design-programs.md](design-programs.md#file-objects)) before and after
+the read, so a file that changes during the read answers `ETXTBSY`. It parses the first line as
 an interpreter path and at most one argument, and starts the
 interpreter with that argument, the script, the script's name and the
 caller's arguments. How the interpreter is handed the script depends
@@ -388,30 +389,49 @@ mount says.
   with the arguments `-f /dev/fd/N` and the caller's, and `wak` reads
   its program from the descriptor.
 
+The session's export lists `/usr/bin` as a second name of `/bin`, so
+the lines scripts written for FreeBSD begin with, `#!/usr/bin/awk -f`
+and `#!/usr/bin/env NAME`, run unchanged. It promises nothing `/bin`
+does not: both names reach the one directory of
+[design-shell.md](design-shell.md#commands).
+
 **A native interpreter's descriptor.** FreeBSD names a script by its
 descriptor when an image started from one with `fexecve`: its shell
 image activator passes `/dev/fd/N` in place of the path
 (`sys/kern/imgact_shell.c`, lines 172-180, FreeBSD 14.3.0). Whether
 FreeBSD does the same for a set-user-id script is unverified; erXos has
-none. erXos hands every native interpreter its script that way, which
-needs two small things that its descriptors do not have yet:
+none. erXos hands every native interpreter its script that way. The
+requirement is that a FreeBSD script runs unchanged under any native
+interpreter, toybox's awk `wak` now, toybox's `sh` later and any a user
+builds, each of which already takes a script by path; an intake of the
+sealed bytes written into `wak` alone would serve only `wak`. Two small
+things serve them all:
 
-* **A sealed-file descriptor**, one more kind in the closed set of
-  [design-programs.md](design-programs.md#descriptors-and-files): the
-  script's data object and its length, which the startup message names
-  in its `descriptor` union. The handler places it at the lowest number
-  above the descriptors the start passes, without `FD_CLOEXEC`. `liberx`
-  maps the object read-only and serves `read`, `pread`, `lseek` and
+* **A sealed description.** The script's descriptor is a file
+  descriptor as [design-programs.md](design-programs.md#descriptors-and-files)
+  has them, an open of the handler's table opened read-only, whose
+  open-file description in the session reads the sealed object in place
+  of a server's file. Everything else follows from its being a
+  description: the session owns its offset and serializes the reads
+  that use it, as for any file; `dup`, `/dev/fd/N`, an `exec`, a child
+  and `SCM_RIGHTS` give opens that share it; and it lives while an open
+  in any program of the session names it, its capability to the object
+  closed with the last. The session answers `read`, `pread`, `lseek` and
   `fstat`, a regular file of the copy's length with mode 0444, from the
-  mapping; `mmap` of it is the file's `data` map; `write` fails with
-  `EBADF`, since the descriptor was opened read-only. The object has no
-  right to write, it was sealed when the read filled it, and nothing
-  else names it, so the descriptor holds exactly the bytes the handler
-  checked. It is charged to the interpreter's program as its data
-  objects are, and goes with the last descriptor that refers to it. An
-  `exec` keeps it and a child inherits it as any descriptor without
-  `FD_CLOEXEC`, so an interpreter that starts another, as `env` does,
-  passes the script on.
+  object; `mmap` of it is a `data` map of the object, as of any file;
+  `write` fails with `EBADF`, since the open is read-only. The handler
+  places it at the lowest number above the descriptors the start
+  passes, without `FD_CLOEXEC`, so an interpreter that starts another,
+  as `env` does, passes the script on. The description holds the
+  object through a capability with `READ` and `MAP` alone, the object
+  was sealed when the read filled it, and nothing else names it, so
+  every open holds exactly the bytes the handler checked. The
+  object is charged to the session's budget, which outlives every
+  program of the session, so a program that holds the script never
+  depends on the program that started it or passed it; a mapping made
+  of it keeps the object after the last open has closed
+  ([design-kernel.md](design-kernel.md#closing-and-deleting)), and its
+  program ends before the session does.
 * **`/dev/fd/N`**, a name `liberx` serves for the program's own
   descriptors, as FreeBSD's `fdescfs` does: `open` of `/dev/fd/N` with a
   mode the descriptor allows is `fcntl(N, F_DUPFD, 0)`, the other flags
@@ -427,9 +447,34 @@ needs two small things that its descriptors do not have yet:
   through `/dev`, a documented difference with a test, since no
   consumer lists descriptors through it.
 
+**An Erlang command started with the script.** `#!/usr/bin/env escript`,
+the line stock escripts begin with, starts the native `env` with
+`/dev/fd/N`, and `env` starts `escript /dev/fd/N`, an Erlang command,
+which runs in the program's command domain, a domain that holds no open
+of the session's
+([design-programs.md](design-programs.md#what-a-program-can-start),
+"An Erlang command"). The sealed description crosses as itself, since
+it carries nothing of the session's but bytes no one can change: when
+descriptor N of the start names one, the handler puts in the run's
+`Start`, at N, one more form beside `relayed` and `null`, `sealed`,
+which names the object through a capability with `READ` and `MAP`
+alone, its length and the description's offset at the start. The run
+server's validator accepts the three forms, and the command domain's
+runtime answers `/dev/fd/N` for a `sealed` descriptor in its own path
+resolution, as `liberx` does in a program, reading through a read-only
+mapping. From then on the command domain keeps its own offset, a
+documented difference with a test, since it shares no open with the
+session. The command domain ends with the program that started it,
+before the session whose budget holds the object.
+`escript:script_name/0` gives `/dev/fd/N`, as on FreeBSD for a script
+started with `fexecve`, and `#!/usr/bin/env rc` runs the same way. A
+description backed by a server's file still never crosses: the
+command domain reaches files only through its grants.
+
 The descriptor gives the interpreter nothing it did not have: the
-bytes are those of a file its starter could read, and a program reaches
-its own descriptors with or without the name.
+bytes are those of a file its starter could read, a program reaches
+its own descriptors with or without the name, and the command domain's
+capability can neither write the object nor supply it.
 
 Erlang interpreters run as every Erlang command of a program runs, in a command
 domain ([design-programs.md](design-programs.md#what-a-program-can-start),
@@ -774,10 +819,15 @@ again once that session has retired. A second concurrent root login
 over SSH, and every other user's, comes from `users` as any login's
 does. It is the manifest's choice per board: the development manifests
 reserve it, and a board with a screen may leave it out. Where the SSH
-server runs does not change: in 0.2 it is a configured domain in the
-system's part, and before then it runs in root's session
-([design-ssh.md](design-ssh.md)); the wall holds root's session, not the
-server.
+server runs does not change: the wall holds root's session, not the
+server. The reservation needs a login over SSH to be a session of its
+own, which it is from stage 2 of
+[design-ssh.md](design-ssh.md#stages), where the server is a configured
+domain in the system's part. In stage 1 the server, its ttys and their
+jobs run inside the console's root session, so their memory comes from
+the UART line's wall and there is no SSH login to reserve for; until
+stage 2 the manifests reserve no SSH wall, and the reservation's test
+runs from that stage.
 
 A start that `users` cannot hold is refused with `no_memory`, and the
 row's reason at `/proc/apps` says so. Nothing else is promised to a
@@ -920,6 +970,13 @@ file of the data partition widens (AM1, AM4).
   handler read, so a script replaced after the read changes nothing
   that runs. Clearing the execute bit, or remounting `noexec`, stops the
   next start and not a running program.
+* **A script's descriptor in several programs.** Its offset is the
+  session's description's, which serializes the reads that use it, so
+  programs that share it read as they would share a file's; a command
+  domain reads its own copy of the offset. The object outlives the
+  program that started the script and every program it was passed to,
+  since it is charged to the session, and goes with the last open and
+  the last mapping, or with the session.
 * **A setting changed while its app runs** takes effect at the row's
   next start. The start service reads the file at boot and at each
   row's own command, as it does for every field.
@@ -1025,9 +1082,11 @@ under test ran.
 | the manifest check refuses a source row with `rw` and `exec`, and `exec` on a row of the app template | each as a seeded row |
 | `#!/bin/rc` and `#!/bin/escript` scripts run by path with their arguments; a script naming a script fails with `ENOEXEC`, and a name of `PATH_MAX` bytes with `ENAMETOOLONG`; the line reader's fuzz target, with FreeBSD's cases as its oracle | a reader without its bound; a resolve that follows a second line |
 | `within /root/in -- /root/job` runs the script `job`; a script replaced between the handler's read and the interpreter's start runs the bytes that were read | an interpreter handed the path and opening it again, which both cases catch |
-| a `#!/bin/awk -f` script runs by path with its arguments, and under `within /root/in --` from a path the narrowed program cannot open; a `write` to the descriptor fails with `EBADF` | the native interpreter handed the script's path instead, which the `within` case catches; a descriptor over a writable object, on which the `write` succeeds |
+| a `#!/usr/bin/awk -f` script runs by path with its arguments, and under `within /root/in --` from a path the narrowed program cannot open; a `write` to the descriptor fails with `EBADF` | the native interpreter handed the script's path instead, which the `within` case catches; a description opened for writing, on which the `write` succeeds; an export without `/usr/bin`, on which the line answers `ENOENT` |
+| the session's test starts a script and, through the capability the script's description holds, asks for a writable map of the object and a `SUPPLY` of it, each refused with `ERX_ERIGHTS`; an Erlang command started with `/dev/fd/N` asks the same through the capability its `Start` carries, refused alike | a capability copied without its `READ` and `MAP` mask, on which the map and the `SUPPLY` succeed while the `EBADF` case above still passes |
+| a `#!/usr/bin/env escript` script runs by path with its arguments, also under `within /root/in --`, and `escript:script_name/0` gives `/dev/fd/N`; a test program that starts `escript /dev/fd/N` on a script descriptor then reads the whole script from that descriptor itself | a run server whose validator refuses the `sealed` form, on which the start fails; a command domain that resolves `/dev/fd/N` through its grants, on which `escript` answers `ENOENT` |
 | a program opens `/dev/fd/0` read-only and reads its standard input through it; `/dev/fd/N` for a closed N and `/dev/fd` itself answer `ENOENT` | an `open` that sends the name to the handler, on which a program without a grant at `/dev` gets `ENOENT` for `/dev/fd/0` |
-| a native app's program runs a `#!/bin/awk -f` script of its package | a native interpreter counted as a command domain, on which the start fails with `EAGAIN` |
+| a native app's program runs a `#!/usr/bin/awk -f` script of its package | a native interpreter counted as a command domain, on which the start fails with `EAGAIN` |
 | an `escript` run leaves the session's loaded modules as they were | an `escript` run in the session's domain |
 | a native app's program that starts an `rc` script fails with `EAGAIN`, and `erx-app pack` of a script is refused naming it | a command domain created past the app principal's quota; a packer that accepts a script |
 | `within /tmp -- prog` cannot open a socket and `within -f net /tmp -- prog` can; a connected socket handed to a narrowed child without `net` still carries data, and a command domain that child starts holds no network facet | a handler that serves `socket` without the right; a command domain given a network facet its program lacked |
@@ -1035,7 +1094,7 @@ under test ran.
 | with `max 2`, one image package that needs no display and `display` offered: storage withholds the image package's header at boot and at recovery, and two installed display apps start with their pixel areas | a count that takes image packages at their needs, on which the second app's pixel area is short |
 | `NAME_memory` above the declaration starts the app at that size, judged at its whole wall, and one above the pool refuses it with `no_memory` while every configured domain's budget stays as planned | a slice carved from the root budget; a judgement of the own budget alone |
 | apps fill `users`; root logs in at the UART, runs `service NAME stop`, logs out and logs in again, and logs in once more while the ended session is still retiring | a console login carved from `users` directly, on which the first login fails |
-| apps fill `users` on a development manifest; root logs in over SSH, logs out and logs in again, and a second concurrent root login over SSH is refused with `no_memory`; on a manifest that reserves no SSH wall the first is refused too | an SSH login carved from `users` directly, on which the first login fails; a reservation made whatever the manifest says, on which the last refusal does not come |
+| from SSH stage 2, apps fill `users` on a development manifest; root logs in over SSH, logs out and logs in again, and a second concurrent root login over SSH is refused with `no_memory`; on a manifest that reserves no SSH wall the first is refused too | an SSH login carved from `users` directly, on which the first login fails; a reservation made whatever the manifest says, on which the last refusal does not come |
 | `erx-app pack hello` gives a package whose session holds its package and nothing else | a synthesized declaration that names every offered service |
 | each shipped manifest boots at exactly its derived `root_memory`, with every configured domain, reserved login and enabled package started (property 12's planner) | a derivation that leaves out the outer budgets or the reserved logins, on which the planner fails |
 | a machine with more memory than `root_memory`, and one with sixteen times more, show `users` as the remainder, root's session at an eighth of it, and start two apps the least machine could not hold | a pool sized from `root_memory` on every machine; a principal ceiling left in the judgement, on which the larger machine's login is refused |
@@ -1058,10 +1117,10 @@ build, and an installation re-creates what an earlier build wrote.
 | `abi/services/files.txt` | `files_rights` is `ro` and `rw`; a second parameter `exec` |
 | [design-programs.md](design-programs.md#invariants), P10 | a program's image is never writable; it starts a file it wrote only through an entry that both writes and runs |
 | [design-programs.md](design-programs.md#starting-a-program), step 4, and [What a program can start](design-programs.md#what-a-program-can-start) | the image check is the entry's `exec` and the file's mode, for a code `map` as for a start; a script is a fifth image, read whole into a sealed data object and handed to an Erlang interpreter as bytes and to a native one as a read-only descriptor named `/dev/fd/N`; `ENOEXEC` and `ENAMETOOLONG` as FreeBSD's activator answers |
-| [design-programs.md](design-programs.md#descriptors-and-files) | a sealed-file descriptor, one more kind, which the startup message's `descriptor` union (`abi/protocols/prog.txt`) names; `liberx` serves `open` and `stat` of `/dev/fd/N` as a duplicate of descriptor N |
+| [design-programs.md](design-programs.md#descriptors-and-files) and [What a program can start](design-programs.md#what-a-program-can-start) | a sealed description, an open-file description of the session that reads a sealed object in place of a server's file; `liberx` serves `open` and `stat` of `/dev/fd/N` as a duplicate of descriptor N; a run's `Start` takes a `sealed` form, which the `descriptor` union of `abi/protocols/prog.txt` names and the run server's validator accepts, and the command domain's runtime serves `/dev/fd/N` for it |
 | [design-programs.md](design-programs.md#facets) | `net` is a right beyond files: creating a socket; held sockets work on |
 | [design-programs.md](design-programs.md#the-posix-lite-personality), "Users and files" | `chmod`'s execute bit gates a start; `X_OK` reads the entry and the mode for a file and any entry for a directory |
-| [design-shell.md](design-shell.md#commands) | a `#!` line is interpreted; `escript` |
+| [design-shell.md](design-shell.md#commands) | a `#!` line is interpreted; `escript`; `/usr/bin` is a second name of `/bin` in the session's export |
 | [design-shell.md](design-shell.md#starting-programs) and [Interfaces](design-shell.md#interfaces) | `within -f net`, `within -m`; `mount -o` |
 | [design-system.md](design-system.md#the-manifest), property 4 and the machine record | the sums are derived; `users_min`; the `app` row and facet rows granted to an app; the `home` field; `share` on a session template; no principal states `memory` |
 | [design-system.md](design-system.md#resource-policy), "Budgets" | the system's sum and `users`; each reserved login's wall carved at boot; every other user's domain carved at its start |
@@ -1079,7 +1138,7 @@ build, and an installation re-creates what an earlier build wrote.
 | [design-login.md](design-login.md#who-holds-it) | the `bleuart` holder is the image's package `bleuart`, a grantee of the kind `app`, held to the same `line`, operations and `logins` |
 | [design-live.md](design-live.md#the-console) | each console line holds its login's wall from boot and offers its next login once the ended session has retired |
 | [design-ssh.md](design-ssh.md#roots-login-keys-on-the-medium) | in a development build, the same tree serves `package_keys` beside root's keys |
-| [design-ssh.md](design-ssh.md) | root's login over SSH is carved in its reserved wall where the manifest reserves one, and from `users` otherwise |
+| [design-ssh.md](design-ssh.md#stages) | from stage 2, root's login over SSH is carved in its reserved wall where the manifest reserves one, and from `users` otherwise |
 | the book, chapters 13, 14, 20 and 23, and the guide | follow each design edit in its own commit; the guide gains "Run your own program" and "Write an app" |
 
 Deleted outright: the `rx` value and the rule that `rw` and `rx` meet
@@ -1111,8 +1170,8 @@ memory.
 * a new entry: **configuration only narrows: an app holds the services
   it requests in its sealed declaration, within what the board's
   manifest offers it, less what the machine's settings deny; no setting
-  on a data partition has a field that names a service, a grant or a
-  user, so tampered storage can withhold, enable, disable and choose
+  on a data partition can name a service, a grant or a user to add it,
+  so tampered storage can withhold, enable, disable and choose
   among packages a trusted key signed, but never gives an app more
   than its declaration requests and the board offers;**
 * the budgets entry stands as written: `users`, each reserved login's
@@ -1144,7 +1203,9 @@ is a new image.
    and directories, `mount -o`, with AM2's and AM3's tests and seeds.
 4. **Scripts.** `#!` in the handler's resolve step, with FreeBSD's
    grammar and its fuzz target, the bytes handed to `rc` and `escript`,
-   the sealed-file descriptor and `/dev/fd/N` in `liberx` for `awk`,
+   the sealed description and `/dev/fd/N` in `liberx` for `awk`, the
+   `sealed` form of a run's `Start` for an Erlang command started
+   with the script, `/usr/bin` in the session's export,
    and the edits of design-shell.md and design-programs.md.
 5. **The SDK's short path.** `erx-cc`, `erx-app pack FILE` for an
    executable, `tools/erx app run`, and the guide's two pages.
@@ -1257,12 +1318,15 @@ is a new image.
     second root login over SSH and any command domain from starting,
     each refused with `no_memory` until memory is free; the person who
     administers the machine can always log in at its console, and over
-    SSH where the board reserves it, and stop an app.
+    SSH where the board reserves it from SSH stage 2, and stop an app.
 15. **Root's SSH login may hold a reserved wall**, as each console line
     does ([Slices](#slices)), carved from `users` at boot before any
     app starts. It is the manifest's choice per board: a board without
     a screen reserves it, one with a screen may leave it out, and the
-    development manifests reserve it. The SSH server is not affected.
+    development manifests reserve it from SSH stage 2, the first in
+    which a login over SSH is a session of its own; before it, SSH's
+    work runs in the console's root session. The SSH server is not
+    affected.
 16. **A local `memory` may raise** an app's slice, bounded by `users`
     and judged at the whole wall, and it is introduced after `users`
     (step 10); with the reserved logins' walls it cannot keep anyone
@@ -1300,26 +1364,23 @@ is a new image.
     executable**: an Erlang one is handed the bytes the handler read, a
     native one a read-only descriptor of them named `/dev/fd/N`
     ([Scripts](#scripts)), and an app's own program is never a script.
+    The descriptor is there so that any native interpreter runs a
+    FreeBSD script unchanged, not only `wak`; an Erlang command a
+    native interpreter starts with it, as `#!/usr/bin/env escript`
+    does, receives it as a `sealed` descriptor of its run's `Start`.
     An interpreter handed the path would break `within` and run bytes
     the handler did not check; a command domain for every app would
     cost a domain in every table for each place of `max`, so an app's
     Erlang stays in OTP applications.
+23. **`/usr/bin` names the same directory as `/bin`**: the session's
+    export lists it as a second name, so `#!/usr/bin/awk -f`,
+    `#!/usr/bin/env NAME` and the other lines of FreeBSD scripts run
+    unchanged. It costs one name in the export's tree and promises
+    nothing `/bin` does not.
 
 ### Open decisions
 
-1. **`/usr/bin` in a session's namespace.** FreeBSD keeps `awk` and
-   `env` in `/usr/bin`, so scripts written for it begin
-   `#!/usr/bin/awk -f` or `#!/usr/bin/env NAME`. erXos's session export
-   lists the image's programs in `/bin` alone
-   ([design-shell.md](design-shell.md#commands)), so such a line names
-   nothing and answers `ENOENT` until the script is edited to `/bin`.
-   Recommended: the export also lists `/usr/bin` as a second name of
-   the same directory, which costs one name in the export's tree and
-   lets FreeBSD scripts run unchanged; it promises nothing `/bin` does
-   not, so it is familiar where it is true. The other choice keeps one
-   name and documents the edit. The slice this blocks is only that
-   name; the tests of [Verification and testing](#verification-and-testing)
-   use `/bin/awk`.
+None.
 
 ## References
 
