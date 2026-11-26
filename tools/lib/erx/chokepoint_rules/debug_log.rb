@@ -22,9 +22,16 @@ module Erx
                   Chokepoints::Site.new(glob: 'include/erx/core/effects.h'),
                   Chokepoints::Site.new(glob: 'liberx/backend/hosted/log.c'),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c'),
+                  # The Fiasco kernel's host: the crash frame a stop prints takes the stop's
+                  # own polled write, Erx_console_ring::write_uart, beside which the effect
+                  # is defined; the rest of the stop's glue calls write_uart, not the effect
+                  # (docs/design-debugger.md, "The stop").
+                  Chokepoints::Site.new(glob: 'fiasco/kernel/src/erx/erx_console_ring.cpp'),
                   Chokepoints::Site.new(glob: 'test/fixtures/dispatch_driver.c'),
                   Chokepoints::Site.new(glob: 'tools/fuzz/dispatch_fuzz.c')],
-          seed: { 'kernel/core/seeded.c' => "void f(void) { erx_effect_console_write(\"x\", 1); }\n" }
+          seed: { 'kernel/core/seeded.c' => "void f(void) { erx_effect_console_write(\"x\", 1); }\n",
+                  'fiasco/kernel/src/erx/erx_machine_stop.cpp' =>
+                    "static void f() { erx_effect_console_write(\"x\", 1); }\n" }
         )
       ]
     )

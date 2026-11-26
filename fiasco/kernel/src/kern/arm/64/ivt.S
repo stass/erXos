@@ -1,6 +1,6 @@
 /* Modified by erXos: the SError vectors from user mode enter arm_serror_user_entry;
  * the interrupt entry hands the stop its frame, and the stop's switch to a panic
- * stack (docs/design-debugger.md, "On Fiasco"). */
+ * stack and its read of the live registers (docs/design-debugger.md, "On Fiasco"). */
 /* -*- asm -*- */
 
 #include "globalconfig.h"
@@ -321,6 +321,16 @@ erx_machine_stop_switch:
 	mov	x0, x3
 	blr	x2
 	brk	#3
+
+// erx_machine_stop_live(live): stores the translation root of the space, read
+// as erx_machine_stop_switch reads it, and the user's stack pointer, SP_EL0,
+// which the interrupt entry does not save, into live (an Erx_stop_live).
+.global erx_machine_stop_live
+erx_machine_stop_live:
+	mrs	x9, EL(TTBR0)
+	mrs	x10, SP_EL0
+	stp	x9, x10, [x0]
+	ret
 
 .global kern_kdebug_ipi_entry
 kern_kdebug_ipi_entry:

@@ -64,6 +64,19 @@ extern "C" [[noreturn]] void
 erx_machine_stop_switch(erx_stop_regs_t *regs, void *stack_top,
                         void (*body)(void *), void *arg);
 
+// The two system registers a stop request reads live: the space's translation
+// root, as erx_machine_stop_switch records it, and the user's stack pointer,
+// which the interrupt entry does not save. erx_machine_stop_live, in
+// kern/arm/64/ivt.S, stores them at offsets 0 and 8.
+struct Erx_stop_live
+{
+  Mword space_root;
+  Mword user_sp;
+};
+extern "C" void erx_machine_stop_live(Erx_stop_live *live);
+static_assert(offsetof(Erx_stop_live, space_root) == 0 && offsetof(Erx_stop_live, user_sp) == 8
+              && sizeof(Erx_stop_live) == 16, "erx_machine_stop_live stores the two words with one stp");
+
 static_assert(Config::Max_num_cpus <= ERX_CPU_LIMIT,
               "every CPU the kernel can start has a stop slot and a bit");
 static_assert(sizeof(Mword) == sizeof(uint64_t), "a register is a slot's word");
@@ -167,7 +180,7 @@ erx_stop_end(unsigned cpu, bool say = true)
 {
   static char const line[] = "erx: end reset\n";
   if (say)
-    erx_effect_console_write(line, sizeof(line) - 1);
+    Erx_console_ring::write_uart(line, sizeof(line) - 1);
   // Fiasco finds the current CPU through the stack pointer, which on a panic
   // stack names no thread, so the reset is told the stop's own number.
   // A CPU whose number is out of range resets as the boot CPU, so the reset
@@ -318,8 +331,8 @@ erx_stop_say(char const *format, ...)
     return;
   size_t const used = size_t(length) < sizeof(line) - 1 ? size_t(length) : sizeof(line) - 2;
   line[used] = '\n';
-  erx_effect_console_write(prefix, sizeof(prefix) - 1);
-  erx_effect_console_write(line, used + 1);
+  Erx_console_ring::write_uart(prefix, sizeof(prefix) - 1);
+  Erx_console_ring::write_uart(line, used + 1);
 }
 
 // The report's first part (docs/design-debugger.md, "The stop", step 6): the
@@ -436,7 +449,7 @@ static void
 erx_stop_nested_line()
 {
   static char const line[] = "erx: nested stop\n";
-  erx_effect_console_write(line, sizeof(line) - 1);
+  Erx_console_ring::write_uart(line, sizeof(line) - 1);
 }
 
 IMPLEMENT
@@ -562,9 +575,9 @@ Erx_machine_stop::request()
   (void)erx_stop_deeper(cpu);
   Return_frame const *frame = erx_irq_frame[cpu];
   erx_stop_regs_t regs = {};
-  Mword space_root;
-  asm volatile("mrs %0, TTBR0_EL1" : "=r"(space_root));
-  regs.space_root = space_root;
+  Erx_stop_live live;
+  erx_machine_stop_live(&live);
+  regs.space_root = live.space_root;
   if (frame)
     {
       for (unsigned r = 0; r < 31; ++r)
@@ -572,9 +585,7 @@ Erx_machine_stop::request()
       // The interrupt entry does not save the user's stack pointer, which
       // Fiasco keeps in SP_EL0 until a thread switch, so a CPU interrupted in
       // user mode (EL0t) reads it live; the kernel runs on SP_EL1.
-      Mword user_sp;
-      asm volatile("mrs %0, SP_EL0" : "=r"(user_sp));
-      regs.regs.sp = (frame->pstate & 0xf) == 0 ? user_sp : erx_irq_sp[cpu];
+      regs.regs.sp = (frame->pstate & 0xf) == 0 ? live.user_sp : erx_irq_sp[cpu];
       regs.regs.pc = frame->pc;
       regs.regs.state = frame->pstate;
     }
@@ -596,7 +607,9 @@ erx_machine_stop_irq_frame(Return_frame *frame, Mword sp)
     }
 }
 
-// The crash core's effects (include/erx/core/effects.h). The kernel keeps no
+// The crash core's effects (include/erx/core/effects.h), but for the console
+// write, which erx_console_ring.cpp defines beside write_uart, the one glue
+// file the dispatch-console-write rule lets provide it. The kernel keeps no
 // erXos log, so the log's lock guards nothing here.
 extern "C" void erx_effect_log_lock(void) {}
 extern "C" void erx_effect_log_unlock(void) {}
@@ -605,12 +618,4 @@ extern "C" uint64_t
 erx_effect_clock_ns(void)
 {
   return erx_stop_clock_ns();
-}
-
-// Every line of the stop's, the crash core's frame among them, takes the
-// UART's polled write (Erx_console_ring::write_uart).
-extern "C" void
-erx_effect_console_write(char const *line, size_t length)
-{
-  Erx_console_ring::write_uart(line, length);
 }

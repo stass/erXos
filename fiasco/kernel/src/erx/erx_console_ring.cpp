@@ -37,6 +37,7 @@ IMPLEMENTATION:
 
 #include <libc_backend.h>
 #include "erx/core/console_ring.h"
+#include "erx/core/effects.h"
 #include "global_data.h"
 #include "kernel_console.h"
 #include "vlog.h"
@@ -164,6 +165,15 @@ Erx_console_ring::write_uart(char const *str, size_t len)
     Kconsole::console()->write(str, len);
   else if (uart->state() & Console::OUTENABLED)
     uart->write(str, len);
+}
+
+// The cores' console write (include/erx/core/effects.h): the crash frame the
+// stop prints, and any line of the debug-log core, takes the stop's own
+// write, so every line of a stop reaches the UART through write_uart alone.
+extern "C" void
+erx_effect_console_write(char const *line, size_t length)
+{
+  Erx_console_ring::write_uart(line, length);
 }
 
 // The close, and the head of every stop's report: the first close

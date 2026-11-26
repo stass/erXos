@@ -16,7 +16,8 @@ class ChokepointsInlineAsmTest < Minitest::Test
 
   def test_every_spelling_fails_outside_the_listed_files
     %w[kernel/core/x.c liberx/x.c otp/erts/emulator/nifs/erxos/erx_device.c
-       otp/erts/emulator/sys/erxos/x.c erlang/apps/erx_net/c_src/x.c].each do |path|
+       otp/erts/emulator/sys/erxos/x.c erlang/apps/erx_net/c_src/x.c
+       fiasco/kernel/src/erx/erx_machine_stop.cpp].each do |path|
       SPELLINGS.each { |spelling| refute_empty found(path, "void f(void) { #{spelling}; }\n"), "#{path}: #{spelling}" }
     end
   end
