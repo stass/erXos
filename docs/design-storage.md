@@ -1944,13 +1944,16 @@ designed. It maps the format onto the file protocol as follows:
   check reads a sector, and the two together stay within half of
   `media_volume_bytes`, so a volume of more than 4,194,304 clusters,
   128 GiB of 32 KiB clusters, mounts read-only with `too large` without
-  being read. The directories the walk has found and not yet walked stay
-  within another quarter of it, 13,107 of them, and a volume whose walk
-  would hold more also mounts read-only with `too large`. Each read of the
+  being read. The directories the walk has found and not yet walked wait
+  on a stack of two 8-byte slots each, the first cluster and its parent's,
+  within an eighth of it, 16,384 of them, and a volume whose walk
+  would hold more also mounts read-only with `too large`. The sets and the
+  stack are arrays outside the process's heap, sized before the check reads
+  a sector, which the bound counts at exactly that size; each read of the
   FAT takes one sector at a time and builds no list of its sectors or
   entries, and a directory is read within the size the read path admits,
-  so what the check holds beyond the sets and the pending directories is
-  the same for every size of volume. The sets are dropped once the check passes, since from then
+  so the rest of what the check holds is the same for every size of
+  volume. The sets are dropped once the check passes, since from then
   on the batches keep what it found; a read-only mount does not run it,
   since a read follows a chain with checked bounds and writes nothing.
 * **Removing a file.** A removed file's name goes in its batch's

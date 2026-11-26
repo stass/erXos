@@ -393,35 +393,72 @@ the_freeze_finishes_every_volume_of_every_drive_test() ->
         [exit(P, kill) || P <- [D1, D2, Empty, F1, F2 | Proxies]]
     end.
 
-%% The ownership check reads the whole FAT within the volume's memory bound, whatever
+%% The ownership check holds what it needs within the volume's memory bound, whatever
 %% the volume's size: FAT32 sticks shaped as an 8 GB one, 15,628,288 sectors in
 %% clusters of eight, and a 16 GB one, whose 3,899,437 clusters come near the most the
-%% check holds, mount rw under their volume's own bound.
-fat32_sticks_are_checked_within_the_memory_bound_test_() ->
-    [{Name, {timeout, 120,
+%% check holds, mount rw under their volume's own bound, as does a volume of 4,193,404
+%% one-sector clusters whose root names the 16,384 subdirectories the check's stack
+%% holds; one subdirectory more is too_large, and the volume mounts read-only.
+fat32_volumes_are_checked_within_the_memory_bound_test_() ->
+    Cases = [{"8 GB", 15_628_288, 8, 0, 0, rw}, {"16 GB", 31_256_576, 8, 0, 0, rw},
+             {"a full stack", 4_260_000, 1, 16_384, 0, rw},
+             {"one past a full stack", 4_260_000, 1, 16_385, 0, {ro, too_large}}],
+    [{Name, {timeout, 300,
              fun() ->
-                     Proxy = proxy(fat32_shaped(Total, 8), ok),
+                     Proxy = proxy(fat32_shaped(Total, PerCluster, Subdirs, Files), ok),
                      {_Sup, {none, [{_, Volume}], 0}} = through(Proxy),
-                     ?assertMatch(#{fat := 32, mount := rw}, erx_media_volume:outcome(Volume)),
+                     ?assertMatch(#{fat := 32, mount := Mount}, erx_media_volume:outcome(Volume)),
                      Proxy ! stop
              end}}
-     || {Name, Total} <- [{"8 GB", 15_628_288}, {"16 GB", 31_256_576}]].
+     || {Name, Total, PerCluster, Subdirs, Files, Mount} <- Cases].
 
 %% A FAT32 volume of Total sectors and PerCluster sectors a cluster, a sector at a
-%% time: the seed's reserved sectors with its boot sector's geometry changed, FATs whose
-%% one chain is the root's one cluster, and zeros elsewhere, so the root is empty.
-fat32_shaped(Total, PerCluster) ->
-    <<Head:13/binary, _, Reserved:16/little, Fats, Middle:15/binary, _:32, _:32, _:32, _:32, Tail/binary>> =
-        Seed = image("fat32.img"),
+%% time: the seed's reserved sectors with its boot sector's geometry changed; FATs
+%% that chain the root's clusters from cluster 2 and end each subdirectory's one
+%% cluster after them; a root that names Subdirs subdirectories, D0000000 on, each
+%% holding its dot entries alone, then Files empty files; and zeros elsewhere.
+fat32_shaped(Total, PerCluster, Subdirs, Files) ->
+    Seed = image("fat32.img"),
+    <<Head:13/binary, _PerCluster, Reserved:16/little, Fats, Middle:15/binary, _Total32:32, _FatSectors32:32,
+      _FlagsVersion:32, _RootCluster:32, Tail:(?SECTOR - 48)/binary, _/binary>> = Seed,
+    %% An entry for every sector past the reserved ones, the FATs' own among them, so
+    %% at least as many as the volume's clusters need.
     FatSectors = ((Total - Reserved) div PerCluster + 2) * 4 div ?SECTOR + 1,
     Boot = <<Head/binary, PerCluster, Reserved:16/little, Fats, Middle/binary, Total:32/little,
-             FatSectors:32/little, 0:32, 2:32/little, (binary:part(Tail, 0, ?SECTOR - 48))/binary>>,
-    <<Media:32, Flags:32, _/binary>> = binary:part(Seed, Reserved * ?SECTOR, ?SECTOR),
-    First = <<Media:32, Flags:32, 16#0fffffff:32/little, 0:(?SECTOR - 12)/unit:8>>,
+             FatSectors:32/little, 0:32, 2:32/little, Tail/binary>>,
+    Area = binary:copy(binary:part(Seed, 0, Reserved * ?SECTOR)),
+    <<Media:4/binary, Flags:4/binary, _/binary>> = binary:part(Seed, Reserved * ?SECTOR, ?SECTOR),
+    Data = Reserved + Fats * FatSectors,
+    PerSector = ?SECTOR div 32,
+    FirstSub = 2 + max(1, (Subdirs + Files + PerSector * PerCluster - 1) div (PerSector * PerCluster)),
+    Entry = fun(0) -> Media;
+               (1) -> Flags;
+               (C) when C < FirstSub - 1 -> <<(C + 1):32/little>>;
+               (C) when C < FirstSub + Subdirs -> <<16#0fffffff:32/little>>;
+               (_C) -> <<0:32>>
+            end,
+    Short = fun(Name, Attributes, Cluster) ->
+                    <<Name:11/binary, Attributes, 0:64, (Cluster bsr 16):16/little, 0:16, 16#21:16/little,
+                      (Cluster band 16#ffff):16/little, 0:32>>
+            end,
+    Named = fun(K) when K < Subdirs -> Short(iolist_to_binary(io_lib:format("D~7..0B   ", [K])), 16#10, FirstSub + K);
+               (K) when K < Subdirs + Files -> Short(iolist_to_binary(io_lib:format("F~7..0B   ", [K])), 16#20, 0);
+               (_K) -> <<0:32/unit:8>>
+            end,
     Zero = <<0:?SECTOR/unit:8>>,
+    Cluster = fun(C, 0) when C >= FirstSub, C < FirstSub + Subdirs ->
+                      <<(Short(<<".          ">>, 16#10, C))/binary, (Short(<<"..         ">>, 16#10, 0))/binary,
+                        0:(?SECTOR - 64)/unit:8>>;
+                 (C, J) when C < FirstSub ->
+                      First = ((C - 2) * PerCluster + J) * PerSector,
+                      << <<(Named(K))/binary>> || K <- lists:seq(First, First + PerSector - 1) >>;
+                 (_C, _J) -> Zero
+              end,
     {synthesized, Total,
      fun(0) -> Boot;
-        (Lba) when Lba < Reserved -> binary:part(Seed, Lba * ?SECTOR, ?SECTOR);
-        (Lba) when Lba < Reserved + Fats * FatSectors, (Lba - Reserved) rem FatSectors =:= 0 -> First;
-        (_Lba) -> Zero
+        (Lba) when Lba < Reserved -> binary:part(Area, Lba * ?SECTOR, ?SECTOR);
+        (Lba) when Lba < Data ->
+             First = (Lba - Reserved) rem FatSectors * (?SECTOR div 4),
+             << <<(Entry(C))/binary>> || C <- lists:seq(First, First + ?SECTOR div 4 - 1) >>;
+        (Lba) -> Cluster((Lba - Data) div PerCluster + 2, (Lba - Data) rem PerCluster)
      end}.

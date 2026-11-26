@@ -42,9 +42,9 @@ byte of the volume is untrusted input.
   twice or linked to, a dot entry that names no parent, and a reached cluster whose
   entry is free or bad. Any finding, a directory the read path would refuse with
   `does_not_read` among them, is `tree`; the sets are atomics local to the call.
-  The directories found and not yet walked stay within a quarter of the volume's
-  memory bound, ?CHECK_PENDING_MAX of them; a volume that queues more is
-  `too_large`, as one of too many clusters is.
+  The directories found and not yet walked wait on a stack, atomics too, within an
+  eighth of the volume's memory bound, ?CHECK_PENDING_MAX of them; a volume that
+  pushes more is `too_large`, as one of too many clusters is.
 * **The write path's view.** fold/4 folds a function over a directory's entries
   as erx_fat_dir places names in it, a sector at a time, and answers the
   directory's sectors, size, end marker and first cluster, so no caller holds a
@@ -86,14 +86,16 @@ function raises propagates.
 %% The value a bad cluster's entry holds (section 4.1).
 -define(BAD_16, 16#fff7).
 -define(BAD_32, 16#0ffffff7).
-%% The ownership check's two sets, one bit a cluster each, are arrays outside the
-%% heap that the volume's memory bound counts; they stay within half of
-%% it, so the check holds at most 4,194,304 clusters, and the rest of what it holds,
-%% one sector of the FAT at a time and the directories pending, stays within the rest.
+%% What the ownership check holds is arrays outside the heap, fixed in size before it
+%% reads a sector, which the volume's memory bound counts at exactly that size; its
+%% heap holds one sector and a directory's place at a time. The two sets, one bit a
+%% cluster each, stay within half of the bound, so the check holds at most 4,194,304
+%% clusters.
 -define(CHECKED_CLUSTERS_MAX, (?ERX_MEDIA_VOLUME_BYTES div 2 * 8 div 2)).
-%% The directories the check has found and not yet walked, each a list cell and a
-%% pair of small integers, five words, stay within a quarter of the bound.
--define(CHECK_PENDING_MAX, (?ERX_MEDIA_VOLUME_BYTES div 4 div 40)).
+%% The stack of directories found and not yet walked, two 8-byte slots each, its
+%% first cluster and its parent's, stays within an eighth of the bound: 16,384. The
+%% rest of the bound holds the volume's heap, a directory's sectors listed among it.
+-define(CHECK_PENDING_MAX, (?ERX_MEDIA_VOLUME_BYTES div 8 div 16)).
 
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
 -type finding() :: not_its_volume | does_not_read | read_failed.
@@ -529,46 +531,60 @@ held_allocated(Fat, {Linked, Named}, Cluster, Value) ->
     Held andalso lists:member(entry_kind(Fat, Value), [free, bad]) andalso fail(tree).
 
 %% The second pass: the directories walked from the root, FAT32's root cluster
-%% named first.
+%% named first, those found and not yet walked held on a stack of ?CHECK_PENDING_MAX
+%% places outside the heap.
 names_pass(Fat = #fat{root = Root}, Sets) ->
     is_integer(Root) andalso named(Fat, Sets, Root),
-    directories(Fat, Sets, [{root, 0}], 1).
+    Stack = atomics:new(2 * ?CHECK_PENDING_MAX, [{signed, false}]),
+    directories(Fat, Sets, Stack, directory(Fat, Sets, Stack, root, 0, 0)).
 
-%% Each directory once, from Work, which holds {Dir, Parent}: Dir is root or a
-%% subdirectory's first cluster, and Parent the cluster its `..` names, 0 for the
-%% root (section 6.1); Pending is Work's length. A subdirectory holds both its dot
-%% entries.
-directories(_Fat, _Sets, [], 0) ->
+%% Each directory on Stack once, Depth of them, the last pushed first.
+directories(_Fat, _Sets, _Stack, 0) ->
     ok;
-directories(Fat, Sets, [{Dir, Parent} | Work], Pending) ->
+directories(Fat, Sets, Stack, Depth) ->
+    Dir = atomics:get(Stack, 2 * Depth - 1),
+    Parent = atomics:get(Stack, 2 * Depth),
+    directories(Fat, Sets, Stack, directory(Fat, Sets, Stack, Dir, Parent, Depth - 1)).
+
+%% Directory Dir walked with Depth directories below it on Stack, and the depth its
+%% subdirectories leave: Dir is root or a subdirectory's first cluster, and Parent
+%% the cluster its `..` names, 0 for the root (section 6.1). A subdirectory holds
+%% both its dot entries.
+directory(Fat, Sets, Stack, Dir, Parent, Depth) ->
     Node = #fat_node{key = root, kind = dir, first = Dir, size = 0, mtime = ?FAT_EPOCH, read_only = false},
-    #{dot := Dot, dotdot := DotDot, work := Next, pending := Queued} =
+    #{dot := Dot, dotdot := DotDot, depth := Pushed} =
         fold_entries(Fat, dir_sectors(Node, Fat),
                      fun(Entry, Acc = #{index := Index}) -> (owned(Fat, Sets, Dir, Parent, Entry, Acc))#{index := Index + 1} end,
-                     #{dot => false, dotdot => false, work => Work, pending => Pending - 1, index => 0}),
+                     #{dot => false, dotdot => false, stack => Stack, depth => Depth, index => 0}),
     Dir =:= root orelse (Dot andalso DotDot) orelse fail(tree),
-    directories(Fat, Sets, Next, Queued).
+    Pushed.
 
-%% One entry of directory Dir: a name's first cluster named, a subdirectory queued,
+%% One entry of directory Dir: a name's first cluster named, a subdirectory pushed,
 %% and a subdirectory's `.` and `..`, its first two entries as the specification
 %% places them, matched against its own first cluster and its parent's. Deleted, long-name and label entries hold no cluster (sections 6 and
 %% 7), and the root has no dot entries, so any it holds are not read.
-owned(Fat = #fat{type = Type}, Sets, Dir, Parent, {short, Short = #{name := Name}}, Acc = #{work := Work, index := Index}) ->
+owned(Fat = #fat{type = Type}, Sets, Dir, Parent, {short, Short = #{name := Name}}, Acc = #{index := Index}) ->
     First = erx_fat_entry:first(Short, Type),
     case {Name, erx_fat_entry:kind(Short)} of
         {_, label} -> Acc;
         {_, _} when Dir =:= root, Name =:= ?DOT orelse Name =:= ?DOTDOT -> Acc;
         {?DOT, _} -> (Index =:= 0 andalso First =:= Dir) orelse fail(tree), Acc#{dot := true};
         {?DOTDOT, _} -> (Index =:= 1 andalso First =:= Parent) orelse fail(tree), Acc#{dotdot := true};
-        {_, dir} -> named(Fat, Sets, First), queued(Acc#{work := [{First, number(Dir)} | Work]});
+        {_, dir} -> named(Fat, Sets, First), pushed(First, number(Dir), Acc);
         {_, file} when First =:= 0 -> Acc;
         {_, file} -> named(Fat, Sets, First), Acc
     end;
 owned(_Fat, _Sets, _Dir, _Parent, _Unnamed, Acc) ->
     Acc.
 
-queued(#{pending := Pending}) when Pending >= ?CHECK_PENDING_MAX -> fail(too_large);
-queued(Acc = #{pending := Pending}) -> Acc#{pending := Pending + 1}.
+%% Directory Dir, whose `..` names Parent, pushed on the stack; a stack already full
+%% is too_large.
+pushed(_Dir, _Parent, #{depth := Depth}) when Depth >= ?CHECK_PENDING_MAX ->
+    fail(too_large);
+pushed(Dir, Parent, Acc = #{stack := Stack, depth := Depth}) ->
+    ok = atomics:put(Stack, 2 * Depth + 1, Dir),
+    ok = atomics:put(Stack, 2 * Depth + 2, Parent),
+    Acc#{depth := Depth + 1}.
 
 %% The cluster a directory's children's `..` entries name.
 number(root) -> 0;

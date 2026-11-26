@@ -243,6 +243,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [High] storage, the ownership check's directory walk (`erx_fat:check/1`, `chain_sectors/2`,
+  `fold_entries/4`): a directory is walked from a list of all its sectors and clusters, so on a
+  volume near the most clusters the check holds, a directory of the largest size the read path
+  admits, 65,536 entries, grows the volume's heap blocks to about 150,000 words beside the sets
+  and the stack, and the volume is killed by its memory bound instead of mounting `too large`.
+  A crafted image reaches it; the volume ends and the medium serves nothing from it. Fix: walk a
+  directory's chain a cluster and a sector at a time, as the FAT pass reads the FAT, and add the
+  65,536-entry root to `fat32_volumes_are_checked_within_the_memory_bound_test_`.
 * [Medium] storage, create-or-open's refused truncate (`erx_media_volume:emptied/3`): a refusal
   after part of the truncate committed forgets the caller's hold of the file outright, though a
   holder is counted once however many fids name the file, so a hold an earlier walk took goes too

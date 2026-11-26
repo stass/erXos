@@ -94,16 +94,24 @@ class ErxMediaVolumeTest < Minitest::Test
               from: 'ok -> case erx_fat:check(Fat) of',
               to: 'ok -> case erx_fat_alloc:writable(erx_fat:info(Fat)) of',
               caught_by: 'a_crossed_chain_mounts_read_only_test'),
+    Fault.new(name: "the ownership check's stack filled past its places", path: FAT,
+              from: 'pushed(_Dir, _Parent, #{depth := Depth}) when Depth >= ?CHECK_PENDING_MAX ->',
+              to: 'pushed(_Dir, _Parent, #{depth := Depth}) when Depth > ?CHECK_PENDING_MAX ->',
+              caught_by: 'fat32_volumes_are_checked_within_the_memory_bound_test_/0-fun-2- (one past a full stack)'),
+    # The pass as it was when a volume of 1,949,723 clusters was killed by its bound.
     Fault.new(name: "the ownership check's FAT pass building lists over the whole FAT", path: FAT,
               from: "fat_pass(Fat = #fat{clusters = Clusters}, Fun) ->\n    fat_pass(Fat, Fun, 2, Clusters + 2).",
               to: "fat_pass(Fat = #fat{read = Read, type = Type, fat_start = Start, clusters = Clusters}, Fun) ->\n" \
                   "    PerSector = ?SECTOR * 8 div Type,\n" \
-                  "    Values = [{Index, [E band mask(Type) || <<E:Type/little>> <= sector(Read, Start + Index)]}\n" \
-                  "              || Index <- lists:seq(0, (Clusters + 1) div PerSector)],\n" \
-                  "    [Fun(C, V) || {Index, Sector} <- Values, {C, V} <- lists:enumerate(Index * PerSector, Sector),\n" \
-                  "                  C >= 2, C < Clusters + 2],\n" \
+                  "    lists:foreach(fun(Index) ->\n" \
+                  "                          Values = [Entry band mask(Type) || <<Entry:Type/little>> <= " \
+                  "sector(Read, Start + Index)],\n" \
+                  "                          [Fun(Cluster, Value) || {Cluster, Value} <- " \
+                  "lists:enumerate(Index * PerSector, Values),\n" \
+                  "                                                  Cluster >= 2, Cluster < Clusters + 2]\n" \
+                  "                  end, lists:seq(0, (Clusters + 1) div PerSector)),\n" \
                   '    fat_pass(Fat, Fun, Clusters + 2, Clusters + 2).',
-              caught_by: 'fat32_sticks_are_checked_within_the_memory_bound_test_/0-fun-2- (8 GB)'),
+              caught_by: 'fat32_volumes_are_checked_within_the_memory_bound_test_/0-fun-2- (8 GB)'),
     Fault.new(name: "a removed file's key kept", path: VOLUME,
               from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Holders}}};',
               to: 'State#{places := Places, nodes := Nodes#{Path := {removed, Node, Holders}}};',
