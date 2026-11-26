@@ -423,3 +423,29 @@ read_only_writes() ->
     ?assertEqual(ok, erx_media_volume:truncate(Pid, File, 1)),
     ?assertEqual({ok, <<"a">>}, read(Pid, File, 0, 10)),
     finish(Pid).
+
+%% finish/1 writes the volume's last batch and the clean bit before it answers, so a
+%% volume changed, synced, which writes the medium dirty, and then finished, still
+%% running, has left its medium clean: FAT16's clean bit, bit 15 of FAT entry 1, is set
+%% again, the file is there, and the medium mounts writable.
+finish_writes_the_clean_bit_test_() ->
+    {timeout, 300, fun finish_writes_the_clean_bit/0}.
+
+finish_writes_the_clean_bit() ->
+    Base = image("fat16.img"),
+    Proxy = ram(Base, infinity),
+    Pid = volume(Proxy, Base),
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    {ok, file, File} = erx_media_volume:create(Pid, Root, <<"changed.txt">>),
+    ?assertEqual({ok, 6}, erx_media_volume:write(Pid, File, 0, <<"hello\n">>)),
+    ?assertEqual(ok, erx_media_volume:fsync(Pid)),
+    ?assertEqual(ok, erx_media_volume:finish(Pid)),
+    {Medium, _, _} = ram_final(Proxy),
+    <<_:14/binary, Reserved:16/little, _/binary>> = Medium,
+    <<_:(Reserved * ?SECTOR + 2)/binary, Entry1:16/little, _/binary>> = Medium,
+    ?assertNotEqual(0, Entry1 band 16#8000),
+    ?assert(lists:member({<<"changed.txt">>, <<"hello\n">>}, extracted(Medium))),
+    Again = volume(ram(Medium, infinity), Medium),
+    ?assertMatch(#{mount := rw}, erx_media_volume:outcome(Again)),
+    finish(Again),
+    finish(Pid).

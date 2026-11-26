@@ -1020,8 +1020,8 @@ make(Dfid, Name, What, Grant) ->
     case node_of(Dfid, Grant) of
         {ok, Dir} ->
             case change(make, [Dir, Name, What], Grant) of
-{{ok, Node, Qid}, Grant1} -> {made_reply(What, Qid), held_node(Node, Grant1)};
-{{error, _} = Error, Grant1} -> {Error, Grant1}
+                {{ok, Node, Qid}, Grant1} -> {made_reply(What, Qid), held_node(Node, Grant1)};
+                {{error, _} = Error, Grant1} -> {Error, Grant1}
             end;
         error ->
             {{error, ebadf}, Grant}
