@@ -114,13 +114,13 @@ connection's starter and what the tree's grant ends with. Each therefore ends wh
 handler does, whatever its reason, and a refused start undoes nothing by hand. The
 handler is linked to the connection, which ends `normal` only at the handler's end, so
 the connection's end ends the handler, as a crash of the tree's grant does. Answers
-the tree's grant, `enodev` in a domain without the display client or with no grant of
+the tree's grant's handle (erx_fs:start_link/4), `enodev` in a domain without the display client or with no grant of
 `Display`, the window's or the connection's own errno, or `eio` for a tree that does not
 start. The display's window modules are named here, in the session's application,
 and not by the handler, since the display domain's release ships the handler's
 application and none of the client's (docs/design-display.md, G9).
 """.
--spec start_window(atom()) -> {ok, pid()} | {error, atom()}.
+-spec start_window(atom()) -> {ok, erx_fs:grant_handle()} | {error, atom()}.
 start_window(Display) ->
     maybe
         {ok, Window} ?= open_window(Display),
@@ -161,7 +161,7 @@ open_window(Display) ->
     end.
 
 %% A tree that does not start refuses the start with eio.
-tree({ok, Pid, _Handle}) -> {ok, Pid};
+tree({ok, _Pid, Handle}) -> {ok, Handle};
 tree({error, _}) -> {error, eio}.
 
 %% ---------------------------------------------------------------------------

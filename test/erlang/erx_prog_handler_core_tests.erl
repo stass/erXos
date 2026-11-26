@@ -417,7 +417,8 @@ window_test_() ->
             end,
     Bind = fun(Point) -> #{point => Point, provider => {grant, self(), <<"t">>}, root => [], rights => rw} end,
     Grant = list_to_pid("<0.4242.0>"),
-    Dev = #{point => [<<"dev">>], provider => {grant, Grant, <<"export">>}, root => [<<"dev">>], rights => rw},
+    %% The entry takes its tree and rights from the grant's handle.
+    Dev = #{point => [<<"dev">>], provider => {grant, Grant, <<"dev-tree">>}, root => [<<"dev">>], rights => rw},
     New = fun(Entries, Fds) -> NewOn(Entries, Fds, display) end,
     Narrowed = fun(Within) ->
                        Table = ?TABLE ++ [Bind([<<"data">>]), Bind([<<"dev">>])],
@@ -426,7 +427,7 @@ window_test_() ->
                end,
     {ok, C0, [holder]} = New([Bind([<<"data">>]), Bind([<<"dev">>]), Bind([<<"dev">>, <<"usb">>])], []),
     {C1, Window} = erx_prog_handler_core:step(C0, {holder, ok}),
-    {C2, Start} = erx_prog_handler_core:step(C1, {windowed, Grant}),
+    {C2, Start} = erx_prog_handler_core:step(C1, {windowed, {Grant, <<"dev-tree">>, rw}}),
     {_, [{open, _, _, _, _, Table, _}]} =
         erx_prog_handler_core:step(run(C2, [started]), ?ASK(7, {file, lopen, <<"x">>, 0})),
     {_, Refused} = erx_prog_handler_core:step(C1, {refused, enodev}),
@@ -467,8 +468,8 @@ window_test_() ->
 first_window_test_() ->
     Draw = ?ASK(7, {file, lopen, <<"/dev/draw">>, 2}),
     {C1, Asked} = erx_prog_handler_core:step(running(), Draw),
-    Dev = #{point => [<<"dev">>], provider => {grant, self(), <<"export">>}, root => [<<"dev">>], rights => rw},
-    {C2, Opened} = erx_prog_handler_core:step(C1, {first_window, {ok, self()}}),
+    Dev = #{point => [<<"dev">>], provider => {grant, self(), <<"dev-tree">>}, root => [<<"dev">>], rights => rw},
+    {C2, Opened} = erx_prog_handler_core:step(C1, {first_window, {ok, {self(), <<"dev-tree">>, rw}}}),
     {C3, Refused} = erx_prog_handler_core:step(C1, {first_window, {error, enodev}}),
     Failed = run(C1, [{first_window, {failed, enomem}}]),
     Relayed = fun(C, Path) -> element(2, erx_prog_handler_core:step(sent(C), ?ASK(8, {file, lopen, Path, 0}))) end,

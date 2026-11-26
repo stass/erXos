@@ -301,7 +301,7 @@ sent_counts() ->
 the_handler_and_its_dev_end_at_the_connection_s_end_test() ->
     erx_win_tests:with(fun(_Fixture) ->
         ok = erx_fs_version:init(),
-        {{ok, Tree}, Handler} = in_holder(fun() -> erx_session_export:start_window(?SERVICE) end),
+        {{ok, {Tree, _, _}}, Handler} = in_holder(fun() -> erx_session_export:start_window(?SERVICE) end),
         {links, Links} = process_info(Handler, links),
         [Conn] = Links -- [Tree],
         Watches = [monitor(process, Ended) || Ended <- [Handler, Tree]],

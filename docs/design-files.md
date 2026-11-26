@@ -2197,8 +2197,9 @@ handler, after building the program's table:
 2. starts the connection on it, as its starter;
 3. starts the `/dev` tree's grant for its own domain (`client => own`),
    `rw`, ending with the handler (`ends_with => self()`);
-4. puts in the program's table, at `/dev`, the entry `{grant, DevGrant,
-   <<"export">>}` with `root` `[<<"dev">>]` and rights `rw`, in place of
+4. puts in the program's table, at `/dev`, an entry on the grant with
+   `root` `[<<"dev">>]`, whose tree and rights are those of the handle
+   the grant's start answered (`erx_fs:start_link/4`), in place of
    every entry at exactly `/dev`, or beside the others when the
    narrowing left none.
 

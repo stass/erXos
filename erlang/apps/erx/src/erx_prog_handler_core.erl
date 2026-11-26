@@ -164,7 +164,7 @@ session code and the program's own driver.
                | {holder, ok | {error, atom()}}
                | {reserved, {pipe_hand, pos_integer(), term()}}
                | {reserved, {mem, Lease :: pos_integer(), Pages :: pos_integer(), Offset :: non_neg_integer()}}
-               | {windowed, DevGrant :: pid()}
+               | {windowed, DevGrant :: erx_fs:grant_handle()}
                | {refused, atom()}
                | started
                | {report, term()}
@@ -184,7 +184,7 @@ session code and the program's own driver.
                | {file_opened, slot(), {ok, description()} | {error, atom()}}
                | {file_done, slot(), {ok, binary()} | eof | ok | {error, atom()}}
                | {file_copied, slot(), ok | {error, atom()}}
-               | {first_window, {ok, DevGrant :: pid()} | {error, enodev} | {failed, atom()}}
+               | {first_window, {ok, DevGrant :: erx_fs:grant_handle()} | {error, enodev} | {failed, atom()}}
                | ignored.
 
 %% What the starter hands for the program's files: its namespace table
@@ -519,14 +519,15 @@ writes_dev({window, _}, Table) -> lists:all(fun(Rights) -> Rights =:= rw end, de
 
 dev_rights(Table) -> [Rights || #{rights := Rights} <- Table -- without_dev(Table)].
 
-%% The program's table with its own /dev tree's grant at /dev, in place of
-%% every entry at /dev itself (docs/design-files.md, "A program's window").
+%% The program's table with its own /dev tree's grant at /dev, on the tree and with
+%% the rights its handle carries, in place of every entry at /dev itself
+%% (docs/design-files.md, "A program's window").
 %% Until the handler joins the export and a grant at /dev, that drops a grant
 %% the session mounts there, so the program reaches fewer files, never more
 %% (TODO.md).
-window_dev(Table, DevGrant) ->
-    without_dev(Table) ++ [#{point => [<<"dev">>], provider => {grant, DevGrant, <<"export">>},
-                             root => [<<"dev">>], rights => rw}].
+window_dev(Table, {Pid, Tree, Rights}) ->
+    without_dev(Table) ++ [#{point => [<<"dev">>], provider => {grant, Pid, Tree},
+                             root => [<<"dev">>], rights => Rights}].
 
 without_dev(Table) -> [Entry || #{point := Point} = Entry <- Table, Point =/= [<<"dev">>]].
 
@@ -611,8 +612,8 @@ step(#core{phase = reserving, todo = [{N, {buffer, _, _}} | Todo], made = Made, 
      {reserved, {mem, Lease, Pages, Offset}}) when ?IS_POS(Lease), ?IS_POS(Pages) ->
     reserve_next(C#core{todo = Todo, made = [{N, {mem, Lease, Pages}} | Made],
                         offsets = [{N, Offset} | Offsets]});
-step(#core{phase = reserving, todo = [], window = {window, _}, table = Table} = C, {windowed, DevGrant})
-  when is_pid(DevGrant) ->
+step(#core{phase = reserving, todo = [], window = {window, _}, table = Table} = C, {windowed, {Pid, _, _} = DevGrant})
+  when is_pid(Pid) ->
     reserve_next(C#core{window = none, table = window_dev(Table, DevGrant)});
 step(#core{phase = reserving} = C, {refused, Errno}) when is_atom(Errno) ->
     {C#core{phase = {ended, normal}}, undo(C) ++ [{answer, {error, Errno}}]};
@@ -718,8 +719,8 @@ step(C, _Event) ->
 %% /dev; a window that failed once its opening began ends the handler.
 first_window(C, Slot, Case, _Path, _Flags, _Mode, {error, enodev}) ->
     file_reply(C, Case, Slot, {error, enodev});
-first_window(#core{table = Table} = C, Slot, Case, Path, Flags, Mode, {ok, DevGrant})
-  when is_pid(DevGrant) ->
+first_window(#core{table = Table} = C, Slot, Case, Path, Flags, Mode, {ok, {Pid, _, _} = DevGrant})
+  when is_pid(Pid) ->
     relay_open(C#core{first = never, table = window_dev(Table, DevGrant)}, Slot, Case, Path, Flags, Mode);
 first_window(C, _Slot, _Case, _Path, _Flags, _Mode, {failed, Errno}) when is_atom(Errno) ->
     {C#core{phase = {ended, {shutdown, {window, Errno}}}, queue = queue:new()}, []}.
