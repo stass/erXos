@@ -1480,7 +1480,9 @@ module Erx
 
       # The tracer's case on four CPUs (docs/design-fiasco.md, Verification, "Trace on four
       # CPUs"). At the Erlang shell the person first reads every CPU's kernel ring through
-      # the root's window (KERNEL_READ, the BIF over erx_trace_read) and the shell prints
+      # the root's window (KERNEL_READ, the BIF over erx_trace_read), whole: from its oldest
+      # record, at most eight reads of 512, a ring's 4,096, since an early part of a ring may
+      # hold no message; the shell prints
       # one summary, {kernel_trace, Switches, Receives, ZeroIds, IdsAgree}: whether the
       # rings hold switch and ipc_receive records, how many of their thread and space ids
       # are 0, and whether the two events name threads and spaces alike. An ipc_receive
@@ -1509,7 +1511,9 @@ module Erx
       TRACE_CPUS = 4
       TRACE_SWITCH = ABI::Generated::CODEC.member('trace_event', 'switch')
       TRACE_RECEIVE = ABI::Generated::CODEC.member('trace_event', 'ipc_receive')
-      KERNEL_READ = "KR=lists:append([element(2,erx_trace_ring:read({kernel,C},0,512))||C<-lists:seq(0,#{TRACE_CPUS - 1})])," \
+      KERNEL_READ = "RA=fun RA(_,_,0)->[];RA(Q,U,K)->case erx_trace_ring:read(Q,U,512) of " \
+                    "{ok,[_|_]=Rs,N,_}->Rs++RA(Q,N,K-1);_->[] end end," \
+                    "KR=lists:append([RA({kernel,C},0,8)||C<-lists:seq(0,#{TRACE_CPUS - 1})])," \
                     "KS=[{N,S}||{_,#{TRACE_SWITCH},_,_,_,_,{N,S,_}}<-KR],KM=maps:from_list(KS)," \
                     "KV=[{A,B}||{_,#{TRACE_RECEIVE},_,_,_,_,{A,B,_}}<-KR]," \
                     "KI=[{T,S}||{_,#{TRACE_RECEIVE},_,_,T,S,{A,B,_}}<-KR,T=:=A orelse T=:=B,maps:is_key(T,KM)]," \
