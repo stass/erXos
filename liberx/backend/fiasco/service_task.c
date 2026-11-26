@@ -1174,7 +1174,7 @@ erx_fiasco_task_mem_dma_body(uint32_t caller, uint64_t mem, uint64_t offset, uin
 }
 
 void
-erx_fiasco_task_fault(uint32_t task, const erx_crash_fault_t *fault)
+erx_fiasco_task_fault(uint32_t task, const erx_fault_t *fault)
 {
 	if (erx_fiasco_gate_fault(task, fault))
 		return;

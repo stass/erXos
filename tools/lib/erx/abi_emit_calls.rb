@@ -583,9 +583,8 @@ module Erx
       # What the crash core's seam needs of the ABI: every value the glue
       # hands the crash record's writer, the size of its registers among
       # them, spelled as include/erx/abi.h spells it, so a file that
-      # includes both redefines nothing differently. The CPU entries are a
-      # struct of the seam (include/erx/core/crash.h) that the crash core
-      # pins to the generated layout.
+      # includes both redefines nothing differently, and the fault and CPU
+      # entry layouts the record carries (CEmitter.seam_layout).
       def crash_seam(schema)
         members = %w[crash_cause crash_form boot_value boot_slot].flat_map do |name|
           schema.types.fetch(name).members.keys.sort.map { |member| "#{Model.constant_prefix(name)}_#{member}" }
@@ -601,6 +600,7 @@ module Erx
          *constants.map { |item| CEmitter.constant_definition(item) },
          "#define ERX_CRASH_FAULT_KINDS UINT32_C(#{format('0x%x', kinds)})",
          "#define ERX_CRASH_REGS_BYTES #{regs.size}", '',
+         *CEmitter.seam_layouts(schema, 'abi_crash.h'), '',
          *%w[boot_value boot_slot].flat_map { |name| CEmitter.enum_name_lookup(schema.types.fetch(name)) },
          '#endif /* ERX_CORE_ABI_CRASH_H */', ''].join("\n")
       end
@@ -636,11 +636,10 @@ module Erx
           type.members.keys.sort.map { |member| schema.constants.fetch("#{Model.constant_prefix(type.name)}_#{member}") }
         end
         constants = %w[cpu_limit debug_ram_ranges page_size stop_census_ms].map { |name| schema.constants.fetch(name) }
-        layouts = CEmitter::SEAM_LAYOUTS.map { |name| schema.types.fetch(name) }
         [CEmitter::NOTICE, '#ifndef ERX_CORE_ABI_STOP_H', '#define ERX_CORE_ABI_STOP_H', '',
          '#include <stdbool.h>', '#include <stddef.h>', '#include <stdint.h>', '',
          *(constants + members).map { |item| CEmitter.constant_definition(item) },
-         '', *layouts.flat_map { |layout| CEmitter.seam_layout(layout) }, '',
+         '', *CEmitter.seam_layouts(schema, 'abi_stop.h'), '',
          *enums.flat_map { |type| CEmitter.type_declaration(type) }, '',
          *CEmitter.enum_attribute_predicate(state, 'registers', state.attributes.fetch('registers')),
          '#endif /* ERX_CORE_ABI_STOP_H */', ''].join("\n")

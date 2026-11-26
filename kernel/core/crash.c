@@ -31,25 +31,6 @@ _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
 /* The seam's constants and the ABI's. */
 _Static_assert(ERX_REGS_SIZE == ERX_CRASH_REGS_BYTES, "regs bytes");
 _Static_assert(ERX_CRASH_RECORD_ALIGN == ERX_CRASH_BUFFER_ALIGN, "alignment");
-_Static_assert(ERX_FAULT_SIZE == sizeof(erx_crash_fault_t), "fault size");
-_Static_assert(ERX_FAULT_OFF_KIND == offsetof(erx_crash_fault_t, kind), "kind");
-_Static_assert(ERX_FAULT_OFF_CAUSE == offsetof(erx_crash_fault_t, cause), "cause");
-_Static_assert(ERX_FAULT_OFF_ADDR == offsetof(erx_crash_fault_t, addr), "addr");
-_Static_assert(ERX_FAULT_OFF_PC == offsetof(erx_crash_fault_t, pc), "pc");
-_Static_assert(ERX_FAULT_OFF_THREAD == offsetof(erx_crash_fault_t, thread), "thread");
-_Static_assert(ERX_FAULT_OFF_SPACE == offsetof(erx_crash_fault_t, space), "space");
-_Static_assert(ERX_FAULT_OFF_STATUS == offsetof(erx_crash_fault_t, status), "status");
-_Static_assert(ERX_CRASH_CPU_SIZE == sizeof(erx_crash_cpu_entry_t), "entry size");
-_Static_assert(ERX_CRASH_CPU_OFF_CPU == offsetof(erx_crash_cpu_entry_t, cpu), "entry cpu");
-_Static_assert(ERX_CRASH_CPU_OFF_STATE == offsetof(erx_crash_cpu_entry_t, state), "entry state");
-_Static_assert(ERX_CRASH_CPU_OFF_PC == offsetof(erx_crash_cpu_entry_t, pc), "entry pc");
-_Static_assert(ERX_CRASH_CPU_OFF_SP == offsetof(erx_crash_cpu_entry_t, sp), "entry sp");
-_Static_assert(ERX_CRASH_CPU_OFF_FP == offsetof(erx_crash_cpu_entry_t, fp), "entry fp");
-_Static_assert(ERX_CRASH_CPU_OFF_RETURN_ADDRESS ==
-    offsetof(erx_crash_cpu_entry_t, return_address), "entry return address");
-_Static_assert(ERX_CRASH_CPU_OFF_PROCESSOR_STATE ==
-    offsetof(erx_crash_cpu_entry_t, processor_state), "entry processor state");
-_Static_assert(ERX_CRASH_CPU_OFF_AUX == offsetof(erx_crash_cpu_entry_t, aux), "entry aux");
 
 /* Bytes after the crc field, where the CRC starts. */
 #define ERX_CRASH_CRC_START	(ERX_CRASH_BRIEF_OFF_CRC + sizeof(uint32_t))
@@ -83,7 +64,7 @@ static bool erx_crash_all_zero(const uint8_t *, size_t);
 static bool erx_crash_cause_known(uint32_t);
 static bool erx_crash_cpus_fit(const uint8_t *, uint32_t);
 static erx_crash_check_t erx_crash_check_body(const uint8_t *, const erx_crash_brief_t *);
-static bool erx_crash_fault_fits(uint32_t, const erx_crash_fault_t *);
+static bool erx_crash_fault_fits(uint32_t, const erx_fault_t *);
 static bool erx_crash_kind_known(uint32_t);
 static bool erx_crash_log_next(erx_crash_log_walk_t *, size_t *);
 static erx_crash_log_walk_t erx_crash_log_start(const erx_log_t *,
@@ -132,7 +113,7 @@ erx_crash_kind_known(uint32_t kind)
  * report names, or nothing, so it fits any record.
  */
 static bool
-erx_crash_fault_fits(uint32_t cause, const erx_crash_fault_t *fault)
+erx_crash_fault_fits(uint32_t cause, const erx_fault_t *fault)
 {
 	switch (cause) {
 	case ERX_CRASH_CAUSE_FAULT:
@@ -193,13 +174,7 @@ erx_crash_settle(const erx_crash_input_t *input, erx_crash_brief_t *header)
 	    sizeof(header->build_id));
 	header->boot_value = pair ? input->boot_value : ERX_BOOT_VALUE_UNKNOWN;
 	header->boot_slot = pair ? input->boot_slot : ERX_BOOT_SLOT_NONE;
-	header->fault.kind = input->fault.kind;
-	header->fault.cause = input->fault.cause;
-	header->fault.addr = input->fault.addr;
-	header->fault.pc = input->fault.pc;
-	header->fault.thread = input->fault.thread;
-	header->fault.space = input->fault.space;
-	header->fault.status = input->fault.status;
+	header->fault = input->fault;
 }
 
 /*
@@ -292,7 +267,7 @@ erx_crash_log_tail(const erx_log_t *log, erx_crash_scratch_t *scratch, char *dst
 static void
 erx_crash_write_cpus(const erx_crash_input_t *input, erx_crash_record_t *record)
 {
-	const erx_crash_cpu_entry_t *entry;
+	const erx_crash_cpu_t *entry;
 	erx_crash_cpu_t *out;
 	uint32_t ncpus;
 
@@ -438,7 +413,7 @@ erx_crash_check(const void *bytes, size_t available)
 {
 	const uint8_t *in;
 	erx_crash_brief_t header;
-	erx_crash_fault_t fault;
+	erx_fault_t fault;
 
 	in = bytes;
 	if (in == NULL || available < ERX_CRASH_BRIEF_SIZE)

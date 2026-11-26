@@ -318,10 +318,11 @@ class AbiGenerationTest < Minitest::Test
     end
   end
 
-  # The boot, crash and stop seams spell each value as include/erx/abi.h does, so C that
-  # includes all three builds warning-free, and the boot seam stays valid C++ for
-  # bootstrap; the handoff's cpu_id has one word per cpu_id_word member.
-  def test_boot_seam_matches_the_abi_header
+  # The boot, crash and stop seams spell each value as include/erx/abi.h does, so C
+  # that includes all three builds warning-free, the boot seam stays valid C++ for
+  # bootstrap and the crash and stop seams for the Fiasco glue; the handoff's cpu_id
+  # has one word per cpu_id_word member.
+  def test_seams_match_the_abi_header
     seam = @plan.files.fetch('include/erx/core/abi_boot.h')
     words = @plan.schema.types.fetch('cpu_id_word').members.size
     assert_includes seam, "#define ERX_CPU_ID_WORD_COUNT UINT32_C(#{words})"
@@ -334,9 +335,12 @@ class AbiGenerationTest < Minitest::Test
       File.write(File.join(directory, 'erx/core/abi_stop.h'), @plan.files.fetch('include/erx/core/abi_stop.h'))
       File.write(File.join(directory, 'both.c'), "#include <erx/abi.h>\n#include <erx/core/abi_boot.h>\n#include <erx/core/abi_crash.h>\n#include <erx/core/abi_stop.h>\n" \
                                                  "_Static_assert(ERX_BOOT_HANDOFF_SIZE == sizeof(erx_boot_handoff_t), \"size\");\n" \
-                                                 "_Static_assert(ERX_RAM_RANGE_SIZE == sizeof(erx_ram_range_t), \"range\");\n")
-      File.write(File.join(directory, 'seam.cc'), "#include <erx/core/abi_boot.h>\n#include <erx/core/abi_stop.h>\n" \
-                                                  "static_assert(ERX_CPU_ID_WORD_COUNT == #{words}, \"words\");\n")
+                                                 "_Static_assert(ERX_RAM_RANGE_SIZE == sizeof(erx_ram_range_t), \"range\");\n" \
+                                                 "_Static_assert(ERX_FAULT_SIZE == sizeof(erx_fault_t), \"fault\");\n" \
+                                                 "_Static_assert(ERX_CRASH_CPU_SIZE == sizeof(erx_crash_cpu_t), \"entry\");\n")
+      File.write(File.join(directory, 'seam.cc'), "#include <erx/core/abi_boot.h>\n#include <erx/core/abi_crash.h>\n#include <erx/core/abi_stop.h>\n" \
+                                                  "static_assert(ERX_CPU_ID_WORD_COUNT == #{words}, \"words\");\n" \
+                                                  "static_assert(sizeof(erx_crash_cpu_t) == ERX_CRASH_CPU_SIZE, \"entry\");\n")
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'), timeout_program: 'gtimeout')
       begin
         runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-I', directory,

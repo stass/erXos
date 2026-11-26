@@ -107,7 +107,7 @@ end_begin(void)
 }
 
 _Noreturn void
-erx_fiasco_end(erx_fiasco_end_cause_t cause, const erx_crash_fault_t *fault)
+erx_fiasco_end(erx_fiasco_end_cause_t cause, const erx_fault_t *fault)
 {
 	static const char message[] = "root task fault";
 
@@ -168,7 +168,7 @@ erx_fiasco_end_boot_refused(const char *reason)
 
 /* Buffers of its own: the watchdog's end may run at the same time and takes the others. */
 void
-erx_fiasco_task_crash_write(const erx_crash_fault_t *fault)
+erx_fiasco_task_crash_write(const erx_fault_t *fault)
 {
 	static const char message[] = "task fault";
 	static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t record[ERX_CRASH_SIZE];

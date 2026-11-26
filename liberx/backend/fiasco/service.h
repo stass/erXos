@@ -213,7 +213,7 @@ int	erx_machine_end(uint64_t res, uint32_t how);
  * and the rest sleep. With a fault, the root's, it first prints the crash frame; the
  * cause decides how the machine ends (erx_fiasco_end_how). Takes no lock.
  */
-_Noreturn void	erx_fiasco_end(erx_fiasco_end_cause_t cause, const erx_crash_fault_t *fault);
+_Noreturn void	erx_fiasco_end(erx_fiasco_end_cause_t cause, const erx_fault_t *fault);
 /*
  * A refusal's end: line is a NUL-terminated fixed line of the root's own ending in a newline. On
  * the service thread, which owns the log, it follows the records the log still holds, so the
@@ -228,7 +228,7 @@ _Noreturn void	erx_fiasco_end_watchdog(const erx_watchdog_end_t *end);
 /* Whether an end has been taken, after which the board's watchdog is written no more (erx_fiasco_pm_wdt_step). */
 bool	erx_fiasco_end_taken(void);
 /* A task's fault: its crash frame on the console, with the machine going on. Only the service calls it. */
-void	erx_fiasco_task_crash_write(const erx_crash_fault_t *fault);
+void	erx_fiasco_task_crash_write(const erx_fault_t *fault);
 
 #ifdef ERX_FIASCO_TEST_HOOKS
 #include <stdatomic.h>

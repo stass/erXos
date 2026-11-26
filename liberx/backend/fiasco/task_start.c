@@ -98,7 +98,7 @@ erx_fiasco_task_main(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
  * to run on without its reaper.
  */
 _Noreturn void
-erx_fiasco_end(erx_fiasco_end_cause_t cause, const erx_crash_fault_t *fault)
+erx_fiasco_end(erx_fiasco_end_cause_t cause, const erx_fault_t *fault)
 {
 	(void)cause;
 	(void)fault;

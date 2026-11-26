@@ -103,7 +103,7 @@ static const char *service_start(void);
 static bool	service_failed(l4_msgtag_t);
 static l4_cap_idx_t service_reply_cap(uint32_t);
 static void	service_replies_empty(l4_utcb_t *);
-static void	service_fault(uint32_t, const erx_crash_fault_t *);
+static void	service_fault(uint32_t, const erx_fault_t *);
 static void	service_page_fault(const l4_msg_regs_t *, uint32_t);
 static void	service_exception(const l4_exc_regs_t *, uint32_t);
 
@@ -1015,7 +1015,7 @@ service_replies_empty(l4_utcb_t *utcb)
 
 /* The root's fault resets the machine; a task's goes to its fault gate, or ends only the task. */
 static void
-service_fault(uint32_t task, const erx_crash_fault_t *fault)
+service_fault(uint32_t task, const erx_fault_t *fault)
 {
 	if (task == ERX_FIASCO_TASK_ROOT)
 		erx_fiasco_end(ERX_FIASCO_END_FAULT, fault);
@@ -1025,7 +1025,7 @@ service_fault(uint32_t task, const erx_crash_fault_t *fault)
 static void
 service_page_fault(const l4_msg_regs_t *mr, uint32_t task)
 {
-	const erx_crash_fault_t fault = { .kind = ERX_FAULT_MEMORY,
+	const erx_fault_t fault = { .kind = ERX_FAULT_MEMORY,
 	    .cause = (uint32_t)(mr->mr[0] & SERVICE_FAULT_ACCESS), .addr = mr->mr[0] & ~SERVICE_FAULT_ACCESS,
 	    .pc = mr->mr[1], .thread = SERVICE_THREAD_UNKNOWN, .space = task };
 
@@ -1035,7 +1035,7 @@ service_page_fault(const l4_msg_regs_t *mr, uint32_t task)
 static void
 service_exception(const l4_exc_regs_t *regs, uint32_t task)
 {
-	const erx_crash_fault_t fault = { .kind = erx_fiasco_exception_kind(regs->err),
+	const erx_fault_t fault = { .kind = erx_fiasco_exception_kind(regs->err),
 	    .cause = (uint32_t)regs->err, .addr = regs->pfa, .pc = regs->pc, .thread = SERVICE_THREAD_UNKNOWN, .space = task };
 
 	service_fault(task, &fault);

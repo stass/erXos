@@ -58,7 +58,7 @@ void	erx_fiasco_gate_exit(uint32_t task, uint32_t stopper, int64_t status);
  */
 void	erx_fiasco_gate_space_close(uint32_t task);
 /* A task's fault: true when its space has a fault gate, gone or not, and the record went there or was counted. */
-bool	erx_fiasco_gate_fault(uint32_t task, const erx_crash_fault_t *fault);
+bool	erx_fiasco_gate_fault(uint32_t task, const erx_fault_t *fault);
 /* The gate record's end: its queue is dropped and every space naming it is left with none. */
 void	erx_fiasco_gate_free(uint32_t index);
 

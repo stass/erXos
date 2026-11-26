@@ -159,7 +159,7 @@ erx_fiasco_gate_space_close(uint32_t task)
  * records are dropped: harm only to itself.
  */
 bool
-erx_fiasco_gate_fault(uint32_t task, const erx_crash_fault_t *fault)
+erx_fiasco_gate_fault(uint32_t task, const erx_fault_t *fault)
 {
 	gate_space_t *const space = gate_space(task);
 	erx_backend_gate_t *const gate = gate_of(space);

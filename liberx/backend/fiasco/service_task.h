@@ -227,6 +227,6 @@ int	erx_fiasco_task_vm_map_body(uint32_t caller, const erx_fiasco_vm_map_request
  * A task's fault: a fault record at its space's fault gate, its thread left blocked;
  * with no fault gate, its crash record, then its end. The root's own fault never comes here.
  */
-void	erx_fiasco_task_fault(uint32_t task, const erx_crash_fault_t *fault);
+void	erx_fiasco_task_fault(uint32_t task, const erx_fault_t *fault);
 
 #endif /* ERX_FIASCO_SERVICE_TASK_H */

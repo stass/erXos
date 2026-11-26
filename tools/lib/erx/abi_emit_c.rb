@@ -496,14 +496,26 @@ module Erx
         extent = layout_extent(layout)
         typedef = "typedef struct #{tag} #{tag}_t;"
         return [*extent, typedef] if layout.private?
-        return seam_layout(layout) if SEAM_LAYOUTS.include?(layout.name)
+        return seam_layout(layout) if SEAM_LAYOUTS.key?(layout.name)
 
         [*extent, *layout_offsets(layout), typedef, *layout_definition(layout)]
       end
 
-      # The layouts a seam header of include/erx/core/ also declares, so a core
-      # and the Fiasco glue share the ABI type itself instead of a copy of it.
-      SEAM_LAYOUTS = %w[erx_ram_range].freeze
+      # The layouts a seam header of include/erx/core/ also declares, each with
+      # the seam header that declares it, so a core and the Fiasco glue share
+      # the ABI type itself instead of a copy of it.
+      SEAM_LAYOUTS = { 'erx_ram_range' => 'abi_stop.h', 'erx_fault' => 'abi_crash.h',
+                       'erx_crash_cpu' => 'abi_crash.h' }.freeze
+
+      # The layouts of one seam header, after the typedefs of the enums their
+      # fields hold, which include/erx/abi.h spells the same.
+      def seam_layouts(schema, header)
+        layouts = SEAM_LAYOUTS.filter_map { |name, seam| schema.types.fetch(name) if seam == header }
+        raise SchemaError, "no seam layouts for #{header}" if layouts.empty?
+
+        enums = layouts.flat_map { |layout| layout.fields.map(&:type) }.grep(EnumType).uniq
+        [*enums.flat_map { |type| type_declaration(type) }, *layouts.flat_map { |layout| seam_layout(layout) }]
+      end
 
       # A layout as include/erx/abi.h and a seam header both declare it: under
       # one guard, so a file may include both, and valid C17 and C++17, so the
