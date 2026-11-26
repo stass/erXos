@@ -54,6 +54,47 @@ enum ram_class u32
 layout erx_ram_range wire_le 8 16
   field base u64 0
   field length u64 8
+# The readable-RAM map: nranges ranges, sorted by base, disjoint and never
+# touching; none when the map was refused.
+layout erx_ram_map wire_le 8 264
+  field nranges u32 0
+  padding 4 4
+  field range erx_ram_range 8 count @debug_ram_ranges
+# One CPU's stop slot (docs/design-debugger.md, "Stop slots"), one of an array
+# of @cpu_limit in kernel memory indexed by the kernel's CPU number: the CPU
+# writes aux (the lock's address for `waiting`, zero otherwise) and regs, then
+# stores state with release ordering; a state of zero is a slot nobody has
+# published, and only a state with registers has regs to read.
+layout erx_machine_stop_slot wire_le 8 312
+  field state stop_cpu_state 0
+  padding 4 4
+  field aux u64 8
+  field regs erx_stop_regs 16
+# The debug anchor (docs/design-debugger.md, "The anchor"): one page-aligned
+# page of the kernel image's data, from which a reader finds and translates
+# everything else. Its 16 bytes of magic mark the page; crc is CRC-32C of
+# the whole page with crc and stop read as zero; slots and record are the
+# physical addresses of the stop slot array and the crash buffer; stop is
+# zero or the leader's CPU number plus one, the one field that changes once
+# the anchor is complete.
+bytes debug_anchor_magic 16 value 45525820444542554720414e43484f52
+limit debug_anchor_version u32 1
+layout erx_debug_anchor wire_le 8 4096
+  field magic debug_anchor_magic 0
+  field version u32 16
+  field crc u32 20
+  field build_id u8 24 count @build_id_size
+  field image_virtual u64 32
+  field image_physical u64 40
+  field kernel_root u64 48
+  field root_task_root u64 56
+  field translation u64 64
+  field slots u64 72
+  field record u64 80
+  field stop u32 88
+  padding 92 4
+  field ram erx_ram_map 96
+  padding 360 3736
 
 # erx.watchdog=P,D,B, in seconds: P from 1 to 60, D from 2P to 600, B from D
 # to 600, and 1,5,60 when the key is absent or malformed.

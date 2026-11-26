@@ -170,12 +170,6 @@ typedef struct erx_ram_entry {
 	erx_ram_class_t		ram_class;
 } erx_ram_entry_t;
 
-/* The readable-RAM map: whole pages, sorted by base, disjoint and never touching. */
-typedef struct erx_ram_map {
-	uint32_t		nranges;
-	erx_ram_range_t		range[ERX_DEBUG_RAM_RANGES];
-} erx_ram_map_t;
-
 typedef enum erx_ram_map_status {
 	ERX_RAM_MAP_OK = 0,
 	ERX_RAM_MAP_OVERFLOW,		/* an entry's or a range's end passes the address space */
@@ -189,7 +183,8 @@ typedef enum erx_ram_map_status {
  * rounded outward. `ignored` entries take no part, and a class outside the enum counts
  * as `excluded`. A map that overflows, needs more ranges than the anchor holds, or
  * leaves out part of a `used` entry, rounded outward, is refused, never cut: the
- * status says why and the map has no ranges.
+ * status says why and the map has no ranges. The map is the anchor's own `ram`
+ * (erx_ram_map_t of abi/kernel.txt), so the glue builds it in place.
  */
 erx_ram_map_status_t	erx_machine_stop_ram_map(const erx_ram_entry_t *entries, size_t nentries,
 			    erx_ram_map_t *map);

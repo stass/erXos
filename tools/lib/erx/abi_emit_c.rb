@@ -67,11 +67,11 @@ module Erx
                '/* Only rights constructors publish values of this type. */', '']
         schema.constants.each_value { |item| out << constant_definition(item) }
         out << ''
-        # A schema without the seam types (a test's) has no shared enums.
-        shared = held_enums(SEAM_TYPES.keys.filter_map { |name| schema.types[name] }).map(&:name)
+        # A schema without the seam types (a test's) has none to share.
+        shared = held_types(SEAM_TYPES.keys.filter_map { |name| schema.types[name] }).map(&:name)
         schema.type_order.each do |type_name|
           type = schema.types.fetch(type_name)
-          out.concat(shared.include?(type_name) ? seam_enum(type) : type_declaration(type))
+          out.concat(shared.include?(type_name) ? seam_declaration(type) : type_declaration(type))
           out << ''
         end
         out.concat(note_declaration(schema))
@@ -498,48 +498,59 @@ module Erx
         extent = layout_extent(layout)
         typedef = "typedef struct #{tag} #{tag}_t;"
         return [*extent, typedef] if layout.private?
-        return seam_layout(layout) if SEAM_TYPES.key?(layout.name)
 
         [*extent, *layout_offsets(layout), typedef, *layout_definition(layout)]
       end
 
-      # The layouts and enums a seam header of include/erx/core/ also
-      # declares, each with the seam header that declares it, so a core and
-      # the Fiasco glue share the ABI type itself instead of a copy of it. A
-      # seam also declares every enum its layouts' fields hold.
-      SEAM_TYPES = { 'erx_ram_range' => 'abi_stop.h', 'stop_cpu_state' => 'abi_stop.h',
-                     'ram_class' => 'abi_stop.h', 'erx_fault' => 'abi_crash.h',
+      # The types a seam header of include/erx/core/ also declares, each with
+      # the seam header that declares it, so a core and the Fiasco glue share
+      # the ABI type itself instead of a copy of it. A seam also declares
+      # every type its layouts' fields hold, so only the roots are listed.
+      SEAM_TYPES = { 'ram_class' => 'abi_stop.h', 'erx_machine_stop_slot' => 'abi_stop.h',
+                     'erx_debug_anchor' => 'abi_stop.h', 'erx_fault' => 'abi_crash.h',
                      'erx_crash_cpu' => 'abi_crash.h' }.freeze
 
-      # The enums and layouts SEAM_TYPES lists for one seam header.
+      # The types one seam header declares: those SEAM_TYPES lists for it and
+      # every type they hold, each after the types it holds.
       def seam_types(schema, header)
-        types = SEAM_TYPES.filter_map { |name, seam| schema.types.fetch(name) if seam == header }
-        raise SchemaError, "no seam types for #{header}" if types.empty?
+        roots = SEAM_TYPES.filter_map { |name, seam| schema.types.fetch(name) if seam == header }
+        raise SchemaError, "no seam types for #{header}" if roots.empty?
 
-        types
+        held_types(roots)
       end
 
-      # The enums among types, and those their layouts' own fields hold; a
-      # seam lists only enums and flat layouts.
-      def held_enums(types)
-        types.flat_map { |type| type.is_a?(EnumType) ? [type] : type.fields.map(&:type).grep(EnumType) }.uniq
+      # The roots and the enums, byte strings and layouts their layouts'
+      # fields hold, recursively, each after the types it holds. The
+      # schema bounds the depth of by-value types (MAX_TYPE_DEPTH).
+      def held_types(roots)
+        roots.each_with_object([]) { |type, held| hold(type, held) }
+      end
+
+      def hold(type, held)
+        return if held.include?(type)
+
+        type.fields.each { |field| hold(field.type, held) } if type.is_a?(Layout)
+        held << type if [Layout, EnumType, BytesType].any? { |kind| type.is_a?(kind) }
       end
 
       # The enums one seam header declares.
-      def seam_enums(schema, header) = held_enums(seam_types(schema, header))
+      def seam_enums(schema, header) = seam_types(schema, header).grep(EnumType)
 
-      # The declarations of one seam header: its enums first, since its
-      # layouts' fields hold them, then its layouts.
+      # The declarations of one seam header: its enums and byte strings
+      # first, since its layouts' fields hold them, then its layouts, each
+      # after the layouts it holds.
       def seam_declarations(schema, header)
-        layouts = seam_types(schema, header).grep(Layout)
-        [*seam_enums(schema, header).flat_map { |type| seam_enum(type) },
-         *layouts.flat_map { |layout| seam_layout(layout) }]
+        layouts, values = seam_types(schema, header).partition { |type| type.is_a?(Layout) }
+        [*values.flat_map { |type| seam_value(type) }, *layouts.flat_map { |layout| seam_layout(layout) }]
       end
 
-      # An enum's typedef as include/erx/abi.h and every seam header declare
-      # it: under one guard, since C99, which musl builds in, refuses a
-      # repeated typedef even when it names the same type.
-      def seam_enum(type) = guarded(c_type(type), type_declaration(type))
+      # An enum's or a byte string's typedef as include/erx/abi.h and every
+      # seam header declare it: under one guard, since C99, which musl builds
+      # in, refuses a repeated typedef even when it names the same type.
+      def seam_value(type) = guarded(c_type(type), type_declaration(type))
+
+      # A seam type as include/erx/abi.h declares it.
+      def seam_declaration(type) = type.is_a?(Layout) ? seam_layout(type) : seam_value(type)
 
       # Declarations of the type named typedef under the guard every header
       # that declares it shares.

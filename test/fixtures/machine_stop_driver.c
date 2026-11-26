@@ -21,6 +21,7 @@
 
 #include <inttypes.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -685,6 +686,30 @@ check_ram_cases(void)
 		printf("ram reasons: FAIL\n");
 }
 
+/*
+ * The anchor is one page, and the core writes its readable-RAM map in place: the map
+ * the core builds is the anchor's own field, not a copy of its shape. A stop slot
+ * holds the stop registers after its state and auxiliary word.
+ */
+static void
+check_anchor(void)
+{
+	static erx_debug_anchor_t anchor;
+	erx_ram_entry_t entries[ERX_DEBUG_RAM_RANGES + 1];
+	const char *why = NULL;
+
+	if (sizeof(anchor) != ERX_PAGE_SIZE || sizeof(erx_machine_stop_slot_t) != ERX_MACHINE_STOP_SLOT_SIZE ||
+	    offsetof(erx_machine_stop_slot_t, regs) != ERX_MACHINE_STOP_SLOT_OFF_REGS)
+		why = "a layout's size or offset differs from the ABI file's";
+	if (erx_machine_stop_ram_map(entries, banks(entries, ERX_DEBUG_RAM_RANGES), &anchor.ram) != ERX_RAM_MAP_OK ||
+	    anchor.ram.nranges != ERX_DEBUG_RAM_RANGES || anchor.ram.range[1].base != 0x100000 + 2 * P)
+		why = "the anchor's map was not written in place";
+	if (erx_machine_stop_ram_map(entries, banks(entries, ERX_DEBUG_RAM_RANGES + 1), &anchor.ram) != ERX_RAM_MAP_TOO_MANY ||
+	    anchor.ram.nranges != 0)
+		why = "a refused map left ranges in the anchor";
+	printf("anchor map: %s%s\n", why == NULL ? "ok" : "FAIL ", why == NULL ? "" : why);
+}
+
 /* Random maps over 160 pages, judged page by page against the entries. */
 #define	ORACLE_PAGES	160
 
@@ -863,6 +888,7 @@ main(void)
 		check_stop(n);
 	check_ram_cases();
 	check_ram_random();
+	check_anchor();
 	check_kip();
 	free(stack);
 	free(visited_gen);

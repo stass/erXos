@@ -366,7 +366,7 @@ starts the root task; after that only its stop word changes.
 
 | Field | Holds |
 | --- | --- |
-| `magic`, `version`, `crc` | 16 bytes that mark the page; the layout's version; CRC-32C of every field but the stop word |
+| `magic`, `version`, `crc` | 16 bytes that mark the page; the layout's version; CRC-32C of the whole page, `crc` and the stop word read as zero |
 | `build_id` | the build identifier the banner and the crash record carry |
 | `image_virtual`, `image_physical` | where the kernel's image runs and where it lies, so a symbol's address gives a physical one |
 | `kernel_root`, `root_task_root`, `translation` | the physical addresses of the translation roots of the kernel's own mappings and of the root task's space, the second zero until the root task exists; and the architecture's word that says how such tables are walked, so the reader assumes no kernel's layout |

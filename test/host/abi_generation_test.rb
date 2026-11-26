@@ -318,6 +318,21 @@ class AbiGenerationTest < Minitest::Test
     end
   end
 
+  # The debug anchor is one page and its offsets are the ABI file's: an offset
+  # written wrong in abi/kernel.txt refuses the whole plan.
+  def test_the_debug_anchor_is_one_page_and_a_wrong_offset_is_refused
+    assert_equal @plan.schema.constants.fetch('page_size').value, @plan.schema.types.fetch('erx_debug_anchor').size
+    Dir.mktmpdir('erx-abi-anchor-') do |root|
+      FileUtils.cp_r(File.join(@root, 'abi'), root)
+      source = File.join(root, 'abi/kernel.txt')
+      original = File.binread(source)
+      line = original[/^  field stop u32 \d+\n/] || flunk('the anchor has no stop word')
+      File.write(source, original.sub(line, line.sub(/\d+$/) { |offset| (offset.to_i + 4).to_s }))
+      error = assert_raises(Erx::ABI::SchemaError) { Erx::ABI::Generator.plan(root: root) }
+      assert_match(/fields overlap, leave a gap or exceed the layout/, error.message)
+    end
+  end
+
   # The boot, crash and stop seams spell each value as include/erx/abi.h does, so C
   # that includes all three builds warning-free, in C17 and in musl's C99, where a
   # repeated typedef is an error; the boot seam stays valid C++ for bootstrap and
@@ -338,10 +353,16 @@ class AbiGenerationTest < Minitest::Test
                                                  "_Static_assert(ERX_BOOT_HANDOFF_SIZE == sizeof(erx_boot_handoff_t), \"size\");\n" \
                                                  "_Static_assert(ERX_RAM_RANGE_SIZE == sizeof(erx_ram_range_t), \"range\");\n" \
                                                  "_Static_assert(ERX_FAULT_SIZE == sizeof(erx_fault_t), \"fault\");\n" \
-                                                 "_Static_assert(ERX_CRASH_CPU_SIZE == sizeof(erx_crash_cpu_t), \"entry\");\n")
+                                                 "_Static_assert(ERX_CRASH_CPU_SIZE == sizeof(erx_crash_cpu_t), \"entry\");\n" \
+                                                 "_Static_assert(sizeof(erx_debug_anchor_t) == ERX_PAGE_SIZE, \"anchor\");\n" \
+                                                 "_Static_assert(ERX_MACHINE_STOP_SLOT_SIZE == sizeof(erx_machine_stop_slot_t), \"slot\");\n")
       File.write(File.join(directory, 'seam.cc'), "#include <erx/core/abi_boot.h>\n#include <erx/core/abi_crash.h>\n#include <erx/core/abi_stop.h>\n" \
                                                   "static_assert(ERX_CPU_ID_WORD_COUNT == #{words}, \"words\");\n" \
-                                                  "static_assert(sizeof(erx_crash_cpu_t) == ERX_CRASH_CPU_SIZE, \"entry\");\n")
+                                                  "static_assert(sizeof(erx_crash_cpu_t) == ERX_CRASH_CPU_SIZE, \"entry\");\n" \
+                                                  "static_assert(sizeof(erx_debug_anchor_t) == ERX_DEBUG_ANCHOR_SIZE, \"anchor\");\n" \
+                                                  "static_assert(offsetof(erx_debug_anchor_t, ram) == ERX_DEBUG_ANCHOR_OFF_RAM, \"map\");\n" \
+                                                  "static_assert(sizeof(erx_machine_stop_slot_t) == ERX_MACHINE_STOP_SLOT_SIZE, \"slot\");\n" \
+                                                  "static_assert(offsetof(erx_machine_stop_slot_t, regs) == ERX_MACHINE_STOP_SLOT_OFF_REGS, \"regs\");\n")
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'), timeout_program: 'gtimeout')
       begin
         runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-I', directory,

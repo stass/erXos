@@ -97,11 +97,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   still builds JDB, the kernel's console input and `jdb_object.cpp` (GPL-2.0-only) into every development
   kernel, where a panic waits in the debugger, and the design documents describe the fork without them. To
   land, in parts that each stand alone:
-  1. the stop: the glue `fiasco/kernel/src/erx/erx_machine_stop.cpp`, the anchor and the stop slots in
-     `abi/kernel.txt`, the routes from `panic`, `assert_fail`, `kdb_ke` and the four trap reports, the park in
-     the debug inter-processor interrupt's handler, the check in the spinlock's wait, the admission at the end of
+  1. the stop: the glue `fiasco/kernel/src/erx/erx_machine_stop.cpp`, the routes from `panic`, `assert_fail`,
+     `kdb_ke` and the four trap reports, the park in the debug inter-processor interrupt's handler, the check in the spinlock's wait, the admission at the end of
      a secondary CPU's start, the bounded take of the printf lock, and the `native_machine_stop` cells (the core,
-     its exhaustive host test, the crash record's CPU entries and the litmus tests of the admission and the slot
+     its exhaustive host test, the anchor and stop slot layouts of `abi/kernel.txt` in its seam, the crash record's
+     CPU entries and the litmus tests of the admission and the slot
      are in the tree, and no build has `CONFIG_JDB` or `CONFIG_INPUT`); and with it the removal of `src/jdb`,
      `jdb_object.cpp`, the JDB menu of `src/Kconfig`, the `debug` and `log` parts and the `LicenseCheck::TABLE`
      row, which no build uses; every development boot is now one of a kernel without the object, and a boot
