@@ -108,16 +108,17 @@ watched(#{fat_start := Start, fat_sectors := FatSectors, fsinfo := FsInfo}) ->
        (Sector) -> error({read_outside, Sector})
     end.
 
-%% Plan applied once every write lies in a FAT or FSInfo and each FAT sector goes
-%% to every FAT with the same bytes.
+%% Plan applied once every write lies in a FAT or FSInfo and each FAT sector it writes
+%% goes to every FAT, the copies left with the same bytes. The flag steps write the FAT
+%% the server reads and its mirrors in steps of their own, so the copies agree across
+%% the plan, not within each step.
 planned(Plan, L = #{fat_start := Start, fats := Fats, fat_sectors := FatSectors, fsinfo := FsInfo}) ->
-    [begin
-         [inside(L, Sector) orelse error({write_outside, Sector}) || {Sector, _} <- Writes],
-         Groups = maps:groups_from_list(fun({Sector, _}) -> (Sector - Start) rem FatSectors end,
-                                        fun({_, Bytes}) -> Bytes end,
-                                        [Write || {Sector, _} = Write <- Writes, Sector =/= FsInfo]),
-         [{Fats, [_]} = {length(Copies), lists:usort(Copies)} || _ := Copies <- Groups]
-     end || {_Step, Writes} <- Plan],
+    Writes = [Write || {_Step, Step} <- Plan, Write <- Step],
+    [inside(L, Sector) orelse error({write_outside, Sector}) || {Sector, _} <- Writes],
+    Last = maps:from_list([Write || {Sector, _} = Write <- Writes, Sector =/= FsInfo]),
+    Groups = maps:groups_from_list(fun({Sector, _}) -> (Sector - Start) rem FatSectors end,
+                                   fun({_, Bytes}) -> Bytes end, maps:to_list(Last)),
+    [{Fats, [_]} = {length(Copies), lists:usort(Copies)} || _ := Copies <- Groups],
     erx_fat_alloc_tests:apply_plan(Plan).
 
 inside(#{fsinfo := Sector}, Sector) -> true;

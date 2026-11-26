@@ -72,7 +72,7 @@ class ErxMediaVolumeTest < Minitest::Test
               from: '[{clean_mirrors, Mirrors}, {clean, Read}]', to: '[{clean, Read}, {clean_mirrors, Mirrors}]',
               caught_by: 'every_cut_of_a_removal_leaves_a_tree_that_reads_test_/0-fun-1- (fat16.img)'),
     Fault.new(name: "a failed volume's end not logged", path: VOLUME,
-              from: 'logger:notice("erx_media: volume s~b ended: its commit failed: ~0P", [Number, Why, 8]);',
+              from: 'logger:notice("erx_media: volume s~b ended: its commit failed: ~s", [Number, erx_report:reason_name(Why)]);',
               to: '_ = {Number, Why}, ok;',
               caught_by: 'a_commit_that_cannot_read_ends_the_volume_test'),
     Fault.new(name: 'a rename between two volumes taken as one within a volume', path: TREE,

@@ -409,7 +409,7 @@ effect(Change, State) ->
 %% volume says why in the log, since its end leaves the drive's status without it.
 -doc false.
 terminate({shutdown, {failed, Why}}, #{volume := #{number := Number}}) ->
-    logger:notice("erx_media: volume s~b ended: its commit failed: ~0P", [Number, Why, 8]);
+    logger:notice("erx_media: volume s~b ended: its commit failed: ~s", [Number, erx_report:reason_name(Why)]);
 terminate(_Why, #{finished := false, batch := Batch} = State) when Batch =/= read_only ->
     try last_batch(State) catch throw:{?MODULE, _, _} -> ok end;
 terminate(_Why, _State) ->
