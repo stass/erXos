@@ -8,7 +8,8 @@
 %% buffer, or when Ctrl-C or the end of input ends the read. A group keeps the damage in each request, damages every
 %% unfinished request at a loss, starts a request damaged while any unfinished one is,
 %% and holds the loss of a damaged request that ends with an error for the next request.
-%% The group cases run a group over a driver the test plays.
+%% The group cases run a group over a driver the test plays; a requester that ends is a case
+%% of it too.
 %% test/host/edlin_lost_test.rb runs them against the tree's edlin, edlin_key and group.
 
 -module(edlin_lost_tests).
@@ -356,6 +357,86 @@ typed(Inputs) ->
 
 with_group(Fun) ->
     with_group([{dumb, false}], Fun).
+
+%% A requester that ends abandons its request, so it does not take the line typed for the
+%% next one: when the next reader has its line, the dead one's request is not asked for
+%% another. The group's monitor of the dead reader is gone before the next reader asks,
+%% so the request that ends is the current one.
+a_group_drops_the_current_request_of_an_ended_requester_test() ->
+    with_group(fun(Group, Driver) ->
+        Dead = reader(Group),
+        synced(Group),
+        unlink(Dead),
+        exit(Dead, kill),
+        monitors(Group, 0),
+        Next = reader(Group),
+        feed(Group, Driver, ["x\r"]),
+        ?assertEqual("x\n", answer(Next)),
+        ?assertEqual(none, asked())
+    end).
+
+%% The same for a request set aside under the next reader's: the dead one's goes with it.
+a_group_drops_a_set_aside_request_of_an_ended_requester_test() ->
+    with_group(fun(Group, Driver) ->
+        Dead = reader(Group),
+        synced(Group),
+        Next = reader(Group),
+        synced(Group),
+        unlink(Dead),
+        exit(Dead, kill),
+        monitors(Group, 1),
+        feed(Group, Driver, ["x\r"]),
+        ?assertEqual("x\n", answer(Next)),
+        ?assertEqual(none, asked())
+    end).
+
+%% A request from a process that ended before the group read it is dropped at once: it
+%% takes no line the group holds, here the second of two typed in one delivery, which the
+%% next reader has.
+a_group_drops_the_request_of_a_dead_process_test() ->
+    with_group(fun(Group, Driver) ->
+        First = reader(Group),
+        feed(Group, Driver, ["a\rb\r"]),
+        ?assertEqual("a\n", answer(First)),
+        {Dead, Down} = spawn_monitor(fun() -> ok end),
+        receive {'DOWN', Down, process, Dead, _} -> ok end,
+        Group ! {io_request, Dead, make_ref(), {get_line, unicode, ""}},
+        synced(Group),
+        Next = reader(Group),
+        ?assertEqual("b\n", answer(Next))
+    end).
+
+%% The end of a damaged read's reader is no discard by the user: its loss is held for the
+%% next request, which returns no line for the typed rest of the lost line.
+a_group_holds_the_loss_of_a_request_whose_requester_ended_test() ->
+    with_group(fun(Group, Driver) ->
+        Dead = reader(Group),
+        Ref = receive {asked, R} -> R after 5000 -> error(no_ask) end,
+        Group ! {Driver, {read, Ref, lost}},
+        synced(Group),
+        unlink(Dead),
+        exit(Dead, kill),
+        monitors(Group, 0),
+        Next = reader(Group),
+        feed(Group, Driver, ["foo\r"]),
+        ?assertEqual(none, answer(Next))
+    end).
+
+%% Returns once the group has handled what the test sent it before.
+synced(Group) ->
+    _ = sys:get_state(Group),
+    ok.
+
+%% Returns once the group holds Count monitors, those of the requesters it watches.
+monitors(Group, Count) ->
+    case process_info(Group, monitors) of
+        {monitors, Held} when length(Held) =:= Count -> ok;
+        _ -> erlang:yield(), monitors(Group, Count)
+    end.
+
+%% Whether the driver was asked for input since, within a fifth of a second.
+asked() ->
+    receive {asked, _} -> asked after 200 -> none end.
 
 %% Runs Fun with a group over a driver the test plays.
 with_group(Options, Fun) ->

@@ -29,7 +29,37 @@ class EdlinLostTest < Minitest::Test
     assert_match(/a_group_holds_a_stray_loss_past_the_users_discard_test\S*\.\.\.\*failed\*/, result.output)
   end
 
+  # The seeded faults of the group's monitor of a requester: a request that is not dropped
+  # when its requester ends (the current one, one set aside), and an end that does not hold
+  # the loss of a damaged read.
+  def test_a_current_request_that_outlives_its_requester_fails
+    seeded("    pop_state(error, Data);\n%% The requester of a request set aside", "    keep_state_and_data;\n%% The requester of a request set aside",
+           'a_group_drops_the_current_request_of_an_ended_requester_test')
+  end
+
+  def test_a_set_aside_request_that_outlives_its_requester_fails
+    seeded('Set =/= Mref end, Queue)', 'true end, Queue)', 'a_group_drops_a_set_aside_request_of_an_ended_requester_test')
+  end
+
+  def test_a_dead_process_request_that_is_not_dropped_fails
+    seeded('case node(From) =:= node() andalso not is_process_alive(From) of', 'case false of',
+           'a_group_drops_the_request_of_a_dead_process_test')
+  end
+
+  def test_an_ended_requester_that_drops_the_loss_fails
+    seeded("    pop_state(error, Data);\n%% The requester of a request set aside", "    pop_state(interrupted, Data);\n%% The requester of a request set aside",
+           'a_group_holds_the_loss_of_a_request_whose_requester_ended_test')
+  end
+
   private
+
+  def seeded(old, new, test)
+    source = File.binread(File.join(OtpEunit::ROOT, GROUP))
+    assert_equal 1, source.scan(old).size, "#{GROUP} no longer holds #{old.inspect} once"
+    result = run_cases(replaced: { GROUP => source.sub(old) { new } })
+    refute result.passed, result.output
+    assert_match(/#{test}\S*\.\.\.\*failed\*/, result.output)
+  end
 
   def run_cases(replaced: {})
     Dir.mktmpdir('erx-edlin') do |work|

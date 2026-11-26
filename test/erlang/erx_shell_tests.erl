@@ -551,10 +551,10 @@ log(Event, #{config := Pid}) ->
     ok.
 
 %% Closing a job passes on to the terminal's group every output request its
-%% processes sent before, here each of five members' io:format waiting at a leader
-%% held suspended until the close is under way, and none of the read requests two
-%% more members sent, since the close ended them, and ends the members and the
-%% leader (erx_shell_leader:close/1).
+%% processes sent before, here each of five members' io:format and two more members'
+%% reads waiting at a leader held suspended until the close is under way, and ends the
+%% members and the leader (erx_shell_leader:close/1). The group, here the test, is the
+%% one that drops a read whose process the close ended (group:handle_info/3).
 a_closed_job_passes_on_its_last_output_test() ->
     Group = self(),
     Leader = erx_shell_leader:start(Group),
@@ -576,8 +576,7 @@ a_closed_job_passes_on_its_last_output_test() ->
     Requests = [Request || _ <- Members,
                            Request <- [receive {io_request, _, _, _} = Got -> Got after 0 -> none end],
                            Request =/= none],
-    ?assertEqual(5, length(Requests)),
-?assertEqual([], [Request || {io_request, _, _, {get_line, _, _}} = Request <- Requests]),
+    ?assertEqual(7, length(Requests)),
     ?assertEqual([], [Pid || Pid <- [Leader | Members], is_process_alive(Pid)]).
 
 %% Waits until Closer waits in close/1 for the leader's end, or has ended, looking up to

@@ -22,6 +22,9 @@
 %% most (ask/1), which the driver answers with {read, Ref, Chars}; format_status/1
 %% hides the shell history and the input typed or waiting (edit 75).
 %%
+%% Modified by erXos: the group watches the process that asked for input while its request is
+%% unfinished, and a reader that ends abandons the request (handle_info/3).
+%%
 %% Modified by erXos, the loss of input (edit 81): the driver answers an ask with
 %% {read, Ref, lost} where input was lost. A loss damages every unfinished request
 %% (lose/1); each request keeps its damage and passes it into every edlin call; a
@@ -87,6 +90,11 @@
          %% returns no line: an edited one until the user empties its buffer, a dumb
          %% one at all, until Ctrl-C or the end of input ends it.
          damaged = false :: boolean(),
+
+         %% erXos: the monitor of the requester, held while its request is
+         %% unfinished: a requester that ends abandons its request (handle_info/3),
+         %% so it never takes a line typed for the next one.
+         requester_mref :: reference() | undefined,
 
          %% Used by xterm state
          lines = [], %% Previously entered lines that have not yet been consumed
@@ -315,15 +323,12 @@ start_shell_fun(Fun) ->
 %% When there are no outstanding input requests we are in this state
 server(info, {io_request,From,ReplyAs,Req} = IOReq, Data) when is_pid(From), ?IS_INPUT_REQ(Req) ->
     log_io_request(IOReq, Data#state.log, server_name()),
-    {next_state,
-     if Data#state.dumb orelse not Data#state.echo -> dumb; true -> xterm end,
-     %% erXos: a request starts damaged while any unfinished request is damaged, and
-     %% takes a held loss first.
-     Data#state{ input = #input_state{ from = From, reply_as = ReplyAs,
-                                       damaged = Data#state.held_loss orelse
-                                           any_damaged(Data#state.input_queue) },
-                 held_loss = false },
-     {next_event, internal, Req} };
+    %% erXos: a request of a process of this node that ended already is dropped, so it
+    %% takes no typed-ahead line; a requester that ends later is watched (handle_info/3).
+    case node(From) =:= node() andalso not is_process_alive(From) of
+        true -> keep_state_and_data;
+        false -> start_request(From, ReplyAs, Req, Data)
+    end;
 server(info, {Drv, Event}, #state{ driver = Drv, shell = Shell })
   when Event =:= suspend; Event =:= winch ->
     %% erXos: Ctrl-Z or a size change while no line is read, as while the
@@ -335,6 +340,19 @@ server(info, {Drv, _}, #state{ driver = Drv }) ->
     {keep_state_and_data, postpone};
 server(info, Msg, Data) ->
     handle_info(server, Msg, Data).
+
+%% erXos: Req becomes the current request, and its requester is watched until it ends.
+start_request(From, ReplyAs, Req, Data) ->
+    {next_state,
+     if Data#state.dumb orelse not Data#state.echo -> dumb; true -> xterm end,
+     %% A request starts damaged while any unfinished request is damaged, and takes a
+     %% held loss first.
+     Data#state{ input = #input_state{ from = From, reply_as = ReplyAs,
+                                       requester_mref = monitor(process, From),
+                                       damaged = Data#state.held_loss orelse
+                                           any_damaged(Data#state.input_queue) },
+                 held_loss = false },
+     {next_event, internal, Req} }.
 
 %% This is the dumb terminal state, also used for noshell and xterm get_password
 
@@ -600,6 +618,18 @@ handle_info(_State, {Drv, terminal_mode, Mode}, Data = #state{ driver = Drv }) -
     true = lists:member(Mode, [raw, cooked, disabled]),
     {keep_state, Data#state{ terminal_mode = Mode }};
 
+%% erXos: the requester of the current request ended: its read ends as an error, which
+%% holds the loss of a damaged read, and gets no reply; the typed-ahead input stays for the
+%% next request. In xterm the line shown is erased, as when a new request takes over.
+handle_info(State, {'DOWN', Mref, process, _Requester, _Reason},
+            Data = #state{ driver = Drv, input = #input_state{ requester_mref = Mref } }) ->
+    [send_drv_reqs(Drv, edlin:erase_line()) || State =:= xterm],
+    pop_state(error, Data);
+%% The requester of a request set aside ended: the request is dropped.
+handle_info(_State, {'DOWN', Mref, process, _Requester, _Reason}, Data = #state{ input_queue = Queue }) ->
+    Kept = queue:filter(fun({_Pushed, #input_state{ requester_mref = Set }}) -> Set =/= Mref end, Queue),
+    {keep_state, Data#state{ input_queue = Kept }};
+
 handle_info(_State, {io_request, From, ReplyAs, {setopts, Opts}}, Data) ->
     {Reply, NewData} = setopts(Opts, Data),
     io_reply(From, ReplyAs, Reply),
@@ -701,7 +731,8 @@ push_state(State, Data) ->
 %% discard and the end of input end a damaged request's loss; any other ending, a
 %% returned one included, holds it for the next request, so an ending that forgets to
 %% say how it ended over-damages rather than drops a loss (edit 81).
-pop_state(How, Data = #state{ input = #input_state{ damaged = Damaged } }) ->
+pop_state(How, Data = #state{ input = #input_state{ damaged = Damaged, requester_mref = Mref } }) ->
+    demonitor(Mref, [flush]),
     Ends = How =:= interrupted orelse How =:= eof,
     resume_set_aside(Data#state{ held_loss = Data#state.held_loss orelse (Damaged andalso not Ends) }).
 

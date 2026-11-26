@@ -1265,7 +1265,8 @@ function, `pop_state/2` (`otp/lib/kernel/src/group.erl:691`), which
 takes how the request ended, and a
 damaged request reaches it only by the user's discard (`Ctrl-C`), by
 the end of input, or by an error (a driver's `{error, _}`, a failed
-translation or collection), since it returns no line. An error is
+translation or collection, or the end of the process that asked, which
+`group` watches while its request is unfinished), since it returns no line. An error is
 neither the user's act nor the end, so a damaged request that ends with
 one leaves its loss held for the group's next ask, and the next request
 takes that loss first, as a held flushed loss is taken. `pop_state/2`
@@ -1277,11 +1278,10 @@ loss or characters the group cannot place, is input lost too: it
 damages every unfinished request and is held for the next one, which
 starts damaged even after the user discards those: an answer to no ask is
 a driver's fault, and nothing tells which request its bytes were for. No other ending
-exists: `group` does not watch the process that asked, so a reader's
-exit leaves its request unfinished until it ends one of these ways, and
-the I/O protocol has no timeout or cancellation on the group's side. So
-the only ways out are the user's own discard of a damaged request, or
-the end of input, after which no character comes.
+exists: a reader's exit ends its request as an error, which holds the
+loss, and the I/O protocol has no timeout or cancellation on the group's
+side. So the only ways out are the user's own discard of a damaged
+request, or the end of input, after which no character comes.
 
 | Hop | The end of input | A loss |
 | --- | --- | --- |

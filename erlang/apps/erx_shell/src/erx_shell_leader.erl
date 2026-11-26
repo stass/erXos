@@ -16,8 +16,8 @@ everything it spawns inherits, so membership needs no list: the processes a
 leader leads are found by asking each process for its group leader.
 
 The leader passes each io request on to the terminal's group, which answers
-the requester itself, except a request to read or set from a process that
-has ended, and drops any other message. It ends every process it
+the requester itself and drops the request of a reader that has ended, and
+drops any other message. It ends every process it
 leads, and then itself, when its starter ends, for any reason; release/2
 ends the job's processes at once (`kill`), or lets the leader end on its own
 once it leads none (`keep`), as the processes a UNIX job leaves stay in its
@@ -41,14 +41,11 @@ start(Group) ->
 
 forward(Group, StarterRef, Look) ->
     receive
-        {io_request, From, _ReplyAs, Request} = Message when is_pid(From), node(From) =:= node() ->
-            %% Output is passed on even from a process that has ended since, as
-            %% a job's last output; any other request only while its sender
-            %% lives, so the terminal never reads input for a process ended.
-            case output(Request) orelse is_process_alive(From) of
-                true -> Group ! Message;
-                false -> ok
-            end,
+        {io_request, From, _ReplyAs, _Request} = Message when is_pid(From) ->
+            %% Every request is passed on, the last output of a process that has ended
+            %% included; the group watches the process that reads, so the terminal
+            %% never reads input for one that has ended.
+            Group ! Message,
             forward(Group, StarterRef, Look);
         {'DOWN', StarterRef, process, _, _} ->
             end_all(self());
@@ -64,12 +61,6 @@ forward(Group, StarterRef, Look) ->
             _Left -> forward(Group, StarterRef, Look)
         end
     end.
-
-%% An io request that writes, and nothing else: put_chars in any of its forms,
-%% or a list of requests each of which writes.
-output({requests, Requests}) when is_list(Requests) -> lists:all(fun output/1, Requests);
-output(Request) when is_tuple(Request), tuple_size(Request) >= 2 -> element(1, Request) =:= put_chars;
-output(_Request) -> false.
 
 -doc """
 Spawns Body, evaluator code, as a process of Leader's job, with a monitor and
@@ -113,9 +104,7 @@ release(keep, Leader) ->
 -doc """
 Ends the job of Leader: kills every process it leads (end_all/1), and
 returns once the leader has passed on to the terminal's group every io
-request that came before, and ended; of the requests of a process that has
-ended it passes on only output (forward/3), so the terminal reads no input
-for a process the close ended. A process the job killed sent its
+request that came before, and ended. A process the job killed sent its
 last request before it died, so the group has all the job's output when
 this returns, and output the job wrote comes before anything the caller
 says once this returns, such as its exit status. That rests on ERTS, not on
