@@ -61,10 +61,13 @@ struct erx_lane_part;
 typedef struct erx_funnel_control erx_funnel_control_t;
 typedef struct erx_funnel_header erx_funnel_header_t;
 
-/* The operations of the grammar, by OTP's distribution operation number. */
+/*
+ * The operations of the grammar, by OTP's distribution operation number.
+ * OTP's GROUP_LEADER (7) is not one: no group leader crosses a domain
+ * (design-domains.md, D18), so a frame that carries it is malformed.
+ */
 typedef enum erx_funnel_op {
 	ERX_FUNNEL_LINK = 1,
-	ERX_FUNNEL_GROUP_LEADER = 7,
 	ERX_FUNNEL_MONITOR_P = 19,
 	ERX_FUNNEL_DEMONITOR_P = 20,
 	ERX_FUNNEL_SEND_SENDER = 22,
@@ -128,11 +131,12 @@ struct erx_funnel_header {
  * member has one owner whatever the operation: from and sender_ref are
  * the sender's own, so the sender rule judges them; to and receiver_ref
  * are the receiver's, so the target rule judges them; group_leader is
- * data, as a pid in a payload is.
+ * data, as a pid in a payload is: the sender writes its From there, and
+ * the receiver ignores it, giving the child its own init as its group
+ * leader.
  *
  *   operation (number)        control tuple                 sets
  *   LINK (1)                  {1, FromPid, ToPid}           from to
- *   GROUP_LEADER (7)          {7, FromPid, ToPid}           from to
  *   MONITOR_P (19)            {19, FromPid, ToProc, Ref}    from to sender_ref
  *   DEMONITOR_P (20)          {20, FromPid, ToProc, Ref}    from to sender_ref
  *   SEND_SENDER (22)          {22, FromPid, ToPid}          from to

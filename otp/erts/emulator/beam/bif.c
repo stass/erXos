@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself; link/1,2 and monitor/2,3 answer a link or monitor of a pid of another run of a connected domain's node themselves (edit 66); list_to_pid, list_to_port and list_to_ref read a node's creation and refuse a number past its width. List_to_ref takes four words for this node, and unalias/1 ends the alias in the alias registry (edit 17 of docs/design-runtime.md). hibernate/3 drops prim_eval's held frames with the stack that owned them (edit 78).
+ * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag; monitor/2,3 answers a monitor of another domain's registered name itself; link/1,2 and monitor/2,3 answer a link or monitor of a pid of another run of a connected domain's node themselves (edit 66); list_to_pid, list_to_port and list_to_ref read a node's creation and refuse a number past its width. List_to_ref takes four words for this node, and unalias/1 ends the alias in the alias registry (edit 17 of docs/design-runtime.md). No group leader of another domain is set: group_leader/2 refuses a leader or a member of another domain, and erts_set_group_leader such a leader (edit 83). hibernate/3 drops prim_eval's held frames with the stack that owned them (edit 78).
  *
  * %CopyrightEnd%
  */
@@ -4930,6 +4930,10 @@ erts_set_group_leader(Process *proc, Eterm new_gl)
 
     ASSERT(is_pid(new_gl));
 
+    /* erXos: edit 83. Every way a group leader is set ends here: none of another domain. */
+    if (erts_dist_pid_of_other_domain(new_gl))
+        return 0;
+
     state = erts_atomic32_read_nob(&proc->state);
 
     if (state & ERTS_PSFLG_EXITING)
@@ -4978,7 +4982,13 @@ BIF_RETTYPE erts_internal_group_leader_3(BIF_ALIST_3)
 
 BIF_RETTYPE erts_internal_group_leader_2(BIF_ALIST_2)
 {
-    if (is_not_pid(BIF_ARG_1))
+    /*
+     * erXos: edit 83. No group leader crosses a domain: a leader or a member of another
+     * domain is badarg here, so no frame is written (the funnel's grammar has no
+     * GROUP_LEADER); erts_set_group_leader refuses such a leader on every other path.
+     */
+    if (is_not_pid(BIF_ARG_1) || erts_dist_pid_of_other_domain(BIF_ARG_1)
+        || erts_dist_pid_of_other_domain(BIF_ARG_2))
         BIF_RET(am_badarg);
 
     if (is_internal_pid(BIF_ARG_2)) {

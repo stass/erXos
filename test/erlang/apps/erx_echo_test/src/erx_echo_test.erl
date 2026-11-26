@@ -22,8 +22,16 @@ runtime answers the request itself with `noconnection` and writes nothing
 system domain decodes each frame in safe mode (edit 9 of
 docs/design-runtime.md), so the message is dropped and the reason arrives as
 `{erx_foreign_reason, Bin}`.
+
+group_leader_of/1, for the same suite, is spawned here by the system domain: it
+notes whether its group leader is this domain's own `init`, waits for `report`,
+and sends To `{group_leader, AtStart, Now}`, each `true` when the leader is
+`init`. The report names only atoms the system domain has, since it drops a
+message naming one it lacks. A spawn request's child takes its own
+domain's `init` as its group leader, and `group_leader/2` from another domain
+changes nothing (docs/design-domains.md, D18).
 """.
--export([mint/0, foreign_atoms/1]).
+-export([mint/0, foreign_atoms/1, group_leader_of/1]).
 %% erx_facet's callbacks; erx_facet is not on this application's compile path.
 -export([init/1, admit/3]).
 
@@ -51,6 +59,14 @@ foreign_atoms(To) ->
     To ! {foreign, list_to_atom("erx_foreign_atom_message")},
     To ! foreign_after,
     exit(list_to_atom("erx_foreign_atom_reason")).
+
+-spec group_leader_of(pid()) -> {group_leader, boolean(), boolean()}.
+group_leader_of(To) ->
+    AtStart = leader(),
+    receive {erx_origin, _, report} -> ok after 10000 -> ok end,
+    To ! {group_leader, AtStart, leader()}.
+
+leader() -> group_leader() =:= whereis(init).
 
 init(_Grant) ->
     {ok, none}.

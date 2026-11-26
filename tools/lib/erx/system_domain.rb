@@ -617,6 +617,19 @@ module Erx
                           '{foreign_spawn,noconnection},{erx_foreign_reason,true},false,false,false,' \
                           '{error,badarg}}'
     FOREIGN_ATOM_START = /\A#{PROMPT}\{foreign_atom,/n
+    # Typed after the foreign atoms: the system domain spawns
+    # erx_echo_test:group_leader_of/1 in erts, tries to make itself the child's group
+    # leader, then tells the child to report. A spawn request's child takes erts's own
+    # init as its group leader, never the spawner's, and group_leader/2 on a process of
+    # another domain fails with badarg and sends nothing, so the leader is still erts's
+    # init (docs/design-domains.md, D18).
+    GROUP_LEADER_EXPRESSION = "SdGlP=spawn('erts@erxos',erx_echo_test,group_leader_of,[self()])," \
+                              "SdGlS=case catch group_leader(self(),SdGlP) of {'EXIT',{badarg,_}}->badarg;SdGlO->SdGlO end," \
+                              'SdGlP!report,' \
+                              'SdGlR=receive {erx_origin,_,{group_leader,_,_}=SdGlV}->SdGlV after 15000->timeout end,' \
+                              'io:format("~0kp~n",[{group_leader_cross,SdGlS,SdGlR}])'
+    GROUP_LEADER_ANSWER = '{group_leader_cross,badarg,{group_leader,true,true}}'
+    GROUP_LEADER_START = /\A#{PROMPT}\{group_leader_cross,/n
     # peer stopped by its side's end while erts runs, its watcher told noconnection twice;
     # then erts halted with status 69, its watcher told {domain_down, Erts, {halt, 69}} by
     # the link, the monitor and the spawn's error reply, and the library calls given
@@ -686,8 +699,9 @@ module Erx
     end
 
     # The first line typed at the Erlang shell: SdSpec bound to later_spec(domain), then
-    # ECHO_EXPRESSION and FOREIGN_ATOM_EXPRESSION. SERVICE_KILL_STEPS follow it.
-    def service_kill_setup(domain, grant:) = "SdSpec=#{later_spec(domain, grant: grant)},#{ECHO_EXPRESSION},#{FOREIGN_ATOM_EXPRESSION}"
+    # ECHO_EXPRESSION, FOREIGN_ATOM_EXPRESSION and GROUP_LEADER_EXPRESSION. SERVICE_KILL_STEPS
+    # follow it.
+    def service_kill_setup(domain, grant:) = "SdSpec=#{later_spec(domain, grant: grant)},#{ECHO_EXPRESSION},#{FOREIGN_ATOM_EXPRESSION},#{GROUP_LEADER_EXPRESSION}"
 
     # The production checkpoints to the command shell, then the Erlang shell, the kill and
     # the runtime's end: service_kill_setup typed as a shell part that prints the echo
@@ -700,6 +714,7 @@ module Erx
 
       echo = /\A#{PROMPT}#{Regexp.escape(ECHO_ANSWER)}\r*\n\z/n
       foreign = /\A#{PROMPT}#{Regexp.escape(FOREIGN_ATOM_ANSWER)}\r*\n\z/n
+      leader = /\A#{PROMPT}#{Regexp.escape(GROUP_LEADER_ANSWER)}\r*\n\z/n
       answer = /\A#{PROMPT}#{Regexp.escape(SERVICE_KILL_ANSWER)}\r*\n\z/n
       ends = /\A#{PROMPT}#{Regexp.escape(DOMAIN_ENDS_ANSWER)}\r*\n\z/n
       table = /\A#{PROMPT}#{Regexp.escape(CONTROL_TABLE_ANSWER)}\r*\n\z/n
@@ -708,11 +723,13 @@ module Erx
       down = /\A#{PROMPT}#{Regexp.escape(CONNECTION_DOWN_ANSWER)}\r*\n\z/n
       ignored = /\A#{PROMPT}#{Regexp.escape(IGNORED_DOWN_ANSWER)}\r*\n\z/n
       later = /\A#{PROMPT}#{Regexp.escape(LATER_DOMAIN_ANSWER)}\r*\n\z/n
-      echo_facet, foreign_atom, *step_answers, ended = [
+      echo_facet, foreign_atom, group_leader, *step_answers, ended = [
         { name: 'echo-facet', pattern: ECHO_START, seconds: 180,
           verify: ->(text) { raise Error, "the echo facet gave #{text.inspect}" unless echo.match?(text) } }.freeze,
         { name: 'foreign-atom', pattern: FOREIGN_ATOM_START, seconds: 180,
           verify: ->(text) { raise Error, "the foreign atoms gave #{text.inspect}" unless foreign.match?(text) } }.freeze,
+        { name: 'group-leader', pattern: GROUP_LEADER_START, seconds: 180,
+          verify: ->(text) { raise Error, "the group leader across domains gave #{text.inspect}" unless leader.match?(text) } }.freeze,
         { name: 'domain-running', pattern: SERVICE_KILL_START, seconds: 180,
           verify: ->(text) { raise Error, "the shell answered #{text.inspect} before the kill" unless answer.match?(text) } }.freeze,
         { name: 'control-table', pattern: CONTROL_TABLE_START, seconds: 180,
@@ -735,7 +752,7 @@ module Erx
       steps = SERVICE_KILL_STEPS.map do |name, expression|
         ProductionImage::Run::ShellPart.new(expression: expression, answers: [answer_of.fetch(name)])
       end
-      parts = [ProductionImage::Run::ShellPart.new(expression: service_kill_setup(domain, grant: grant), answers: [echo_facet, foreign_atom]),
+      parts = [ProductionImage::Run::ShellPart.new(expression: service_kill_setup(domain, grant: grant), answers: [echo_facet, foreign_atom, group_leader]),
                *steps]
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
        *ProductionImage::Run.shell_parts(ProductionImage::Run::ERLANG_SHELL, parts, name: 'service-kill'), ended].freeze

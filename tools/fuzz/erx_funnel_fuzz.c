@@ -66,7 +66,6 @@ expected_fields(const erx_funnel_control_t *c)
 {
 	switch (c->op) {
 	case ERX_FUNNEL_LINK:
-	case ERX_FUNNEL_GROUP_LEADER:
 	case ERX_FUNNEL_SEND_SENDER:
 	case ERX_FUNNEL_PAYLOAD_EXIT:
 	case ERX_FUNNEL_PAYLOAD_EXIT2:

@@ -56,7 +56,7 @@ class SystemDomainTest < Minitest::Test
     domain = Erx::MediumBoot::Domain.new(runtime: 11, jit: 12, release: 13, release_files: 14)
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell], domain: domain, grant: GRANT)
     lines = [Suite.service_kill_setup(domain, grant: GRANT), *Suite::SERVICE_KILL_STEPS.values]
-    assert_equal %w[image-identity release-shell erlang-shell echo-facet foreign-atom service-kill-1 domain-running service-kill-2
+    assert_equal %w[image-identity release-shell erlang-shell echo-facet foreign-atom group-leader service-kill-1 domain-running service-kill-2
                     control-table service-kill-3 introduced service-kill-4 hostile service-kill-5 connection-down service-kill-6
                     ignored-down service-kill-7 later-domain service-kill-8 domain-ends system-domain-ended],
                  points.map { |point| point.fetch(:name) }
@@ -65,15 +65,15 @@ class SystemDomainTest < Minitest::Test
     # and the console's tty holds every one whole.
     typed = points.drop(2).filter_map { |point| point[:type] }
     assert_equal [*lines[0...-1].each_with_index.map { |line, index| "#{line},service_kill_#{index + 1}.\r" }, "#{lines.last}\r"], typed
-    assert_equal 'service-kill-1', points[5].fetch(:name)
-    assert_match points[5].fetch(:pattern), "service_kill_1\r\n"
-    refute_match points[5].fetch(:pattern), "#{typed.first}\n"
+    assert_equal 'service-kill-1', points[6].fetch(:name)
+    assert_match points[6].fetch(:pattern), "service_kill_1\r\n"
+    refute_match points[6].fetch(:pattern), "#{typed.first}\n"
     typed.each { |line| assert_operator line.bytesize, :<, Erx::ABI::Generated.constant('tty_max_input') }
     Erx::Transcript.new(checkpoints: points)
     # The later domain's request names the image's runtime and release, the rows' boot
     # script, and one connection.
     assert lines.first.start_with?('SdSpec=#{name=><<"peer">>,runtime=>11,release=>13,release_files=>14,boot=><<"erts">>,')
-    assert lines.first.end_with?(",connections=>1},#{Suite::ECHO_EXPRESSION},#{Suite::FOREIGN_ATOM_EXPRESSION}")
+    assert lines.first.end_with?(",connections=>1},#{Suite::ECHO_EXPRESSION},#{Suite::FOREIGN_ATOM_EXPRESSION},#{Suite::GROUP_LEADER_EXPRESSION}")
     assert lines[1].start_with?('SdLives=')
     named = points.to_h { |point| [point.fetch(:name), point] }
     running, table, ignored, later, ends, ended = named.values_at('domain-running', 'control-table', 'ignored-down', 'later-domain',

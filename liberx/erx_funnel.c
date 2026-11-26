@@ -229,7 +229,6 @@ ctl_shape(int64_t op)
 {
 	static const ctl_shape_t shapes[] = {
 		[ERX_FUNNEL_LINK] = { 3, false },
-		[ERX_FUNNEL_GROUP_LEADER] = { 3, false },
 		[ERX_FUNNEL_MONITOR_P] = { 4, false },
 		[ERX_FUNNEL_DEMONITOR_P] = { 4, false },
 		[ERX_FUNNEL_SEND_SENDER] = { 3, true },
@@ -258,7 +257,6 @@ ctl_elements(erx_etf_reader_t *r, erx_funnel_control_t *c)
 
 	switch (c->op) {
 	case ERX_FUNNEL_LINK:
-	case ERX_FUNNEL_GROUP_LEADER:
 	case ERX_FUNNEL_SEND_SENDER:
 	case ERX_FUNNEL_PAYLOAD_EXIT:
 	case ERX_FUNNEL_PAYLOAD_EXIT2:
@@ -566,8 +564,6 @@ static const verdict_row_t verdict_rows[] = {
 	    UNREACHABLE, ERX_FUNNEL_DROP, ERX_FUNNEL_TOO_LARGE),
 	[ERX_FUNNEL_PAYLOAD_EXIT2] = ROW(ERX_RIGHT_EXIT, PID,
 	    ERX_FUNNEL_DROP, ERX_FUNNEL_DROP, ERX_FUNNEL_TOO_LARGE),
-	[ERX_FUNNEL_GROUP_LEADER] = ROW(ERX_RIGHT_EXIT, PID,
-	    ERX_FUNNEL_DROP, ERX_FUNNEL_DROP, UNREACHABLE),
 	[ERX_FUNNEL_SPAWN_REQUEST] = ROW(ERX_RIGHT_SPAWN, DOMAIN,
 	    ERX_FUNNEL_ANSWER_SPAWN, UNREACHABLE, ERX_FUNNEL_ANSWER_SPAWN),
 	[ERX_FUNNEL_SPAWN_REPLY] = ROW(0, PID,

@@ -25,7 +25,9 @@
  * with that reason (edit 56). A lane port's entry takes its creation from the port,
  * and the port the connection's serial from the entry. erts_dist_other_run tells a
  * pid of an ended domain of a connected peer's name (edit 66). A spawn toward the
- * system domain's node fails with noconnection and writes nothing.
+ * system domain's node fails with noconnection and writes nothing. No group leader
+ * crosses a domain (edit 83): a spawn request toward another domain names its sender as
+ * the group leader, and a child spawned for another domain takes this node's init.
  *
  * %CopyrightEnd%
  */
@@ -1668,6 +1670,23 @@ erts_dist_peer_is_domain(DistEntry *dep)
 }
 
 /*
+ * erXos: edit 83 of docs/design-runtime.md. Whether pid is a process of another domain of
+ * this machine, of any run of its node: no group leader crosses a domain, so no such pid
+ * becomes a group leader, and group_leader/2 sets none. The node name alone decides,
+ * and an entry's name never changes, so no lock is needed.
+ */
+int
+erts_dist_pid_of_other_domain(Eterm pid)
+{
+    DistEntry *dep;
+
+    if (!is_external_pid(pid))
+        return 0;
+    dep = external_pid_dist_entry(pid);
+    return (dep != erts_this_dist_entry && erts_dist_peer_is_domain(dep));
+}
+
+/*
  * erXos: edit 66 of docs/design-runtime.md. Whether pid, a pid of dep's node, belongs to
  * another run of that node than the one dep is connected to, on a connection to another
  * domain that is up: every domain of a name has a creation of its own
@@ -3150,7 +3169,14 @@ int erts_net_message(Port *prt,
         so.mref = ref;
         so.tag = am_spawn_reply;
         so.parent_id = from;
-        so.group_leader = gl;
+        /*
+         * erXos: edit 83 of docs/design-runtime.md. No group leader crosses a domain: a
+         * child spawned for another domain takes this domain's init as its group leader,
+         * whatever the request names, so its io never leaves its domain. A node of another
+         * machine keeps stock's inheritance, unless it names a process of a domain here.
+         */
+        so.group_leader = (erts_dist_peer_is_domain(dep) || erts_dist_pid_of_other_domain(gl)
+                           ? erts_init_process_id : gl);
         so.mfa = mfa;
         so.dist_entry = dep;
         so.conn_id = conn_id;
@@ -6214,7 +6240,7 @@ BIF_RETTYPE erts_internal_dist_spawn_request_4(BIF_ALIST_4)
     case ERTS_DSIG_PREP_PENDING: {
         int inserted;
         ErtsMonitorData *mdp;
-        Eterm nargs_term, mfna, *hp;
+        Eterm nargs_term, mfna, gl, *hp;
 
         if (IS_USMALL(0, nargs)) {
             hp = HAlloc(BIF_P, 4);
@@ -6245,8 +6271,14 @@ BIF_RETTYPE erts_internal_dist_spawn_request_4(BIF_ALIST_4)
 
         ctx.reds = (Sint) (ERTS_BIF_REDS_LEFT(BIF_P) * TERM_TO_BINARY_LOOP_FACTOR);
 
-        code = dsig_send_spawn_request(&ctx, ref, BIF_P->common.id,
-                                       BIF_P->group_leader, mfna,
+        /*
+         * erXos: edit 83. The caller's group leader never crosses a domain: toward one,
+         * the group leader the request names is the caller, which the frame names
+         * already, so encoding it hands out nothing more, and the child takes its own
+         * domain's init.
+         */
+        gl = erts_dist_peer_is_domain(dep) ? BIF_P->common.id : BIF_P->group_leader;
+        code = dsig_send_spawn_request(&ctx, ref, BIF_P->common.id, gl, mfna,
                                        alist, opts);
         switch (code)  {
         case ERTS_DSIG_SEND_OK:

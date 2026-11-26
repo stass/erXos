@@ -11,6 +11,8 @@ require_relative '../system_domain'
 # erx_echo_test, and reads the domain service's refusals of that domain's hostile
 # provides; that domain then sends the system domain a message and an exit reason naming
 # atoms the system domain lacks, which it decodes in safe mode, its atom table unchanged;
+# a child the system domain spawns there takes that domain's init as its group leader,
+# and group_leader/2 on it fails with badarg;
 # then service_kill ends one configured domain's system side
 # with another domain's {domain_down, D2, x}, which its watcher sees as noconnection, and
 # the other by having it kill its agent behind a burst it published, which halts it with

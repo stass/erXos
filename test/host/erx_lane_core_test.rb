@@ -81,7 +81,7 @@ class ErxLaneCoreTest < Minitest::Test
 
   def test_every_decision_agrees_with_the_model
     table, answered = run_driver(build(File.join(ROOT, CORE)))
-    assert_equal STATES.size * EVENTS.size * 2 * ACTIONS.size * 14 * 2 * 2, table.size
+    assert_equal STATES.size * EVENTS.size * 2 * ACTIONS.size * 13 * 2 * 2, table.size
     assert_equal [], model_differences(table)
     assert_equal ANSWERED_OPS, answered.select { |_, yes| yes }.keys.sort
   end

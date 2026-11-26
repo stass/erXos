@@ -23,15 +23,15 @@ module Erx
   # takes the envelope whole.
   #
   # OWNERS holds the modules whose unwrap is built, a subset of the owners design.md's
-  # chokepoint row names: gen and io take replies (edits 58 and 60), erts_internal's
+  # chokepoint row names: gen takes call replies (edit 58), erts_internal's
   # dist_spawn_init a spawn's argument list, and erx_file_remote, the preloaded client
   # of the file protocol, a file server's replies. Each later edit adds its own module.
+  # No io request or reply crosses a domain (edit 83), so neither io nor any io server is an owner.
   module OriginUnwraps
     SCOPE = %w[otp/**/*.{erl,hrl}].freeze
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
     OWNERS = %w[
       otp/lib/stdlib/src/gen.erl
-      otp/lib/stdlib/src/io.erl
       otp/erts/preloaded/src/erts_internal.erl
       otp/erts/preloaded/src/erx_file_remote.erl
     ].freeze

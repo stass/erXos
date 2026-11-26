@@ -26,7 +26,7 @@ module FunnelWire
   # follows it.
   def every_operation
     {
-      'LINK' => [ctl(op(1), from, to), false], 'GROUP_LEADER' => [ctl(op(7), from, to), false],
+      'LINK' => [ctl(op(1), from, to), false],
       'MONITOR_P' => [ctl(op(19), from, to, reference), false],
       'DEMONITOR_P' => [ctl(op(20), from, to, reference), false],
       'SEND_SENDER' => [ctl(op(22), from, to), true], 'PAYLOAD_EXIT' => [ctl(op(24), from, to), true],

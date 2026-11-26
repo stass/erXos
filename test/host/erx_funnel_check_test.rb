@@ -46,7 +46,6 @@ class ErxFunnelCheckTest < Minitest::Test
     'PAYLOAD_MONITOR_P_EXIT' => Row.new(0, '-', nil, 'drop', 'too_large'),
     'PAYLOAD_EXIT' => Row.new(0, '-', nil, 'drop', 'too_large'),
     'PAYLOAD_EXIT2' => Row.new(EXIT, 'pid:9', 'drop', 'drop', 'too_large'),
-    'GROUP_LEADER' => Row.new(EXIT, 'pid:9', 'drop', 'drop', nil),
     'SPAWN_REQUEST' => Row.new(SPAWN, 'domain', 'answer_spawn', nil, 'answer_spawn'),
     'SPAWN_REPLY' => Row.new(0, '-', nil, 'drop', nil),
     'SPAWN_REPLY error' => Row.new(0, '-', nil, 'drop', nil)
@@ -143,7 +142,6 @@ class ErxFunnelCheckTest < Minitest::Test
     other_node = EtfWire.pid('db@erxos', 5, 0, 3)
     {
       'SEND_SENDER' => ctl(op(22), other_id, to), 'LINK' => ctl(op(1), other_node, to),
-      'GROUP_LEADER' => ctl(op(7), other_id, to),
       'MONITOR_P' => ctl(op(19), from, to, reference),
       'DEMONITOR_P' => ctl(op(20), from, to, EtfWire.ref('web@erxos', 4, [1, 2, 3, 4])),
       'SPAWN_REQUEST' => ctl(op(29), reference, from, to, mfa, options),
@@ -227,6 +225,12 @@ class ErxFunnelCheckTest < Minitest::Test
       end
       assert_equal 'deliver accepted ok - 0', check(reply.call(from), '', rights: 0, system: system), "pid system #{system}"
     end
+  end
+
+  # No group leader crosses a domain (design-domains.md, D18): OTP's GROUP_LEADER is
+  # outside the grammar, so a peer that writes one ends its connection, whatever it holds.
+  def test_a_group_leader_change_is_outside_the_grammar
+    assert_equal 'malformed malformed op - 0', check(ctl(op(7), from, to), '', rights: ALL)
   end
 
   def test_refusals_of_the_grammar_stay_malformed
