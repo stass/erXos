@@ -469,7 +469,7 @@ module Erx
       # * constant, the abi/manifest.txt constant that holds its name;
       # * interface, the abi/services interface it is of, one whose parameters files_grant
       #   checks (files_grant_interface): files, or media for the media service, whose own
-      #   interface marks its entries nofollow (abi/services/media.txt);
+      #   interface's row says links none (abi/services/media.txt);
       # * needs, what makes the manifest hold exactly one service of the name, of its
       #   interface, and the build derive its rows: an apps row (:apps), the name
       #   being served at all (:served), or nothing (nil), when it derives none;
@@ -2069,7 +2069,7 @@ module Erx
       end
 
       # The number of the interface name, which must be one whose parameters files_grant
-      # checks, files or media (grant_checker), since a well-known service's derived rows
+      # checks (grant_checker), since a well-known service's derived rows
       # are files grants.
       def files_grant_interface(name)
         interface = fetch_interface(name)

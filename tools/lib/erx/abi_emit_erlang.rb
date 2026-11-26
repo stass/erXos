@@ -154,7 +154,7 @@ module Erx
           end
         end
         schema.signals.sets.sort.each { |name, signals| lines << signal_set_members(schema, name, signals) }
-        lines << tree_services(schema) << files_grant_services(schema)
+        lines << tree_services(schema) << files_grant_services(schema) << links_none_services(schema)
         lines << session_lines(schema) << drive_grants(schema)
         (lines + ['', '-endif.', '']).join("\n")
       end
@@ -183,8 +183,7 @@ module Erx
       end
 
       # ?ERX_FILES_GRANT_SERVICES: the numbers of the abi/services interfaces whose
-      # parameters name files_grant as their checker, in number order: files and media,
-      # whose grants a namespace mounts with the rights the facet row states, so the
+      # parameters name files_grant as their checker, in number order, whose grants a namespace mounts with the rights the facet row states, so the
       # domain service tells them from the other tree interfaces by the ABI alone.
       def files_grant_services(schema)
         raise SchemaError, 'files_grant_services collides with a constant' if schema.constants.key?('files_grant_services')
@@ -192,6 +191,18 @@ module Erx
         numbers = schema.services.select { |service| service.fetch(:checked_by) == 'files_grant' }
                         .map { |service| service.fetch(:number) }.sort
         "-define(ERX_FILES_GRANT_SERVICES, [#{numbers.join(', ')}])."
+      end
+
+      # ?ERX_LINKS_NONE_SERVICES: the numbers of the abi/services interfaces whose row
+      # says links none, in number order, so erx_facets:table/1 marks every entry on a
+      # facet of one of them nofollow from the ABI alone, naming no interface itself
+      # (docs/design-app-trees.md, "Links").
+      def links_none_services(schema)
+        raise SchemaError, 'links_none_services collides with a constant' if schema.constants.key?('links_none_services')
+
+        numbers = schema.services.select { |service| service.fetch(:links_none) }
+                        .map { |service| service.fetch(:number) }.sort
+        "-define(ERX_LINKS_NONE_SERVICES, [#{numbers.join(', ')}])."
       end
 
       # ?ERX_LINES: each abi/services interface declared served_by session, a session's

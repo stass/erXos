@@ -1428,7 +1428,8 @@ manifest's row for a facet of the ready answer or of an installation,
 and from the live grant record of its source for a facet
 `erx_domain:grant/4` installs. `erx_facets:table/1`, and
 `erx_facets:program_table/1` with it, gives every entry whose facet the
-registry holds as one of the `media` interface the mark, at each
+registry holds as one of an interface whose row says `links none`, as
+`media`'s does ([design-abi.md](design-abi.md)), the mark, at each
 resolution. So the mark follows no name: not the facet's, which
 `grant/4` may choose freely, and not the grant's tree, which its server
 names and which keys identities alone. It is stored in no table and
@@ -1461,9 +1462,9 @@ The mark lies with the interface because only the domain service, which
 holds the manifest and every grant record, can attach a fact to a facet
 that reaches every grantee's runtime and that no server, name or mount
 can change. An interface of its own costs one declaration in
-`abi/services` and no field, message or table: the interface number
-already travels with every facet, in the ready answer's map and in each
-installation.
+`abi/services`, whose row says `links none`, and no field, message or
+table: the interface number already travels with every facet, in the
+ready answer's map and in each installation.
 
 The tree is one grant over many volumes, so the media tree keeps apart
 what the namespace's own `exdev` rule cannot see: a rename or a link

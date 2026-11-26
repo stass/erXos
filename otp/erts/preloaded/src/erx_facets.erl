@@ -234,17 +234,19 @@ facet, never a pid or a tree, so a re-grant serves the next lookup and nothing
 has to follow the registry. Every other
 entry is as `Mounts` holds it, except that
 
-* every entry on a facet the registry holds as one of the `media`
-  interface, a drive's volumes, carries the `nofollow` mark, whatever the
-  facet is named and whatever tree the entry asks. So a mount of the facet,
-  a bind of one and a program's table taken from one alike carry it once
-  the registry holds the facet; before that the entry is `ended`. The mark
+* every entry on a facet the registry holds as one of an interface whose
+  row in abi/services says `links none` (`?ERX_LINKS_NONE_SERVICES`) carries
+  the `nofollow` mark, whatever the facet is named and whatever tree the entry asks. So a
+  mount of the facet, a bind of one and a program's table taken from one
+  alike carry it once the registry holds the facet; before that the entry
+  is `ended`. The mark
   is derived here at each resolution, from the interface number the system
   domain set with the facet, and is stored in no table and taken from no
   name, so no writer of a table has to keep it, and the resolver follows no
-  link a stranger's stick holds (erx_path; docs/design-drives.md, "Links
-  and rights"). No grant of another domain is mounted by pid, so outside
-  the media domain every entry on a media grant is a facet's.
+  link a stranger's stick or a service's tree holds (erx_path;
+  docs/design-drives.md, "Links and rights"; docs/design-app-trees.md,
+  "Links"). No grant of another domain is mounted by pid, so outside its
+  server's domain every entry on such a grant is a facet's.
 """.
 -spec table(erx_path:table()) -> erx_path:table().
 table(Mounts) when is_list(Mounts) ->
@@ -304,10 +306,13 @@ resolved(Entry, _Registry) ->
 on_grant(Entry, _Pid, _Tree, none) -> Entry#{provider := ended};
 on_grant(Entry, Pid, Tree, Rights) -> Entry#{provider := {grant, Pid, Tree}, rights := Rights}.
 
-%% The resolved Entry of a mount on a facet of Interface, marked nofollow for the media
-%% interface's.
-marked(?ERX_SERVICE_MEDIA, Entry) -> Entry#{nofollow => true};
-marked(_Interface, Entry) -> Entry.
+%% The resolved Entry of a mount on a facet of Interface, marked nofollow for an
+%% interface whose row says links none.
+marked(Interface, Entry) ->
+    case lists:member(Interface, ?ERX_LINKS_NONE_SERVICES) of
+        true -> Entry#{nofollow => true};
+        false -> Entry
+    end.
 
 -doc """
 A file client's handle on the grant of the facet `Name` of a tree, read-only,

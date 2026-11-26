@@ -582,6 +582,10 @@ module Erx
       # or facet row declares; so its interface states every quantity a facet row carries
       # (docs/design-system.md, "A session's lines" and "A drive window as a grant").
       SERVED_BY = %w[session drive].freeze
+      # `links none` says no link in a grant of the interface is followed, so
+      # erx_facets:table/1 marks every entry on a facet of the interface nofollow
+      # (docs/design-app-trees.md, "Links"). An interface that does not state it has
+      # its links followed.
 
       def services(declarations, types:)
         seen_numbers = {}
@@ -601,6 +605,7 @@ module Erx
           liveness = nil
           served_as = nil
           served_by = nil
+          links = nil
           declaration.members.each do |line|
             keyword, *words = line.words
             case keyword
@@ -624,6 +629,11 @@ module Erx
               line.fail!('duplicate served_by') if served_by
               line.fail!("served_by must be #{SERVED_BY.join(' or ')}") unless SERVED_BY.include?(words[0])
               served_by = words[0]
+            when 'links'
+              Model.arity(line, 2)
+              line.fail!('duplicate links') if links
+              line.fail!('links must be none') unless words[0] == 'none'
+              links = words[0]
             when 'parameter'
               key, id, kind, cardinality, *bound = words
               allowed = %w[u64 i64 boolean identifier namespace_path domain principal device bytes member]
@@ -680,7 +690,8 @@ module Erx
           Model.unique_values(parameters.transform_values { |value| value.fetch(:number) }, label: 'parameter', line: declaration.line)
           { name: name, number: number,
             operations: operations.freeze, parameters: parameters.freeze, quantities: quantities.freeze,
-            liveness: liveness, served_as: served_as, served_by: served_by, checked_by: checkers.first }.freeze
+            liveness: liveness, served_as: served_as, served_by: served_by, links_none: !links.nil?,
+            checked_by: checkers.first }.freeze
         end.freeze
       end
 

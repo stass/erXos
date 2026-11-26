@@ -173,6 +173,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Low] ABI, a files-like tree interface copies `files`'s quantities by hand: `abi/services/media.txt` and
+  `abi/services/svc.txt` each repeat the five `quantity` lines of `abi/services/files.txt`, and only
+  `max_request`'s floor is checked (`check_files_grants`), so a change to `files`'s quantities leaves the
+  copies behind. A row word naming the interface whose quantities it carries, or the generator deriving them,
+  would make `files.txt` the one source.
 * [Low] ABI, the generated C manifest reader has no span accessor: `liberx/system/dom_boot_view.c`
   (`boot_facet_parameters`' caller) and `liberx/backend/core/boot_manifest.c` each turn a facet row's
   `parameters` span into a first index by hand (`(offset - header offset) / ERX_MF_PARAMETER_SIZE`),

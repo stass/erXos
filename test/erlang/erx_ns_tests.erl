@@ -41,7 +41,8 @@ ns_test_() ->
       fun an_own_tree_mounts_its_grant_at_its_place/0,
       fun the_packages_place_is_the_system_domains_alone/0,
       fun facet_mount_refusals/0,
-      fun a_media_facet_entry_follows_no_link/0]}.
+      fun a_media_facet_entry_follows_no_link/0,
+      fun a_service_tree_entry_follows_no_link/0]}.
 
 start() ->
     persistent_term:erase(erx_ns),
@@ -503,6 +504,24 @@ a_media_facet_entry_follows_no_link() ->
                  [Entry || #{point := [<<"media">>]} = Entry <- at_use()]),
     ?assertEqual(Expected ++ [[<<"p">>]], Marked(erx_facets:table(Program))),
     ?assertEqual(Expected ++ [[<<"p">>]], Marked(erx_facets:program_table(erx_facets:program(Program)))).
+
+%% An entry on a facet the registry holds as one of the svc interface, a service's own
+%% tree, carries the nofollow mark as a drive's does, because the interface's row says
+%% links none (abi/services/svc.txt) and erx_facets:table/1 marks every interface whose
+%% row says it, never the media interface by name: a mount of the facet, a bind of it
+%% and a program's table made by change/2 carry the mark, and a files facet of the same
+%% name does not (docs/design-app-trees.md, "Links").
+a_service_tree_entry_follows_no_link() ->
+    ok = erx_ns:mount({facet, ntp}, <<"/ntp">>, [rw]),
+    ok = erx_ns:bind(<<"/ntp">>, <<"/n">>, [ro]),
+    {ok, Program} = erx_ns:change({bind, <<"/ntp">>, <<"/p">>, [ro]}, table()),
+    Marked = fun(Table) -> [Point || #{point := Point, nofollow := true} <- Table] end,
+    persistent_term:put({erx, facets}, {1, #{ntp => {?ERX_SERVICE_FILES, {grant(), <<"ntp">>, rw}}}}),
+    ?assertEqual([], Marked(at_use())),
+    persistent_term:put({erx, facets}, {2, #{ntp => {?ERX_SERVICE_SVC, {grant(), <<"ntp">>, rw}}}}),
+    ?assertEqual([[<<"ntp">>], [<<"n">>]], Marked(at_use())),
+    ?assertEqual([[<<"ntp">>], [<<"n">>], [<<"p">>]],
+                 Marked(erx_facets:program_table(erx_facets:program(Program)))).
 
 %% The table as a resolution uses it, prim_file:erx_table/0's.
 at_use() ->

@@ -5,14 +5,16 @@
 # It speaks the file protocol as a files grant does, so it declares no operation, and
 # carries files's quantities and floor (abi/services/files.txt, property 16). Its client's
 # contract differs from a files grant's in one point: a drive's links are a stranger's,
-# so the resolution of a namespace table marks every entry on a facet of this interface
-# nofollow, from the facet's interface number (erx_facets:table/1), and the resolver
-# follows none of them. A facet row's one parameter is its grant's rights, ro or rw, a
-# row that states none being rw; media_rights has no rx, so no grant of a drive's
-# volumes runs what it reads (docs/design-drives.md, "Manifest rows"). files_grant takes
-# it as it takes a files facet's rights.
+# so its row says links none, the resolution of a namespace table marks every entry on a
+# facet of this interface nofollow, from the facet's interface number
+# (erx_facets:table/1), and the resolver follows none of them. A facet row's one
+# parameter is its grant's rights, ro or rw, a row that states none being rw;
+# media_rights has no rx, so no grant of a drive's volumes runs what it reads
+# (docs/design-drives.md, "Manifest rows"). files_grant takes it as it takes a files
+# facet's rights.
 service media 24
   served_as tree
+  links none
   parameter rights 1 member optional member media_rights checked_by files_grant
   quantity max_request 131072
   quantity in_flight 16

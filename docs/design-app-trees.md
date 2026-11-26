@@ -1295,7 +1295,8 @@ Each test is paired with the fault that proves the code ran.
 Each step lands with its tests and seeded faults above, none waits on a
 later one, and none leaves a command that worked before it broken: a
 path moves in the same step as every reader and writer of it.
-`TODO.md` ("Service trees at `/svc`") tracks the steps.
+[todo-apps.md](todo-apps.md) ("Service trees at `/svc`") tracks the
+steps.
 
 1. **The interface.** `abi/services/svc.txt` with `svc_rights` and the
    three limits; the row word `links none` in the services grammar, on

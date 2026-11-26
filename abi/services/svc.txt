@@ -1,0 +1,30 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The svc interface (docs/design-app-trees.md, "The interface"): an erx_fs grant of a
+# service's own tree, its status and ctl files, which a client mounts at /svc/NAME. It
+# speaks the file protocol as a files grant does, so it declares no operation, and
+# carries files's quantities and floor (abi/services/files.txt, property 16). Its row says
+# links none: a tree's links are its server's, so the resolution of a namespace table
+# marks every entry on a facet of this interface nofollow, from the facet's interface
+# number (erx_facets:table/1), and the resolver follows none of them (AT4). A facet
+# row's one parameter is its grant's rights, ro or rw, a row that states none being rw;
+# svc_rights has no rx, so nothing in a service's tree runs (AT5). files_grant takes it
+# as it takes a files facet's rights.
+service svc 25
+  served_as tree
+  links none
+  parameter rights 1 member optional member svc_rights checked_by files_grant
+  quantity max_request 131072
+  quantity in_flight 16
+  quantity reductions 100000
+  quantity period_ns 1000000000
+  quantity max_heap_size 262144
+enum svc_rights u8
+  value ro 1
+  value rw 2
+# The bounds of a reader of a service's tree (docs/design-app-trees.md, "Reading with a
+# deadline"): the longest a system command waits on a tree, in milliseconds; the most
+# bytes it reads of a status file; and the most bytes it writes to a ctl file.
+limit svc_wait_max u32 5000
+limit svc_status_max u32 65536
+limit svc_ctl_max u32 4096

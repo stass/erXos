@@ -396,8 +396,8 @@ booted(#{lib := Lib} = State) ->
                                                maps:get(grants, Boot, [])),
             %% erx_domain_mints takes each configured domain's service as {Server,
             %% Name}; the interface number tells files services, of the interfaces
-            %% whose parameters files_grant checks, ?ERX_FILES_GRANT_SERVICES (files and
-            %% media), whose grants a namespace mounts and the mint core settles before
+            %% whose parameters files_grant checks, ?ERX_FILES_GRANT_SERVICES,
+            %% whose grants a namespace mounts and the mint core settles before
             %% a session's start answers. The services of interfaces
             %% abi/services declares served_as tree, ?ERX_TREE_SERVICES, are those the
             %% system domain serves as erx_fs grants (served_kind/2).

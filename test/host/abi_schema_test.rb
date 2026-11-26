@@ -541,22 +541,46 @@ class AbiSchemaTest < Minitest::Test
     end
   end
 
-  # The checked-in interfaces served as trees are files, input, line, media and windows.
-  def test_files_input_line_media_and_windows_are_served_as_trees
+  # The checked-in interfaces served as trees are files, input, line, media, svc and windows.
+  def test_files_input_line_media_svc_and_windows_are_served_as_trees
     root = File.expand_path('../..', __dir__)
     services = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)).services
-    assert_equal %w[files input line media windows], services.select { |service| service.fetch(:served_as) == 'tree' }.map { |service| service.fetch(:name) }.sort
+    assert_equal %w[files input line media svc windows], services.select { |service| service.fetch(:served_as) == 'tree' }.map { |service| service.fetch(:name) }.sort
+  end
+
+  # links none says that no link in a grant of the interface is followed
+  # (docs/design-app-trees.md, "Links"); the generator lists the interfaces that state it
+  # by number as ?ERX_LINKS_NONE_SERVICES, from which erx_facets:table/1 marks their
+  # entries nofollow. Seeds: a word outside the closed set, a missing or extra word, and
+  # the member stated twice.
+  def test_links_none_lists_the_interfaces_whose_links_no_grant_follows
+    parsed = schema("service plain 2\n  served_as tree\nservice stranger 3\n  served_as tree\n  links none\n")
+    assert_equal({ 'plain' => false, 'stranger' => true },
+                 parsed.services.to_h { |service| [service.fetch(:name), service.fetch(:links_none)] })
+    assert_includes Erx::ABI::ErlangEmitter.header(parsed), "-define(ERX_LINKS_NONE_SERVICES, [3]).\n"
+    ['  links follow', '  links', '  links none none', "  links none\n  links none"].each do |member|
+      assert_raises(Erx::ABI::SchemaError, member) { schema("service stranger 3\n  served_as tree\n#{member}\n") }
+    end
+  end
+
+  # The checked-in interfaces whose links no grant follows are media, a drive's volumes
+  # (docs/design-drives.md, "Links and rights"), and svc, a service's own tree
+  # (docs/design-app-trees.md, "Links").
+  def test_media_and_svc_are_the_interfaces_whose_links_no_grant_follows
+    root = File.expand_path('../..', __dir__)
+    services = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)).services
+    assert_equal %w[media svc], services.select { |service| service.fetch(:links_none) }.map { |service| service.fetch(:name) }.sort
   end
 
   # ?ERX_FILES_GRANT_SERVICES lists by number the interfaces whose parameters name
   # files_grant as their checker, and no other tree interface; the checked-in ones are
-  # files and media, whose grants a namespace mounts with rights (erx_domain_srv).
+  # files, media and svc, whose grants a namespace mounts with rights (erx_domain_srv).
   def test_files_grant_services_are_the_interfaces_files_grant_checks
     parsed = schema("service carried 2\n  served_as tree\n  parameter rights 1 u64 optional range 1 2 checked_by files_grant\n" \
                     "service line 3\n  served_as tree\n  parameter rate 1 u64 optional range 1 2 checked_by line_grant\n")
     assert_includes Erx::ABI::ErlangEmitter.header(parsed), "-define(ERX_FILES_GRANT_SERVICES, [2]).\n"
     model = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: File.expand_path('../..', __dir__)))
-    numbers = %w[files media].map { |name| model.services.find { |service| service.fetch(:name) == name }.fetch(:number) }
+    numbers = %w[files media svc].map { |name| model.services.find { |service| service.fetch(:name) == name }.fetch(:number) }
     assert_includes Erx::ABI::ErlangEmitter.header(model), "-define(ERX_FILES_GRANT_SERVICES, [#{numbers.sort.join(', ')}]).\n"
   end
 

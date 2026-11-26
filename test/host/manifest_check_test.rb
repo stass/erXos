@@ -884,6 +884,18 @@ class ManifestCheckTest < Minitest::Test
     assert_match(/parameter rights is one of ro, rw/, error.message)
   end
 
+  # Nothing in a service tree runs (docs/design-app-trees.md, AT5): svc_rights has no rx,
+  # so a facet row of an svc service is admitted ro or rw and refused rx, as any value
+  # outside the enum's declared members is (abi/services/svc.txt).
+  def test_an_svc_facet_granting_rx_is_refused
+    tree = "service ntp_tree\n  server @domain.web\n  interface svc\n"
+    %w[ro rw].each { |rights| admit(@source + tree + files_facet('ntp_tree', '@session.system', rights: rights)) }
+    error = assert_raises(Erx::ABI::SchemaError) do
+      admit(@source + tree + files_facet('ntp_tree', '@session.system', rights: 'rx'))
+    end
+    assert_match(/parameter rights is one of ro, rw/, error.message)
+  end
+
   # Property 4: budgets, grants and the root startup rule.
   # The development manifest's system_baseline, which the sums below fit against.
   def baseline = Integer(@source[/^  system_baseline (\d+)$/, 1])

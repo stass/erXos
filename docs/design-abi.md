@@ -1831,13 +1831,13 @@ connection, with no additional capabilities or transitive authority.
 
 Within `service NAME NUMBER`, the members are `operation NAME NUMBER`,
 `liveness OPERATION_NAME`, `served_as message|tree`, `served_by
-session`, `quantity KEY VALUE` and `parameter NAME NUMBER KIND CARDINALITY BOUND checked_by
+session`, `links none`, `quantity KEY VALUE` and `parameter NAME NUMBER KIND CARDINALITY BOUND checked_by
 HELPER`.
 
 * `served_as` is stated by every interface, so no interface is served
   one way by omission. `tree` marks an interface whose grants are
   `erx_fs` grants of one tree, which the grantee mounts and speaks
-  9P2000.L to (`files`, `media`, `windows`, `line` and `input`); `message` one served as a
+  9P2000.L to (`files`, `media`, `svc`, `windows`, `line` and `input`); `message` one served as a
   message facet. It is the one source of that fact: the generator lists
   the `tree` interfaces for Erlang as `?ERX_TREE_SERVICES`, from which
   the domain service serves the system domain's such services as
@@ -1845,10 +1845,19 @@ HELPER`.
   and the manifest check holds every receiver of such a facet to
   `files_max_frame_min` (property 16 of design-system.md).
   Of those, the interfaces whose parameters name `files_grant` as
-  their checker (`files` and `media`) are the ones whose grants a
+  their checker (`files`, `media` and `svc`) are the ones whose grants a
   namespace mounts with the rights the facet row states; the generator
   lists them for Erlang as `?ERX_FILES_GRANT_SERVICES`, and the manifest
   check tells them by the same checker.
+* `links none` says that no link in a grant of the interface is
+  followed; an interface that does not state it has its links followed as the resolver's
+  table in [design-files.md](design-files.md#resolving-a-path) says.
+  `media`, a drive's volumes, and `svc`, a service's own tree, state
+  it. The generator lists those interfaces for Erlang as
+  `?ERX_LINKS_NONE_SERVICES`, from which `erx_facets:table/1` marks
+  every entry on a facet of one of them `nofollow` at each resolution,
+  naming no interface itself ([design-drives.md](design-drives.md#links-and-rights),
+  [design-app-trees.md](design-app-trees.md#links)).
 * A facet row's operations are explicit operation numbers of its
   interface, strictly ascending; a schema revision does not add newly
   declared operations to an existing grant. A tree service's row names
