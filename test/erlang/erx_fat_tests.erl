@@ -226,6 +226,20 @@ a_chain_that_ends_early_is_refused_test() ->
     Fat = mounted(relinked(image("fat16.img"), fun(_, _) -> 16#ffff end)),
     ?assertEqual({error, does_not_read}, whole(Fat, [<<"sub">>, ?LONG])).
 
+%% A directory whose chain links back to itself never reaches its end: its walk runs
+%% out of the clusters 65,536 entries fill and is does_not_read, never a hang, and the
+%% check finds the loop.
+a_directory_chain_that_loops_is_refused_test() ->
+    each_image(fun(Image) ->
+                       Sub = dir_first(Image, [<<"sub">>]),
+                       Looped = fat_put(Image, Sub, Sub),
+                       Fat = mounted(Looped),
+                       {ok, Dir} = path(Fat, [<<"sub">>]),
+                       ?assertEqual({error, does_not_read}, erx_fat:walk(Dir, <<"Deeper">>, Fat)),
+                       ?assertEqual({error, does_not_read}, erx_fat:list(Dir, Fat)),
+                       ?assertEqual({read_only, tree}, checked(Looped))
+               end).
+
 a_sector_the_medium_does_not_read_is_read_failed_test() ->
     Image = image("fat16.img"),
     Fat = mounted(Image),

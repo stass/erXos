@@ -22,12 +22,16 @@ class ErxFatTest < Minitest::Test
 
   Fault = Data.define(:name, :from, :to, :caught_by)
 
-  # Each fault replaces one passage of erx_fat; the case named in caught_by must fail.
+  # Each fault replaces one passage of erx_fat; the case named in caught_by must fail, or
+  # time out where the fault makes a walk endless.
   FAULTS = [
     Fault.new(name: 'a cluster seen twice in a chain not checked',
-              from: "walk_chain(_Fat, Cluster, _Bound, Seen, _Got) when is_map_key(Cluster, Seen) ->\n    " \
+              from: "exact_chain(_Fat, Cluster, _Left, Seen, _Got) when is_map_key(Cluster, Seen) ->\n    " \
                     "fail(does_not_read);\n",
               to: '', caught_by: 'a_chain_that_loops_is_refused_test'),
+    Fault.new(name: "a directory's chain followed past the clusters its entries fill",
+              from: "        _Next when Taken =:= Max -> fail(does_not_read);\n", to: '',
+              caught_by: 'a_directory_chain_that_loops_is_refused_test'),
     Fault.new(name: "a link's range not checked",
               from: 'when is_integer(Cluster), Cluster >= 2, Cluster < Clusters + 2 ->',
               to: 'when is_integer(Cluster), Clusters > 0 ->',
@@ -108,7 +112,7 @@ class ErxFatTest < Minitest::Test
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
       output, status = eunit(original.sub(fault.from) { fault.to })
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
-      assert_match(/#{Regexp.escape(fault.caught_by)}\.\.\.(?:(?!erx_fat_tests: ).)*?\*failed\*/m,
+      assert_match(/#{Regexp.escape(fault.caught_by)}\.\.\.(?:(?!erx_fat_tests: ).)*?\*(?:failed|timed out)\*/m,
                    output, fault.name)
     end
   end

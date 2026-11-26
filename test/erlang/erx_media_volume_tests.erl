@@ -412,6 +412,29 @@ fat32_volumes_are_checked_within_the_memory_bound_test_() ->
              end}}
      || {Name, Total, PerCluster, Subdirs, Files, Mount} <- Cases].
 
+%% A directory of the most entries a directory holds, 65,536, is walked within the
+%% volume's memory bound on a volume of nearly the most clusters the check holds, whose
+%% two sets stand beside it: in a process under the volume's bound that reads through
+%% the proxy, the check of 4,193,404 one-sector clusters whose root holds 65,536 names
+%% answers ok, and a lookup of the root's last name finds it.
+the_largest_directory_is_walked_within_the_memory_bound_test_() ->
+    {timeout, 300,
+     fun() ->
+             Proxy = proxy(fat32_shaped(4_260_000, 1, 0, 65_536), ok),
+             Read = fun(Lba) -> erx_media_medium:window(Proxy, {read, Lba, 1}) end,
+             Test = self(),
+             {Pid, Ref} = spawn_opt(fun() ->
+                                            {ok, Fat} = erx_fat:mount(Read, 4_260_000),
+                                            Check = erx_fat:check(Fat),
+                                            Test ! {walked, Check, erx_fat:walk(erx_fat:root(Fat), <<"F0065535">>, Fat)}
+                                    end, [monitor, {max_heap_size, erx_media_medium:memory_bound()}]),
+             receive
+                 {walked, Check, Walk} -> ?assertEqual(ok, Check), ?assertMatch({ok, _}, Walk);
+                 {'DOWN', Ref, process, Pid, Why} -> ?assertEqual(walked, Why)
+             end,
+             Proxy ! stop
+     end}.
+
 %% A FAT32 volume of Total sectors and PerCluster sectors a cluster, a sector at a
 %% time: the seed's reserved sectors with its boot sector's geometry changed; FATs
 %% that chain the root's clusters from cluster 2 and end each subdirectory's one

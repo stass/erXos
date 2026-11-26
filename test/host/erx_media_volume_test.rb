@@ -98,7 +98,7 @@ class ErxMediaVolumeTest < Minitest::Test
               from: 'pushed(_Dir, _Parent, #{depth := Depth}) when Depth >= ?CHECK_PENDING_MAX ->',
               to: 'pushed(_Dir, _Parent, #{depth := Depth}) when Depth > ?CHECK_PENDING_MAX ->',
               caught_by: 'fat32_volumes_are_checked_within_the_memory_bound_test_/0-fun-2- (one past a full stack)'),
-    # The pass as it was when a volume of 1,949,723 clusters was killed by its bound.
+    # A FAT pass that lists each sector's entries and every sector's index over the whole FAT.
     Fault.new(name: "the ownership check's FAT pass building lists over the whole FAT", path: FAT,
               from: "fat_pass(Fat = #fat{clusters = Clusters}, Fun) ->\n    fat_pass(Fat, Fun, 2, Clusters + 2).",
               to: "fat_pass(Fat = #fat{read = Read, type = Type, fat_start = Start, clusters = Clusters}, Fun) ->\n" \
@@ -112,6 +112,14 @@ class ErxMediaVolumeTest < Minitest::Test
                   "                  end, lists:seq(0, (Clusters + 1) div PerSector)),\n" \
                   '    fat_pass(Fat, Fun, Clusters + 2, Clusters + 2).',
               caught_by: 'fat32_volumes_are_checked_within_the_memory_bound_test_/0-fun-2- (8 GB)'),
+    # A directory walk that lists the sectors of its whole chain before it reads an entry.
+    Fault.new(name: "a directory's chain listed whole before it is read", path: FAT,
+              from: '    links_fold(Fat, data_cluster(Fat, First), 1, Max, Fun, Acc).',
+              to: "    {Listed, Total} = links_fold(Fat, data_cluster(Fat, First), 1, Max,\n" \
+                  "                                 fun(Sector, Entries, L) -> [{Sector, Entries} | L] end, []),\n" \
+                  "    {lists:foldl(fun({Sector, Entries}, A) -> Fun(Sector, Entries, A) end, Acc, " \
+                  "lists:reverse(Listed)), Total}.",
+              caught_by: 'the_largest_directory_is_walked_within_the_memory_bound_test_/0-fun-5-'),
     Fault.new(name: "a removed file's key kept", path: VOLUME,
               from: 'State#{places := Rest, nodes := Nodes#{Path := {removed, Node, Holders}}};',
               to: 'State#{places := Places, nodes := Nodes#{Path := {removed, Node, Holders}}};',

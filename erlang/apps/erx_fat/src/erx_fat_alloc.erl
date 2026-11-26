@@ -62,7 +62,7 @@ throw, `{erx_fat_alloc, Finding}`, caught at each exported entry, and leaves the
 allocator as it was.
 """.
 
--export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, volume_flags/2,
+-export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, volume_flags/2, entry_place/2,
          writable/1, view/1]).
 -export_type([alloc/0, layout/0, plan/0, step/0, finding/0, cluster/0]).
 
@@ -542,11 +542,18 @@ sector(#alloc{read = Read}, Index) ->
         _ -> fail(read_failed)
     end.
 
-%% The sector of a FAT that holds Cluster's entry, as an index into the FAT.
-entry_sector(#alloc{type = Type}, Cluster) -> Cluster * (Type div 8) div ?SECTOR.
+-doc """
+Where Cluster's entry lies in a FAT of Type-bit entries: the sector that holds it, as
+an index into the FAT, and its byte offset in that sector.
+""".
+-spec entry_place(16 | 32, non_neg_integer()) -> {non_neg_integer(), non_neg_integer()}.
+entry_place(Type, Cluster) ->
+    Offset = Cluster * (Type div 8),
+    {Offset div ?SECTOR, Offset rem ?SECTOR}.
 
-%% Where in its sector Cluster's entry lies.
-entry_offset(#alloc{type = Type}, Cluster) -> Cluster * (Type div 8) rem ?SECTOR.
+entry_sector(#alloc{type = Type}, Cluster) -> element(1, entry_place(Type, Cluster)).
+
+entry_offset(#alloc{type = Type}, Cluster) -> element(2, entry_place(Type, Cluster)).
 
 %% Sector Index of the first FAT, as the medium holds it.
 fat_sector(Alloc = #alloc{fat_start = FatStart}, Index) -> sector(Alloc, FatStart + Index).

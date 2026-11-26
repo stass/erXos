@@ -79,9 +79,9 @@ class ErxFatDirTest < Minitest::Test
   end
 
   # The ownership check's directories waiting to be walked are bounded: seeded to 2,
-  # a volume that queues three is too large.
+  # a volume that pushes three is too large.
   def test_the_check_bounds_its_pending_directories
-    from = '-define(CHECK_PENDING_MAX, (?ERX_MEDIA_VOLUME_BYTES div 4 div 40)).'
+    from = '-define(CHECK_PENDING_MAX, (?ERX_MEDIA_VOLUME_BYTES div 8 div 16)).'
     original = File.read(File.join(ROOT, FAT))
     assert_equal 1, original.scan(from).size
     output, status = eunit({ FAT => original.sub(from, '-define(CHECK_PENDING_MAX, 2).') },

@@ -19,7 +19,11 @@ byte of the volume is untrusted input.
   volume's dirty flag.
 * **Directories.** A directory is read entry by entry to its end marker or its
   last entry: FAT16's root as its fixed region, every other directory as its
-  cluster chain, at most 65,536 entries (2 MiB), the specification's bound. A
+  cluster chain, at most 65,536 entries (2 MiB), the specification's bound,
+  followed a link and read a sector at a time, so a walk holds one sector and one
+  cluster's number whatever the directory's size; the chain is followed to its end
+  even past the end marker, so a directory whose chain the read path refuses is
+  refused whatever its entries hold. A
   long name counts only when its entries run in order from the last to the first,
   each with the checksum of the short entry that follows them, and its UTF-16 is
   valid and fits 255 bytes of UTF-8; otherwise the entry is listed under its short
@@ -88,13 +92,13 @@ function raises propagates.
 -define(BAD_32, 16#0ffffff7).
 %% What the ownership check holds is arrays outside the heap, fixed in size before it
 %% reads a sector, which the volume's memory bound counts at exactly that size; its
-%% heap holds one sector and a directory's place at a time. The two sets, one bit a
-%% cluster each, stay within half of the bound, so the check holds at most 4,194,304
+%% heap holds one sector, the directory being walked with its parent, and the walk's
+%% accumulator at a time. The two sets, one bit a cluster each, stay within half of the bound, so the check holds at most 4,194,304
 %% clusters.
 -define(CHECKED_CLUSTERS_MAX, (?ERX_MEDIA_VOLUME_BYTES div 2 * 8 div 2)).
 %% The stack of directories found and not yet walked, two 8-byte slots each, its
 %% first cluster and its parent's, stays within an eighth of the bound: 16,384. The
-%% rest of the bound holds the volume's heap, a directory's sectors listed among it.
+%% rest of the bound holds the volume's heap.
 -define(CHECK_PENDING_MAX, (?ERX_MEDIA_VOLUME_BYTES div 8 div 16)).
 
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
@@ -203,10 +207,10 @@ attr(#fat_node{kind = Kind, size = Size, mtime = Mtime, read_only = ReadOnly}) -
 -spec walk(fat_node(), binary(), fat()) -> {ok, fat_node()} | {error, not_found | not_dir | finding()}.
 walk(#fat_node{kind = dir} = Dir, Name, Fat) ->
     guarded(fun() ->
-                    {Match, _Dir} = fold_dir(Dir, Fat, fun(_Index, {short, _, {Other, Node, _}}, M) ->
-                                                               erx_fat_name:match(M, Other, Node);
-                                                          (_Index, _Event, M) -> M
-                                                       end, erx_fat_name:match(Name)),
+                    Match = fold_dir(Dir, Fat, fun(_Index, {short, _, {Other, Node, _}}, M) ->
+                                                       erx_fat_name:match(M, Other, Node);
+                                                  (_Index, _Event, M) -> M
+                                               end, erx_fat_name:match(Name)),
                     case erx_fat_name:matched(Match) of
                         none -> fail(not_found);
                         Node -> Node
@@ -292,9 +296,16 @@ refreshed(#fat_node{key = {file, Parent, Index}} = File, Fat) ->
 slot_of(Parent, Index, Fat) ->
     Dir = #fat_node{key = Parent, kind = dir, first = case Parent of root -> root; {dir, C} -> C end,
                     size = 0, mtime = ?FAT_EPOCH, read_only = false},
-    {Sectors, Total} = dir_sectors(Dir, Fat),
+    {{_Counted, Found}, Total} = dir_fold(Dir, Fat, nth_sector(Index div ?ENTRIES_PER_SECTOR), {0, none}),
     Index < Total orelse fail(does_not_read),
-    {lists:nth(Index div ?ENTRIES_PER_SECTOR + 1, Sectors), Index rem ?ENTRIES_PER_SECTOR * ?ENTRY}.
+    {Found, Index rem ?ENTRIES_PER_SECTOR * ?ENTRY}.
+
+%% A dir_fold/4 step that finds the Wanted-th sector, counting from 0: its accumulator
+%% is the count of sectors met and the one found, none until then.
+nth_sector(Wanted) ->
+    fun(Sector, _Entries, {Counted, _None}) when Counted =:= Wanted -> {Counted + 1, Sector};
+       (_Sector, _Entries, {Counted, Found}) -> {Counted + 1, Found}
+    end.
 
 -doc "The sectors of data cluster Cluster, in order.".
 -spec cluster_sectors(fat(), pos_integer()) -> {ok, [pos_integer()]} | {error, does_not_read}.
@@ -307,7 +318,14 @@ sector at a time (event()), with the directory as dir() answers it.
 -spec fold(fat_node(), fat(), fun((non_neg_integer(), event(), Acc) -> Acc), Acc) ->
           {ok, {Acc, dir()}} | {error, not_dir | finding()}.
 fold(#fat_node{kind = dir} = Dir, Fat, Fun, Acc) ->
-    guarded(fun() -> fold_dir(Dir, Fat, Fun, Acc) end);
+    guarded(fun() ->
+                    Step = kept_step(entry_step(Fat, fun event/2)),
+                    {{{_Phase, Cursor}, Sectors}, Total} =
+                        dir_fold(Dir, Fat, Step, {{reading, cursor(Dir, Fat, Fun, Acc)}, []}),
+                    #{index := End, acc := Folded} = Cursor,
+                    {Folded, #{sectors => list_to_tuple(lists:reverse(Sectors)), total => Total,
+                               end_at => End, cluster => dir_cluster(Dir, Fat)}}
+            end);
 fold(#fat_node{kind = file}, _Fat, _Fun, _Acc) ->
     {error, not_dir}.
 
@@ -392,9 +410,10 @@ identity(?EXTENDED_BOOT, Serial, Label, Tail) ->
 identity(_Signature, _Serial, _Label, Tail) ->
     Tail#{serial => none, label => none}.
 
+%% The value of Cluster's entry in the FAT the server reads.
 raw_entry(#fat{read = Read, type = Type, fat_start = FatStart}, Cluster) ->
-    Offset = Cluster * (Type div 8),
-    <<_:(Offset rem ?SECTOR)/binary, Entry:Type/little, _/binary>> = sector(Read, FatStart + Offset div ?SECTOR),
+    {Index, Offset} = erx_fat_alloc:entry_place(Type, Cluster),
+    <<_:Offset/binary, Entry:Type/little, _/binary>> = sector(Read, FatStart + Index),
     Entry.
 
 %% Cluster, when it is a cluster of the data area, the one check every cluster a
@@ -420,32 +439,24 @@ mask(32) -> 16#0fffffff.
 chain(#fat{clusters = Clusters}, _First, Count) when Count > Clusters ->
     fail(does_not_read);
 chain(Fat, First, Count) ->
-    walk_chain(Fat, data_cluster(Fat, First), {exactly, Count}, #{}, []).
+    exact_chain(Fat, data_cluster(Fat, First), Count, #{}, []).
 
-%% A directory's whole chain, to its end of chain, within the entries' bound.
-dir_chain(Fat = #fat{per_cluster = PerCluster, clusters = Clusters}, First) ->
-    Max = min(Clusters, max(1, (?DIR_ENTRIES_MAX * ?ENTRY) div (PerCluster * ?SECTOR))),
-    walk_chain(Fat, data_cluster(Fat, First), {at_most, Max}, #{}, []).
-
-%% The one walk of a chain: Bound is {exactly, Left}, the clusters still to take, or
-%% {at_most, Left}, the clusters it may still take before its end of chain. Only an
-%% exact walk keeps the clusters it has seen: a loop never reaches an end of chain,
-%% so an at-most walk runs out of Left on one, holding nothing more.
-walk_chain(_Fat, Cluster, _Bound, Seen, _Got) when is_map_key(Cluster, Seen) ->
+exact_chain(_Fat, Cluster, _Left, Seen, _Got) when is_map_key(Cluster, Seen) ->
     fail(does_not_read);
-walk_chain(_Fat, Cluster, {exactly, 1}, _Seen, Got) ->
+exact_chain(_Fat, Cluster, 1, _Seen, Got) ->
     lists:reverse([Cluster | Got]);
-walk_chain(Fat, Cluster, {Kind, Left}, Seen, Got) ->
-    case {next_link(Fat, Cluster), Kind, Left} of
-        {end_of_chain, at_most, _} -> lists:reverse([Cluster | Got]);
-        {end_of_chain, exactly, _} -> fail(does_not_read);
-        {_Next, at_most, 1} -> fail(does_not_read);
-        {Next, exactly, _} -> walk_chain(Fat, Next, {Kind, Left - 1}, Seen#{Cluster => true}, [Cluster | Got]);
-        {Next, at_most, _} -> walk_chain(Fat, Next, {Kind, Left - 1}, Seen, [Cluster | Got])
+exact_chain(Fat, Cluster, Left, Seen, Got) ->
+    case next_link(Fat, Cluster) of
+        end_of_chain -> fail(does_not_read);
+        Next -> exact_chain(Fat, Next, Left - 1, Seen#{Cluster => true}, [Cluster | Got])
     end.
 
-cluster_sectors_of(#fat{data_start = DataStart, per_cluster = PerCluster}, Cluster) ->
-    First = DataStart + (Cluster - 2) * PerCluster,
+%% The first sector of data cluster Cluster.
+cluster_start(#fat{data_start = DataStart, per_cluster = PerCluster}, Cluster) ->
+    DataStart + (Cluster - 2) * PerCluster.
+
+cluster_sectors_of(Fat = #fat{per_cluster = PerCluster}, Cluster) ->
+    First = cluster_start(Fat, Cluster),
     lists:seq(First, First + PerCluster - 1).
 
 cluster(Fat = #fat{read = Read}, Cluster) ->
@@ -489,10 +500,8 @@ fat_pass(Fat = #fat{clusters = Clusters}, Fun) ->
 fat_pass(_Fat, _Fun, End, End) ->
     ok;
 fat_pass(Fat = #fat{read = Read, type = Type, fat_start = Start}, Fun, Cluster, End) ->
-    PerSector = ?SECTOR * 8 div Type,
-    Index = Cluster div PerSector,
-    Next = min(End, (Index + 1) * PerSector),
-    Skip = (Cluster - Index * PerSector) * Type div 8,
+    {Index, Skip} = erx_fat_alloc:entry_place(Type, Cluster),
+    Next = min(End, Cluster + (?SECTOR - Skip) * 8 div Type),
     Bytes = (Next - Cluster) * Type div 8,
     <<_:Skip/binary, Entries:Bytes/binary, _/binary>> = sector(Read, Start + Index),
     fat_entries(Entries, Type, Cluster, Fun),
@@ -552,8 +561,8 @@ directories(Fat, Sets, Stack, Depth) ->
 %% both its dot entries.
 directory(Fat, Sets, Stack, Dir, Parent, Depth) ->
     Node = #fat_node{key = root, kind = dir, first = Dir, size = 0, mtime = ?FAT_EPOCH, read_only = false},
-    #{dot := Dot, dotdot := DotDot, depth := Pushed} =
-        fold_entries(Fat, dir_sectors(Node, Fat),
+    {#{dot := Dot, dotdot := DotDot, depth := Pushed}, _Total} =
+        fold_entries(Node, Fat,
                      fun(Entry, Acc = #{index := Index}) -> (owned(Fat, Sets, Dir, Parent, Entry, Acc))#{index := Index + 1} end,
                      #{dot => false, dotdot => false, stack => Stack, depth => Depth, index => 0}),
     Dir =:= root orelse (Dot andalso DotDot) orelse fail(tree),
@@ -617,46 +626,95 @@ bit(Cluster) -> {(Cluster - 2) div 64 + 1, 1 bsl ((Cluster - 2) rem 64)}.
 %% Directories
 %% ---------------------------------------------------------------------------
 
-%% The sectors of a directory, in order, with its count of entries: FAT16's fixed
-%% root region, or a directory's cluster chain.
-dir_sectors(#fat_node{first = root}, #fat{root = {fixed, First, Count}}) ->
-    {lists:seq(First, First + (Count - 1) div ?ENTRIES_PER_SECTOR), Count};
-dir_sectors(#fat_node{first = root}, Fat = #fat{root = Cluster}) ->
-    chain_sectors(Fat, Cluster);
-dir_sectors(#fat_node{first = First}, Fat) ->
-    chain_sectors(Fat, First).
+%% Fun(Sector, Entries, Acc) folded over directory Dir's sectors in order, Entries the
+%% count of the directory's entries a sector holds, and the directory's count of
+%% entries: {Acc, Total}. FAT16's root is its fixed region; any other directory is its
+%% cluster chain, followed a link at a time to its end of chain within the clusters
+%% ?DIR_ENTRIES_MAX entries fill, each link a cluster of the data area. A chain that
+%% loops never reaches its end, so it runs out of clusters and is does_not_read, as
+%% one that leaves the data area is. The walk holds one cluster's number and builds
+%% nothing, so it needs the same memory whatever the directory's size; a cluster's
+%% sectors are folded before its link is read.
+dir_fold(#fat_node{first = root}, #fat{root = {fixed, First, Count}}, Fun, Acc) ->
+    {region_fold(First, Count, Fun, Acc), Count};
+dir_fold(#fat_node{first = root}, Fat = #fat{root = Cluster}, Fun, Acc) ->
+    chain_fold(Fat, Cluster, Fun, Acc);
+dir_fold(#fat_node{first = First}, Fat, Fun, Acc) ->
+    chain_fold(Fat, First, Fun, Acc).
 
-chain_sectors(Fat, First) ->
-    Sectors = [Sector || Cluster <- dir_chain(Fat, First), Sector <- cluster_sectors_of(Fat, Cluster)],
-    {Sectors, length(Sectors) * ?ENTRIES_PER_SECTOR}.
+chain_fold(Fat = #fat{per_cluster = PerCluster, clusters = Clusters}, First, Fun, Acc) ->
+    Max = min(Clusters, max(1, (?DIR_ENTRIES_MAX * ?ENTRY) div (PerCluster * ?SECTOR))),
+    links_fold(Fat, data_cluster(Fat, First), 1, Max, Fun, Acc).
+
+%% Cluster, the Taken-th of a chain of at most Max, folded, then the rest of the chain.
+links_fold(Fat = #fat{per_cluster = PerCluster}, Cluster, Taken, Max, Fun, Acc) ->
+    Entries = PerCluster * ?ENTRIES_PER_SECTOR,
+    Folded = region_fold(cluster_start(Fat, Cluster), Entries, Fun, Acc),
+    case next_link(Fat, Cluster) of
+        end_of_chain -> {Folded, Taken * Entries};
+        _Next when Taken =:= Max -> fail(does_not_read);
+        Next -> links_fold(Fat, Next, Taken + 1, Max, Fun, Folded)
+    end.
+
+%% Fun folded over the sectors from Sector on that hold Left entries.
+region_fold(_Sector, 0, _Fun, Acc) ->
+    Acc;
+region_fold(Sector, Left, Fun, Acc) ->
+    Entries = min(?ENTRIES_PER_SECTOR, Left),
+    region_fold(Sector + 1, Left - Entries, Fun, Fun(Sector, Entries, Acc)).
+
+%% Fun(Entry, Acc) folded over directory Dir's entries, each decoded, a sector read at a
+%% time, to its end marker or its last entry, and the directory's count of entries:
+%% {Acc, Total}. The walk of its sectors goes on to their end without reading them, so a
+%% chain the read path refuses is refused whatever its entries hold.
+fold_entries(Dir, Fat, Fun, Acc) ->
+    {{_Phase, Folded}, Total} = dir_fold(Dir, Fat, entry_step(Fat, Fun), {reading, Acc}),
+    {Folded, Total}.
+
+%% Step, a dir_fold/4 step, with each sector's number kept as well: the accumulator
+%% is {State, Kept}, Step's own and the sectors met so far, last first.
+kept_step(Step) ->
+    fun(Sector, Entries, {State, Kept}) -> {Step(Sector, Entries, State), [Sector | Kept]} end.
+
+%% The step of fold_entries/4 for one sector, whose accumulator is {reading, Acc} or
+%% {ended, Acc}: its entries folded while the directory has not ended.
+entry_step(#fat{read = Read}, Fun) ->
+    fun(_Sector, _Entries, {ended, _Acc} = Ended) -> Ended;
+       (Sector, Entries, {reading, Acc}) -> entries_of(sector(Read, Sector), Entries, Fun, Acc)
+    end.
+
+entries_of(_Bytes, 0, _Fun, Acc) ->
+    {reading, Acc};
+entries_of(<<Bytes:?ENTRY/binary, Rest/binary>>, Left, Fun, Acc) ->
+    case erx_fat_entry:decode(Bytes) of
+        end_of_directory -> {ended, Acc};
+        Entry -> entries_of(Rest, Left - 1, Fun, Fun(Entry, Acc))
+    end.
 
 %% A directory's entries, each name with its node, in order.
 entries(Dir, Fat) ->
-    {Got, _Dir} = fold_dir(Dir, Fat, fun(_Index, {short, _, {Name, Node, _}}, Acc) -> [{Name, Node} | Acc];
-                                        (_Index, _Event, Acc) -> Acc
-                                     end, []),
+    Got = fold_dir(Dir, Fat, fun(_Index, {short, _, {Name, Node, _}}, Acc) -> [{Name, Node} | Acc];
+                                (_Index, _Event, Acc) -> Acc
+                             end, []),
     lists:reverse(Got).
 
-%% Fun folded over a directory's entries through one cursor, to its end marker,
-%% whose index the cursor's index ends at, with the directory as dir() answers it.
-%% Long is the long name being gathered across entries and sectors, none or
-%% {long, Next, Sum, Parts, Start}: the order number the next entry must carry, the
-%% checksum all carry, the parts read so far, first part first, and the index of
-%% its first entry.
-fold_dir(#fat_node{key = Parent, first = First} = Dir, Fat = #fat{root = Root}, Fun, Acc0) ->
-    {Sectors, Total} = dir_sectors(Dir, Fat),
-    Cursor = #{fat => Fat, parent => Parent, step => Fun, index => 0, long => none, acc => Acc0},
-    #{index := End, acc := Acc} =
-        fold_entries(Fat, {Sectors, Total},
-                     fun(Entry, Next = #{index := Index}) -> (event(Entry, Next))#{index := Index + 1} end, Cursor),
-    {Acc, #{sectors => list_to_tuple(Sectors), total => Total, end_at => End,
-            cluster => case {First, Root} of
-                           {root, {fixed, _, _}} -> fixed;
-                           {root, Cluster} -> Cluster;
-                           _ -> First
-                       end}}.
+%% Fun folded over a directory's entries through one cursor (cursor/4), to its end
+%% marker.
+fold_dir(Dir, Fat, Fun, Acc) ->
+    {#{acc := Folded}, _Total} = fold_entries(Dir, Fat, fun event/2, cursor(Dir, Fat, Fun, Acc)),
+    Folded.
 
-%% Fun fed one entry, the long name gathered so far moved on.
+%% The cursor fold_dir/4 and fold/4 move over a directory's entries: the step Fun and
+%% its accumulator, the index of the next entry, which ends at the end marker's, and
+%% Long, the long name being gathered across entries and sectors, none or
+%% {long, Next, Sum, Parts, Start}: the order number the next entry must carry, the
+%% checksum all carry, the parts read so far, first part first, and the index of its
+%% first entry.
+cursor(#fat_node{key = Parent}, Fat, Fun, Acc) ->
+    #{fat => Fat, parent => Parent, step => Fun, index => 0, long => none, acc => Acc}.
+
+%% Fun fed one entry, the long name gathered so far moved on, the cursor at the next
+%% entry.
 event(Entry, Cursor = #{index := Index, long := Long, step := Fun, acc := Acc}) ->
     {Event, Next} = case Entry of
                         deleted -> {deleted, none};
@@ -664,7 +722,12 @@ event(Entry, Cursor = #{index := Index, long := Long, step := Fun, acc := Acc}) 
                         {long, Order, Last, Sum, Part} -> {long, long_part(Order, Last, Sum, Part, Long, Index)};
                         {short, Short} -> {{short, Short, listed(Short, Long, Cursor)}, none}
                     end,
-    Cursor#{long := Next, acc := Fun(Index, Event, Acc)}.
+    Cursor#{long := Next, acc := Fun(Index, Event, Acc), index := Index + 1}.
+
+%% A directory's first cluster, as dir() answers it: fixed for FAT16's root.
+dir_cluster(#fat_node{first = root}, #fat{root = {fixed, _, _}}) -> fixed;
+dir_cluster(#fat_node{first = root}, #fat{root = Cluster}) -> Cluster;
+dir_cluster(#fat_node{first = First}, _Fat) -> First.
 
 %% What short entry Short names, after long name Long: {Name, Node, Start}, or none
 %% for a label, a dot entry or a name the volume may not serve.
@@ -679,29 +742,6 @@ listed(Short = #{name := Bytes, flags := Case}, Long, #{fat := Fat, parent := Pa
              Start};
         _ ->
             none
-    end.
-
-%% Fun folded over a directory's entries, given as its sectors and its count of
-%% entries, a sector read at a time, each entry decoded, to its end marker or its
-%% last entry.
-fold_entries(Fat, {Sectors, Total}, Fun, Acc) ->
-    fold_sectors(Fat, Sectors, Total, Fun, Acc).
-
-fold_sectors(_Fat, [], _Left, _Fun, Acc) ->
-    Acc;
-fold_sectors(Fat = #fat{read = Read}, [Sector | Rest], Left, Fun, Acc) ->
-    Count = min(?ENTRIES_PER_SECTOR, Left),
-    case fold_sector(sector(Read, Sector), Count, Fun, Acc) of
-        {done, Done} -> Done;
-        {next, Next} -> fold_sectors(Fat, Rest, Left - Count, Fun, Next)
-    end.
-
-fold_sector(_Bytes, 0, _Fun, Acc) ->
-    {next, Acc};
-fold_sector(<<Bytes:?ENTRY/binary, Rest/binary>>, Left, Fun, Acc) ->
-    case erx_fat_entry:decode(Bytes) of
-        end_of_directory -> {done, Acc};
-        Entry -> fold_sector(Rest, Left - 1, Fun, Fun(Entry, Acc))
     end.
 
 node_key(#fat{root = First}, dir, First, _Parent, _Index) -> root;
