@@ -6,7 +6,8 @@
 /*
  * The kernel's trace rings on the host (kernel/core/trace_rings.c, docs/design-fiasco.md,
  * "The kernel's trace rings"): a write reaches only its CPU's ring, a CPU past the rings
- * writes nothing, a ring wraps within itself, and the rings' pages hold the rings alone.
+ * writes nothing, a ring wraps within itself, a ring's times never go back, and the rings'
+ * pages hold the rings alone.
  * Prints "<mode>: ok" or the first broken property, and exits nonzero on one.
  */
 
@@ -117,6 +118,35 @@ mode_wrap(void)
 	return (0);
 }
 
+/*
+ * Times that go back on CPU 2, as two unserialised counter reads may: the ring keeps the
+ * later record at its newest time, and CPU 3's ring keeps its own earlier time.
+ */
+static int
+mode_order(void)
+{
+	static const uint64_t times[] = { 50, 40, 60, 60, 59 };
+	static const uint64_t kept[] = { 50, 50, 60, 60, 60 };
+	erx_trace_read_result_t result;
+	erx_trace_entry_t entry;
+
+	for (size_t n = 0; n < sizeof(times) / sizeof(times[0]); n++) {
+		entry = entry_for(2, times[n]);
+		erx_trace_kernel_put(2, &entry);
+	}
+	entry = entry_for(3, 10);
+	erx_trace_kernel_put(3, &entry);
+	if (erx_trace_ring_read(ring_at(2), 0, out, 8, &result) != ERX_OK || result.kept != 5)
+		return (fail("order", "CPU 2's records were not kept"));
+	for (size_t n = 0; n < sizeof(kept) / sizeof(kept[0]); n++)
+		if (out[n].time_ns != kept[n] || out[n].arg[0] != times[n])
+			return (fail("order", "a ring's time went back"));
+	if (erx_trace_ring_read(ring_at(3), 0, out, 8, &result) != ERX_OK || result.kept != 1 ||
+	    out[0].time_ns != 10)
+		return (fail("order", "another CPU's newest time moved this ring's"));
+	return (0);
+}
+
 /* The rings' pages: page-aligned, whole pages, every ring inside them. */
 static int
 mode_pages(void)
@@ -138,7 +168,8 @@ main(int argc, char **argv)
 	static const struct {
 		const char	*name;
 		int		(*run)(void);
-	} modes[] = { { "cpus", mode_cpus }, { "wrap", mode_wrap }, { "pages", mode_pages } };
+	} modes[] = { { "cpus", mode_cpus }, { "wrap", mode_wrap }, { "order", mode_order },
+	    { "pages", mode_pages } };
 
 	if (argc != 2)
 		return (2);

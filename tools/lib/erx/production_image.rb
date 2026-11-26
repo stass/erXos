@@ -1485,7 +1485,10 @@ module Erx
       # hold no message; the shell prints
       # one summary, {kernel_trace, Switches, Receives, ZeroIds, IdsAgree}: whether the
       # rings hold switch and ipc_receive records, how many of their thread and space ids
-      # are 0, and whether the two events name threads and spaces alike. An ipc_receive
+      # are 0, whether the two events name threads and spaces alike, and on how many CPUs
+      # the ring holds a switch record later than the first second of uptime, which every
+      # CPU's must, so a CPU whose ring stops after early boot, or never starts, is caught.
+      # An ipc_receive
       # record's thread and space are the thread the CPU ran, the sender on do_ipc's path and
       # the receiver when it takes a queued sender; where that thread is one end of the
       # message and a switch record names it, the switch's space must be the record's, and
@@ -1513,14 +1516,16 @@ module Erx
       TRACE_RECEIVE = ABI::Generated::CODEC.member('trace_event', 'ipc_receive')
       KERNEL_READ = "RA=fun RA(_,_,0)->[];RA(Q,U,K)->case erx_trace_ring:read(Q,U,512) of " \
                     "{ok,[_|_]=Rs,N,_}->Rs++RA(Q,N,K-1);_->[] end end," \
-                    "KR=lists:append([RA({kernel,C},0,8)||C<-lists:seq(0,#{TRACE_CPUS - 1})])," \
+                    "KP=[{C,RA({kernel,C},0,8)}||C<-lists:seq(0,#{TRACE_CPUS - 1})],KR=lists:append([Rs||{_,Rs}<-KP])," \
+                    "KC=length([C||{C,Rs}<-KP,lists:any(fun({Tm,Ev,_,_,_,_,_})->Ev=:=#{TRACE_SWITCH} andalso Tm>1000000000 end,Rs)])," \
                     "KS=[{N,S}||{_,#{TRACE_SWITCH},_,_,_,_,{N,S,_}}<-KR],KM=maps:from_list(KS)," \
                     "KV=[{A,B}||{_,#{TRACE_RECEIVE},_,_,_,_,{A,B,_}}<-KR]," \
                     "KI=[{T,S}||{_,#{TRACE_RECEIVE},_,_,T,S,{A,B,_}}<-KR,T=:=A orelse T=:=B,maps:is_key(T,KM)]," \
                     '{kernel_trace,KS=/=[],KV=/=[],length([0||{X,Y}<-KS++KV,X*Y=:=0]),' \
-                    "KI=/=[] andalso lists:all(fun({T,S})->maps:get(T,KM)=:=S end,KI)}.\r"
-      # The summary a working window gives: both events, no id 0, and ids that agree.
-      KERNEL_SUMMARY = '{kernel_trace,true,true,0,true}'
+                    "KI=/=[] andalso lists:all(fun({T,S})->maps:get(T,KM)=:=S end,KI),KC}.\r"
+      # The summary a working window gives: both events, no id 0, ids that agree, and every
+      # CPU's ring recording after the first second.
+      KERNEL_SUMMARY = "{kernel_trace,true,true,0,true,#{TRACE_CPUS}}".freeze
       KERNEL_LINE = /\A#{TRACE_REDRAW}(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{kernel_trace,[a-z0-9,]+\}\r*\n\z/n
       def self.trace_checkpoints(machine:)
         boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|

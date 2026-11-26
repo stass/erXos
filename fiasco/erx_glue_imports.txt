@@ -17,6 +17,7 @@ _ZN3Kip10global_kipE boot-handoff erx_handoff.cpp
 _ZN3Pic3gicE machine-stop erx_machine_stop.cpp
 _ZN4Task19erx_map_trace_ringsEm trace-window erx_trace.cpp
 _ZN5Timer22_scaler_shift_ts_to_usE machine-stop erx_machine_stop.cpp
+_ZN5Timer6_freq0E trace-clock erx_trace.cpp
 _ZN7Console5stateEm console-ring erx_console_ring.cpp
 _ZN8Kconsole2_cE console-ring erx_console_ring.cpp
 _ZN8Koptions1oEv boot-handoff erx_handoff.cpp

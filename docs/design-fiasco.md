@@ -3004,15 +3004,31 @@ is a user address.
 **Writing.** One glue function, `Erx_trace::record(event, arg0, arg1, arg2)` in `fiasco/kernel/src/erx/erx_trace.cpp`, is the
 only writer. Each hook is one call of its event's function in that file (`Erx_trace::ipc_receive`, `Erx_trace::switch_to`),
 which names its objects and calls `record`, so the event numbers and the core's headers stay in the glue and no hooked
-file of Fiasco's includes them. It masks interrupts for the write itself (`cpu_lock`), since Fiasco runs some
-kernel paths with interrupts enabled (`Factory::kinvoke` around the object's manufacture, `kern/factory.cpp:182`;
-`Kobject::destroy`); under the mask it value-initialises the entry, so every argument an event does not use is 0, reads the current thread and
-its space and the counter, and hands the entry
-and the CPU's number to `erx_trace_kernel_put`, which writes it on that CPU's ring with `erx_trace_ring_put`. A CPU's ring has one writer, the CPU, and no interrupt can enter its write, so the
-mask stands where the root's ring has its trace lock, and the sequence protocol is the core's ([The trace ring](#the-trace-ring),
-"Writing"). The time is the counter, read between two ISBs as the root reads it, converted by the same core function the
-root's `erx_clock_ns` calls, so the kernel's rings and the root's merge on one clock and no record takes its time ahead of
-the instructions before it.
+file of Fiasco's includes them. `record` runs with interrupts masked and takes no lock of its own: both hooks are on
+kernel paths that hold `cpu_lock` (`Thread::transfer_msg` and `Context::_switch_exec_common`); `record` writes nothing for a caller without it,
+and an event on a path with interrupts enabled (`Factory::kinvoke` around the object's manufacture,
+`kern/factory.cpp:182`; `Kobject::destroy`) takes `lock_guard(cpu_lock)` around its call. It value-initialises the
+entry, so every argument an event does not use is 0, reads the current thread and its space and the counter, and hands
+the entry and the CPU's number to `erx_trace_kernel_put`, which writes it on that CPU's ring with `erx_trace_ring_put`.
+A CPU's ring has one writer, the CPU, and no interrupt can enter its write, so the mask stands where the root's ring has
+its trace lock, and the sequence protocol is the core's ([The trace ring](#the-trace-ring), "Writing").
+
+The time is the counter converted by the same core function the root's `erx_clock_ns` calls, `erx_clock_ticks_ns`, so
+the kernel's rings and the root's merge on one clock. Two things differ from the root's read, and both are the writer's
+cost ([Cost](#the-kernels-trace-rings), below). The frequency is the one the boot CPU read as its timer started
+(`Timer::counter_frequency`, the fork's accessor of `Timer::_freq0`, `kern/arm/timer-arm-generic.cpp`), which
+`Timer::init` makes every CPU's, not a read of the counter-frequency register, which under HVF costs about 30 ns. And the counter is read
+with no ISB around it. An ISB keeps a counter read from being taken before the instructions ahead of it or after those
+behind it; for a kernel record the kernel entry and exit around the hook do that against everything user mode runs,
+since the fork sets the system control register's exception-entry and exception-exit synchronization bits (bits 22
+and 11 of `Cpu::Sctlr_res`, `kern/arm/64/cpu-arm-64.cpp:217`),
+which make taking an exception and returning from one context synchronization events, as an ISB is. So no kernel record
+takes its time ahead of a root record written before the call that entered the kernel, or behind one written after the
+return. What is left unordered is two reads within one kernel entry, an `ipc_receive` and the `switch` that follows it:
+the later may come out earlier. `erx_trace_kernel_put` keeps each ring's newest time and writes a record's time as the
+larger of the entry's and that, so a ring stays in time order, which the trace's merger relies on
+(`erlang/apps/erx/src/erx_tracer.erl`), and a time raised that way is late by at most the reads' reordering, a few
+nanoseconds. Only the writing CPU touches its ring's newest time, under the same mask.
 
 **C and C++.** The ring's type holds `_Atomic` fields and the generated layout's alignment, which C++ does not share, so
 no ring is ever a C++ object and no C++ file includes the ring's header. Three files divide the work:
@@ -3034,9 +3050,10 @@ no ring is ever a C++ object and no C++ file includes the ring's header. Three f
 
 The glue holds `static_assert(Config::Max_num_cpus <= ERX_TRACE_KERNEL_RINGS)` (`kern/config.cpp:74`), so a CPU number
 the glue passes always names a ring, and a configuration with more CPUs fails to build. The glue's references into
-Fiasco (`cpu_lock`, `current()`, `current_cpu()`, the object id, the counter) are inline functions of Fiasco's headers, so
-the glue's object refers to one Fiasco symbol, `Task::erx_map_trace_rings`, which maps the rings and nothing else with
-read rights for user mode and is `map_trace`'s one line in `fiasco/erx_glue_imports.txt`; the object ids exist because
+Fiasco (`cpu_lock`, `current()`, `current_cpu()`, the object id, the counter and its frequency) are inline functions of
+Fiasco's headers, so the glue's object refers to two Fiasco symbols, each a line of `fiasco/erx_glue_imports.txt`:
+`Task::erx_map_trace_rings`, which maps the rings and nothing else with read rights for user mode, `map_trace`'s, and
+`Timer::_freq0`, the boot CPU's counter frequency, the writer's; the object ids exist because
 the fork's configuration requires `CONFIG_RT_DBG`.
 
 **The root's window.** As its service starts, the root asks for the mapping with one operation the fork adds to the platform

@@ -6,7 +6,8 @@
 /*
  * The kernel's trace rings (docs/design-fiasco.md, "The kernel's trace rings"): one ring
  * for each CPU the kernel is configured for, in one static array of the kernel's image.
- * Each CPU writes only its own ring, with interrupts masked; nothing writes them but
+ * Each CPU writes only its own ring, with interrupts masked, and keeps its times in
+ * order; nothing writes them but
  * erx_trace_kernel_put, and the root reads them through a read-only mapping of their
  * pages, with the ring core's reader. Linked into the kernel only, never into the root.
  */
@@ -19,6 +20,8 @@
 #include "erx/abi.h"
 #include "erx/core/trace_kernel.h"
 #include "erx/core/trace_ring.h"
+
+#include "trace_ring_impl.h"
 
 #define TRACE_RINGS_PAGES \
 	((ERX_TRACE_RING_SIZE * ERX_TRACE_KERNEL_RINGS + ERX_PAGE_SIZE - 1) / ERX_PAGE_SIZE)
@@ -34,19 +37,33 @@ typedef union erx_trace_rings {
 
 _Alignas(ERX_PAGE_SIZE) erx_trace_rings_t erx_trace_rings;
 
+/*
+ * The time of each ring's newest record. Each CPU reads and writes only its own, with
+ * interrupts masked, as it writes its ring.
+ */
+static uint64_t trace_rings_newest_ns[ERX_TRACE_KERNEL_RINGS];
+
 /* Whether a map_trace call holds the rings' mapping (erx_trace_kernel_window_claim). */
 static atomic_bool trace_rings_window_claimed;
 
-/* The record's cpu is the ring's own, whatever the entry says, so a ring holds only its CPU's records. */
+/*
+ * The record's cpu is the ring's own, whatever the entry says, so a ring holds only its
+ * CPU's records. Its time is the entry's, or the ring's newest where the entry's is
+ * earlier: the writer reads the counter with no ISB, so of two reads in one kernel entry
+ * the later may come out earlier, and a ring stays in time order, as its readers rely.
+ */
 void
 erx_trace_kernel_put(uint32_t cpu, const erx_trace_entry_t *entry)
 {
-	erx_trace_entry_t written = *entry;
+	uint64_t time_ns;
 
 	if (cpu >= ERX_TRACE_KERNEL_RINGS)
 		return;
-	written.cpu = (uint16_t)cpu;
-	(void)erx_trace_ring_put(&erx_trace_rings.ring[cpu], &written);
+	time_ns = entry->time_ns;
+	if (time_ns < trace_rings_newest_ns[cpu])
+		time_ns = trace_rings_newest_ns[cpu];
+	trace_rings_newest_ns[cpu] = time_ns;
+	(void)trace_ring_write(&erx_trace_rings.ring[cpu], entry, (uint16_t)cpu, time_ns);
 }
 
 const void *

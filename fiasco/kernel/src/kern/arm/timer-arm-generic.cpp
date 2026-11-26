@@ -1,6 +1,8 @@
 // Modified by erXos: the kernel debugger's parts are deleted (docs/design-debugger.md).
 // Modified by erXos: no scaler from microseconds to counts; Timer::us_to_ts
 // inverts the clock's own (timer-arm.cpp).
+// Modified by erXos: Timer::counter_frequency answers the boot CPU's frequency
+// for the kernel's trace rings (fiasco/kernel/src/erx/erx_trace.cpp).
 // --------------------------------------------------------------------------
 INTERFACE [arm && arm_generic_timer]:
 
@@ -52,6 +54,14 @@ IMPLEMENT_DEFAULT
 static inline
 Unsigned32 Timer::frequency()
 { return Gtimer::frequency(); }
+
+// The counter's frequency as the boot CPU read it, which Timer::init makes
+// every CPU's; 0 before the boot CPU's timer starts. A load, where a read of
+// CNTFRQ_EL0 may trap to a hypervisor.
+PUBLIC static inline
+Unsigned32
+Timer::counter_frequency()
+{ return _freq0; }
 
 IMPLEMENT
 void

@@ -20,6 +20,8 @@
 #include "erx/abi.h"
 #include "erx/core/trace_ring.h"
 
+#include "trace_ring_impl.h"
+
 static const erx_trace_record_t *
 trace_slot(const erx_trace_ring_t *ring, uint64_t index)
 {
@@ -37,28 +39,7 @@ erx_trace_ring_clear(erx_trace_ring_t *ring)
 bool
 erx_trace_ring_put(erx_trace_ring_t *ring, const erx_trace_entry_t *entry)
 {
-	uint64_t index = 0;
-	erx_trace_record_t *record;
-
-	(void)erx_trace_ring_head_load(ring, &index);
-	if (index > ERX_TRACE_RING_INDEX_LAST)
-		return (false);
-	record = &ring->records[index % ERX_TRACE_RING_RECORDS];
-	(void)erx_trace_record_seq_store(record, 2 * index + 1);
-	(void)erx_trace_record_time_ns_store(record, entry->time_ns);
-#ifdef ERX_TRACE_RING_TEST_HOOKS
-	erx_trace_ring_test_writing(record);
-#endif
-	(void)erx_trace_record_event_store(record, entry->event);
-	(void)erx_trace_record_cpu_store(record, entry->cpu);
-	(void)erx_trace_record_flags_store(record, entry->flags);
-	(void)erx_trace_record_thread_store(record, entry->thread);
-	(void)erx_trace_record_space_store(record, entry->space);
-	for (size_t arg = 0; arg < ERX_TRACE_ENTRY_ARGS; arg++)
-		(void)erx_trace_record_arg_store(record, arg, entry->arg[arg]);
-	(void)erx_trace_record_seq_store(record, 2 * index + 2);
-	(void)erx_trace_ring_head_store(ring, index + 1);
-	return (true);
+	return (trace_ring_write(ring, entry, entry->cpu, entry->time_ns));
 }
 
 /*

@@ -4,8 +4,9 @@
 // The kernel's trace rings' one writer (docs/design-fiasco.md, "The kernel's
 // trace rings"). A hook calls its event's function here (ipc_receive,
 // switch_to). That function names its objects and calls Erx_trace::record,
-// which fills an entry under the CPU lock and hands it to the C17 core's
-// erx_trace_kernel_put for the current CPU's ring. The hooks' files see no core header: the event
+// which fills an entry and hands it to the C17 core's erx_trace_kernel_put for
+// the current CPU's ring. Every hook runs with interrupts masked, so record
+// takes no lock of its own. The hooks' files see no core header: the event
 // numbers stay in this file. The rings themselves are
 // C (kernel/core/trace_rings.c) and reach this file only through the seam,
 // erx/core/trace_kernel.h.
@@ -30,12 +31,11 @@ IMPLEMENTATION:
 #include "cpu_lock.h"
 #include "generic_timer.h"
 #include "globals.h"
-#include "lock_guard.h"
-#include "mem.h"
 #include "mem_space.h"
 #include "platform_control_object.h"
 #include "task.h"
 #include "thread.h"
+#include "timer.h"
 
 // A CPU number the glue passes always names a ring.
 static_assert(Config::Max_num_cpus <= ERX_TRACE_KERNEL_RINGS,
@@ -62,24 +62,32 @@ trace_space_id(Context const *ctx)
 
 // Writes one record of event on the current CPU's ring, with the thread the
 // CPU runs and its space. The arguments are values the kernel holds, never
-// addresses it stores through.
+// addresses it stores through. Its caller holds the CPU lock (both hooks run
+// on kernel paths with interrupts masked), so no interrupt enters the write
+// and the CPU is its ring's one writer; an event on a path with interrupts
+// enabled takes lock_guard(cpu_lock) around its call.
 PRIVATE static
 void
 Erx_trace::record(Unsigned32 event, Unsigned64 arg0, Unsigned64 arg1,
                   Unsigned64 arg2)
 {
-  auto guard = lock_guard(cpu_lock);
+  // A hook that reached here without the CPU lock would let an interrupt's
+  // hook nest inside this write and leave one slot with two events' fields;
+  // it writes nothing instead (the build defines NDEBUG, so no assert).
+  if (!cpu_lock.test())
+    return;
   Context const *running = current();
   erx_trace_entry_t entry{};
 
-  // The counter is read as the root reads it (erx_fiasco_counter), between
-  // two ISBs, so the read is neither taken before the instructions ahead of
-  // it nor after those behind it, and a record's time keeps its place among
-  // the root's records on the one clock.
-  Mem::isb();
+  // The counter is read with no ISB around it: the kernel entry and exit
+  // around every hook are context synchronization events (SCTLR_EL1.EIS and
+  // EOS, set by Cpu::Sctlr_res), so no read here moves past a user-mode
+  // instruction of the root, and erx_trace_kernel_put keeps a ring's times in
+  // order within one entry. The frequency is the one the boot CPU read, which
+  // every CPU's matches, not a read of CNTFRQ_EL0 (docs/design-fiasco.md,
+  // "The kernel's trace rings", "Writing").
   Unsigned64 const ticks = Generic_timer::Gtimer::counter();
-  Mem::isb();
-  entry.time_ns = erx_clock_ticks_ns(ticks, Generic_timer::Gtimer::frequency());
+  entry.time_ns = erx_clock_ticks_ns(ticks, Timer::counter_frequency());
   entry.event = event;
   entry.thread = trace_thread_id(running);
   entry.space = trace_space_id(running);
