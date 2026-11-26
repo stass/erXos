@@ -21,13 +21,17 @@ module's documentation cites them.
 %% Runs a line in Dir with its standard output and error at a terminal,
 %% answering its status, its output and its error.
 run_line(Source, Dir) ->
+    run_line(Source, Dir, #{}).
+
+%% The same with the variables Vars (`COLUMNS => [<<"4">>]`).
+run_line(Source, Dir, Vars) ->
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)}
                      || Module <- [erx_cmd_ps, erx_cmd_sort, erx_cmd_grep, erx_cmd_ls, erx_cmd_wc,
                                    erx_cmd_echo, erx_cmd_cat]]),
     State = erx_shell_runner:state(#{cwd => Dir, fds => #{0 => null, 1 => sink(out), 2 => sink(err)},
                                      table => Table, facets => fun() -> #{} end}),
-    Shell = erx_shell_eval:new(#{}, erx_shell_runner:runner(), State),
+    Shell = erx_shell_eval:new(Vars, erx_shell_runner:runner(), State),
     {ok, Done} = erx_shell_eval:run_source(Source, Shell),
     {erx_shell_eval:status(Done), shown(out), shown(err)}.
 
@@ -310,6 +314,36 @@ ls_line_test() ->
                        {<<"1">>, <<>>, Err} = run_line(<<"ls missing">>, Dir),
                        ?assertMatch(<<"ls: missing: ", _/binary>>, Err)
                end).
+
+%% ls asks for the terminal's width only to write columns: into a pipe, under
+%% -1 or -l and with COLUMNS set it never does. Here the group leader answers nothing,
+%% so an ls that asked would fail the timeout.
+ls_asks_no_width_unless_it_writes_columns_test_() ->
+    {timeout, 20,
+     fun() ->
+             with_files([{"a", <<>>}, {"b", <<>>}, {"c", <<>>}],
+                        fun(Dir) ->
+                                with_silent_leader(
+                                  fun() ->
+                                          ?assertEqual({<<"|">>, <<"a\nb\nc\n">>, <<>>}, run_line(<<"ls | cat">>, Dir)),
+                                          ?assertEqual({<<>>, <<"a\nb\nc\n">>, <<>>}, run_line(<<"ls -1">>, Dir)),
+                                          ?assertMatch({<<>>, <<"total -\n", _/binary>>, <<>>}, run_line(<<"ls -l">>, Dir)),
+                                          Narrow = #{<<"COLUMNS">> => [<<"4">>]},
+                                          ?assertEqual({<<>>, <<"a\nb\nc\n">>, <<>>}, run_line(<<"ls">>, Dir, Narrow))
+                                  end)
+                        end)
+     end}.
+
+%% Runs Fun with a group leader that reads every request and answers none.
+with_silent_leader(Fun) ->
+    Silent = spawn(fun Loop() -> receive _ -> Loop() end end),
+    Old = group_leader(),
+    group_leader(Silent, self()),
+    try Fun()
+    after
+        group_leader(Old, self()),
+        exit(Silent, kill)
+    end.
 
 %% A listing reads its directory's names and no entry's attributes unless
 %% -l shows them, as FreeBSD's ls asks fts for names alone (bin/ls/ls.c):

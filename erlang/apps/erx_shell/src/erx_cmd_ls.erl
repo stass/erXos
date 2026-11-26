@@ -48,14 +48,19 @@ run(Args, Ctx) ->
     case erx_cmd:getopt(Args, "1al") of
         {ok, Flags, Operands} ->
             Tty = erx_cmd:isatty(Ctx, stdout),
+            Across = Tty andalso not lists:member($1, Flags) andalso not lists:member($l, Flags),
             Options = #{all => lists:member($a, Flags), long => lists:member($l, Flags),
-                        across => Tty andalso not lists:member($1, Flags), tty => Tty,
-                        width => case erx_cmd:columns(Ctx) of unknown -> 80; W -> W end,
+                        across => Across, tty => Tty,
+                        width => width(Ctx, Across),
                         now => os:system_time(second)},
             list(case Operands of [] -> [<<".">>]; _ -> Operands end, Options, Ctx);
         {error, usage} ->
             {error, usage}
     end.
+
+%% The width matters only to a listing in columns, which -1 and -l are not.
+width(Ctx, true) -> case erx_cmd:columns(Ctx) of unknown -> 80; Width -> Width end;
+width(_Ctx, false) -> 80.
 
 list(Operands, Options, Ctx) ->
     Infos = [{Name, file:read_link_info(erx_cmd:path(Ctx, Name), [{time, posix}])} || Name <- Operands],
