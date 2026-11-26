@@ -277,4 +277,19 @@ class BenchLineTest < Minitest::Test
   def test_the_fuzzer_runs_clean_over_its_seeds
     assert_operator Fuzz.run(seconds: 1, seed: 7), :>, 100
   end
+  # A guest whose console splits long lines writes each as its first piece and MORE
+  # lines (docs/design-bench.md, "A benchmark"): the reader joins them back, so the boot
+  # judges the line as if it came whole, and refuses a MORE line that continues no line
+  # or carries no byte, or pieces past 64 KiB, with the line they continue.
+  def test_more_lines_join_back_into_their_line
+    line = Fuzz.line('wake-same-cpu')
+    split = Fuzz.pieces(line, piece_bytes: 64)
+    assert_operator split.size, :>, 2
+    assert_equal boot([Fuzz.clock_line, line]), boot([Fuzz.clock_line, *split])
+    assert_equal [[line, 'CLOCK x'], []], Erx::BenchMeasurement.joined([*split, 'CLOCK x'])
+    assert_equal [[], ['a MORE line continues no line']], Erx::BenchMeasurement.joined(split.drop(1))
+    assert_equal [['CLOCK x'], ['a MORE line carries no bytes']], Erx::BenchMeasurement.joined([*split, 'MORE ', 'CLOCK x'])
+    long = Fuzz.pieces("BENCH #{'x' * Erx::BenchMeasurement::LINE_BYTES}", piece_bytes: 4096)
+    assert_equal [[], ['a line and its MORE lines are longer than 65536 bytes']], Erx::BenchMeasurement.joined(long)
+  end
 end

@@ -163,9 +163,10 @@ module Erx
     # the boot's end was not seen (BoardLog). The cells come in asked's order, and each
     # refused line's reason is returned in refused, never its text.
     def boot(lines, asked, timed_out: false, not_run: NOT_RUN)
-      clocks, others = lines.partition { |text| line_of?(text, 'CLOCK') }
+      whole, broken = joined(lines)
+      clocks, others = whole.partition { |text| line_of?(text, 'CLOCK') }
       benches, trailing = with_windows(others)
-      answers = benches.map { |text, windows| judged { asked_cell(cell(text, asked, windows: windows), asked) } }
+      answers = benches.map { |text, windows| judged { asked_cell(cell(text, asked, windows: windows), asked) } } + broken
       answers << 'WINDOW lines are followed by no BENCH line' unless trailing.empty?
       accepted, refused = answers.partition { |answer| answer.is_a?(Array) }
       reported = accepted.group_by(&:first).transform_values { |pairs| pairs.map(&:last) }
@@ -189,6 +190,24 @@ module Erx
     def rejected(asked, reason:) = asked.cells.map { |entry| unreported(entry, asked, status: 'rejected', reason: reason) }
 
     def line_of?(text, kind) = text.is_a?(String) && text.b.start_with?("#{kind} ")
+
+    # The lines with each line's pieces joined back, and a refusal for each line whose
+    # pieces were refused. A guest whose console splits a long line writes it as its
+    # first piece and then MORE lines, each MORE, a space and the next piece
+    # (docs/design-bench.md, "A benchmark"). A MORE line that continues no line or carries
+    # no byte, or pieces that join to more than LINE_BYTES, are refused with the line they
+    # continue; nothing longer than LINE_BYTES is ever built.
+    def joined(lines)
+      lines.slice_before { |text| !line_of?(text, 'MORE') }.each_with_object([[], []]) do |(head, *more), (whole, refused)|
+        pieces = more.map { |text| text.b.delete_prefix('MORE ') }
+        if line_of?(head, 'MORE') || (!head.is_a?(String) && !more.empty?) then refused << 'a MORE line continues no line'
+        elsif more.empty? then whole << head
+        elsif pieces.any?(&:empty?) then refused << 'a MORE line carries no bytes'
+        elsif head.bytesize + pieces.sum(&:bytesize) > LINE_BYTES then refused << "a line and its MORE lines are longer than #{LINE_BYTES} bytes"
+        else whole << head.b + pieces.join
+        end
+      end
+    end
 
     # Each line but a WINDOW line, with the WINDOW lines between it and the line before
     # it, and the WINDOW lines no other line follows.

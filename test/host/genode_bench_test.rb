@@ -22,13 +22,32 @@ class GenodeBenchTest < Minitest::Test
     assert Erx::GenodeBench.checkpoints.last.fetch(:pattern).match?('[init -> erx_peer_bench] erx: bench: done')
   end
 
+  # Genode's LOG prints a message longer than its line as several lines, each behind the
+  # label, so the program writes a long record as its first piece and MORE lines that fit
+  # (test/fixtures/genode_bench/posix.serial.log: a boot's CLOCK, getpid and
+  # clock-gettime records re-split as the program splits them). The importer keeps the
+  # MORE lines and the reader joins them, so each record is judged whole.
+  def test_records_written_in_pieces_are_judged_whole
+    serial = File.binread(File.expand_path('../fixtures/genode_bench/posix.serial.log', __dir__))
+    lines = Erx::GenodeBench.lines(serial)
+    assert lines.all? { |line| line.bytesize <= Erx::GenodeBuild::MACHINE.piece_bytes }
+    answer = Erx::BenchMeasurement.boot(lines, Erx::PeerBench.asked('posix', cpus: 4, clock: 'counter', pinned: false))
+    assert_equal [], answer.fetch(:refused)
+    status = answer.fetch(:cells).to_h { |cell| [cell.operation, cell.status] }
+    assert_equal %w[failed measured], status.values_at('getpid', 'clock-gettime')
+  end
+
   # What base-hw on QEMU's virt allows at the pinned release is one declaration: it boots
   # under TCG alone, entered at the hypervisor's level, always on four CPUs, and its C
   # library refuses to pin, so the guest, the build and the program's arguments all follow
   # it and no caller passes any of it.
   def test_the_guest_boots_as_the_machine_declaration_allows
     machine = Erx::GenodeBuild::MACHINE
-    assert_equal [%w[tcg], 4, true, false], [machine.accelerators, machine.cpus, machine.virtualization, machine.pinned]
+    assert_equal [%w[tcg], 4, true, false, 230],
+                 [machine.accelerators, machine.cpus, machine.virtualization, machine.pinned, machine.piece_bytes]
+    flags = Erx::GenodeBuild.staged_inputs(Dir.pwd, arguments: Erx::GenodeBuild.arguments, cpus: 4)
+                            .fetch('repo/src/app/erx_peer_bench/flags.mk')
+    assert_includes flags.split, '-DERX_PEER_PIECE_BYTES=230u'
     guest = Erx::GenodeBench::Guest.new(root: Dir.pwd, runner: nil, platform: nil)
     assert_equal [%w[tcg], [4], [4]], [guest.accelerators, guest.forms(1), guest.forms(4)]
     assert_equal %w[posix 4 unpinned], Erx::GenodeBuild.arguments

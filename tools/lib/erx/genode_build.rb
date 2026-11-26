@@ -50,10 +50,18 @@ module Erx
     # pthread_setaffinity_np "not implemented", so its program runs unpinned; and it does
     # not power off when its program exits, so the harness ends the boot at its last
     # checkpoint, the program's done line, as at any guest that does not end the machine
-    # itself (Qemu#run's machine_end). The guest, its build and the session read these,
-    # and no caller passes any of them.
-    Machine = Data.define(:accelerators, :cpus, :virtualization, :pinned, :powers_off)
-    MACHINE = Machine.new(accelerators: %w[tcg].freeze, cpus: 4, virtualization: true, pinned: false, powers_off: false)
+    # itself (Qemu#run's machine_end); and its LOG service prints a message longer than
+    # log_line_bytes characters as several lines of that many, each behind the
+    # component's label, so the program writes its lines in pieces that fit (piece_bytes).
+    # The guest, its build and the session read these, and no caller passes any of them.
+    Machine = Data.define(:accelerators, :cpus, :virtualization, :pinned, :powers_off, :log_line_bytes) do
+      # The longest piece of a line the program writes (ERX_PEER_PIECE_BYTES): one byte
+      # short of log_line_bytes, whether or not Genode counts the newline, which is
+      # unverified.
+      def piece_bytes = log_line_bytes - 1
+    end
+    MACHINE = Machine.new(accelerators: %w[tcg].freeze, cpus: 4, virtualization: true, pinned: false, powers_off: false,
+                          log_line_bytes: 231)
     # The component's name: its target, its start node and its run script's.
     PROGRAM = 'erx_peer_bench'
     # What of erXos's tree the component's one C file includes, staged at its tree paths
@@ -172,8 +180,8 @@ module Erx
     # What a build for a posix run of arguments on cpus CPUs stages from erXos into the
     # container's /tmp/inputs, by path under it, sorted: the container script, and erXos's
     # Genode repository (the component's target description, its flags from their one
-    # source, PeerBench.flags, every regular file under SOURCES at its tree path under the
-    # component's root/, and the run script). The build writes exactly this map and its
+    # source, PeerBench.flags, and MACHINE's piece_bytes, every regular file under SOURCES
+    # at its tree path under the component's root/, and the run script). The build writes exactly this map and its
     # record names its digest (staged_sha256), so a boot recomputes it from the tree and
     # refuses an image staged from anything else.
     def staged_inputs(root, arguments:, cpus:)
@@ -181,7 +189,7 @@ module Erx
       sources = SOURCES.flat_map { |path| tree_files(root, path) }
                        .to_h { |path| ["#{app}/root/#{path}", tree_file(root, path)] }
       { 'build.sh' => tree_file(root, SCRIPT), "#{app}/target.mk" => tree_file(root, TARGET),
-        "#{app}/flags.mk" => "CC_OPT += #{PeerBench.flags.join(' ')}\n",
+        "#{app}/flags.mk" => "CC_OPT += #{[*PeerBench.flags, "-DERX_PEER_PIECE_BYTES=#{MACHINE.piece_bytes}u"].join(' ')}\n",
         "repo/run/#{PROGRAM}.run" => run_script(arguments: arguments, cpus: cpus), **sources }.sort.to_h
     end
 

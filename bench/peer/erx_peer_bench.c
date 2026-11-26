@@ -106,6 +106,20 @@
 #define READ_PAIRS	10000u
 #define ROUNDS		1000u
 #define LINE_BYTES	65536u
+/*
+ * The longest piece of a line the program writes, its newline not counted. A longer line
+ * is written as its first PIECE_BYTES bytes and then MORE lines, each MORE and at most the
+ * next PIECE_BYTES - (sizeof(MORE) - 1) bytes, which the host's reader joins back into the
+ * line (docs/design-bench.md, "A benchmark"). Genode's build sets ERX_PEER_PIECE_BYTES
+ * from its LOG service's line (GenodeBuild::MACHINE); elsewhere no line is split.
+ */
+#if defined(ERX_PEER_PIECE_BYTES)
+#define PIECE_BYTES	ERX_PEER_PIECE_BYTES
+#else
+#define PIECE_BYTES	LINE_BYTES
+#endif
+#define MORE		"MORE "
+_Static_assert(PIECE_BYTES > sizeof(MORE) - 1 && PIECE_BYTES <= LINE_BYTES, "a piece holds more than its MORE");
 #define NS_PER_SECOND	UINT64_C(1000000000)
 #define MS_PER_SECOND	UINT64_C(1000)
 /* A park-deadline period: 1 ms. The first deadline is this many periods after the run starts. */
@@ -182,14 +196,31 @@ peer_say(const char *text)
 	fflush(stdout);
 }
 
+/* Writes prefix and n bytes of text as one line. */
+static void
+peer_print_piece(const char *prefix, const char *text, size_t n)
+{
+	if (fputs(prefix, stdout) == EOF || fwrite(text, 1, n, stdout) != n || putchar('\n') == EOF ||
+	    fflush(stdout) != 0)
+		peer_fail("a line was not written");
+}
+
+/* Writes the length bytes of line, split into pieces of at most PIECE_BYTES. */
 static void
 peer_print_line(size_t length)
 {
+	const size_t more = PIECE_BYTES - (sizeof(MORE) - 1);
+	size_t at = length < PIECE_BYTES ? length : PIECE_BYTES;
+
 	if (length == 0 || length >= sizeof(line) - 1)
 		peer_fail("a line did not fit");
-	line[length] = '\n';
-	if (fwrite(line, 1, length + 1, stdout) != length + 1 || fflush(stdout) != 0)
-		peer_fail("a line was not written");
+	peer_print_piece("", line, at);
+	while (at < length) {
+		const size_t n = length - at < more ? length - at : more;
+
+		peer_print_piece(MORE, line + at, n);
+		at += n;
+	}
 }
 
 /* The clocks. */
@@ -300,12 +331,15 @@ clock_choose(void)
 
 /*
  * The probe (docs/design-bench.md, "What a program sees: `posix` and `erl`"): the call
- * that last failed and its error, which a cell's untimed first run reads to tell a call the
- * system does not offer from a wrong answer.
+ * that last failed and its error, or the answer POSIX does not allow it gave where invalid
+ * is set, which a cell's untimed first run reads to tell a call the system does not offer
+ * from a wrong answer. Each failure sets all of it.
  */
 static struct {
 	const char *call;
 	int error;
+	bool invalid;
+	long answer;
 } refusal;
 
 /* Whether a call answering -1 and errno on failure succeeded; a failure is kept for the probe. */
@@ -316,6 +350,7 @@ posix_ok(const char *call, long answer)
 		return (true);
 	refusal.call = call;
 	refusal.error = errno;
+	refusal.invalid = false;
 	return (false);
 }
 
@@ -327,6 +362,20 @@ pthread_ok(const char *call, int error)
 		return (true);
 	refusal.call = call;
 	refusal.error = error;
+	refusal.invalid = false;
+	return (false);
+}
+
+/* Whether a call's answer is one POSIX allows, valid; an answer it does not is kept for the probe. */
+static bool
+answer_ok(const char *call, long answer, bool valid)
+{
+	if (valid)
+		return (true);
+	refusal.call = call;
+	refusal.error = 0;
+	refusal.invalid = true;
+	refusal.answer = answer;
 	return (false);
 }
 
@@ -567,16 +616,24 @@ batch_run(const peer_op_t *op, uint64_t n, uint64_t *ticks)
 	return (right);
 }
 
-/* A run its probe ended: unsupported where the last refusal was ENOSYS or ENOTSUP, naming the call; else failed. */
+/*
+ * A run its probe ended: unsupported where the last refusal was ENOSYS or ENOTSUP, or an
+ * answer POSIX does not allow, naming the call and its answer; else failed.
+ */
 static peer_run_t
 probe_refused(void)
 {
 	static char reason[80];
-	const bool lacking = refusal.call != NULL && (refusal.error == ENOSYS || refusal.error == ENOTSUP);
+	const bool lacking = refusal.call != NULL &&
+	    (refusal.invalid || refusal.error == ENOSYS || refusal.error == ENOTSUP);
 
 	if (!lacking)
 		return ((peer_run_t){ .batch = 1, .taken = 0, .status = "failed", .reason = WRONG_RESULT });
-	snprintf(reason, sizeof(reason), "%s answered %s", refusal.call, refusal.error == ENOSYS ? "ENOSYS" : "ENOTSUP");
+	if (refusal.invalid)
+		snprintf(reason, sizeof(reason), "%s answered %ld", refusal.call, refusal.answer);
+	else
+		snprintf(reason, sizeof(reason), "%s answered %s", refusal.call,
+		    refusal.error == ENOSYS ? "ENOSYS" : "ENOTSUP");
 	return ((peer_run_t){ .batch = 1, .taken = 0, .status = "unsupported", .reason = reason });
 }
 
@@ -1670,11 +1727,12 @@ descriptor_drop(int *fd)
 
 /* Trivial calls. */
 
+/* A process ID is a positive integer (POSIX, Definitions, "Process ID"). */
 static bool
 getpid_begin(void)
 {
 	posix.pid = getpid();
-	return (posix.pid > 0);
+	return (answer_ok("getpid", (long)posix.pid, posix.pid > 0));
 }
 
 static bool

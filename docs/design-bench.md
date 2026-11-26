@@ -245,6 +245,13 @@ its frequency, the status, the sample count, the batch size, the
 histogram, the exact maximum and minimum, the sixteen largest samples with
 their sequence numbers, the counts of lost, early and missed events, and,
 for a batched cell that keeps it, its `total` ([the one clock](#the-one-clock)).
+A guest whose console splits a line longer than its own limit, as
+Genode's log does, writes a long line as its first piece and then `MORE`
+lines, each `MORE`, a space and the next piece, every one within the
+limit; the reader joins them back before it reads the line, and refuses
+a `MORE` line that continues no line or carries no byte, or pieces that
+join to more than 64 KiB, with the line they continue, so the cell is
+`rejected`. Every other guest writes each line whole.
 A swept periodic cell adds its sixteen phases and its excess histogram;
 an unswept one carries neither, and a line that carries them for an
 unswept operation, or lacks them for a swept one, is refused. A
@@ -2287,7 +2294,10 @@ What runs on erXos is derived, not declared. Before its timed loop each
 cell makes its calls once, untimed; a call that answers `ENOSYS` or
 `ENOTSUP` makes the cell `unsupported` with that call and its `errno`
 named as the reason (`unsupported: stat answered ENOSYS`), the
-status the record already has for an operation the environment lacks.
+status the record already has for an operation the environment lacks;
+so does a call whose answer POSIX does not allow, with the answer named
+(`unsupported: getpid answered 0`, where a process ID is a positive
+integer).
 The rows that wait on an unbuilt part therefore report so from the
 system itself, a row measures once its part exists, and no list of
 which rows run is kept anywhere to fall out of date. The statuses below
@@ -2739,10 +2749,13 @@ are therefore emulation numbers, published as such, at four CPUs and
 unpinned, and set beside erXos's TCG runs of the same session and
 nothing else ([A comparison session](#a-comparison-session)). Genode prints a component's log behind its label; the importer
 of its boot drops the label, as L4Re's drops ned's tag, and nothing else.
-Whether Genode's log carries a 64 KiB line whole is unverified; a cut
-line is `rejected`, which is visible and fails safe, and if lines are
-cut the program writes its lines through Genode's terminal path instead,
-settled when the guest is built. Genode does not power off when the
+Genode's log prints a message longer than 231 characters as several
+lines of 231, each behind the label, as the guest's boots showed, so
+the machine declaration states that line and the build sets the
+program's piece one byte shorter, since whether Genode counts the
+newline is unverified: the program writes each long line as its first
+piece and `MORE` lines ([A benchmark](#a-benchmark)), which the reader
+joins back. Genode does not power off when the
 program exits, so the boot ends at its last checkpoint, the program's
 `erx: bench: done` line, which follows its `CLOCK` line, and the
 harness stops QEMU there, as at any boot ([A benchmark](#a-benchmark)).

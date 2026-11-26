@@ -1,0 +1,13 @@
+kernel initialized
+Genode 26.08
+[init -> erx_peer_bench] erx: bench: timing
+[init -> erx_peer_bench] BENCH {"benchmark":"posix","operation":"getpid","conditions":{"load":"idle","placement":"same-cpu","parameters":{},"clock":"counter","batch":1},"frequency_hz":62500000,"status":"failed","reason":"wrong result","samples":0,"histogr
+[init -> erx_peer_bench] MORE am":[],"largest":[],"counts":{"lost":0,"early":0,"missed":0}}
+[init -> erx_peer_bench] BENCH {"benchmark":"posix","operation":"clock-gettime","conditions":{"load":"idle","placement":"same-cpu","parameters":{},"clock":"counter","batch":1},"frequency_hz":62500000,"status":"measured","samples":10000,"histogram":[[125,1
+[init -> erx_peer_bench] MORE 25,5],[186,187,274],[188,189,235],[250,251,545],[312,315,1646],[372,375,2524],[436,439,1448],[500,503,800],[560,567,1090],[624,631,533],[680,687,136],[688,695,116],[744,751,251],[808,815,200],[872,879,100],[936,943,34],[1000,
+[init -> erx_peer_bench] MORE 1007,26],[1056,1071,7],[1120,1135,8],[1184,1199,4],[1248,1263,5],[1312,1327,3],[1360,1375,1],[1424,1439,1],[1552,1567,1],[1616,1631,1],[1744,1759,1],[1808,1823,1],[1872,1887,1],[2240,2271,1],[2304,2335,1],[2368,2399,1]],"min"
+[init -> erx_peer_bench] MORE :125,"max":2375,"largest":[[9676,2375],[1861,2313],[5231,2250],[3675,1875],[7184,1812],[7741,1750],[7745,1625],[945,1562],[3876,1437],[4995,1375],[2525,1313],[4822,1313],[4954,1312],[878,1250],[1375,1250],[7992,1250]],"counts
+[init -> erx_peer_bench] MORE ":{"lost":0,"early":0,"missed":0}}
+[init -> erx_peer_bench] CLOCK {"clock":"counter","frequency_hz":62500000,"increment":62,"read_cost":0,"wait_rounding":1,"cycles_per_tick":"unknown","pairs":[]}
+[init -> erx_peer_bench] erx: bench: done
+[init] child "erx_peer_bench" exited with exit value 0

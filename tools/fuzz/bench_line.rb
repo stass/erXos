@@ -134,11 +134,21 @@ module Erx
     # The longest WINDOW line a spinner writes: its last window and thread, every count at its most.
     def longest_window_line = window_line(window: 9, thread: 7, **MEASUREMENT::WINDOW_COUNTS.to_h { |name| [name, (1 << 64) - 1] })
 
+    # A line as a guest whose console splits long lines writes it (erx_peer_bench's
+    # peer_print_line): its first piece_bytes bytes, then MORE lines of at most piece_bytes.
+    def pieces(text, piece_bytes:)
+      first, rest = text.b.unpack("a#{piece_bytes}a*")
+      [first, *rest.scan(/.{1,#{piece_bytes - 'MORE '.bytesize}}/mn).map { |piece| "MORE #{piece}" }]
+    end
+
     # Each operation's line, the two-CPU calibration, an Erlang guest's: 1 GHz, its wait
     # rounding 1 ms, cycles unknown, no pair, and a failed cell with samples; and WINDOW
-    # lines, a typical one and the longest.
+    # lines, a typical one and the longest; and a boot of a console that splits lines, at
+    # Genode's piece size, and a line near its bound whose first piece holds its histogram.
     def seeds
-      PROFILES.keys.map { |operation| line(operation) } +
+      split = pieces(line('wake-same-cpu'), piece_bytes: 230)
+      near = pieces(repeat_bucket(line('wake-same-cpu'), 4000), piece_bytes: 4096)
+      PROFILES.keys.map { |operation| line(operation) } + [[clock_line, *split].join("\n"), near.join("\n")] +
         [clock_line, clock_line(frequency_hz: 1_000_000_000, increment: 41, wait_rounding: 1_000_000, pairs: []),
          line('erlang-timer', frequency_hz: 1_000_000_000, status: 'failed', reason: 'a timer message did not come',
                               counts: { 'lost' => 1, 'early' => 0, 'missed' => 3 }),
@@ -168,7 +178,8 @@ module Erx
     end
 
     def exercise(text)
-      return board(text) if text.include?("\n")
+      return board(text) if text.include?("\r\n")
+      return split_boot(text) if text.include?("\n")
       return MEASUREMENT.clock(text) if text.start_with?('CLOCK')
       if text.start_with?('WINDOW')
         MEASUREMENT.window(text)
@@ -180,6 +191,18 @@ module Erx
       cell = MEASUREMENT.cell(text, ASKED)
       samples = cell.summary.fetch('samples', 0)
       raise 'an accepted histogram past its profile' if samples > PROFILES.fetch(cell.operation).samples
+    rescue Erx::Error
+      nil
+    end
+
+    # A split boot's lines: the reader builds no line past its bound and judges each line
+    # it joined.
+    def split_boot(text)
+      lines = text.split("\n")
+      whole, = MEASUREMENT.joined(lines)
+      raise 'a joined line past its bound' if whole.any? { |joined| joined.bytesize > MEASUREMENT::LINE_BYTES }
+
+      MEASUREMENT.boot(lines, ASKED)
     rescue Erx::Error
       nil
     end
@@ -221,5 +244,5 @@ if $PROGRAM_NAME == __FILE__
   end.parse!(ARGV)
   raise OptionParser::InvalidArgument, 'budget of 1..60 seconds' unless options[:seconds].between?(1, 60)
 
-  puts "BENCH, CLOCK and WINDOW line validators and the board log reader: #{Erx::BenchLineFuzz.run(**options)} inputs"
+  puts "BENCH, CLOCK, WINDOW and MORE line readers and the board log reader: #{Erx::BenchLineFuzz.run(**options)} inputs"
 end

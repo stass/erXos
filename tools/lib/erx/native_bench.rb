@@ -129,7 +129,7 @@ module Erx
     # and anything else after it is a broken one.
     NAMING_HEAD = /\Aerx: bench: boot /n
     NAMING_LINE = /\Aerx: bench: boot (?<name>[0-9a-f]{32})(?: (?<form>done|deadline))?\r*\z/n
-    GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW) /n
+    GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW|MORE) /n
 
     module_function
 
