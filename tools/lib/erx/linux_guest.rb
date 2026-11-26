@@ -38,11 +38,6 @@ module Erx
     COMMAND_LINE = 'console=ttyAMA0 panic=-1'
     PEER = PeerBench::SOURCE
     INIT = 'bench/linux/init.c'
-    # The guest's deadline: /init kills the program this long after starting it, later
-    # than the program's own deadline, so the kill is only the backstop for a program its
-    # alarm did not end. QEMU's deadline for the program's end is
-    # NativeBench::DEADLINE_MARGIN_SECONDS more, so /init powers the machine off first.
-    DEADLINE_SECONDS = PeerBench::RUN_DEADLINE_SECONDS + 10
     # The code-generation flags, erXos's programs' own without their target, so the program
     # Linux runs is generated as erXos's is (docs/design-bench.md, "Fairness").
     CODE_FLAGS = NativeRoot::CODE_FLAGS.grep_v(/\A--target=/).freeze
@@ -50,6 +45,12 @@ module Erx
     BOOTS = %w[native posix].freeze
 
     module_function
+
+    # The guest's deadline under accel: /init kills the program this long after starting
+    # it, later than the program's own deadline under accel, so the kill is only the
+    # backstop for a program its alarm did not end. QEMU's deadline for the program's end
+    # is NativeBench::DEADLINE_MARGIN_SECONDS more, so /init powers the machine off first.
+    def deadline_seconds(accel) = PeerBench.run_deadline(accel) + 10
 
     # The lock's sources over their own workspace.
     def lock(root:, runner:)
@@ -76,16 +77,18 @@ module Erx
     # no other build replaces what a session boots. Answers the kernel's path, the
     # initramfs and the subject facts a record keeps. seeded are a seeded fault's flags
     # (NativeBench::Seed#root_flags), which the program takes as the native bench root does.
-    # board builds /init for the Raspberry Pi 4 (bench/linux/init.c, ERX_INIT_BOARD).
-    def build(root:, runner:, seeded: [], board: false)
+    # accel is the accelerator the guest boots under, 'native' on a board, whose run deadline
+    # the program and /init are built with; board builds /init for the Raspberry Pi 4
+    # (bench/linux/init.c, ERX_INIT_BOARD).
+    def build(root:, runner:, accel:, seeded: [], board: false)
       dependencies = lock(root: root, runner: runner)
       parent = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
       output = Dir.mktmpdir("build-#{Process.pid}-", parent)
       usr = dependencies.fetched_tree(MUSL_DEV)
-      peer_flags = [*PeerBench.flags, *seeded]
+      peer_flags = [*PeerBench.flags(accel: accel), *seeded]
       peer = compile(root: root, usr: usr, output: output, runner: runner, source: PEER, flags: peer_flags)
       init = compile(root: root, usr: usr, output: output, runner: runner, source: INIT,
-                     flags: ["-DERX_INIT_DEADLINE_S=#{DEADLINE_SECONDS}u", *(board ? ['-DERX_INIT_BOARD'] : [])])
+                     flags: ["-DERX_INIT_DEADLINE_S=#{deadline_seconds(accel)}u", *(board ? ['-DERX_INIT_BOARD'] : [])])
       initrd = File.join(output, 'initramfs.cpio')
       File.binwrite(initrd, initramfs(init: File.binread(init), peer: File.binread(peer)))
       kernel = dependencies.fetched_file(KERNEL)
@@ -114,7 +117,7 @@ module Erx
     def boot(root:, runner:, built:, benchmark:, cpus:, platform:, accel: 'hvf', directory:)
       checkpoints = [{ name: 'bench-timing', pattern: /\Aerx: bench: timing/n, seconds: 60 },
                      { name: 'bench-done', pattern: /\Aerx: bench: done/n,
-                       seconds: DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS }]
+                       seconds: deadline_seconds(accel) + NativeBench::DEADLINE_MARGIN_SECONDS }]
       machine = machine(benchmark, cpus: cpus, platform: platform)
       Qemu.new(root: root, runner: runner).run(
         platform: platform, accel: accel, cpus: cpus, memory_mib: machine.fetch(:memory_mib),
@@ -191,7 +194,7 @@ module Erx
       end
 
       def call(benchmark, cells:, cpus:, accel:)
-        @built ||= LinuxGuest.build(root: @root, runner: @runner)
+        @built ||= LinuxGuest.build(root: @root, runner: @runner, accel: accel)
         directory = File.join(@root, 'build/qemu', "linux-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
         report = LinuxGuest.boot(root: @root, runner: @runner, built: @built, benchmark: benchmark.name, cpus: cpus,
                                  platform: @platform, accel: accel, directory: directory)

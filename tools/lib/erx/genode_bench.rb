@@ -61,12 +61,12 @@ module Erx
             .grep(NativeBench::GUEST_LINE)
     end
 
-    # The checkpoints of a boot: the program's timing line, then its done line, each
-    # behind the component's label.
-    def checkpoints
+    # The checkpoints of a boot under accel: the program's timing line, then its done
+    # line, due within the run's deadline under accel, each behind the component's label.
+    def checkpoints(accel:)
       [{ name: 'bench-timing', pattern: /\A#{Regexp.escape(LABEL)}erx: bench: timing/n, seconds: 120 },
        { name: 'bench-done', pattern: /\A#{Regexp.escape(LABEL)}erx: bench: done/n,
-         seconds: PeerBench::RUN_DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS }]
+         seconds: PeerBench.run_deadline(accel) + NativeBench::DEADLINE_MARGIN_SECONDS }]
     end
 
     # Genode's guest for the posix boot (BenchSystem): one boot of the image built for its
@@ -111,7 +111,7 @@ module Erx
         memory = PosixBench.machine(@platform).memory_mib
         report = @qemu.run(
           platform: @platform, accel: accel, cpus: cpus, memory_mib: memory, image: build.image,
-          hostlink: QemuPlan::NO_HOSTLINK, checkpoints: GenodeBench.checkpoints, machine_end: machine.powers_off, directory: directory,
+          hostlink: QemuPlan::NO_HOSTLINK, checkpoints: GenodeBench.checkpoints(accel: accel), machine_end: machine.powers_off, directory: directory,
           virtualization: machine.virtualization
         )
         # The image QEMU booted is the one the record names, even if it was rebuilt meanwhile.

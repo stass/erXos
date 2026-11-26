@@ -21,8 +21,13 @@ module Erx
     CALIBRATED = %w[native posix].freeze
     # The program's one C file, which every system's build compiles.
     SOURCE = 'bench/peer/erx_peer_bench.c'
-    # A run ends by SIGALRM this long after it starts, so a stalled side ends it.
+    # A run ends by SIGALRM this long after it starts under HVF or on a board, so a stalled
+    # side ends it (docs/design-bench.md, "The program's deadline").
     RUN_DEADLINE_SECONDS = 300
+    # How many times RUN_DEADLINE_SECONDS a run is given under each accelerator: TCG
+    # translates every instruction, so a run that takes most of the base deadline under
+    # HVF takes about three times as long under TCG. 'native' is a board.
+    DEADLINE_FACTORS = { 'native' => 1, 'hvf' => 1, 'tcg' => 3 }.freeze
 
     module_function
 
@@ -30,12 +35,18 @@ module Erx
     # posix run told "unpinned"): every run but an xdomain run's pins.
     def pins?(name, pinned: true) = BOOTS.fetch(name) != 'xdomain' && pinned
 
-    # The -D flags of the source's build: the landing profiles' sizes and the xdomain
-    # cells' parameters, as their declarations give them, and the run's deadline.
-    def flags
+    # The seconds a run under accel (a key of DEADLINE_FACTORS) is given before its alarm.
+    def run_deadline(accel)
+      RUN_DEADLINE_SECONDS * DEADLINE_FACTORS.fetch(accel) { raise Error, "bench: no run deadline under #{accel}" }
+    end
+
+    # The -D flags of the source's build for runs under accel: the landing profiles' sizes
+    # and the xdomain cells' parameters, as their declarations give them, and the run's
+    # deadline under accel.
+    def flags(accel:)
       bytes, encoded = xdomain_parameters.values_at('bytes', 'encoded')
       [*NativeBench.profile_flags, "-DERX_PEER_XDOMAIN_BYTES=#{bytes}u",
-       "-DERX_PEER_XDOMAIN_ENCODED=#{encoded}u", "-DERX_PEER_RUN_DEADLINE_S=#{RUN_DEADLINE_SECONDS}u"].freeze
+       "-DERX_PEER_XDOMAIN_ENCODED=#{encoded}u", "-DERX_PEER_RUN_DEADLINE_S=#{run_deadline(accel)}u"].freeze
     end
 
     # The program's arguments for a run of benchmark name on cpus CPUs: a posix run is given

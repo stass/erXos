@@ -36,11 +36,20 @@ class PosixBenchTest < Minitest::Test
   # the carriage return a terminal's Enter sends; the session's shell types it.
   def test_session_shell_types_the_program_with_the_boot_cpu_count
     assert_equal "erx_peer_bench posix 4\r", Erx::PosixBench.command(4)
-    points = Erx::PosixBench.checkpoints([{ name: 'release-shell' }], cpus: 1)
+    points = Erx::PosixBench.checkpoints([{ name: 'release-shell' }], cpus: 1, accel: 'hvf')
     shell = points.find { |point| point[:name] == 'root-shell' }
     assert_equal "erx_peer_bench posix 1\r", shell.fetch(:type)
     assert_equal %w[release-shell root-shell bench-timing bench-done], points.map { |point| point[:name] }
     assert_match points.last.fetch(:pattern), "erx: bench: done\r\n"
+  end
+
+  # The done line is due within the run's deadline under the boot's accelerator and the
+  # margin, so a TCG boot is given the longer deadline its program was built with.
+  def test_the_done_line_is_due_within_the_accelerators_deadline
+    %w[hvf tcg].each do |accel|
+      done = Erx::PosixBench.checkpoints([{ name: 'release-shell' }], cpus: 4, accel: accel).last
+      assert_equal Erx::PeerBench.run_deadline(accel) + Erx::NativeBench::DEADLINE_MARGIN_SECONDS, done.fetch(:seconds)
+    end
   end
 
   # A line the program writes through root's session reaches the serial log ending
@@ -51,10 +60,10 @@ class PosixBenchTest < Minitest::Test
   end
 
   def test_flags_build_the_erxos_branch_with_the_peer_flags_and_a_seed
-    flags = Erx::PosixBench.flags(seeded: ['-DERX_PEER_SEED_NO_PROBE'])
+    flags = Erx::PosixBench.flags(accel: 'tcg', seeded: ['-DERX_PEER_SEED_NO_PROBE'])
     assert_equal '-DERX_PEER_ERXOS', flags.first
     assert_equal '-DERX_PEER_SEED_NO_PROBE', flags.last
-    assert_equal Erx::PeerBench.flags, flags[1...-1]
+    assert_equal Erx::PeerBench.flags(accel: 'tcg'), flags[1...-1]
   end
 
   def test_guest_boots_one_cpu_and_the_boot_count_at_the_landing_profiles_only

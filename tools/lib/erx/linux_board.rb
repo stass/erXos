@@ -93,7 +93,7 @@ module Erx
     def lay_out(root:, runner:, platform:, name:, directory:, compiler:, linker:, revision:)
       raise Error, "linux board: Linux's guest runs no counterpart of #{name}" unless runs?(name)
       lock = LinuxGuest.lock(root: root, runner: runner)
-      built = LinuxGuest.build(root: root, runner: runner, board: true)
+      built = LinuxGuest.build(root: root, runner: runner, accel: 'native', board: true)
       pinned = BootPartition::FIRMWARE.map { |id| Dependencies.new(root: root, runner: runner).archive_for(id) }
       plan = plan(platform: platform, name: name, initramfs: built.fetch(:initrd),
                   linux: [KERNEL, TREE, LICENSE].to_h { |id| [id, lock.fetched_file(id)] },
@@ -108,7 +108,7 @@ module Erx
                                'linux' => linux } }
       written = BootPartition.write_set(root: root, directory: directory, plan: plan, record: record)
       BoardRun::Subject.new(set: Netboot.boot_set(File.dirname(written.record), record: BootPartition::SET_RECORD),
-                            record: written.record, identity: nil, deadline_seconds: LinuxGuest::DEADLINE_SECONDS,
+                            record: written.record, identity: nil, deadline_seconds: LinuxGuest.deadline_seconds('native'),
                             root_flags: nil)
     end
   end

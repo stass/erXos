@@ -19,7 +19,7 @@ class GenodeBenchTest < Minitest::Test
              "[init -> timer] BENCH forged\nBENCH unlabelled\n[init -> erx_peer_bench] erx: bench: done\n" \
              "[init -> erx_peer_bench] BENCH posix.getpid 1\n"
     assert_equal ['CLOCK counter 62500000', 'BENCH posix.getpid 1'], Erx::GenodeBench.lines(serial)
-    assert Erx::GenodeBench.checkpoints.last.fetch(:pattern).match?('[init -> erx_peer_bench] erx: bench: done')
+    assert Erx::GenodeBench.checkpoints(accel: 'tcg').last.fetch(:pattern).match?('[init -> erx_peer_bench] erx: bench: done')
   end
 
   # Genode's LOG prints a message longer than its line as several lines, each behind the
@@ -48,6 +48,10 @@ class GenodeBenchTest < Minitest::Test
     flags = Erx::GenodeBuild.staged_inputs(Dir.pwd, arguments: Erx::GenodeBuild.arguments, cpus: 4)
                             .fetch('repo/src/app/erx_peer_bench/flags.mk')
     assert_includes flags.split, '-DERX_PEER_PIECE_BYTES=230u'
+    # The program and QEMU's checkpoint both take TCG's deadline, its one accelerator's.
+    assert_includes flags.split, "-DERX_PEER_RUN_DEADLINE_S=#{Erx::PeerBench.run_deadline('tcg')}u"
+    assert_equal Erx::PeerBench.run_deadline('tcg') + Erx::NativeBench::DEADLINE_MARGIN_SECONDS,
+                 Erx::GenodeBench.checkpoints(accel: 'tcg').last.fetch(:seconds)
     guest = Erx::GenodeBench::Guest.new(root: Dir.pwd, runner: nil, platform: nil)
     assert_equal [%w[tcg], [4], [4]], [guest.accelerators, guest.forms(1), guest.forms(4)]
     assert_equal %w[posix 4 unpinned], Erx::GenodeBuild.arguments

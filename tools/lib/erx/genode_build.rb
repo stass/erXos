@@ -189,9 +189,13 @@ module Erx
       sources = SOURCES.flat_map { |path| tree_files(root, path) }
                        .to_h { |path| ["#{app}/root/#{path}", tree_file(root, path)] }
       { 'build.sh' => tree_file(root, SCRIPT), "#{app}/target.mk" => tree_file(root, TARGET),
-        "#{app}/flags.mk" => "CC_OPT += #{[*PeerBench.flags, "-DERX_PEER_PIECE_BYTES=#{MACHINE.piece_bytes}u"].join(' ')}\n",
+        "#{app}/flags.mk" => "CC_OPT += #{[*PeerBench.flags(accel: deadline_accelerator), "-DERX_PEER_PIECE_BYTES=#{MACHINE.piece_bytes}u"].join(' ')}\n",
         "repo/run/#{PROGRAM}.run" => run_script(arguments: arguments, cpus: cpus), **sources }.sort.to_h
     end
+
+    # The accelerator whose run deadline the program is built with: the image is built
+    # once for MACHINE, so its alarm is the longest deadline of MACHINE's accelerators.
+    def deadline_accelerator = MACHINE.accelerators.max_by { |accel| PeerBench.run_deadline(accel) }
 
     # The SHA-256 of a staged map: each path with its bytes' SHA-256.
     def staged_sha256(staged)

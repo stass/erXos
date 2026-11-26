@@ -58,9 +58,9 @@ module Erx
       ProductionImage::Machine.development(platform).with(memory_mib: platform.memory_mib + TMP_MIB)
     end
 
-    # The program's flags beyond the tree's: erXos's define, PeerBench's and seeded, a
-    # seeded fault's.
-    def flags(seeded: []) = [ERXOS_FLAG, *PeerBench.flags, *seeded].freeze
+    # The program's flags beyond the tree's for runs under accel: erXos's define,
+    # PeerBench's and seeded, a seeded fault's.
+    def flags(accel:, seeded: []) = [ERXOS_FLAG, *PeerBench.flags(accel: accel), *seeded].freeze
 
     # The line typed at root's command shell: the program's posix benchmark at the boot's
     # CPU count, which the program places its threads by and never asks the system for.
@@ -68,26 +68,28 @@ module Erx
 
     # The boot's checkpoints: the production boot to the system's command shell (points),
     # root's session's command shell, which the command is typed at, and the program's
-    # first and last lines, its last due within its own deadline and NativeBench's margin.
-    def checkpoints(points, cpus:)
+    # first and last lines, its last due within its own deadline under accel and
+    # NativeBench's margin.
+    def checkpoints(points, cpus:, accel:)
       [*points, SessionDomain.session_shell('root-shell', command(cpus)),
        { name: 'bench-timing', pattern: /\Aerx: bench: timing/n, seconds: 60 },
        { name: 'bench-done', pattern: /\Aerx: bench: done/n,
-         seconds: PeerBench::RUN_DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS }].freeze
+         seconds: PeerBench.run_deadline(accel) + NativeBench::DEADLINE_MARGIN_SECONDS }].freeze
     end
 
-    # Builds the image under OUTPUT on platform, with Fiasco as last built. Answers the
-    # built image, its machine and manifest, and the program's flags, SHA-256 and compiler
+    # Builds the image under OUTPUT on platform for runs under accel, with Fiasco as last
+    # built. Answers the built image, its machine and manifest, and the program's flags,
+    # SHA-256 and compiler
     # (PeerBench.compiler_version, as Linux's record names it).
-    def build(root:, runner:, compiler:, linker:, platform:, seeded: [])
+    def build(root:, runner:, compiler:, linker:, platform:, accel:, seeded: [])
       named = PeerBench.compiler_version(runner, compiler)
       on = machine(platform)
       source = manifest(platform.manifest_source(root))
       built, programs = Programs.test_image(root: root, runner: runner, compiler: compiler, linker: linker, machine: on,
                                             fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
                                             build: File.join(root, OUTPUT), programs: { PROGRAM => PeerBench::SOURCE },
-                                            manifest_source: source, flags: flags(seeded: seeded))
-      { built: built, machine: on, manifest: source, flags: flags(seeded: seeded),
+                                            manifest_source: source, flags: flags(accel: accel, seeded: seeded))
+      { built: built, machine: on, manifest: source, flags: flags(accel: accel, seeded: seeded),
         program_sha256: Digest::SHA256.file(programs.fetch(PROGRAM).fetch(:program)).hexdigest,
         compiler: named }.freeze
     end
@@ -102,7 +104,7 @@ module Erx
                                                        memory_mib: machine.memory_mib, test_image: true)
       Qemu.new(root: root, runner: runner)
           .run(platform: machine.platform, accel: accel, cpus: cpus, image: image.single, memory_mib: machine.memory_mib,
-               checkpoints: checkpoints(points, cpus: cpus), directory: directory,
+               checkpoints: checkpoints(points, cpus: cpus, accel: accel), directory: directory,
                command_line: ProductionImage::Run::COMMAND_LINES[accel])
     end
 
@@ -128,7 +130,10 @@ module Erx
       def refusal(profile) = ("erxos's posix image is built with the landing profiles only" unless profile == 'landing')
 
       def call(benchmark, cells:, cpus:, accel:)
-        @built ||= PosixBench.build(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform)
+        # A session boots every guest under one accelerator (BenchSession), so the image
+        # built for the first boot's is every boot's.
+        @built ||= PosixBench.build(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
+                                    accel: accel)
         directory = File.join(@root, 'build/qemu', "posix-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
         report = PosixBench.boot(root: @root, runner: @runner, built: @built, cpus: cpus, accel: accel, directory: directory)
         serial = report.fetch('serial_log')

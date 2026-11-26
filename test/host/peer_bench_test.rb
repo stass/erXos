@@ -53,8 +53,20 @@ class PeerBenchTest < Minitest::Test
 
   def test_the_build_flags_carry_the_declared_xdomain_parameters
     parameters = Erx::BenchSuite.benchmark('xdomain').landing.fetch('xdomain').first.parameters
-    assert_includes Erx::PeerBench.flags, "-DERX_PEER_XDOMAIN_ENCODED=#{parameters.fetch('encoded')}u"
+    assert_includes Erx::PeerBench.flags(accel: "hvf"), "-DERX_PEER_XDOMAIN_ENCODED=#{parameters.fetch('encoded')}u"
     assert_raises(Erx::Error) { Erx::PeerBench.asked('missing', cpus: 16, clock: 'counter') }
+  end
+
+  # A run's deadline is the base deadline times its accelerator's factor, and the flags
+  # compile in the deadline of the accelerator the build is for.
+  def test_the_run_deadline_follows_the_accelerator
+    base = Erx::PeerBench::RUN_DEADLINE_SECONDS
+    assert_equal [base, base, 3 * base], %w[native hvf tcg].map { |accel| Erx::PeerBench.run_deadline(accel) }
+    assert_includes Erx::PeerBench.flags(accel: 'tcg'), "-DERX_PEER_RUN_DEADLINE_S=#{3 * base}u"
+    assert_includes Erx::PeerBench.flags(accel: 'hvf'), "-DERX_PEER_RUN_DEADLINE_S=#{base}u"
+    assert_raises(Erx::Error) { Erx::PeerBench.run_deadline('kvm') }
+    # Linux's /init kills the program only after the program's own alarm, under either.
+    %w[native hvf].each { |accel| assert_operator Erx::LinuxGuest.deadline_seconds(accel), :>, Erx::PeerBench.run_deadline(accel) }
   end
 
   # posix takes the CPU count as its second argument, since on erXos the program cannot ask
@@ -64,7 +76,7 @@ class PeerBenchTest < Minitest::Test
     assert_equal %w[wake], Erx::PeerBench.arguments('wake', cpus: 4)
     assert_equal [[0, 3]], Erx::PeerBench.asked('posix', cpus: 4, clock: 'counter').pairs
     assert_empty Erx::PeerBench.asked('posix', cpus: 1, clock: 'counter').pairs
-    assert_includes Erx::PeerBench.flags, '-DERX_BENCH_EXPENSIVE_SAMPLES=100u'
+    assert_includes Erx::PeerBench.flags(accel: 'hvf'), '-DERX_BENCH_EXPENSIVE_SAMPLES=100u'
   end
 
   # Linux's guest boots posix with the count after the kernel's arguments, a /tmp for its

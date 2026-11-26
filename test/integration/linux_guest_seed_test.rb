@@ -23,7 +23,7 @@ class LinuxGuestSeedTest < Minitest::Test
   # The cells of a one-CPU boot of benchmark, and how long the boot took.
   def peer_boot(benchmark, seeded)
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-    built = Erx::LinuxGuest.build(root: ROOT, runner: runner, seeded: seeded)
+    built = Erx::LinuxGuest.build(root: ROOT, runner: runner, accel: 'hvf', seeded: seeded)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     report = Dir.mktmpdir('linux-guest-seed-', File.join(ROOT, 'build')) do |directory|
       Erx::LinuxGuest.boot(root: ROOT, runner: runner, built: built, benchmark: benchmark, cpus: 1,

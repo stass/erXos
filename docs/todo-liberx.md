@@ -718,6 +718,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
+* [Medium] program layer, `alarm` and `setitimer` ([design-programs.md](design-programs.md#the-posix-lite-personality),
+  the alarm in `handover` and `exec`'s capture): designed, not built; no site in `liberx/` implements either, so musl's
+  `alarm`, which calls `setitimer` (`musl/src/unistd/alarm.c`), reaches a call the program layer does not serve. `erx_peer_bench`'s own run deadline
+  (`alarm(ERX_PEER_RUN_DEADLINE_S)`, `bench/peer/erx_peer_bench.c`) therefore never fires on erXos, and only QEMU's
+  `bench-done` checkpoint ends a stalled `posix` run ([design-bench.md](design-bench.md#the-bench-images-boot-set),
+  "The program's deadline"). Implement `ITIMER_REAL` from the event executor's park deadline as designed, with a
+  test that a program's `alarm` delivers `SIGALRM`.
+
 * [Medium] firmware request, `liberx/backend/fiasco/vc_mbox.c` ([design-fiasco.md](design-fiasco.md#the-firmware-request)):
   no test drives `erx_firmware_request_row` itself; `test/host/vc_mailbox_test.rb` checks only the core through its
   driver's own loop, so the shim's steps, its sleep and its cache maintenance first run on a board (probe B1). Add a
