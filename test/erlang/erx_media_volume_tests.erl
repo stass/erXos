@@ -297,13 +297,13 @@ ended(Pid) ->
 
 %% The finish is the volume's one admission barrier: every read sent before it is
 %% answered, as is the finish; every request after it, a second finish among them,
-%% answers eio without reaching the format. A read-only volume holds nothing to write,
-%% so its finish has the window flush nothing.
+%% answers eio without reaching the format. A clean volume mounted rw that changed
+%% nothing writes nothing, and its finish has the window flush once.
 the_finish_answers_what_came_before_and_refuses_what_comes_after_test() ->
     Proxy = proxy(image("fat16.img"), ok),
     {_Sup, {none, [{_, Volume}], 0}} = through(Proxy),
-    {ok, Root, dir, _} = erx_media_volume:root(Volume),
-    {ok, File, file, _} = erx_media_volume:walk(Volume, Root, <<"hello.txt">>),
+    {ok, dir, Root} = erx_media_volume:root(Volume),
+    {ok, file, File} = erx_media_volume:walk(Volume, Root, <<"hello.txt">>),
     _MountsFlush = flushes(Proxy),
     Before = [wait_read(Volume, File) || _ <- lists:seq(1, 8)],
     ?assertEqual(ok, erx_media_volume:finish(Volume)),
@@ -314,7 +314,7 @@ the_finish_answers_what_came_before_and_refuses_what_comes_after_test() ->
     ?assertEqual({error, eio}, erx_media_volume:attr(Volume, File)),
     ?assertEqual({error, eio}, erx_media_volume:list(Volume, Root)),
     ?assertEqual({error, eio}, erx_media_volume:finish(Volume)),
-    ?assertEqual(0, flushes(Proxy)).
+    ?assertEqual(1, flushes(Proxy)).
 
 %% A volume that mounted no files finishes too, with nothing to write.
 a_volume_with_no_files_finishes_test() ->

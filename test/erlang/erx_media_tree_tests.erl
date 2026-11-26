@@ -369,8 +369,9 @@ session(Name) ->
         stop(Tree)
     end.
 
-%% Fids: a walk of three names, a clone and a second grant's walks each leave the
-%% volume's table as it was once their fids are clunked or their grant ends, and a
+%% Fids: a walk of three names, which holds the node it reached and the directory of
+%% its entry, a clone and a second grant's walks each leave the volume's table as it
+%% was once their fids are clunked or their grant ends, and a
 %% removed file stays readable through any fid that still names it.
 fids_leave_the_table_as_they_found_it_test() ->
     Base = image("fat16.img"),
@@ -379,7 +380,7 @@ fids_leave_the_table_as_they_found_it_test() ->
         {ok, _} = call(Grant, {walk, 1, 2, [<<"disk0">>, <<"s1">>]}),
         Before = table_size(),
         {ok, [_, _, _]} = call(Grant, {walk, 2, 3, [<<"sub">>, <<"Deeper">>, <<"x.TXT">>]}),
-        ?assertEqual(Before + 3, table_size()),
+        ?assertEqual(Before + 2, table_size()),
         ok = call(Grant, {clunk, 3}),
         ?assertEqual(Before, table_size()),
         %% A clone, and the same node walked twice, hold one entry until the last clunk.
@@ -471,7 +472,7 @@ a_read_only_volume_refuses_every_change_test() ->
         ?assertEqual({error, erofs}, call(Grant, {lopen, 4, ?ERX_P9_O_WRONLY})),
         ?assertEqual({ok, <<"hello, stick\n">>}, contents(Grant, [<<"disk0">>, <<"s1">>, <<"hello.txt">>], 5)),
         {ok, Status} = contents(Grant, [<<"disk0">>, <<"status">>], 5),
-        ?assertMatch({_, _}, binary:match(Status, <<"s1_mount\tro flush\n">>))
+        ?assertMatch({_, _}, binary:match(Status, <<"s1_mount\tro\ns1_ro_reason\tthe medium cannot flush\n">>))
     after
         stop(Tree)
     end.
