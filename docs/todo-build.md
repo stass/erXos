@@ -495,18 +495,6 @@ design does not have, to be deleted so no side-by-side table can show it under s
   moby v27.5.1 does for `docker cp` (docs/design-bench.md, "Genode's guest"); nothing checks that the context's
   engine does. Send a canary archive first (a directory entry `usr/lib/ssl/certs/` over the image's link) and
   refuse the build unless the engine refuses it.
-* [High] Genode's guest in the bench session (`GenodeBench::Guest`, docs/design-bench.md "Genode's guest"):
-  no Genode row can be measured as the design states. Black-box boots of `build/genode/1cpu/image.elf`
-  (Genode 26.08, base-hw on `virt_qemu_arm_v8a`, QEMU 11.1.3, Apple M3 Max) showed: the image prints nothing
-  unless QEMU enters it at EL2 (`virtualization=on`); its bootstrap starts four CPUs whatever the run script's
-  affinity space, printing "Failed to boot CPU1..3" and stopping with fewer; under HVF with
-  `virtualization=on` it prints nothing at all (why is unverified), so it runs only under TCG, whose numbers
-  the design never sets beside HVF's; and at 4 CPUs under TCG init takes the `+ arg` form and the program
-  reaches its timing line (the counter's frequency read at EL0 passes), but Genode's C library answers
-  `pthread_setaffinity_np` with "not implemented" and the program rejects the run before its `CLOCK` line.
-  Decide how Genode places threads (a clean-room facts record of what Genode's C library offers for it, or
-  rows marked unpinned), and whether a TCG-only system belongs in the HVF session; then boot, import and show
-  the cross-CPU handshake before any row is published as pinned.
 * [Low] Source ids and run names, `Dependencies` (`tools/lib/erx/dependencies.rb`) and `Runner::COMMAND_NAME`: a
   lock accepts an id with a capital letter, which the fetch then refuses as a run name ("invalid command name").
   No lock has one; give ids and run names one pattern.

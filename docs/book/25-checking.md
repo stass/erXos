@@ -779,9 +779,13 @@ ran and answered correctly; whether a change made the system slower is
 the comparison's question, and an inconclusive comparison leaves it open.
 
 Other systems are measured beside erXos in two places. Under HVF on the
-development host, L4Re, Linux and Genode boot in the same QEMU machine as
+development host, L4Re and Linux boot in the same QEMU machine as
 erXos's bench images, with the same processors and memory, each in turn
-over several rounds of one session. The system is part of where a run
+over several rounds of one session. Genode's own kernel boots there
+only under QEMU's emulation, always on four processors, so a session
+that includes it runs every system emulated at four processors, and
+its numbers are set beside erXos's emulated runs and never beside a
+number from HVF or the board. The system is part of where a run
 happened, so no comparison can turn one system's number into a verdict
 on another's; the systems meet only in side-by-side tables, one for each
 layer. The kernel table sets the kernels' own paths beside each other: a
@@ -811,8 +815,10 @@ goes from musl through `liberx`'s program layer to the service that
 owns it, mostly Erlang in the program's own session, so a file read
 pays the program's handler and the file server and a `getpid` pays no
 kernel at all. Genode, a microkernel system whose programs also reach
-their services in user mode, runs the same program on the kernels it
-supports, its own among them; L4Re has no row there. Each call is tried once before it
+their services in user mode, runs the same program on its own kernel;
+its C library cannot place a thread on a processor, so its rows are
+marked unpinned and its rows across two processors are unsupported.
+L4Re has no row there. Each call is tried once before it
 is timed, and one that answers that it is not implemented makes its row
 unsupported, so the table shows by itself which calls erXos's programs
 do not have yet.

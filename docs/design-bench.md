@@ -558,7 +558,7 @@ written by hand, and carries no host name:
 | Kind | Name | Holds | Compared with |
 | --- | --- | --- | --- |
 | QEMU `virt` under HVF | `qemu-hvf-<model>-<n>cpu-<system>`, `<model>` the host's hardware model | the development numbers and the landing gate | itself; side by side with `host`, and with the other systems in the same kind, model and CPU count |
-| QEMU `virt` under TCG | `qemu-tcg-<model>-<n>cpu-<system>` | functional runs on hosts without HVF | itself only |
+| QEMU `virt` under TCG | `qemu-tcg-<model>-<n>cpu-<system>` | functional runs on hosts without HVF, and the comparison session of a system that boots only under TCG (Genode's) | itself; side by side with the other systems in the same kind, model and CPU count |
 | deterministic mode | `qemu-det-<system>` | deterministic virtual time of one CPU, the same at every run of the same inputs | itself only |
 | the Raspberry Pi 4 | `pi4-4gb-<system>` | the native numbers and the three limits | itself; side by side with the other systems on the board |
 | the host | `host-<model>` | stock OTP natively | side by side with `qemu-hvf` |
@@ -1375,7 +1375,9 @@ reader.
 
 erXos is set beside L4Re, Linux and Genode first in QEMU's `virt`
 machine under HVF on the development host, where it is measured every
-day, and on the board after.
+day, and on the board after. Genode is the exception: its guest boots
+only under TCG and has no board, so it is set beside erXos's own TCG
+runs in a session of its own ([Genode's guest](#genodes-guest)).
 
 **What a row compares.** The kernel table's rows are kernel against
 kernel: erXos's cells there are the root task's and its test tasks'
@@ -1428,6 +1430,24 @@ boot ends, so a system that fails leaves its record and the session goes
 on with the next, and then prints the side-by-side tables of its runs. It
 runs by hand and at the plan gates that ask for it, never at the landing
 gate, which keeps its one system.
+
+**The session's accelerator and CPUs.** Each guest names the
+accelerators it boots under and the CPU counts it boots in. A session
+runs under HVF when every guest it boots allows HVF, and otherwise
+wholly under TCG when every guest allows that; one that no accelerator
+serves is refused before any boot, naming what each system allows. So a
+system that boots only under TCG, as Genode's `base-hw` does, takes
+every system of its session to TCG, and its runs are of the `qemu-tcg`
+kind: emulation numbers, set beside each other and never beside an HVF
+or board run, which the side-by-side tables refuse whenever their runs
+are of more than one environment kind or host model. A boot's same-CPU
+cells are read from the fewest CPUs every system of the boot boots in,
+and no system boots a one-CPU form that another of the boot cannot
+share, so a guest that boots only at a fixed count, Genode's four,
+moves every system of its boot to that count: erXos's rows beside
+Genode's are its own TCG runs at four CPUs. A run whose program pinned
+no thread says so in its environment (`threads: unpinned`), and each
+of its entries in the tables shows it.
 
 The side-by-side table is three tables, the kernel table and the Erlang
 table of [Counterparts](#other-systems-on-the-same-raspberry-pi-4) and
@@ -2299,8 +2319,8 @@ The Erlang twin is `erl`, a module of its own beside `erx_xdomain_bench`
   in a session, as [A comparison session](#a-comparison-session) gives
   every system; on the board, the same Raspberry Pi 4 under the rules of
   [Other systems on the same Raspberry Pi 4](#other-systems-on-the-same-raspberry-pi-4).
-  HVF and board numbers are never in one table, since their environments
-  differ in kind.
+  HVF, TCG and board numbers are never in one table, since their
+  environments differ in kind.
 * **Distributions, not one number.** Medians, 99th percentiles and
   maxima over the session's boots, in the records every run already
   writes; the side-by-side table shows each boot's summary.
@@ -2341,7 +2361,8 @@ places its threads on, and the pair its `CLOCK` line calibrates, come
 from the boot the host made. Threads are
 pinned with `sched_setaffinity` on erXos as on Linux: musl's erXos seam
 offers it, a mask's first word (`musl/src/internal/erxos/syscall.c:295-301`,
-`:499-500`). A cell whose stamps are taken by two processes (`spawn-main`)
+`:499-500`); Genode's run pins nothing, since its C library refuses the
+call ([Genode's guest](#genodes-guest)). A cell whose stamps are taken by two processes (`spawn-main`)
 runs in the one-CPU form only; `mutex-handoff` stamps across CPUs under
 the cross-CPU rule; every other cell stamps in one thread, same-CPU
 cells come from the one-CPU form and cross-CPU cells from the four-CPU
@@ -2510,11 +2531,11 @@ i.MX8Q EVK board; and Fiasco.OC, which would hold the kernel family
 constant against erXos's Fiasco, if Genode supports it on 64-bit ARM.
 Genode's platform page says it supports seL4 on 32-bit ARM and that
 Fiasco.OC runs on many ARM platforms, without saying which Genode
-supports on 64-bit ARM (References). So `base-hw` on QEMU's `virt` and
-on the Raspberry Pi 4, seL4 on the Raspberry Pi 4, and Fiasco.OC
-anywhere on 64-bit ARM are unverified, each until Genode's own
-documentation at the pinned release says so; a kernel it does not
-support there has no row. The guest is built first for `base-hw` on
+supports on 64-bit ARM (References). Genode 26.08 has no board for the
+Raspberry Pi 4, so Genode has no row on the board and runs only in
+QEMU. seL4 on QEMU's `virt` and Fiasco.OC anywhere on 64-bit ARM are
+unverified, each until Genode's own documentation at the pinned release
+says so; a kernel it does not support there has no row. The guest is built first for `base-hw` on
 Genode's board `virt_qemu_arm_v8a`, QEMU's `virt` machine: it is the
 one kernel built from nothing but Genode's own tree and tool chain, so
 it needs no further pinned source, and the offline probe of Genode's
@@ -2658,19 +2679,23 @@ but `cpuset_setaffinity`, which Genode's C library lacks. Of the calls
 that place threads, the library links `pthread_setaffinity_np` and
 `pthread_getaffinity_np`, and not `sched_setaffinity`,
 `sched_getaffinity`, `pthread_attr_setaffinity_np` or `sched_getcpu`.
-So the program's FreeBSD branch pins a thread with
+The program's FreeBSD branch pins a thread with
 `pthread_setaffinity_np` on itself, which on FreeBSD makes the same
 `cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_TID, -1)` call, and one
-call serves both. A refused call prints `FAILED` and no `CLOCK` line,
-so the run is rejected rather than measured unpinned. A call that
-returns success is not proof that the thread moved: no Genode row is
-published as pinned until a boot shows a cross-CPU handshake between
-CPU 0 and the last completing at the speed of two CPUs, not of one
-CPU's time slices. The run script gives init an affinity space of the
-boot's CPUs in one row (`+ affinity-space | width: N | height: 1`) and
-the component's start node all of it (`+ affinity | xpos: 0 | ypos: 0 |
-width: N | height: 1`), so that the program's CPU n is the boot's; the
-image is built for one CPU count (`tools/erx build genode --cpus N`).
+call serves both; but the guest's boot shows Genode's library answering
+it "not implemented", and a pinned run then prints `FAILED` and no
+`CLOCK` line. So Genode's program runs unpinned: its image gives it
+`unpinned` after its CPU count, and it pins no thread, runs its
+same-CPU cells wherever Genode places their threads, reports every
+cross-CPU cell and `mutex-handoff` `unsupported` with the reason
+`threads are not pinned on this system`, and calibrates no pair in its
+`CLOCK` line. Each of its rows is marked unpinned
+([A comparison session](#a-comparison-session)), and a same-CPU row of
+Genode's is not a measurement of two threads sharing one CPU. The run
+script gives init an affinity space of the boot's CPUs in one row
+(`+ affinity-space | width: N | height: 1`) and the component's start
+node all of it (`+ affinity | xpos: 0 | ypos: 0 | width: N | height:
+1`), so the program may run on any of them.
 
 Genode's run tool, the tool that makes the boot image, takes a Tcl
 script. erXos's harness writes it (`GenodeBuild.run_script`) from its
@@ -2690,7 +2715,18 @@ bounded and read only as data.
 
 **Boot and lines.** `QemuPlan.argv` with Genode's boot image as
 `-kernel`, Genode's own QEMU start is not used, so its QEMU arguments are
-erXos's. Genode prints a component's log behind its label; the importer
+erXos's. The image prints only when QEMU enters it at the hypervisor's
+level (`virtualization=on` on the machine line), and so entered under
+HVF it prints nothing, so it boots under TCG alone. Its bootstrap starts
+four CPUs whatever QEMU offers, and a boot with fewer reports the CPUs
+it could not start, so every boot has four and the image is built for
+four (`tools/erx build genode`). One declaration of the harness,
+`GenodeBuild::MACHINE`, states the accelerator, the CPU count, the
+machine option and that the program runs unpinned; the guest, its build
+and the session read it, and no caller passes any of it. Genode's rows
+are therefore emulation numbers, published as such, at four CPUs and
+unpinned, and set beside erXos's TCG runs of the same session and
+nothing else ([A comparison session](#a-comparison-session)). Genode prints a component's log behind its label; the importer
 of its boot drops the label, as L4Re's drops ned's tag, and nothing else.
 Whether Genode's log carries a 64 KiB line whole is unverified; a cut
 line is `rejected`, which is visible and fails safe, and if lines are
@@ -2826,10 +2862,10 @@ which shows the row went through the session's Erlang handler.
   comparison sessions and on demand, never at the landing gate, which
   keeps its three boots; a session's numbers are the evidence a change
   to a program's paths brings.
-* **Genode's kernels.** Recommendation: `base-hw` and seL4 under HVF
-  first, Fiasco.OC only where Genode's documentation at the pin names
-  64-bit ARM support, and the board once Genode's documentation names
-  the Raspberry Pi 4.
+* **Genode's kernels.** Recommendation: `base-hw` under TCG first, as
+  its boots allow, then seL4, and Fiasco.OC only where Genode's
+  documentation at the pin names 64-bit ARM support. Genode has no
+  board row: its release has no Raspberry Pi 4 board.
 
 ## The first five benchmarks
 
