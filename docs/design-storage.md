@@ -1713,10 +1713,22 @@ designed. It maps the format onto the file protocol as follows:
   original OEM code page, which maps every byte to one character, so every
   short name has a UTF-8 form. A name that would need more than 255 bytes
   of UTF-8, or that is not valid UTF-16, is listed and walked under its
-  short name. Every file the server creates gets a short name too,
+  short name, and the server creates none: one past 255 bytes of UTF-8 or
+  255 UTF-16 code units fails with `enametoolong`. Every file the server
+  creates gets a short name too,
   generated as the specification describes from ASCII letters, digits and
   the symbols it allows, so other systems that read only short names find
-  it under the same name in every OEM code page.
+  it under the same name in every OEM code page. A name whose base and
+  extension fit 8.3 and each hold one case is stored as its short name
+  alone, with the case flags Windows NT writes; one that does not fit, or
+  whose short name the directory holds already, takes the least numeric
+  tail free in its directory, `~1` upwards, as FreeBSD's `msdosfs` numbers
+  its generations (`uniqdosname`,
+  `sys/fs/msdosfs/msdosfs_lookup.c:1056-1062` at `release/14.3.0`), up to
+  `~999999`. Tails are numeric only: the server writes no hashed form of a
+  short name. A name stored as its short entry alone is never placed right
+  after a live long-name entry, which a reader would take as its long name;
+  there it gets long-name entries of its own.
 * **Attributes.** FAT has no owners and no permission bits: a file reports
   mode `0644`, or `0444` with the read-only attribute, and a directory
   `0755`; `setattr` of `mode` sets the read-only attribute exactly when the
@@ -1754,7 +1766,12 @@ designed. It maps the format onto the file protocol as follows:
   skipped with its flush. A sector a step writes holds the medium's bytes
   with the changes of that step and of the steps before it, and none of a
   later step's, so a directory sector that loses a name in step 1 and
-  gains one in step 3 is written twice:
+  gains one in step 3 is written twice. A change at a step overwrites its
+  entry in that step's image of the sector and in every later step's, so
+  the batch's last change to an entry wins from its step on: a name
+  created and removed in one batch, its entries published in step 3 and
+  marked deleted in step 1, leaves them deleted in both images, and an
+  entry changed twice holds its later change. The five steps:
   1. **Preparation**: the directory entries that remove names, a
      removed file's or directory's, a renamed file's old entry, and the
      entry of the name a rename replaces; the FAT entries of every
@@ -1915,7 +1932,9 @@ designed. It maps the format onto the file protocol as follows:
   check reads a sector, and the two together stay within half of
   `media_volume_bytes`, so a volume of more than 4,194,304 clusters,
   128 GiB of 32 KiB clusters, mounts read-only with `too large` without
-  being read. The sets are dropped once the check passes, since from then
+  being read. The directories the walk has found and not yet walked stay
+  within another quarter of it, 13,107 of them, and a volume whose walk
+  would hold more also mounts read-only with `too large`. The sets are dropped once the check passes, since from then
   on the batches keep what it found; a read-only mount does not run it,
   since a read follows a chain with checked bounds and writes nothing.
 * **Removing a file.** A removed file's name goes in its batch's

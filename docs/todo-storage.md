@@ -249,24 +249,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [Medium] storage, the FAT ownership check's directory list (`erlang/apps/erx_fat/src/erx_fat.erl`
-  `check/1`; [design-storage.md](design-storage.md#removable-media-fat)): the check's two cluster sets
-  are bounded to half of `media_volume_bytes`, but the list of directories it has found and not yet
-  walked grows with the volume's directories, about 40 bytes each, so a crafted volume of tens of
-  thousands of sibling directories passes the volume process's heap bound, which ends the process
-  (`none failed`) instead of mounting the volume read-only. A bound on the list, refused as
-  `too large`, or a walk that keeps one cursor per level, would end it.
-* [Medium] storage, a FAT directory's slots past its end marker (`erx_fat`;
-  [design-storage.md](design-storage.md#removable-media-fat), "Directory growth"): the read path and
-  the ownership check stop at a directory's first end-marker entry, as the specification has
-  readers do, but a crafted volume can hold live-looking entries after it. A new name written into
-  never-used slots that end in such entries would make them reachable, entries the check never
-  saw. The write path's directory growth (P3) must write the slot after a new name's last entry
-  as an end marker, or zero the rest of the cluster, when the name takes the end marker's slot.
-* [Low] storage, a FAT directory of exactly the entries' bound refused (`erlang/apps/erx_fat/src/erx_fat.erl`
-  `walk_chain/5`): the `{at_most, 1}` clause fails before it asks whether the cluster ends the chain,
-  so a directory of exactly 65,536 entries is `does_not_read` and, through the ownership check,
-  mounts its volume read-only with `tree`. Fix with a regression test of a directory of that length.
 * [Medium] media, an eject waits inside the ejecting grant (`erx_media_tree:write/4` on `ctl`,
   `erx_media_drive`'s `eject`): the finish answers every request a volume holds first, so a slow or
   stalled stick with many reads queued holds the drive process, every walk of `diskN` and `status`
