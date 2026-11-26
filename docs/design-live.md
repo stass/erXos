@@ -1985,7 +1985,7 @@ every other machine-wide path
 answers `{error, scope}`; a domain's own group and budget are under its
 path. The one machine tree a grant adds is the start table's: a scoped
 facet whose grantee is a session template that holds the start
-service's tree, `start`, also reaches `[apps]` and every `[apps, Name]`,
+service's tree, `start`, also reaches `[svc]` and every `[svc, Name]`,
 so whoever may command the start table, and edit `/etc/start.conf`,
 reads the table's applied state, its last read's problems and its
 rows' names, which `service status`, `service -e` and `service -c`
@@ -2096,7 +2096,7 @@ grantee's principal, the manifest's system-shell principals, its
 development flag and whether a facet row grants the grantee `start`:
 `all` for a system-shell principal (`root` in a development build) in
 a development build, and otherwise `{principal, P, Trees}`, the
-principal's domains and the machine trees `Trees`, `[apps]` for a
+principal's domains and the machine trees `Trees`, `[svc]` for a
 session template that holds `start` and none otherwise, and with the grantee's principal itself, which a
 facet of scope `all` would otherwise not carry. Both are parameters the
 domain service computes at the mint ([design-system.md](design-system.md#facets-a-configured-domain-serves),
@@ -2484,9 +2484,10 @@ memory and work, charged to it.
   domain id or a process id, and its generator refuses any other, so
   `/proc` holds what the system observes, the kernel's, the system
   services', the configured domains' and each runtime's about its own
-  processes, and no app's words. An app speaks in a tree of its own, at
-  `/svc/NAME` ([design-app-trees.md](design-app-trees.md)); of an app,
-  `/proc` shows the start table's record at `/proc/apps/NAME` and its
+  processes, and no service's own words. A service speaks in a tree of its
+  own, at `/svc/NAME`, whatever serves it
+  ([design-app-trees.md](design-app-trees.md)); of an app,
+  `/proc` shows the start table's record at `/proc/svc/NAME` and its
   session's domain.
 * **Scope.** A path outside the facet's scope answers `enoent`, as a path
   that names nothing does. The inspector decides scope from the path and
@@ -4488,7 +4489,7 @@ faults that must make its tests fail where it has any.
   case:
   * `erx_domain_core:inspect_scope/4`, over every principal, build flag
     and `start` grant: `all` for every principal of a development build;
-    `[apps]` among the trees of a grantee without `start`;
+    `[svc]` among the trees of a grantee without `start`;
   * in a release build: a scope that ignores its trees; a resolver that
     lets a tree's paths reach the domains they name;
   * an admission path that takes a scope from a request's options;

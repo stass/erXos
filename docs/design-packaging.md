@@ -1865,7 +1865,7 @@ promises compatibility, nothing below owes anything to its earlier forms,
 so a package built against an earlier SDK whose Erlang calls changed is
 admitted and fails when it runs: its session ends with the reason (an
 `undef`, the widget validator's refusal), its row goes down within its
-intensity, and `/proc/apps` shows why. A release that promises
+intensity, and `/proc/svc` shows why. A release that promises
 compatibility gives the public Erlang surface a version of its own in the
 header.
 
@@ -2013,7 +2013,7 @@ has run it
 package process publishes the package set; it answers once every session
 of an app the set drops has ended, and refuses a publication whose
 lifetime has ended. It is a call of the package process alone. Its `ctl`,
-at `/etc/start/ctl`, takes `purge NAME`, which `service NAME purge`
+at `/svc/start/ctl`, takes `purge NAME`, which `service NAME purge`
 writes; its errnos are `einval` for a name that is not an app name,
 `ebusy` for a name an installed package holds that no image package
 shadows, `erofs` on a trial boot, and `eio` for a failed `remove_app`
@@ -2031,7 +2031,7 @@ the package `/apps/NAME.app` shows, and `[packages, Name, shadowed]` the
 same fields, with `state` `shadowed`, of the installed package of the
 name that an image package shadows, listed in `/apps` as `.NAME.app`,
 so each path names one package. An
-app's start row, with whether it is enabled, is at `[apps, Name]` and
+app's start row, with whether it is enabled, is at `[svc, Name]` and
 its sessions at `[domains, Id]`, as any row's and any session's.
 
 **Manifest rows**: `apps`, as in [The `apps` row](#the-apps-row);
@@ -2075,7 +2075,7 @@ through the `apps` grant; neither takes a layout.
 | the domain library | the principal table sized for the manifest's principals and `max` apps, whose app entries `erx_dom_apps_place` puts after the manifest's principals, with no budget at boot; `erx_dom_plan_app_session` planning an app principal's session from the app template, which `erx_dom_plan_session` refuses |
 | the domain service | the app's session: its principal's wall, carved from the `apps` budget at the start and destroyed at the retire; the kept rows, and the app's record, with its package's place and layout, sent once the session's namespace is in place |
 | the principal service | `register_app/1`, which takes the committed package, called at a committed install or update and at recovery; `app_registry/0`, the registry admission reads; no app principal is unregistered within a boot |
-| the start service ([design-apps.md](design-apps.md#the-start-table)) | its tree at `/etc/start`, holding `ctl`; the package rows after the manifest's; `packages/2`, answered once the dropped apps' sessions have ended and refused for an ended lifetime; the merge's grants for an app from its admission; `purge` in its `ctl` |
+| the start service ([design-apps.md](design-apps.md#the-start-table)) | its tree at `/svc/start`, holding `ctl`; the package rows after the manifest's; `packages/2`, answered once the dropped apps' sessions have ended and refused for an ended lifetime; the merge's grants for an app from its admission; `purge` in its `ctl` |
 | the file service ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)) | a tree's `clunk` answers `ok` or `{error, Errno}`, and `erx_fs` answers the client's clunk with it once the grant has run it, after every request sent before it through the fid; the fid ends whatever the answer, as clunk(5) says; the `apps` facet mounted at `/apps` as any facet with a mount point; a session's export naming each local provider's tree when it is mounted ([design-files.md](design-files.md#narrowing-for-a-program)) |
 | the shell ([design-shell.md](design-shell.md#commands)) | `cp` opens its target itself, copies in pieces as its info report needs, and reports a failed close of the target as it reports a failed write; `mount FILE DIR`, the EROFS mount `{header, FILE}` of a package file of `/apps`, `ro`, `einval` for any other file; `service NAME purge` |
 | the storage service ([design-storage.md](design-storage.md#interfaces)) | the `packages` tree, the data partition's directory, with `new/` and `installed/` and `tree installed` rooted at `installed/`; the `system` tree, the booted slot's system partition's `apps/`, read-only, from the storage domain that serves `system`; `apps/` and `tree apps`, rooted at `apps/NAME/SIGNER/`; `remove_app` on the durability facet |
@@ -2165,8 +2165,8 @@ it no longer offers with `{gatt_not_offered, S}`; its data stays.
 | --- | --- | --- |
 | a file fails the file check: its size, header, length, name or signer, or its hash differs from its `package` row | `erx_pkg_header:check_file/2`, the package process | a copy's close answers its errno and nothing is published, and an installed package of the name goes on running; a package found on the medium is `refused` with the reason at `/proc/packages`; an image package refused at boot leaves its row out of the table |
 | admission refuses | `erx_app_admit:admit/4` | as above, with the reason |
-| an app's session does not fit what is left of the `apps` budget | the kernel's carve, through the domain library | the start answers `no_memory` naming the `apps` budget; the keeper counts an end, and the row goes down past its intensity, with the reason at `/proc/apps` |
-| a block of the image fails its hash | `erx_verity` in the reading session | the read answers `eio` with a log line naming the image and block; in the app's session the code load or file read fails, the session ends, and the row counts an end, with the reason at `/proc/apps`; at a mount of a package the `ls` or `cat` fails |
+| an app's session does not fit what is left of the `apps` budget | the kernel's carve, through the domain library | the start answers `no_memory` naming the `apps` budget; the keeper counts an end, and the row goes down past its intensity, with the reason at `/proc/svc` |
+| a block of the image fails its hash | `erx_verity` in the reading session | the read answers `eio` with a log line naming the image and block; in the app's session the code load or file read fails, the session ends, and the row counts an end, with the reason at `/proc/svc`; at a mount of a package the `ls` or `cat` fails |
 | a header changed on the medium after the file check | the `apps` tree's hash check | reads of the header answer `eio`, so a `mount` of it is refused; the app's own session holds the layout from the record and fails at its first block |
 | the image does not mount | `erx_app`, the shell's `mount` | the app's session ends at its start with the reader's reason; `mount` answers the reader's refusal and changes no namespace |
 | an inode of a layout the reader lacks, compressed or chunked | `erx_erofs` in the reading session | that file answers `enotsup` where it is reached; in the app's session as any failed load or read |
@@ -2181,7 +2181,7 @@ it no longer offers with `{gatt_not_offered, S}`; its data stays.
 | no free entry | admission | `apps_full`, until a reboot frees the entries of removed apps |
 | `max` installed packages, admitted, refused or shadowed, and a copy of a new name | the package process, at the close | `enospc`, until a package is removed |
 
-Every state above is an attribute at `/proc/packages` or `/proc/apps`,
+Every state above is an attribute at `/proc/packages` or `/proc/svc`,
 or an errno and a log line naming the package and the reason. Nothing is
 shown as admitted that the package process did not admit.
 
@@ -2621,7 +2621,7 @@ this is not on the list.
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
 | the build counts `max` apps each holding every service, so a large `max` with a display in `services` reserves the display's memory for pixel areas few apps use | medium | a display domain sized larger than its use | the builder sizes `max` to what the machine expects |
-| installed apps together want more than the `apps` budget | medium | the last one started is refused `no_memory` and its row goes down | the builder sizes `memory`; `room` at `/proc/packages` and the row's reason at `/proc/apps` show it |
+| installed apps together want more than the `apps` budget | medium | the last one started is refused `no_memory` and its row goes down | the builder sizes `memory`; `room` at `/proc/packages` and the row's reason at `/proc/svc` show it |
 | a full-window frame through `/dev/draw` is too slow for a game | medium | a game such as the Doom demo runs below its frame rate | the watch-list measurement; a faster path is a design change of the display's, if needed |
 | the app's code reads slowly through the file protocol and the hash check | medium | slow app starts | `tools/erx bench app-start`; the shared code design maps prepared code later ([design-shared-code.md](design-shared-code.md)) |
 | a mount of a package of `/apps` reads each block through the `apps` tree and the storage domain | medium | a slow `ls -R` or `cat` of a large package | the watch-list measurement; looking inside a package is rare and reads no app's hot path |

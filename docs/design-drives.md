@@ -1348,6 +1348,16 @@ so a slow medium delays the other requests of that session's `media`
 grant for that long. A call to a volume process that has ended answers
 `eio` at once.
 
+A drive's `status` and `ctl` lie beside its volumes, under `/media`,
+while every other service's control tree is at `/svc/NAME`
+([design-app-trees.md](design-app-trees.md)). Moving the two files to
+`/svc/media`, so that `/media` holds mounted volumes alone, as
+`hier(7)` describes it, is a design of its own (`TODO.md`, "A drive's
+`status` and `ctl` at `/svc/media`"): a grant names one tree root, so
+one `media` grant cannot appear as files under `/media` and as control
+under `/svc` without a rule that selects which part of the tree each
+place shows.
+
 ### Status
 
 `status` is one attribute a line, `NAME <tab> VALUE`, in the form an

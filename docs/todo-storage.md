@@ -716,6 +716,16 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
+* [Low] storage, a drive's `status` and `ctl` at `/svc/media`
+  ([design-drives.md](design-drives.md#the-media-tree), [design-app-trees.md](design-app-trees.md)): every
+  other service's control tree is at `/svc/NAME`, and `/media/diskN` keeps its `status` and `ctl` beside the
+  volumes, so `cp -r` and a file manager meet them. Moving them is accepted in principle and needs a design of
+  its own: one grant of the `media` tree cannot appear as files at `/media` and as control at `/svc/media` as
+  things stand, since `/svc` lists facets of interface `svc` while the tree's is `media`, a grant names one
+  tree root, and mounting the grant twice shows the same mixed tree twice. The design chooses a rule that
+  selects each place's part (one `place/1` row with two mount points, or a second, derived `svc` service of the
+  media domain), the `eject diskN` grammar of `/svc/media/ctl`, a top-level `status`, and the changes to
+  `erx_media_tree`, its tests and the QEMU cases.
 * [Medium] storage, one drive allocator for the machine
   ([design-usb.md](design-usb.md#mass-storage-reaches-the-file-servers)): a medium takes the lowest
   free drive among those the manifest names for its USB domain's controllers, which is the machine's

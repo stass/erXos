@@ -155,7 +155,7 @@ gives the question the document settles.
 | [design-app-model.md](../design-app-model.md) | The app model: a program is a file, an app is a package, the board is the manifest |
 | [design-apps.md](../design-apps.md) | Apps as principals, the start table and `service` |
 | [design-packaging.md](../design-packaging.md) | Packages: one file per app, admission, install and update at run time, the SDK |
-| [design-app-trees.md](../design-app-trees.md) | An app's own tree at `/svc/NAME` |
+| [design-app-trees.md](../design-app-trees.md) | Every service's own tree at `/svc/NAME` |
 | [design-generation.md](../design-generation.md) | Generated bindings, inspection, catalogs, test scaffolding, and the hardware and terminal sources |
 | [design-abi.md](../design-abi.md) | The declaration grammar, layouts, bounded readers and numeric assignments |
 | [design-build.md](../design-build.md) | The build and host tooling: deadlines, source records, evidence boundaries |

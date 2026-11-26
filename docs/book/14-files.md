@@ -130,9 +130,10 @@ facet, `data`, which the domain service minted for this session from
 a row of the system manifest and handed to it by name
 ([chapter 11](11-security.md#1161-one-grant-one-grantee-one-process)).
 The app's session got no such facet, so no path it writes can reach
-what the `data` grant reaches. The storage, apps and machine services appear at
-`/data`, `/apps` and `/machine` this way in every session that holds
-their facets. All of this is built.
+what the `data` grant reaches. The storage and apps services appear at `/data`
+and `/apps` this way in every session that holds their facets. All of
+this is built. Control trees, such as the machine's, are reached
+another way, through `/svc` (section 14.5.2).
 
 ### 14.1.2 Two domains, one server
 
@@ -629,7 +630,7 @@ would be a second, unproven way to change the machine. A `sysctl(3)`
 reader for programs, mapping `hw.ncpu` to `cpus_online` and so on, is
 designed and not built.
 
-### 14.5.2 An app's own tree: `/svc/NAME`
+### 14.5.2 A service's own tree: `/svc/NAME`
 
 `/proc` knows that the ntpd app is running, because the start service
 recorded it. It does not know which server ntpd last heard from: only
@@ -659,12 +660,12 @@ back, so a refusal's reason goes to the app's log
 ([design-app-trees.md, Commanding: `ctl`](../design-app-trees.md#commanding-ctl)).
 
 Figure 14.3 shows how `service ntpd status` reads both homes: the run
-state from `/proc/apps/ntpd`, then ntpd's own words from
+state from `/proc/svc/ntpd`, then ntpd's own words from
 `/svc/ntpd/status`.
 
 ```mermaid
 flowchart LR
-  U[service ntpd status, in root's session] --> P["/proc/apps/ntpd"]
+  U[service ntpd status, in root's session] --> P["/proc/svc/ntpd"]
   U --> S["/svc/ntpd/status"]
   P --> I[inspector: the start table's record]
   S --> F[svc facet of root's session]
@@ -676,11 +677,23 @@ flowchart LR
 system observed; the rest is the app's to say, served by the app and
 reached through a facet, never stored in the inspector.*
 
-The `/svc` directory is a namespace entry whose names are the `svc`
-facets the session holds; the domain service mints one for each
-session whose template holds the `start` facet. No link under `/svc`
-is followed, so an app cannot point its tree at another app's. When ntpd's session ends, its facets end and
-`/svc/ntpd` disappears. The whole of `/svc` is designed and not built.
+The same directory holds every other service's control tree, not
+only apps'. `svc` is an interface, and `/svc` is a namespace entry in
+every domain whose names are the facets of that interface the domain
+holds, each under its service's name: `/svc/start`, the start table's
+commands, and `/svc/machine`, the machine's end, which the system
+domain serves; `/svc/bluetooth`, which the Bluetooth domain serves; and
+each serving app's tree. Who holds each is unchanged by where it
+appears: the manifest's facet rows grant a system service's tree, and
+the domain service grants an app's to each session whose template holds
+the `start` facet
+([design-app-trees.md, The construction](../design-app-trees.md#overview)).
+So one question finds a `ctl`: a device's is under `/dev`, any other
+service's under `/svc/NAME`. No link in a tree of the `svc` interface is
+followed, so a tree cannot point a reader at another's. When ntpd's
+session ends, its facets end and `/svc/ntpd` disappears. The whole of
+`/svc` is designed and not built; `/etc/start` and `/machine` are where
+the built code mounts the start and machine trees.
 
 ## 14.6 Familiar only where true
 

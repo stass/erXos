@@ -714,7 +714,7 @@ Here is `reboot` at root's session, end to end:
 1. The command needs the `machine` facet, which the system principal's
    session template grants; a session without it refuses `reboot`
    before it starts.
-2. It writes `reset\n` to `/machine/ctl`, a file of the domain
+2. It writes `reset\n` to `/svc/machine/ctl`, a file of the domain
    service's `machine` tree, reached through the session's grant
    ([chapter 14](14-files.md)): control is a file to write.
 3. The tree's server hands the request to `erx_machine:request/2`, the

@@ -600,7 +600,7 @@ domains in boot order, then the enabled rows.
 `start`, `stop`, `restart` and `status` act on an enabled row; on any
 other they answer
 `Cannot 'start' NAME. Set NAME_enable to YES ...`. `service` holds no
-authority of its own: it reads the table from `/proc/apps` and writes
+authority of its own: it reads the table from `/proc/svc` and writes
 one line per act to the start service's `ctl` file, through the
 session's `start` grant, and the start service judges each line.
 The built `enable` writes the setting, prints

@@ -764,8 +764,8 @@ and planned as the loader plans it (`test/host/sdk_test.rb`).
 | a package the machine does not trust | the file check refuses it | the copy's close fails, in the design |
 | a need the row does not offer | admission refuses the package | the log; the app never starts |
 | a changed block of an image | the reader refuses the block; a refused `/app` mount ends the session | the session's death record |
-| the app's code crashes | its session ends; the row's supervisor starts it again | `/proc/apps` |
-| too many ends in the period | the row is down until `service NAME start` | `/proc/apps` shows `down` |
+| the app's code crashes | its session ends; the row's supervisor starts it again | `/proc/svc` |
+| too many ends in the period | the row is down until `service NAME start` | `/proc/svc` shows `down` |
 | `erx_pkg` crashes | it restarts and recovers; past its intensity it stays down and the last set keeps running | the log |
 | `erx_pkg_io` ends | the system domain ends and the machine resets | the crash record |
 | a power cut during an install | the name holds the old package, the new one, or none, whole | the next boot's recovery |
@@ -847,7 +847,7 @@ session running across it.
   the SDK, and every invariant with its test.
 * [design-app-trees.md](../design-app-trees.md): an app's own tree at
   `/svc/NAME`, described in chapter 14, section
-  [14.5.2](14-files.md#1452-an-apps-own-tree-svcname).
+  [14.5.2](14-files.md#1452-a-services-own-tree-svcname).
 * [design-storage.md, Reading EROFS images](../design-storage.md#reading-erofs-images):
   the reader and the hash check every package mount goes through.
 * [examples/dashboard/README.md](../../examples/dashboard/README.md):

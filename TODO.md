@@ -25,7 +25,7 @@ goes to the document of the subsystem its component pointer names.
 * [Shell and programs](docs/todo-shell.md#major-initiatives): the command shell (rc), programs, the console line and the terminal.
   1 item (1 High).
 * [Apps and the start service](docs/todo-apps.md#major-initiatives): applications and packages, the demo apps.
-  19 items (6 High, 10 Medium, 3 Low).
+  20 items (6 High, 11 Medium, 3 Low).
 * [Storage](docs/todo-storage.md#major-initiatives): storage: file systems, the storage domain, file clients, the object store, the image tree.
   1 item (1 High).
 * [Display and desktop](docs/todo-display.md#major-initiatives): the display stack, the window system, the desktop and LVGL in apps.
@@ -198,7 +198,7 @@ document's "residual risks accepted" paragraph.
 * [Apps and the start service](docs/todo-apps.md#planned-features): applications and packages, the demo apps.
   17 items (1 High, 11 Medium, 5 Low).
 * [Storage](docs/todo-storage.md#planned-features): storage: file systems, the storage domain, file clients, the object store, the image tree.
-  16 items (7 Medium, 9 Low).
+  20 items (7 Medium, 13 Low).
 * [Display and desktop](docs/todo-display.md#planned-features): the display stack, the window system, the desktop and LVGL in apps.
   19 items (8 Medium, 11 Low).
 * [Inspection and logging](docs/todo-inspection.md#planned-features): the inspector, /proc, logging and the live tree.

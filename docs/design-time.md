@@ -897,7 +897,7 @@ when it started, in the environment variable `ERX_START_FLAGS`.
 8 entries and checks each against the server-list rule above. Empty
 flags, or flags that break the rule, end the session at start with `no
 servers` or `bad flags` in its log and its row's last reason at
-`/proc/apps`, and the start table's intensity leaves it down. Because no
+`/proc/svc`, and the start table's intensity leaves it down. Because no
 manifest ships a server, enabling ntpd without naming one does this.
 
 **The Raspberry Pi 4 development image** is the one exception to
@@ -1000,7 +1000,7 @@ service's answer is answered at once. A kiss code is written as one of
 the known atoms, never as the server's bytes. ntpd's tree has no `ctl`;
 `ntpctl -s` writes this file ([Decisions](#decisions), 8). Only a session
 whose template holds `start` has `/svc`, which is also who reads
-`/proc/apps/ntpd`.
+`/proc/svc/ntpd`.
 
 ## Setting the clock by hand
 
@@ -1235,12 +1235,12 @@ The arguments choose the source of a step, and nothing else does
   came, all from one read of the record. A sample stays true after a step
   ([The construction](#the-construction)), so setting its `W` sets the
   time that server gave, less the drift of the clock since. ntpd must be
-  running, as its start-table row says at `/proc/apps/ntpd`; when it is
+  running, as its start-table row says at `/proc/svc/ntpd`; when it is
   not, or when the record holds no sample of ntpd's, the command writes
   `ntpctl: ntpd is not running` or `ntpctl: ntpd has no sample`, status
   1, and sets nothing. A record it cannot read, or an attribute it
   cannot see or that holds no value, writes its path and that status,
-  as `ntpctl: /proc/time: unavailable` or `ntpctl: /proc/apps/ntpd:
+  as `ntpctl: /proc/time: unavailable` or `ntpctl: /proc/svc/ntpd:
   state not visible`, status 1, and never claims either. The
   sample is the last one ntpd sent, and the command applies it whether
   the clock service stepped to it, held it, or refused it as `panic`: a
@@ -1284,7 +1284,7 @@ The arguments choose the source of a step, and nothing else does
 
   `peers` writes one line for each address in use, the current one
   marked `current`, then one for each denied address, marked `denied`.
-  The command reads the file through `erx_svc_client:read/2`, writes
+  The command reads the file through `erx_svc_client:read/3` at `svc_wait_max`, writes
   `ntpctl: ntpd is not running`, status 1, when no session of ntpd's
   row serves it, kept or started by `onestart`, and parses it with
   `erx_svc_status:parse/1`
@@ -1653,7 +1653,7 @@ These were open and are settled as stated here:
    commanding apart. A one-shot command's usual home is a `ctl` file,
    but this adds one operation to a protocol already declared, not a new
    protocol or mechanism, and the operator's command is a protocol
-   request, as `host` uses `net`. A line of `/machine/ctl` was rejected because the
+   request, as `host` uses `net`. A line of `/svc/machine/ctl` was rejected because the
    right to end the machine would also set the clock and the
    coordinator's tree would forward to a service it does not own; a
    `ctl` file of a tree the clock service serves was rejected because it

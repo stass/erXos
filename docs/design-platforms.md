@@ -2055,8 +2055,8 @@ nothing of a record enters erXos's tree.
 **A round.** Round N makes three logins, each `ssh root@MACHINE COMMAND`,
 which the SSH domain runs as `rc -c COMMAND`
 ([design-ssh.md](design-ssh.md#sessions-ttys-and-shells)): *inspect* (`ps`,
-`top -b`, `cat` of `/proc/status`, `/proc/apps/status` and
-`/proc/apps/dashboard/status`, and each `/proc/domains/*/status`, with an
+`top -b`, `cat` of `/proc/status`, `/proc/svc/status` and
+`/proc/svc/dashboard/status`, and each `/proc/domains/*/status`, with an
 `echo soak: SECTION` line before each part so the driver can split the
 output); *write* (`cat > /data/soak/N` with a 256 KiB payload on standard
 input whose byte I is (I + N) mod 251, the rule of the block suite's
@@ -2090,7 +2090,7 @@ at the login's end, more than 60 s apart, counted around midnight; erXos
 keeps no time zone, and a clock in another zone fails, never passes; this is
 unverified); kiosk (`state` other than `running` or `ends` above 0; unknown
 when the round's record is `[unsupported]` or `[error]`); domains (each
-name in `boot_order` of `/proc/apps/status` must have exactly one domain in
+name in `boot_order` of `/proc/svc/status` must have exactly one domain in
 state `running` under the id it had in round 1, since ids are never reused
 and a restarted domain shows a new one; the field name is unverified);
 reset (`uptime` in `/proc/status` below the previous round's: the machine

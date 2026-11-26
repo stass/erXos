@@ -339,7 +339,7 @@ shell and for `erx:` functions that run commands:
    names through `inet_res`
    ([design-network-stack.md](design-network-stack.md)); `reboot` and
    `halt`, which follow FreeBSD's reboot(8), need the `machine` grant and
-   write one end to `/machine/ctl`
+   write one end to `/svc/machine/ctl`
    ([design-system.md](design-system.md#a-sessions-request)); and erXos's own `i`, `domains`, `source`, `trace`,
    `attach`, `mount` and `umount` ([Interfaces](#interfaces)), and `load`, which loads code
    into a domain through the session's install or code facet
@@ -2435,17 +2435,19 @@ session's runtime, with or without the facet. The system domain's session, hande
 reads at scope `all` in its own runtime and holds, for each service of
 the system domain that runs in that domain, the value `local`: the
 service is the domain's own, and the entry only meets the command's
-`-erx_needs`. A command reaches a `files` service by one path in every
-session, the system shell's included, and never looks at the value of
-its entry: each `files` service of the system domain mounts one grant
-of its tree, bound to the system domain, in the system domain's own
-namespace, at the point where a session mounts its facet of the
-service, as `/proc` and `/dev` are mounted there. Both mounts take the
-point from one table of `erx_ns`, its places (`erx_ns:mount_facets/1`
-for a session's facets, `erx_ns:mount_own/2` for the system domain's own
-grants). So `reboot`
-writes `/machine/ctl` and `service` writes the start service's `ctl`
-in the system shell as in root's session. It never holds
+`-erx_needs`. A command reaches a tree the system domain serves by one path in
+every session, the system shell's included, and never looks at the
+value of its entry: each such service mounts one grant of its tree,
+bound to the system domain, in the system domain's own namespace, at
+the path where a session finds its facet of the service, as `/proc` and
+`/dev` are mounted there. A service tree of interface `svc`, `start` or
+`machine`, is at `/svc/NAME`, where a session's `/svc` entry lists its
+grant and `erx_ns:mount_own/2` mounts the system domain's own; any
+other tree is at its place in `erx_ns`'s one table, which
+`erx_ns:mount_facets/1` and `mount_own/2` both read
+([design-app-trees.md](design-app-trees.md#the-namespace-entry)). So
+`reboot` writes `/svc/machine/ctl` and `service` writes
+`/svc/start/ctl` in the system shell as in root's session. It never holds
 `net`, since the system domain holds no `net` grant
 ([design-system.md](design-system.md#the-manifest), property 15), so
 the network utilities run in a session that holds it, root's at the

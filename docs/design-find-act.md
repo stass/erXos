@@ -471,7 +471,7 @@ session's authority over its files:
 * **A program started with the session's whole namespace**, the default
   of [design-files.md](design-files.md#narrowing-for-a-program). It holds
   the session's files, and with them what the session reaches through
-  files, `/proc` and, where the session mounts it, `/etc/start`. It
+  files, `/proc` and, where the session mounts it, `/svc/start`. It
   holds no right beyond files, such as `signal`, unless `within -f`
   names one ([design-programs.md](design-programs.md#facets)), and a
   rule it writes runs with those rights: that difference is the residual
@@ -802,7 +802,7 @@ diagnostic from `act -r` or the palette.
   ([design-apps.md](design-apps.md#how-a-command-is-judged)): the
   session needs the `start` grant, which `service` declares, so a
   session without it is offered no app at all. The members come from
-  the `[apps]` listing, which only an inspect facet of scope `all`
+  the `[svc]` listing, which only an inspect facet of scope `all`
   reads ([design-apps.md](design-apps.md#interfaces), "Inspection");
   [decision 3](#decisions) is what a release build's administrator
   sees.
@@ -1111,7 +1111,7 @@ states. The alternatives:
   Rejected under [Alternatives considered](#alternatives-considered).
 
 **3. App names in a release build's palette follow design-apps'
-visibility.** The palette lists apps from the `[apps]` listing, which
+visibility.** The palette lists apps from the `[svc]` listing, which
 only an inspect facet of scope `all` reads; in a release build no session
 holds one, so an administrator's palette, which may start apps, cannot
 list them. Which sessions may read the start table's row names is a
@@ -1119,7 +1119,7 @@ question of who sees what in the inspector, and it belongs to
 design-apps and the inspection schema, not to the palette. The palette
 lists whatever the session's inspect facet shows and widens nothing. The
 gap is wider than the palette: `service -e` reads a row's
-`declared_enable` from `[apps, Name]`, which the same scope guards
+`declared_enable` from `[svc, Name]`, which the same scope guards
 ([design-apps.md](design-apps.md#interfaces), "Inspection"), so one
 visibility rule serves both. Until design-apps gives one, development
 builds, where `root` holds scope `all`, list apps, and a release build's

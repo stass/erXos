@@ -1751,7 +1751,7 @@ none, from the passphrase, wpa_supplicant's rule
 SSID, the password and the identifier. It sends those to the holder's
 `set` and drops the passphrase; no passphrase leaves the session that
 typed it, whatever holder answers. When the holder has answered, the
-command writes `names` to `/net/wlan0/ctl`, so the station reads the
+command writes `names` to `/svc/wifi/ctl`, so the station reads the
 entries at once, ends the SSID's secret hold and leaves a join that a
 forgotten entry no longer admits
 ([Control and inspection](#control-and-inspection)); without that
@@ -1925,8 +1925,8 @@ whether it transmits under it, is not verified for the pinned firmware
 
 ### Control and inspection
 
-**The tree.** The WiFi domain serves `wifi`, an `erx_fs` tree with one
-file, `ctl`, granted to root's session and mounted at `/net/wlan0`. A
+**The tree.** The WiFi domain serves `wifi`, an `erx_fs` tree of the interface `svc` with one
+file, `ctl`, granted to root's session and mounted at `/svc/wifi`. A
 write is one command of at most 4,096 bytes:
 
 | Command | Does | Answers |

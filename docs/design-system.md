@@ -420,7 +420,7 @@ violation fails the build with the property, the record and the field:
    ([design-bluetooth.md](design-bluetooth.md#the-controllers-line)); the
    service of the `line` interface is named `line`, the one name by which
    the line service finds and serves its grants, the facet-names check
-   reads its serve call and its grantees mount it at `/line`; the
+   reads its serve call and its grantees mount it at `/dev/line`; the
    console's UART shares an interrupt line with none of the others, since
    the console starts its own line's owner, while the host link's UART and the
    `line` grants' devices may share lines with each other, one line group
@@ -2160,19 +2160,19 @@ leaves the system domain. In a session, `init:reboot/0` and
 ([design-runtime.md](design-runtime.md#crash-handling)).
 
 **The `machine` tree** is a service of the system domain and an instance
-of `files`, as the start service's tree, `start`, is
+of `svc`, as the start service's tree, `start`, is
 ([design-apps.md](design-apps.md#interfaces)). The domain service's
 application serves it with `erx_fs`, beside the coordinator, and a
-session that holds the grant mounts it at `/machine`, where the system
-domain mounts its own grant of it
-([design-shell.md](design-shell.md#interfaces)):
+session that holds the grant finds it at `/svc/machine`, as it finds
+every service tree, where the system domain mounts its own grant of it
+([design-app-trees.md](design-app-trees.md#the-namespace-entry)):
 
 | File | Read | Write |
 | --- | --- | --- |
 | `ctl` | nothing: write-only, mode `0200`, and an open for reading is refused with `eacces` | one end per write, whatever the offset: `reset` or `off`, with at most one trailing newline. The write succeeds once the coordinator has installed the ending record. It is refused with `einval` for any other bytes, `trial` and an empty write included; with `ebusy` while an ending record is installed, whoever asked for it; and with `eio` when the coordinator ended before it answered |
 
-A session whose template holds no `machine` grant has no `/machine`. A
-path into it answers `enoent`, as `/etc/start` does for a session without
+A session whose template holds no `machine` grant has no `/svc/machine`. A
+path into it answers `enoent`, as `/svc/start` does for a session without
 `start`.
 
 **The right is the grant.** The manifest's facet rows say which session
@@ -2186,7 +2186,7 @@ development manifest takes grant it to root's template alone
 grants it to root's template and to any administrator's template its
 author lists, as it does `start`. There is no administrator flag, group or
 list beside the facet rows, and the tree does not check who a writer is:
-whoever holds the grant may end the machine, as whoever holds `/etc/start` may
+whoever holds the grant may end the machine, as whoever holds `/svc/start` may
 command the start table. It follows that:
 
 * every session of root holds the grant: one started by a login at a
@@ -2194,13 +2194,13 @@ command the start table. It follows that:
   menu, since each starts from the template alone
   ([design-domains.md](design-domains.md#principals-sessions-and-quotas));
 * ending the machine needs a writable route to the grant: the session's
-  mount of `/machine`, a mount that names the same facet elsewhere, or a
+  `/svc/machine`, a mount that names the same facet elsewhere, or a
   descriptor of `ctl` opened for writing, which a program receives
   whatever its namespace holds
   ([design-programs.md](design-programs.md#descriptors-and-files),
-  "Files passed on"). A program inherits `/machine` with its session's
+  "Files passed on"). A program inherits `/svc/machine` with its session's
   namespace, so a program root runs may end the machine, as on UNIX.
-  Narrowing a command with `within`, or leaving `/machine` out of a
+  Narrowing a command with `within`, or leaving `/svc` out of a
   program's namespace
   ([design-files.md](design-files.md#narrowing-for-a-program)), takes
   the right away only when no route remains: `within` names no `machine`
@@ -2270,11 +2270,11 @@ reaches it.
 **The commands.** `reboot` and `halt` are Erlang commands of the command
 shell ([design-shell.md](design-shell.md#commands)) and declare
 `-erx_needs([machine])`. Their one decision takes the arguments, and
-each writes the end's line, `reset\n` or `off\n`, to `/machine/ctl`. In a
+each writes the end's line, `reset\n` or `off\n`, to `/svc/machine/ctl`. In a
 session the path reaches the session's grant. In the system domain's
 command shell it reaches the system domain's own grant of the tree,
 started with the system principal, which the domain service mounts at
-`/machine` in the system domain's namespace when it serves the tree
+`/svc/machine` in the system domain's namespace when it serves the tree
 ([design-shell.md](design-shell.md#interfaces)). When the write is
 refused the command prints `reboot: ` (or `halt: `) and the errno's
 text, as reboot(8)'s `err(1, NULL)` does, and exits 1. When it succeeds
@@ -2318,15 +2318,16 @@ domain after its `reboot` is refused, and it ends with the machine.
 
 **Failure.** The tree's grants are temporary children of their
 supervisor. A grant that crashes ends that session's grant alone. The
-session's mount of `/machine` stays, and its paths and every descriptor
-opened on the grant answer `eio`, as any facet's mount does once its
-grant has ended ([design-files.md](design-files.md#building-binding-and-mounting)).
+session's registry drops the ended facet, so `/svc/machine` answers
+`enoent`, and every descriptor opened on the grant answers `eio`, as for
+any service tree whose grant has ended
+([design-app-trees.md](design-app-trees.md#lifecycle)).
 The domain service mints a system domain service's grant for a session
 only in its ready answer and does not mint it again, so that session can
 no longer end the machine; a fresh session, from a new login, gets a new
 grant. The system domain's own grant is kept by the tree's supervisor:
 one that ends is started again and mounted in place of the ended one,
-and until then the system shell's `/machine` answers `eio`. The
+and until then the system shell's `/svc/machine` answers `eio`. The
 coordinator is a process of the domain service, whose end
 ends the machine ([System services](#system-services)). So `eio` is the
 answer to a write whose coordinator ended during the call, and the
@@ -2393,7 +2394,7 @@ its seeded fault:
 
 The QEMU suite `machine_end` has two 1-CPU cells, `reboot` and `halt`,
 each its own boot of the development manifest with a principal whose
-template holds no `machine` row: that session finds no `/machine` and
+template holds no `machine` row: that session finds no `/svc/machine` and
 root's session still answers, and root's command logs its line before
 QEMU exits, within the ending record's deadline for `reboot`. Seeds: a manifest that also
 grants the other template, whose write then ends the machine first, and

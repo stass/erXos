@@ -5,20 +5,32 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Major initiatives
 
-* [Medium] apps, an app's own tree ([design-app-trees.md](design-app-trees.md)): build `/svc/NAME`:
+* [Medium] apps, service trees at `/svc` ([design-app-trees.md](design-app-trees.md#order-of-work)): every
+  service's control tree is at `/svc/NAME`, and the code still mounts the start table's at `/etc/start`, the
+  machine's at `/machine` and the controller's line at `/line` (`erx_ns:place/1`), and reports the start table
+  at `/proc/apps`. In the design's order of work: `abi/services/svc.txt` (the interface, `svc_rights`, the
+  limits) and the `links none` row word on `svc` and `media`, with `erx_facets:table/1` marking from the word;
+  the `start` and `machine` service rows as `interface svc`, and the manifest check refusing an `svc` service
+  named like another or like a principal and a facet row granting one to the system domain; the `/svc` entry
+  in every domain, `{facets, svc}` selecting by interface, `place/1` without `start` and `machine`, and
+  `mount_own/2` placing an `svc` service at `/svc/NAME`; `erx_svc_client` with `read/3`, `command/3`, `open/2`
+  and the chokepoint check that only it names `/svc`; `reboot` and `halt` writing `/svc/machine/ctl`, and
+  `service` writing `/svc/start/ctl`, without its blanket `-erx_needs([start])`, resolving system names first,
+  refusing run verbs for system and domain names, and offering `-l` with each name's kind; the inspection
+  path `[apps]` renamed `[svc]` in `abi/inspection.txt` and every reader (`service`, the find-and-act palette,
+  the tests); `erx_domain:grant/4` keeping an `svc` facet's name; the guide, README and `docs/plan.md`'s
+  paths in the same branches. The controller's line moves to `/dev/line` when the Bluetooth code is next
+  touched, and the Bluetooth design's open decision 1 settles on `/svc/bluetooth` with `interface svc`.
+* [Medium] apps, an app's own tree ([design-app-trees.md](design-app-trees.md)): build `/svc/NAME` for apps, on the item above:
   `erx_svc` (the SDK's tree server and mint, started before a session's ready report when its template or
   package declares `serves svc`), `erx_svc_status` (format and parser, with its fuzz target) and
   `erx_svc_client` (reads and commands at `svc_wait_max`, with the chokepoint source check); the `serves` field
   in `abi/manifest.txt`'s session template and `abi/formats/package.txt`'s declaration, and admission
   carrying the declaration's `serves` in `erx_app_admit`'s `Admitted` to the registry entry, for the
-  session's plan ([design-packaging.md](design-packaging.md#admission)); the manifest
-  check refusing a facet row of `svc`; the limits `svc_wait_max`, `svc_status_max` and `svc_ctl_max` in
-  `abi/services/files.txt`; the domain service's session providers (a keeper's `Start` with `row`, the plan's `serves=svc`) and derived `svc` grants, with their connections counted by the manifest check
-  ([design-system.md](design-system.md#facets-a-configured-domain-serves)); the namespace's
-  `{facets, svc}` provider, under which the resolver follows no link (`eacces`) and a program's listing
-  leaves out every facet of the `windows` interface, as `erx_facets:program_table/1` does for its paths
-  ([design-files.md](design-files.md#narrowing-for-a-program)), the `/svc` point in
-  `erx_ns`'s table and an empty `/svc` in the release slice; `service NAME status` showing the app's words;
+  session's plan ([design-packaging.md](design-packaging.md#admission)); the provide check
+  refusing a name the running manifest gives an `svc` service; the domain service's session providers (a keeper's `Start` with `row`, the plan's `serves=svc`) and derived `svc` grants, with their connections counted by the manifest check
+  ([design-system.md](design-system.md#facets-a-configured-domain-serves)); app trees installed with the `svc` interface's number, and an empty `/svc` in the
+  release slice; `service NAME status` showing the app's words;
   ntpd serving `/svc/ntpd/status` and `ntpctl -s` reading it; and deleting the `ntp` kind, its path and the
   types `ntp_servers`, `ntp_last` and `net_addresses` from `abi/inspection.txt` (ntpd's denied-address bound
   becomes `erx_ntp_core`'s own), `erx_ntp_records`, the inspector's `[ntp]` clause, with the schema

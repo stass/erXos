@@ -312,10 +312,10 @@ of each slot's system partition
                                            % facet registry holds for it at
                                            % each resolution, with its tree
                   | {facets, svc}          % a directory of the registry's
-                                           % svc facets, each name the root
-                                           % of an app's tree (design-app-
-                                           % trees.md), mounted at /svc; no
-                                           % link under it is followed
+                                           % facets of interface svc, each
+                                           % name the root of a service's
+                                           % tree (design-app-trees.md),
+                                           % mounted at /svc
                   | ended.                 % a grant that has ended: every
                                            % request answers eio, unsent
 
@@ -340,8 +340,9 @@ place held as one binary in `prim_file`'s NIF that only `set_cwd` writes
 session's handler keeps one table for each program, in its own state, of
 the same type, its entries on the providers of its starter's, so a
 program's sub-space holds no namespace at all. The resolver reads only an
-entry's `point` and `root`, and whether its provider is `{facets, svc}`,
-under which it follows no link; the rest is its callers'. The table is a
+entry's `point` and `root`, and whether the resolution marked it as an
+entry on a facet of a `links none` interface, under which it follows no
+link; the rest is its callers'. The table is a
 term read in place from the persistent term by every resolution, so a
 domain's file state costs one copy of it, a few KiB for a typical domain
 and bounded by the limits above, and nothing on any server until it
@@ -1364,12 +1365,13 @@ mount's root names whatever the reader's namespace holds there, often
 nothing. Local providers follow links only through the resolver: the EROFS
 reader answers its walks and link reads as a grant does, and the release
 file system holds no links. A link that lies in a tree reached through
-a provider marked `nofollow` is never followed. The provider
-`{facets, svc}`, through which a session reaches an app's tree, always
-carries the mark, and so does the provider of every facet the
-registry holds as one of the `media` interface, through which a session
-reaches a drive's volumes, which the resolution of a table derives from
-the facet's interface number, as it decides the `windows` exclusion
+a provider marked `nofollow` is never followed. The resolution
+of a table marks the provider of every facet the registry holds as one
+of an interface whose row in `abi/services` says `links none`, `svc`,
+through which a session reaches a service's tree
+([design-app-trees.md](design-app-trees.md#links)), and `media`, through
+which it reaches a drive's volumes, and derives the mark from the
+facet's interface number, as it decides the `windows` exclusion
 ([Narrowing for a program](#narrowing-for-a-program)), never from a
 name, a tree or a mount's options
 ([design-drives.md](design-drives.md#links-and-rights)). Such a link is never followed: where the resolver would
@@ -1500,7 +1502,9 @@ arrive with the domain's
 other facets, each a grant the server made for the domain when the system
 domain introduced the two
 ([design-system.md](design-system.md#creating-a-domain)); the runtime
-mounts them before its release's applications start. `/tmp` is the grant
+mounts them before its release's applications start. Every domain has the
+`/svc` entry too, a directory of the service trees its registry holds
+([design-app-trees.md](design-app-trees.md#the-namespace-entry)). `/tmp` is the grant
 of the domain's own RAM file server, which the runtime starts and mounts
 itself ([design-tmp.md](design-tmp.md#starting-and-mounting)). A facet that serves
 a tree carries its grant's rights, `ro`, `rw` or `rx`, those of its
@@ -1874,7 +1878,7 @@ server's statfs at the entry's root (`erx_file_remote:statfs/2`), whose
 name, which the ABI file gives as FreeBSD's name where FreeBSD has the
 file system (`tmpfs`, `procfs`, `devfs`), the project's own otherwise
 (`littlefs`, `erofs`, and `media`, the drives' tree), and `ramfs` for the made trees with no type of
-their own (the start service's tree, `/machine` and a display's window
+their own (the start service's tree, `/svc/machine` and a display's window
 tree), after
 the Linux number it answers; a number no member names prints in hex,
 and a server that does not answer, or an ended grant, prints `-`. The
@@ -1949,8 +1953,7 @@ the handler resolved.
 the session's registry at that moment, as `erx_facets:table/1` does for
 the session, and differs in one rule: an entry whose facet the registry
 holds as one of the `windows` interface is left out of that
-resolution, as if the table had no entry there, and so is such a facet
-under `{facets, svc}`. The rule is applied at every resolution, not when
+resolution, as if the table had no entry there. The rule is applied at every resolution, not when
 the table is built, so it holds by construction for every order of
 events:
 
@@ -2837,7 +2840,7 @@ other client's request can come between its parts:
   grant ([design-live.md](design-live.md#the-proc-tree)).
 * **Made trees.** A tree whose server makes its nodes from state it
   reads rather than keeps on a medium (`/proc`, `/dev`, `/apps`,
-  `/machine` and a display's window tree) takes what such trees share
+  `/svc/machine` and a display's window tree) takes what such trees share
   from `erx_fs_node`: every node owned by uid 0 with size 0 and no
   times, a directory with two links and a file with one; a directory
   whose listing is the entries its open took, each entry's offset its

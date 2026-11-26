@@ -4223,7 +4223,7 @@ what starts, restarts and bounds every session the start table keeps:
   `erx_term_sup`. When the session's domain ends, the row's keeper
   starts a new one within the row's restart intensity
   ([design-apps.md](design-apps.md#keeping-a-session)); past it the row
-  is down, shown at `/proc/apps`, the display shows its background and
+  is down, shown at `/proc/svc`, the display shows its background and
   the log names the row. The new session is a new domain, with a new
   id, a new connection, a new pixel area and the display's session's
   grant from its mint.
@@ -4268,7 +4268,7 @@ what starts, restarts and bounds every session the start table keeps:
   root's session does, whether or not a program draws.
 * **An app a person starts** runs in a session of its own principal,
   never in the person's: `service APP onestart display=D`, or a
-  launcher's `start APP display=D` written to `/etc/start/ctl`, starts the
+  launcher's `start APP display=D` written to `/svc/start/ctl`, starts the
   session of a row that is not enabled with `D` as its default display
   and nothing more, and
   its window opens beside the person's under the overlapping policy
@@ -4938,10 +4938,10 @@ at a terminal that declares `links`.
 | a client is killed while `erx_screen` copies from its buffer | the copy finishes: the area stays mapped until the display lets go | none needed |
 | a kiosk's application fails inside its session | its UI's processes end with it and its window is removed; the screen shows the background, or the splash while no window has presented since the screen started | the application's supervisor in the session restarts it, and it opens its UI and its window again |
 | a display's session domain ends, a kiosk's among them | as a client domain's end; under the single policy the screen shows the background, and another session's window stays hidden | the start row's keeper starts a new session, which is introduced and marked as at boot, within the row's intensity; a kiosk's app opens its window again, a desktop's session its terminal |
-| a display's session domain ends more often than its start row's intensity allows | the row is down, shown at `/proc/apps` with its last reason; the screen keeps the background | `service NAME start`, at the UART or the host link, or the next boot |
+| a display's session domain ends more often than its start row's intensity allows | the row is down, shown at `/proc/svc` with its last reason; the screen keeps the background | `service NAME start`, at the UART or the host link, or the next boot |
 | no start row names the display | the display has no session and shows its background, or under the overlapping policy the windows of the sessions that hold its grant | enabling a row that names the display |
-| the row's session is refused, its principal's budget or quota full | no session; the refusal is the row's state and reason at `/proc/apps` and counts as an end against the row's intensity | the administrator's: room for the principal |
-| a local setting names a display the row's template is not granted, or one another enabled row holds | the row is `refused` with `{no_grant, D}` or `{display_held, Name}` at `/proc/apps` and starts nothing; the display keeps its session or its background | the administrator's: a setting the merge accepts ([design-apps.md](design-apps.md#the-start-table)) |
+| the row's session is refused, its principal's budget or quota full | no session; the refusal is the row's state and reason at `/proc/svc` and counts as an end against the row's intensity | the administrator's: room for the principal |
+| a local setting names a display the row's template is not granted, or one another enabled row holds | the row is `refused` with `{no_grant, D}` or `{display_held, Name}` at `/proc/svc` and starts nothing; the display keeps its session or its background | the administrator's: a setting the merge accepts ([design-apps.md](design-apps.md#the-start-table)) |
 | a window process crashes | as the window's end, logged with the message that caused it | the client sees `EIO` on its fids and makes a new window |
 | `erx_screen` crashes | supervisor restart; it shows the splash, asks `erx_winfs` for the layout and every shown window to present again, which each does from its last present, the first of which ends the splash; a window waiting in a present sees the call fail and answers its client `EIO` | the client presents again; nothing is lost but one frame |
 | the display driver crashes | restart; device reset; scanout re-created; `erx_screen` repaints from its windows' buffers; the screen image's memory stays in the NIF's record | no client notices |
@@ -5991,7 +5991,7 @@ Decisions:
     not granted. Enabling or disabling a row, by `service` or by an
     edit of `/etc/start.conf`, starts and stops nothing: the row takes its
     settings at its own `service` command, which answers a refusal, or
-    at the next boot, which shows one as `refused` at `/proc/apps`. A board's manifest closes
+    at the next boot, which shows one as `refused` at `/proc/svc`. A board's manifest closes
     a display to apps by granting it to no app's template, and decides
     which rows exist; the machine's `start.conf` only sets them
     ([design-apps.md](design-apps.md#the-start-table)).
