@@ -171,19 +171,17 @@ class ErxProgHandlerTest < Minitest::Test
       Mutant.new(file: CORE, original: "        [holder_drop].\n", replacement: "        [].\n",
                  caught_by: 'an_end_of_another_process_is_refused'),
     'a program table that knows a display by its name, which keeps one installed as notes' =>
-      Mutant.new(file: FACETS, original: '        #{Name := {?ERX_SERVICE_WINDOWS, _Facet}} -> true;',
-                 replacement: '        #{Name := {_Interface, _Facet}} -> Name =:= display;',
+      Mutant.new(file: FACETS, original: '        Interface =/= ?ERX_SERVICE_WINDOWS].',
+                 replacement: '        case Provider of {facet, display, _} -> false; _ -> true end].',
                  caught_by: 'a_display_under_another_name_and_its_bind_are_left_out'),
     'a program table that knows a display by the tree its server names' =>
-      Mutant.new(file: FACETS,
-                 original: "on_display({facet, Name, _Tree}, Registry) ->\n    case Registry of\n" \
-                           "        \#{Name := {?ERX_SERVICE_WINDOWS, _Facet}} -> true;\n        \#{} -> false\n    end;",
-                 replacement: "on_display({facet, _Name, Tree}, _Registry) ->\n    Tree =:= ?ERX_WINDOWS_TREE_BYTES;",
+      Mutant.new(file: FACETS, original: '        Interface =/= ?ERX_SERVICE_WINDOWS].',
+                 replacement: '        case Provider of {facet, _, ?ERX_WINDOWS_TREE_BYTES} -> false; _ -> true end].',
                  caught_by: 'a_display_under_another_name_and_its_bind_are_left_out'),
     'a program table that is table/1\'s, which a display installed after the start reaches' =>
       Mutant.new(file: FACETS,
-                 original: "     || \#{provider := Provider} = Entry <- Mounts, not on_display(Provider, Registry)].",
-                 replacement: "     || \#{provider := Provider} = Entry <- Mounts, not on_display(Provider, \#{})].",
+                 original: 'Interface <- [interface(Provider, Registry)],',
+                 replacement: 'Interface <- [interface(Provider, #{})],',
                  caught_by: 'a_display_installed_after_the_start_is_left_out'),
     'a program image resolved through table/1, which refuses a program table' =>
       Mutant.new(file: HANDLER, original: '    Table = erx_facets:program_table(Program),',
