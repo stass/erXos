@@ -921,23 +921,37 @@ it and parks before it runs anything. A CPU that has not answered may
 still be writing the console, so what the kernel prints next is best
 effort, and its first line says so. The kernel then writes the crash
 record, with each
-CPU's state in it, and ends the machine. It never resumes, and no
-debugger runs inside it ([design-debugger.md](../design-debugger.md)).
+CPU's state in it, and ends the machine. It never resumes, and nothing
+breaks into it while it runs ([design-debugger.md](../design-debugger.md)).
 
-Everything a developer asks next is answered on the Mac, by one tool,
-`tools/erx debug`, from whatever the stopped machine left:
+Nearly everything a developer asks next is answered on the Mac, by one
+tool, `tools/erx debug`, from whatever the stopped machine left:
 
 * its crash record, from the console's log;
 * a memory image, which the QEMU harness takes of every failing run;
 * the board itself, which in a development boot that asked for it
   **holds** after its record and answers requests to read its memory
-  over the console wire, until the tool lets it go;
+  over the console wire, until it is told to reset;
 * a stub such as QEMU's, which stops the machine from outside and adds
   breakpoints and watchpoints;
 * a recorded QEMU run, which replays exactly.
 
 The commands are the same for all five, and a command that needs memory
 a record does not hold says so.
+
+A held board also answers a person directly. It prints a prompt,
+`hold> `, and whoever has a serial terminal on the console wire, and
+nothing of erXos on the host, can type a few of the tool's commands at
+it: why the machine stopped, where each CPU was, a CPU's registers and
+backtrace, the kernel's threads, the last records of the kernel's
+trace, the memory at an address, and `reset`. Where FreeBSD's `ddb` has
+the same command, its name works too. The commands only read, through
+the one checked read that also serves the tool, and they run none of
+the stopped kernel's code. They are generated from the declarations the
+tool's commands come from, so the two print the same lines for the same
+command. The prompt exists only where the hold does: in a development
+kernel, in a boot that asked for it, after a stop; and the board then
+waits until it is told `reset`.
 
 What the tool shows are the inspector's records. `tools/erx debug IMAGE
 inspect budgets/7` prints the record that `/proc/budgets/7` gave while

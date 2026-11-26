@@ -152,6 +152,18 @@ Designed, not built: `tools/erx debug` reads what the machine left:
 Its views are the paths of `/proc`: `tools/erx debug FILE inspect
 budgets/7` prints the record the running machine's `/proc/budgets/7` gave.
 
+A held board also answers you directly, in any serial terminal and with
+nothing of erXos on the host. It prints `hold> ` and takes a part of the
+tool's commands: `help`, `show panic`, `cpus`, `regs [CPU]`,
+`bt [CPU | thread ID]`, `threads`, `thread ID`, `trace [N]`, `log [N]`,
+`x[/bhlg] ADDRESS[,COUNT]` and `reset`. Where FreeBSD's `ddb` has the
+same command its name works too (`show registers`, `where`,
+`show threads`); `trace` is the kernel's trace rings, not a stack trace.
+The commands only read. A backtrace is addresses, which
+`llvm-symbolizer` or `tools/erx debug` turns into names. The board stays
+held until you type `reset`, and `tools/erx debug --tty DEVICE --held`
+reads the same held board in between.
+
 ## What is not built
 
 * **QEMU's GDB stub.** The harness (`tools/lib/erx/qemu*.rb`) does not pass

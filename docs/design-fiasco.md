@@ -1606,8 +1606,8 @@ calls `kdb_ke` and a kernel trap (`Thread::call_nested_trap_handler`, `arm/threa
 fatal in both and take the stop: the CPU that claims it parks every CPU that answers, so no
 faulting CPU traps again while the others run, writes the crash record with each CPU's stop state
 and prints it in its frame, and the machine resets. A development kernel whose boot carries
-`erx.hold=1` holds before the reset, answering the host debugger's requests to read RAM on the
-console. A kernel-mode SError is counted and execution goes on, in both
+`erx.hold=1` holds before the reset, answering requests to read RAM on the console: the host debugger's frames, and
+read-only commands typed at its prompt. A kernel-mode SError is counted and execution goes on, in both
 (`Thread::arm_serror_handler`, FD33). The reset is PSCI's
 system reset, or the BCM2711 watchdog where the device tree has one and no PSCI was found
 (`reset-arm-gen.cpp`), and otherwise a loop: a stop before `Dt::init` and `Psci::init`,
@@ -1826,8 +1826,8 @@ is the same otherwise. `Erx::QemuPlan` adds the word exactly when it gives the g
 on a development card whose platform names a host link UART; the website's emulator, whose machine has one UART, never
 sends it. erXos's kernel needs no such word: it lists a UART only when the device tree has it.
 
-`erx.hold=1` marks an attended boot: a kernel stop holds before it resets, for the host's debugger
-([design-debugger.md](design-debugger.md#the-hold)). The kernel reads the word from its own copy of
+`erx.hold=1` marks an attended boot: a kernel stop holds before it resets, for the host's debugger and for whoever types
+at its prompt ([design-debugger.md](design-debugger.md#the-hold)). The kernel reads the word from its own copy of
 the handoff record, and the root reads it here for one reason: in an attended boot that is not a
 trial, the root does not arm the board's hardware watchdog ([The watchdog](#the-watchdog)), since
 nothing reloads it while a stopped machine holds. Both ask the same pure function of

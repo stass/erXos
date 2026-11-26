@@ -620,6 +620,12 @@ the walk of [Translation](#translation), with the address sizes and the
 granule taken from `TCR_EL1`, so it assumes neither kernel's layout, and
 its host model covers every descriptor kind at every level, as the model
 of `erx_uword_load` does ([Kernel access to memory](#kernel-access-to-memory)).
+The prompt of a held machine has the same walk as a pure C17 function of
+the same three inputs, which reads each descriptor through the hold's
+checked read, so a table entry or a final address outside readable RAM is
+refused and never loaded
+([design-debugger.md](design-debugger.md#the-prompt)); one host test runs
+both walks over the model's tables and holds them to one answer.
 A backtrace follows the procedure call standard's frame records: `x29`
 points at a pair, the caller's `x29` and the return address. That every
 function of the Fiasco fork and of the cores keeps one is *unverified*

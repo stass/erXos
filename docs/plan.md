@@ -1733,7 +1733,7 @@ neighbour answering. The release notes carry the downsides table.
   Fiasco build (the debugger's replacement of
   [design-debugger.md](design-debugger.md#decisions), in three parts that each land alone: the stop with
   its record and the debugger's removal from every build, the host's tool over records and images, and
-  the hold; the
+  the hold with its prompt; the
   MIT clean-room `kobject_rpc.h` in the GPL original's place, the writable-or-executable patch, and the check that the image's link
   closure is all permissive, and the eager FP switch); the system-call
   fuzz campaign; and the upstream security watch. The build also
