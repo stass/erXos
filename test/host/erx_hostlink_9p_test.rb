@@ -14,12 +14,11 @@ require_relative '../fixtures/erlang_build'
 # supplies) with the generated grammar from build/gen.
 class ErxHostlink9pTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The applications the suite exercises, compiled whole (ErlangBuild), the generated
-  # grammar (in build/gen, outside the applications) and the suite. The test tree declares
+  # The applications the suite exercises, compiled whole (ErlangBuild), and the
+  # suite. The test tree declares
   # the erx_fs behaviour, which erx_files supplies.
   APPLICATIONS = %w[erx erx_files erx_uart].freeze
-  TESTS = %w[build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
-             test/erlang/erx_fs_test_tree.erl test/erlang/erx_hostlink_9p_tests.erl].freeze
+  TESTS = %w[test/erlang/erx_fs_test_tree.erl test/erlang/erx_hostlink_9p_tests.erl].freeze
 
   def test_the_bridge_passes_under_eunit
     Dir.mktmpdir('erx-hostlink-9p-test') do |work|

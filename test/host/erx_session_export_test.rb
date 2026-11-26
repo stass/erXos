@@ -16,8 +16,7 @@ class ErxSessionExportTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The applications the suite exercises, compiled whole (ErlangBuild), and the suite.
   APPLICATIONS = %w[erx_session].freeze
-  # The preloaded 9P grammar the grant decodes frames with, then the suite.
-  TESTS = %w[build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl test/erlang/stand_in/erx_win.erl
+  TESTS = %w[test/erlang/stand_in/erx_win.erl
              test/erlang/stand_in/erx_draw_conn.erl test/erlang/erx_session_export_tests.erl].freeze
   TREE = 'erlang/apps/erx_session/src/erx_session_export.erl'
 

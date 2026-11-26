@@ -14,10 +14,8 @@ require_relative '../fixtures/erlang_build'
 # the sources as they are and against each seeded fault, where the named case must fail.
 class ErxBtFsTest < Minitest::Test
   APPLICATIONS = %w[erx_bt].freeze
-  # The grammar is generated into OTP's preloaded sources, outside the applications, so it
-  # is compiled with the cases; the stand-ins replace the erx modules the grant calls.
+  # The stand-ins replace the erx modules the grant calls.
   TESTS = %w[
-    build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
     test/erlang/erx_bt_fs_tests.erl
     test/erlang/stand_in/erx_dist.erl
     test/erlang/stand_in/erx_connections.erl

@@ -15,12 +15,10 @@ require_relative '../fixtures/erlang_build'
 # where the named case must fail.
 class ErxUsbHidTest < Minitest::Test
   APPLICATIONS = %w[erx_usb].freeze
-  # The grammar is generated into OTP's preloaded sources, outside the applications, so it
-  # is compiled with the cases, as is the places' property test, whose fixture the cases
+  # The places' property test is compiled with the cases, whose fixture the cases
   # share; the stand-ins replace the erx modules the grant calls and
   # erx_usb_pipe, which carries the function's transfers to the model device.
   TESTS = %w[
-    build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
     test/erlang/erx_usb_hid_tests.erl
     test/erlang/erx_usb_places_prop.erl
     test/erlang/stand_in/erx_dist.erl

@@ -17,9 +17,8 @@ class ErxRamfsTest < Minitest::Test
   APP = 'erlang/apps/erx_files/src'
   # The application the suite exercises, compiled whole (ErlangBuild).
   APPLICATIONS = %w[erx_files].freeze
-  # The suite, after the generated 9P grammar: a preloaded module, outside every application,
-  # that erx_fs_grant calls, compiled here as a test source.
-  TESTS = %w[build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl test/erlang/erx_ramfs_tests.erl].freeze
+  # The suite.
+  TESTS = %w[test/erlang/erx_ramfs_tests.erl].freeze
   # EUnit's default allowance for a case is 5 seconds; each case gets this many times that.
   # It exceeds the longest wait a case makes (?REPLY_BOUND and ?CONDITION_BOUND in the
   # tests, which add up along a case), so a host starved of CPU is not read as a hang, and

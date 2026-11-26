@@ -18,9 +18,8 @@ class ErxMediaVolumeTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APPLICATIONS = %w[erx erx_fat erx_media].freeze
   MODULES = %w[erx_media_volume_tests erx_media_tree_tests].freeze
-  # The suites, after the generated 9P grammar, a preloaded module outside every application
-  # that the media tree's grant calls, compiled here as a test source.
-  TESTS = ['build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl', *MODULES.map { |name| "test/erlang/#{name}.erl" }].freeze
+  # The suites.
+  TESTS = MODULES.map { |name| "test/erlang/#{name}.erl" }.freeze
   MEDIUM = 'erlang/apps/erx_media/src/erx_media_medium.erl'
   VOLUME = 'erlang/apps/erx_media/src/erx_media_volume.erl'
   DRIVE = 'erlang/apps/erx_media/src/erx_media_drive.erl'

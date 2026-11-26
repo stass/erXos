@@ -17,11 +17,9 @@ require_relative '../fixtures/erlang_build'
 class ErxUsbBusTest < Minitest::Test
   # erx_blk holds the mass-storage function's write path and block transport.
   APPLICATIONS = %w[erx erx_usb erx_blk].freeze
-  # The places' grants need the 9P grammar, generated into OTP's preloaded sources, and
-  # the stand-ins of the erx modules a grant calls; the HID function is a stand-in the
+  # The places' grants need the stand-ins of the erx modules a grant calls; the HID function is a stand-in the
   # cases end at will.
   TESTS = %w[
-    build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
     test/erlang/stand_in/erx_dist.erl
     test/erlang/stand_in/erx_connections.erl
     test/erlang/stand_in/erx_usb_hid.erl

@@ -37,8 +37,7 @@ class ErxPkgTest < Minitest::Test
   # (ErlangBuild), the registration, publication and namespace stubs over its modules, and
   # the 9P client with a stand-in for prim_file's fids, as test/host/erx_ns_test.rb does.
   SYSTEM_APPLICATIONS = %w[erx_starter].freeze
-  SYSTEM_TESTS = [*%w[otp/erts/preloaded/src/erx_verity_tree.erl test/erlang/host_bytes/erx_bytes.erl
-                      otp/erts/preloaded/src/erx_file_remote.erl build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
+  SYSTEM_TESTS = [*%w[test/erlang/host_bytes/erx_bytes.erl
                       test/erlang/erx_fs_test_tree.erl test/erlang/stand_in/erx_dist.erl],
                   *%w[erx_domain erx_principal erx_starter].map { |stub| "test/erlang/erx_pkg_stubs/#{stub}.erl" },
                   'test/erlang/erx_pkg_system_tests.erl'].freeze

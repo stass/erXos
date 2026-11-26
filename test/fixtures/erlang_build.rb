@@ -17,6 +17,8 @@ require_relative 'generated_tree'
 # directories, then its own test modules. A test names applications, not modules, so a
 # module an application gains is compiled without the test changing, and one it loses
 # fails the compile with the application's diagnostic instead of an `undef` at run time.
+# erXos's preloaded modules, which no application holds and stock's emulator lacks, are
+# compiled with every set of applications (PRELOADED), so no test lists one.
 #
 # The applications are compiled once per test process and set of applications, into a
 # directory removed at exit; each compile copies their beams into the test's directory
@@ -27,11 +29,17 @@ module ErlangBuild
   # Every application ErlangApps knows, in its dependency order, so an application's
   # behaviours are compiled before the modules of a later one that implement them.
   ORDER = [*Erx::ErlangApps::APPLICATIONS, *Erx::ErlangApps::TEST_ONLY].freeze
-  # The preloaded modules of erXos's that stock's emulator lacks and every application
-  # may call, compiled with every set of applications: the facet registry, erx_facets,
-  # which erx:cap/1 and every reader of a facet's grant reach. A preloaded module that
-  # only some cases reach (erx_path, the EROFS reader) is one of those tests' modules.
-  PRELOADED = %w[otp/erts/preloaded/src/erx_facets.erl].freeze
+  # erXos's own preloaded modules, which stock's emulator lacks, root-relative: the
+  # tree's and the generated ones (such as erx_9p_grammar, in build/gen, which
+  # generated_tree brought up to date above). Every set of applications is compiled with
+  # all of them, whichever its modules and its tests' call; a test's stand-in of one is
+  # compiled over it, as for an application's module.
+  PRELOADED = ['otp/erts/preloaded/src', File.join(Erx::Generated::OUTPUT, 'otp/erts/preloaded/src')]
+              .flat_map { |directory| Dir.glob(File.join(directory, 'erx_*.erl'), base: ROOT).sort }.freeze
+  # What the preloaded modules compile with beyond the build's flags: the include
+  # directories of OTP's erts/preloaded/src/Makefile (ERL_COMPILE_FLAGS), whose file.hrl
+  # erx_erofs and erx_file_remote include.
+  PRELOADED_FLAGS = [*Erx::ErlangApps::FLAGS, *%w[-I otp/lib/kernel/src -I otp/lib/kernel/include]].freeze
   # Test modules are not held to the build's deprecation warnings; -Werror still holds.
   TEST_FLAGS = %w[-Werror +debug_info].freeze
   REPLACED_FLAGS = (Erx::ErlangApps::FLAGS - %w[-Werror]).freeze
@@ -88,7 +96,7 @@ module ErlangBuild
     list.split(',').map(&:strip) & ORDER
   end
 
-  # The directory holding the beams of applications, compiled on first use.
+  # The directory holding the beams of applications and of PRELOADED, compiled on first use.
   def self.applications_beams(applications)
     unknown = applications - ORDER
     raise Error, "ErlangApps lists no application #{unknown.join(' ')}" unless unknown.empty?
@@ -98,10 +106,9 @@ module ErlangBuild
   end
 
   def self.compile_applications(applications)
-    Erx::Generated.ensure(root: ROOT)
     Dir.mktmpdir('erx-erlang-build').tap do |beams|
       at_exit { FileUtils.rm_rf(beams) }
-      erlc(beams, Erx::ErlangApps::FLAGS, PRELOADED)
+      erlc(beams, PRELOADED_FLAGS, PRELOADED)
       applications.each { |application| erlc(beams, Erx::ErlangApps::FLAGS, modules(application)) }
     end
   end

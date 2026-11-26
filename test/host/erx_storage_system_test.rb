@@ -33,9 +33,7 @@ class ErxStorageSystemTest < Minitest::Test
   APPLICATIONS = %w[erx_storage].freeze
   # Compiled again with TEST, which exports mount/3 to the cases.
   SYSTEM = 'erlang/apps/erx_storage/src/erx_storage_system.erl'
-  TESTS = %w[otp/erts/preloaded/src/erx_verity.erl otp/erts/preloaded/src/erx_verity_tree.erl
-             otp/erts/preloaded/src/erx_erofs.erl test/erlang/host_bytes/erx_bytes.erl
-             build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl test/erlang/erx_erofs_tests.erl
+  TESTS = %w[test/erlang/host_bytes/erx_bytes.erl test/erlang/erx_erofs_tests.erl
              test/erlang/stand_in/erx_dist.erl test/erlang/erx_storage_system_tests.erl].freeze
   INCLUDES = [File.join(ROOT, 'otp/lib/kernel/include')].freeze
   SALT = "\x5a".b * 8

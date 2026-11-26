@@ -312,9 +312,7 @@ class ReleaseMediumTest < Minitest::Test
   def eunit(directory, module_name)
     Dir.mktmpdir('erx-release-system-build-') do |work|
       ErlangBuild.compile(work, applications: %w[erx],
-                                tests: %w[otp/erts/preloaded/src/erx_verity.erl otp/erts/preloaded/src/erx_verity_tree.erl
-                                          otp/erts/preloaded/src/erx_erofs.erl test/erlang/host_bytes/erx_bytes.erl
-                                          build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl test/erlang/erx_erofs_tests.erl
+                                tests: %w[test/erlang/host_bytes/erx_bytes.erl test/erlang/erx_erofs_tests.erl
                                           test/erlang/erx_release_system_tests.erl],
                                 includes: [File.join(ROOT, 'otp/lib/kernel/include')])
       output, status = Open3.capture2e({ 'ERX_RELEASE_SYSTEM' => directory }, 'gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'),

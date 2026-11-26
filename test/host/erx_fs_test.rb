@@ -20,10 +20,9 @@ class ErxFsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   GRAMMAR = 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'
   # The applications are compiled whole with those they declare (ErlangBuild), erx among
-  # them; the stand-ins below replace the erx modules the grant and the mint call. The grammar is generated into
-  # the preloaded sources of OTP, outside the applications, so it is compiled with the cases.
+  # them; the stand-ins below replace the erx modules the grant and the mint call.
   APPLICATIONS = %w[erx_files erx_storage].freeze
-  TESTS = [GRAMMAR] + %w[
+  TESTS = %w[
     test/erlang/erx_fs_test_tree.erl
     test/erlang/erx_fs_stale_tree.erl
     test/erlang/erx_fs_stream_tree.erl

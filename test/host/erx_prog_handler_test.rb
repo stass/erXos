@@ -23,13 +23,11 @@ class ErxProgHandlerTest < Minitest::Test
   APPLICATIONS = %w[erx erx_files].freeze
   TESTS = %w[test/erlang/erx_pipe_fake_nif.erl test/erlang/erx_prog_handler_fakes.erl
              test/erlang/stand_in/erx_win.erl test/erlang/stand_in/erx_draw_conn.erl
-             erlang/apps/erx_session/src/erx_session_export.erl build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
+             erlang/apps/erx_session/src/erx_session_export.erl
              test/erlang/stand_in/erx_program.erl test/erlang/stand_in/erx_pixels.erl
-             test/erlang/stand_in/erx_pipe_nif.erl test/erlang/stand_in/erx_file_description.erl build/gen/otp/erts/preloaded/src/erx_prog.erl otp/erts/preloaded/src/erx_path.erl
-             build/gen/otp/erts/preloaded/src/erx_prog_grammar.erl
-             otp/erts/preloaded/src/erx_erofs.erl otp/erts/preloaded/src/erx_verity.erl
-             otp/erts/preloaded/src/erx_verity_tree.erl test/erlang/host_bytes/erx_bytes.erl
-             otp/erts/preloaded/src/erx_file_remote.erl test/erlang/erx_erofs_tests.erl
+             test/erlang/stand_in/erx_pipe_nif.erl test/erlang/stand_in/erx_file_description.erl
+             test/erlang/host_bytes/erx_bytes.erl
+             test/erlang/erx_erofs_tests.erl
              test/erlang/erx_prog_handler_core_tests.erl test/erlang/erx_prog_handler_tests.erl].freeze
   SUITES = %w[erx_prog_handler_core_tests erx_prog_handler_tests].freeze
   # The reader's fixture images, which the core's resolve cases mount at /app.

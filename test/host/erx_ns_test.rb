@@ -23,13 +23,10 @@ class ErxNsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   # The application holding erx_ns, compiled whole (ErlangBuild), and the modules the cases
-  # run it with: the prim_file stub, the path, EROFS and verity modules of the preloaded
-  # set (outside the applications) and the suites.
+  # run it with: the prim_file stub, the host stand-in of erx_bytes and the suites.
   APPLICATIONS = %w[erx erx_files].freeze
-  TESTS = %w[test/erlang/erx_ns_prim_stub.erl otp/erts/preloaded/src/erx_path.erl test/erlang/erx_ns_tests.erl
-             otp/erts/preloaded/src/erx_erofs.erl otp/erts/preloaded/src/erx_verity.erl
-             otp/erts/preloaded/src/erx_verity_tree.erl test/erlang/host_bytes/erx_bytes.erl
-             otp/erts/preloaded/src/erx_file_remote.erl build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
+  TESTS = %w[test/erlang/erx_ns_prim_stub.erl test/erlang/erx_ns_tests.erl
+             test/erlang/host_bytes/erx_bytes.erl
              test/erlang/erx_fs_test_tree.erl test/erlang/stand_in/erx_dist.erl
              test/erlang/erx_erofs_tests.erl].freeze
   INCLUDES = %w[otp/lib/kernel/include].freeze

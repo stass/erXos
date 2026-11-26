@@ -21,12 +21,9 @@ class Erx9pTest < Minitest::Test
   Erx::Generated.ensure(root: ROOT)
   # Generated files, by the paths the generator names them; build/gen holds them there.
   CODEC = 'erlang/apps/erx/src/generated/erx_9p.erl'
-  # The grammar is a module of the preloaded set, not of an application, so the suite compiles it
-  # beside the codec, which the applications hold as ErlangApps spells it.
-  GRAMMAR = File.join(Erx::Generated::OUTPUT, 'otp/erts/preloaded/src/erx_9p_grammar.erl')
   BUILT_CODEC = File.join(Erx::Generated::OUTPUT, CODEC)
   APPLICATIONS = %w[erx].freeze
-  TESTS = [GRAMMAR, 'test/erlang/erx_9p_tests.erl'].freeze
+  TESTS = %w[test/erlang/erx_9p_tests.erl].freeze
   TABLE = 'abi/protocols/9p.txt'
 
   def test_codec_cases_pass_under_eunit

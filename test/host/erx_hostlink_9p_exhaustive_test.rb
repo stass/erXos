@@ -19,7 +19,7 @@ class ErxHostlink9pExhaustiveTest < Minitest::Test
   # The application holding the core, compiled whole (ErlangBuild), the generated grammar
   # (in build/gen, outside the applications) and the enumeration.
   APPLICATIONS = %w[erx erx_uart].freeze
-  TESTS = %w[build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl test/erlang/erx_hostlink_9p_exhaustive.erl].freeze
+  TESTS = %w[test/erlang/erx_hostlink_9p_exhaustive.erl].freeze
   CORE = 'erlang/apps/erx_uart/src/erx_hostlink_9p.erl'
   DEADLINE_SECONDS = '600'
 
