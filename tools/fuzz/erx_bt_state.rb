@@ -41,7 +41,11 @@ module ErxBtStateFuzz
     Fault.new(fault: 'a file name with a leading zero read as a generation', path: STATE_FILE,
               anchor: '{[First | _] = Digits, Suffix} when First =/= $0, length(Digits) =< 18 ->',
               replacement: '{[_ | _] = Digits, Suffix} when length(Digits) =< 18 ->',
-              verdict: '{renamed,')
+              verdict: '{renamed,'),
+    Fault.new(fault: "the decoder's check for a shared id dropped", path: STATE,
+              anchor: '    distinct([Id || #{id := Id} <- Bonds]) orelse refuse(duplicate_id),',
+              replacement: '',
+              verdict: '{reencode_refused,duplicate_id,')
   ].freeze
 
   module_function

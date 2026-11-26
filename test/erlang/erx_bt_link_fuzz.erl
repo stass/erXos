@@ -55,7 +55,7 @@ core(Table) ->
     AclTxMax = 26 + rand:uniform(226),
     Bond = case rand:uniform(2) of
                1 -> none;
-               2 -> #{ltk => rand:bytes(16), level => unauthenticated, identity => {random, <<1:48>>},
+               2 -> #{id => binary:encode_hex(rand:bytes(16), lowercase), ltk => rand:bytes(16), level => unauthenticated, identity => {random, <<1:48>>},
                       hash => rand:bytes(32), subscriptions => #{{svc, enc_n} => notify, {svc, ind} => indicate}}
            end,
     {erx_bt_link_core:new(#{table => Table, values => #{}, bond => Bond,
@@ -76,7 +76,7 @@ round({Core, _, Owed} = Link, Now, Table) ->
                 14 -> {registry, {notify, caller, lists:nth(rand:uniform(2), [notify, indicate]),
                                   lists:nth(rand:uniform(length(?KEYS)), ?KEYS), rand:bytes(rand:uniform(30) - 1)}};
                 15 when is_map_key(store, Owed) ->
-                    {store, lists:nth(rand:uniform(2), [{kept, ok}, {kept, {error, unavailable}}])};
+                    {store, lists:nth(rand:uniform(2), [{kept, {ok, <<"00000000000000000000000000000001">>}}, {kept, {error, unavailable}}])};
                 15 when is_map_key(wait, Owed) -> {window, {wait, lists:nth(rand:uniform(2), [0, 1000])}};
                 15 -> lists:nth(rand:uniform(2), [{hci, busy}, completed]);
                 16 -> expired

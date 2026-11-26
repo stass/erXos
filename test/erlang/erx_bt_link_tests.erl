@@ -55,7 +55,7 @@ bonded(Level) -> core(#{bond => resolved(Level, #{})}).
 
 %% A bond the store resolved the phone's address to, with its kept subscriptions.
 resolved(Level, Subscriptions) ->
-    #{ltk => ?BOND_LTK, level => Level, identity => ?IDENTITY,
+    #{id => <<"00000000000000000000000000000001">>, ltk => ?BOND_LTK, level => Level, identity => ?IDENTITY,
       hash => <<0:256>>, subscriptions => Subscriptions}.
 
 %% A basic frame (Part A, 3.1) in one ACL packet, flagged first_flushable (Vol 4 Part E, 5.4.2).
@@ -241,14 +241,14 @@ notification_through_gate_test() ->
     Notify = {notify, caller, notify, {svc, enc_n}, <<"n">>},
     {Refused, _} = run([Notify]),
     ?assertEqual([{reply, caller, {error, insufficient_security}}], [A || {reply, _, _} = A <- Refused]),
-    {Sent, _} = run([ltk_request(), encryption_on(), Subscribe, {kept, ok}, Notify], bonded(unauthenticated)),
+    {Sent, _} = run([ltk_request(), encryption_on(), Subscribe, {kept, {ok, <<"00000000000000000000000000000001">>}}, Notify], bonded(unauthenticated)),
     ?assertEqual([{reply, caller, ok}], [A || {reply, _, _} = A <- Sent]),
     ?assertEqual([write_rsp(), <<16#1B, (handle(enc_n)):16/little, "n">>], on(4, Sent)).
 
 %% With the share used and never completed, the queue fills to bt_notify_queue and the
 %% next notification is `busy`; completions hand the queue over.
 notification_queue_bound_test() ->
-    Inputs = [ltk_request(), encryption_on(), att(write(configuration(enc_n), <<1, 0>>)), {kept, ok}]
+    Inputs = [ltk_request(), encryption_on(), att(write(configuration(enc_n), <<1, 0>>)), {kept, {ok, <<"00000000000000000000000000000001">>}}]
              ++ [{notify, I, notify, {svc, enc_n}, <<"n">>} || I <- lists:seq(1, ?SHARE + ?QUEUE + 1)],
     {Actions, Core} = run(Inputs, bonded(unauthenticated)),
     Replies = [Reply || {reply, _, Reply} <- Actions],
@@ -386,7 +386,7 @@ first_pairing_reaches_level_before_store_test() ->
     ?assertMatch([{store, {keep, 1, #{ltk := Ltk, level := unauthenticated}, #{}}}, {window, {keeping, 1}}],
                  [A || {Role, _} = A <- Ended, Role =:= store orelse Role =:= window]),
     ?assertMatch({[], _}, core_step({withdraw, 1}, 0, Core)),
-    {Kept, _} = core_step({kept, ok}, 0, Core),
+    {Kept, _} = core_step({kept, {ok, <<"00000000000000000000000000000001">>}}, 0, Core),
     ?assertEqual([{registry, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}}], Kept),
     {Failed, _} = core_step({kept, {error, unavailable}}, 0, Core),
     ?assertEqual([{close, {store, unavailable}}], Failed).
@@ -427,7 +427,7 @@ bonded_write_waits_for_the_kept_bond_test() ->
     {Pairing, _} = core_step(Write, 0, Ended),
     ?assertEqual([error_rsp(16#12, handle(bond_w), 16#05)], on(4, Pairing)),
     ?assertEqual([], registry(Pairing)),
-    {_, Kept} = core_step({kept, ok}, 0, Ended),
+    {_, Kept} = core_step({kept, {ok, <<"00000000000000000000000000000001">>}}, 0, Ended),
     {Handed, _} = core_step(Write, 0, Kept),
     ?assertEqual([{write, 1, {svc, bond_w}, <<"b">>}], registry(Handed)).
 
@@ -443,7 +443,7 @@ roles_test() ->
     ?assertMatch({[{close, forgotten}], _}, erx_bt_link_core:step({store, forgotten}, 0, bonded(authenticated))),
     ?assertError(function_clause, erx_bt_link_core:step(ltk_request(), 0, core())),
     ?assertError(function_clause, erx_bt_link_core:step({window, {set, {svc, open_w}, <<"v">>}}, 0, core())),
-    ?assertError(function_clause, erx_bt_link_core:step({store, {kept, ok}}, 0, core())).
+    ?assertError(function_clause, erx_bt_link_core:step({store, {kept, {ok, <<"00000000000000000000000000000001">>}}}, 0, core())).
 
 %% A resolved bond is a candidate until the link is encrypted with its key: before that the
 %% link has the default configuration and answers a configuration write Insufficient
@@ -490,7 +490,7 @@ done_refusal_not_an_outcome_test() ->
     {[PublicKey, Random, Check], _Ltk} = just_works(),
     Identity = [smp(<<16#08, 7:128>>), smp(<<16#09, 1, 16#C6, 16#C5, 16#C4, 16#C3, 16#C2, 16#C1>>)],
     {_, Bonded} = run([smp(pairing_request()), {admission, 1, {open, nodisplay, fresh()}}, smp(PublicKey),
-                       smp(Random), smp(Check), ltk_request(), encryption_on()] ++ Identity ++ [{kept, ok}],
+                       smp(Random), smp(Check), ltk_request(), encryption_on()] ++ Identity ++ [{kept, {ok, <<"00000000000000000000000000000001">>}}],
                       core(#{share => 16})),
     {Actions, _} = run([smp(pairing_request())], Bonded),
     ?assertEqual([pairing_failed(16#08)], on(6, Actions)),
@@ -562,7 +562,7 @@ bonded_configuration_write_waits_for_the_store_test() ->
     ?assertEqual([{store, {subscriptions, #{{svc, enc_n} => notify}}}], [A || {store, _} = A <- Asked]),
     ?assertEqual([], on(4, Asked)),
     ?assertEqual([], registry(Asked)),
-    {Kept, _} = run([{kept, ok}], Writing),
+    {Kept, _} = run([{kept, {ok, <<"00000000000000000000000000000001">>}}], Writing),
     ?assertEqual([write_rsp()], on(4, Kept)),
     ?assertEqual([{subscribed, {svc, enc_n}, notify}], registry(Kept)),
     {Failed, Unchanged} = run([{kept, {error, unavailable}}, att(read(Config))], Writing),
@@ -584,10 +584,10 @@ configuration_write_while_keeping_waits_for_the_keep_test() ->
                        core(#{share => 16})),
     {Held, Holding} = run([att(write(configuration(ind), <<2, 0>>))], Keeping),
     ?assertEqual([], on(4, Held) ++ [A || {store, _} = A <- Held]),
-    {Bonded, Writing} = run([{kept, ok}], Holding),
+    {Bonded, Writing} = run([{kept, {ok, <<"00000000000000000000000000000001">>}}], Holding),
     ?assertEqual([{registry, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}},
                   {store, {subscriptions, #{{svc, ind} => indicate}}}], Bonded),
-    {Kept, _} = run([{kept, ok}], Writing),
+    {Kept, _} = run([{kept, {ok, <<"00000000000000000000000000000001">>}}], Writing),
     ?assertEqual([write_rsp()], on(4, Kept)),
     ?assertEqual([{subscribed, {svc, ind}, indicate}], registry(Kept)).
 
@@ -656,7 +656,7 @@ alphabet({Core, Now, Ref, Asked}) ->
      {ltk_reply_complete, ok}, {ltk_reply_complete, {failed, 16#0C}}, {notify, n, notify, {svc, enc_n}, <<"n">>}]
     ++ [{completed, 1} || maps:get(outstanding, facts(Core)) > 0]
     ++ [Wait || is_map_key(wait, Asked), Wait <- [{wait, 0}, {wait, 1000}]]
-    ++ [Kept || is_map_key(store, Asked), Kept <- [{kept, ok}, {kept, {error, unavailable}}]]
+    ++ [Kept || is_map_key(store, Asked), Kept <- [{kept, {ok, <<"00000000000000000000000000000001">>}}, {kept, {error, unavailable}}]]
     ++ [{at, D, expired} || D <- [erx_bt_link_core:next_deadline(Core)], D =/= infinity, D >= Now].
 
 explore_step({at, Now, Input}, {Core, _, Ref, Asked}) -> explore_step(Input, {Core, Now, Ref, Asked});
@@ -695,7 +695,7 @@ explore_step(Input, {Core, Now, Ref, Asked}) ->
      || _ <- ToStore],
     [?assert(maps:get(encrypted, After))
      || <<16#1D, H:16/little, _/binary>> <- on(4, Actions), H =:= service_changed()],
-    case maps:get(bonded, Before) andalso Input =/= {kept, ok} of
+    case maps:get(bonded, Before) andalso Input =/= {kept, {ok, <<"00000000000000000000000000000001">>}} of
         true -> ?assertEqual([], [S || {registry, {subscribed, _, _}} = S <- Actions]);
         false -> ok
     end,

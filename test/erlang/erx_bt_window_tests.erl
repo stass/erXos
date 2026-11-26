@@ -28,7 +28,7 @@ alphabet() ->
      {link, ?L1, {passkey, 1, 123}}, {link, ?L1, {outcome, 1, {failed, confirm}}},
      {link, ?L1, {outcome, 2, {failed, withdrawn}}}, {link, ?L1, {keeping, 1}}, {link, ?L2, {keeping, 1}},
      {link, ?L1, wait}, {down, ?L1}, {down, ?L2},
-     {store, {outcome, ?L1, 1, {bonded, ?IDENTITY, authenticated}}}, {store, {outcome, ?L1, 1, {failed, unavailable}}},
+     {store, {outcome, ?L1, 1, {bonded, <<"00000000000000000000000000000001">>, ?IDENTITY, authenticated}}}, {store, {outcome, ?L1, 1, {failed, unavailable}}},
      {store, {outcome, ?L2, 1, {failed, bonds_full}}}, deadline, later].
 
 %% The explorer's state: the core, the clock, the links the process would monitor, and
@@ -259,14 +259,14 @@ keeping_then_down_leaves_the_store_to_decide_test() ->
     {Actions, W1} = run([{link, ?L1, {admit, 1, ?PHONE}}, {link, ?L1, {keeping, 1}}, {clunk, a}, {down, ?L1}], 10, W),
     ?assertEqual([], [A || {send, _, {withdraw, _}} = A <- Actions]),
     ?assertEqual({[{answer, {error, ebusy}}], W1}, erx_bt_window:step({open, b}, 20, W1)),
-    {_, W2} = erx_bt_window:step({store, {outcome, ?L1, 1, {bonded, ?IDENTITY, authenticated}}}, 30, W1),
+    {_, W2} = erx_bt_window:step({store, {outcome, ?L1, 1, {bonded, <<"00000000000000000000000000000001">>, ?IDENTITY, authenticated}}}, 30, W1),
     ?assertMatch(#{wait_until := none, pairing := none}, erx_bt_window:facts(W2)),
     ?assertMatch({[{answer, ok}], _}, erx_bt_window:step({open, b}, 40, W2)).
 
 a_bond_is_written_with_the_identity_and_level_test() ->
     W = window(a, nodisplay, 0, new()),
     {_, W1} = run([{link, ?L1, {admit, 1, ?PHONE}}, {link, ?L1, {keeping, 1}},
-                   {store, {outcome, ?L1, 1, {bonded, ?IDENTITY, unauthenticated}}}], 10, W),
+                   {store, {outcome, ?L1, 1, {bonded, <<"00000000000000000000000000000001">>, ?IDENTITY, unauthenticated}}}], 10, W),
     ?assertEqual(<<"waiting\nbonded 00:1B:DC:0A:0B:0C public unauthenticated\n">>, lines(a, W1)),
     {eof, _} = erx_bt_window:take(a, 10, element(2, erx_bt_window:take(a, 4096, W1))).
 

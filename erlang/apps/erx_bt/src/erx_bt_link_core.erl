@@ -115,7 +115,7 @@ The bond the store resolved the phone's address to (`erx_bt_store:resolve/1`), w
 its IRK: a candidate, whose key the link holds from its start and whose subscriptions and
 table hash it takes on at its encryption with that key.
 """.
--type resolved() :: #{ltk := erx_smp_crypto:value(), level := key_level(), identity := erx_smp_crypto:address(),
+-type resolved() :: #{id := erx_bt_state:id(), ltk := erx_smp_crypto:value(), level := key_level(), identity := erx_smp_crypto:address(),
                       hash := binary(), subscriptions := #{key() => subscription()}}.
 -type config() :: #{table := erx_gatt_db:table(), values := #{key() => binary()},
                     addresses := #{central := erx_smp_crypto:address(), peripheral := erx_smp_crypto:address()},
@@ -151,7 +151,7 @@ bond's forgetting; and `expired`, when the earliest deadline is due.
                | {window, from_window()}
                | {registry, {answer, ref(), term()} | {set, key(), binary()}
                             | {notify, From :: term(), notify | indicate, key(), binary()}}
-               | {store, {kept, ok | {error, atom()}} | forgotten}
+               | {store, {kept, {ok, erx_bt_state:id()} | {error, atom()}} | forgotten}
                | expired.
 -doc """
 What the link does, in order, each but a notification's answer and the end sent to an
@@ -286,7 +286,7 @@ input({registry, {notify, From, Kind, Key, Value}}, Now, Core) ->
     notify(From, Kind, erx_gatt_server:notify(Kind, Key, Value, server(Core), Core#core.bearer), Now, Core);
 %% The store kept the pairing's bond: the key is a kept bond's, and a configuration write
 %% held meanwhile is kept as a bonded link's.
-input({store, {kept, ok}}, _Now, #core{bond = {keeping, Identity, Held}} = Core) ->
+input({store, {kept, {ok, _Id}}}, _Now, #core{bond = {keeping, Identity, Held}} = Core) ->
     Kept = Core#core{bond = {kept, Identity, none}},
     {Written, Next} = case Held of
                           none -> {[], Kept};
@@ -298,11 +298,15 @@ input({store, {kept, {error, Reason}}}, _Now, #core{bond = {keeping, _Identity, 
 %% The store's answer to a bonded configuration write: its response, or Unlikely Error.
 input({store, {kept, Answer}}, Now, #core{bond = {kept, Identity, {writing, Ref}}} = Core) ->
     Kept = Core#core{bond = {kept, Identity, none}},
-    att(erx_gatt_server:reply(Ref, Answer, server(Kept), Kept#core.bearer), Now, Kept);
+    att(erx_gatt_server:reply(Ref, written(Answer), server(Kept), Kept#core.bearer), Now, Kept);
 input({store, forgotten}, _Now, Core) ->
     {[{close, forgotten}], Core};
 input(expired, Now, Core) ->
     expire(Now, Core).
+
+%% A configuration write's answer for the GATT server: written, or the store's error.
+written({ok, _Id}) -> ok;
+written({error, _} = Error) -> Error.
 
 %% What the controller process sends.
 hci({acl, Boundary, Data}, Now, #core{partial = Partial} = Core) ->

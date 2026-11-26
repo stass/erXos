@@ -32,13 +32,20 @@ then every change is refused until `forget all` or the next start. After an unco
 `put` it keeps what it had and reads before the next change, which goes on only if that
 read gives a state. Every change
 but `forget all`, a pairing's `keep`, a bonded link's `subscriptions` and `served`, and
-`forget ADDRESS TYPE`, goes through `change/2`: the state last read, the edit, one `put` of the
+`forget` of one bond, goes through `change/2`: the state last read, the edit, one `put` of the
 whole result, and the new bonds only at `ok`. After every confirmed change and every
 read, each link it monitors whose bond is gone is sent `forgotten` (`adopt/2`).
 
+**A bond's id is drawn.** A pairing's `keep` draws the bond's id, 16 octets of
+`crypto:strong_rand_bytes/1`, in the edit that admits it, against the bonds that edit
+starts from, and draws again while a kept bond has it (docs/design-bluetooth.md, "A bond's
+name is made with its key"). It is written as 32 lower-case hexadecimal digits wherever
+it names the bond, to the link's `kept`, to the window's outcome, in `resolve/1` and to
+`forget/1`; it owes nothing to the address or to a count.
+
 **Links.** A link reaches the store by `resolve/1` at its start and by `{erx_bt_link,
 Link, Message}`. The store monitors a link from a `resolve` it answers with a bond or a
-`keep` it answers `ok`, finds the bond of `subscriptions` and `served` by that monitor,
+`keep` it answers `{ok, Id}`, finds the bond of `subscriptions` and `served` by that monitor,
 and drops the link at its `'DOWN'`. It answers a `keep` to the link and tells the window
 (`erx_bt_fs`) the outcome whether or not the link still lives.
 
@@ -50,6 +57,7 @@ alone, so neither the raise's terms nor a queued `keep` reach a crash report.
 -behaviour(gen_server).
 
 -include("generated/erx_abi.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([start_link/0, start_link/1, address/0, known/0, resolve/1, forget/1, facts/0, static_address/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
@@ -67,16 +75,18 @@ all`; or `unknown` since a put it could not confirm, which reads before the next
 -type generation() :: erx_bt_state_file:generation().
 -type bond() :: erx_bt_state:bond().
 -type identity() :: erx_smp_crypto:address().
+-type id() :: erx_bt_state:id().
 
 -record(store, {
     address :: <<_:48>>,
     known :: known(),
     reason = none :: none | store_unavailable | store_unreadable,
     bonds = [] :: [bond()],                                % secret: never shown, see format_status/1
-    links = #{} :: #{reference() => {pid(), identity()}},  % the links it monitors, by monitor
+    links = #{} :: #{reference() => {pid(), id()}},        % the links it monitors, by monitor, with their bond
     generation = 0 :: generation(),                        % the highest read or put, confirmed or not
     backend :: backend(),
-    timeout :: pos_integer()
+    timeout :: pos_integer(),
+    id_source :: fun(() -> <<_:128>>)                     % crypto:strong_rand_bytes(16) unless a test gives one
 }).
 
 -doc """
@@ -89,8 +99,12 @@ start_link() ->
     start_link(#{backend => #{get => fun() -> erx_bt_state_file:get(Dir) end,
                               put => fun(Generation, Blob) -> erx_bt_state_file:put(Dir, Generation, Blob) end}}).
 
--doc "Starts the store over `backend`; `timeout` is `bt_store_timeout_ms` unless given.".
--spec start_link(#{backend := backend(), timeout => pos_integer()}) -> gen_server:start_ret().
+-doc """
+Starts the store over `backend`; `timeout` is `bt_store_timeout_ms` unless given, and
+`id_source`, which draws a bond's id, is `crypto:strong_rand_bytes(16)` unless given.
+""".
+-spec start_link(#{backend := backend(), timeout => pos_integer(), id_source => fun(() -> <<_:128>>)}) ->
+          gen_server:start_ret().
 start_link(Options) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Options, []).
 
@@ -119,11 +133,11 @@ resolve(Address) ->
     gen_server:call(?MODULE, {resolve, Address}).
 
 -doc """
-Forgets the bond with that identity, its type with its address, or every bond (the
-control tree's `forget`): `enoent` when no bond has it, `eio` when the store stays `unknown` or the
+Forgets the bond with that id, the bond with that identity, its type with its address,
+or every bond (the control tree's `forget`): `enoent` when no bond has it, `eio` when the store stays `unknown` or the
 `put` is unconfirmed. The store bounds the wait itself, by a read and a put.
 """.
--spec forget(identity() | all) -> ok | {error, enoent | eio}.
+-spec forget(id() | identity() | all) -> ok | {error, enoent | eio}.
 forget(Target) ->
     gen_server:call(?MODULE, {forget, Target}, infinity).
 
@@ -148,7 +162,8 @@ static_address(<<_:2, Random:46>>) ->
 %% The start's read (docs/design-bluetooth.md, "Bonds and the store", its table).
 init(#{backend := Backend} = Options) ->
     Store = #store{address = make_address(), known = {unknown, start}, backend = Backend,
-                   timeout = maps:get(timeout, Options, ?ERX_BT_STORE_TIMEOUT_MS)},
+                   timeout = maps:get(timeout, Options, ?ERX_BT_STORE_TIMEOUT_MS),
+                   id_source = maps:get(id_source, Options, fun() -> crypto:strong_rand_bytes(16) end)},
     {ok, case read(Store) of
              {{ok, none}, Read} -> Read#store{known = read};
              {{ok, #{address := Address, bonds := Bonds}}, Read} -> Read#store{known = read, address = Address, bonds = Bonds};
@@ -188,14 +203,15 @@ call(known, _From, #store{known = Known} = Store) ->
 call({resolve, Address}, {Link, _}, #store{bonds = Bonds} = Store) ->
     case find(Address, Bonds) of
         none -> {reply, none, Store};
-        #{identity := Identity} = Bond -> {reply, resolved(Bond), watch(Link, Identity, Store)}
+        #{id := Id} = Bond -> {reply, resolved(Bond), watch(Link, Id, Store)}
     end;
 call({forget, all}, _From, Store) ->
     {Answer, Next} = forget_all(Store),
     {reply, Answer, Next};
-call({forget, {_, <<_:48>>} = Identity}, _From, Store) ->
+call({forget, Target}, _From, Store) ->
+    Key = named_by(Target),
     Edit = fun(Bonds) ->
-                   case [Bond || #{identity := Other} = Bond <- Bonds, Other =/= Identity] of
+                   case [Bond || #{Key := Other} = Bond <- Bonds, Other =/= Target] of
                        Bonds -> {error, enoent};
                        Kept -> {ok, Kept}
                    end
@@ -208,15 +224,24 @@ call({forget, {_, <<_:48>>} = Identity}, _From, Store) ->
 call(facts, _From, Store) ->
     {reply, facts(Store), Store}.
 
+%% What `forget` names a bond by: its id, or its identity, the control tree's address
+%% grammar.
+named_by(<<_:256>>) -> id;
+named_by({_, <<_:48>>}) -> identity.
+
 %% A pairing's `keep`, its one ordering point (docs/design-bluetooth.md, "The link's
 %% messages"): answered to the link, and its outcome told to the window, whatever became
-%% of the link. A bond is kept with no table hash, since `keep` carries none.
+%% of the link. A bond is kept with no table hash, since `keep` carries none, and under an
+%% id drawn against the bonds the edit starts from.
 info({erx_bt_link, Link, {keep, Tag, #{identity := Identity, level := Level, irk := Irk, ltk := Ltk},
-                          Subscriptions}}, Store) ->
+                          Subscriptions}}, #store{id_source = Draw} = Store) ->
     Bond = #{identity => Identity, irk => Irk, ltk => Ltk, level => Level, hash => <<>>,
              subscriptions => by_name(Subscriptions)},
-    {Answer, Outcome, Next} = case change(fun(Bonds) -> admit(Bond, Bonds) end, Store) of
-                                  {ok, Kept} -> {ok, {bonded, Identity, Level}, watch(Link, Identity, Kept)};
+    Edit = fun(Bonds) -> admit(Bond#{id => fresh_id(Draw, Bonds)}, Bonds) end,
+    {Answer, Outcome, Next} = case change(Edit, Store) of
+                                  {ok, Kept} ->
+                                      Id = id_of(Identity, Kept),
+                                      {{ok, Id}, {bonded, Id, Identity, Level}, watch(Link, Id, Kept)};
                                   {error, Reason, Failed} -> {{error, Reason}, {failed, Reason}, Failed}
                               end,
     Link ! {store, {kept, Answer}},
@@ -224,14 +249,14 @@ info({erx_bt_link, Link, {keep, Tag, #{identity := Identity, level := Level, irk
     {noreply, Next};
 info({erx_bt_link, Link, {subscriptions, Subscriptions}}, Store) ->
     {Answer, Next} = case bond_edit(Link, fun(Bond) -> Bond#{subscriptions := by_name(Subscriptions)} end, Store) of
-                         {ok, Kept} -> {ok, Kept};
+                         {ok, Id, Kept} -> {{ok, Id}, Kept};
                          {error, _, Failed} -> {{error, unavailable}, Failed}
                      end,
     Link ! {store, {kept, Answer}},
     {noreply, Next};
 info({erx_bt_link, Link, {served, <<_:256>> = Hash}}, Store) ->
     case bond_edit(Link, fun(Bond) -> Bond#{hash := Hash} end, Store) of
-        {ok, Kept} -> {noreply, Kept};
+        {ok, _Id, Kept} -> {noreply, Kept};
         {error, _, Failed} -> {noreply, Failed}
     end;
 info({'DOWN', Monitor, process, _Link, _Reason}, #store{links = Links} = Store) when is_map_key(Monitor, Links) ->
@@ -246,20 +271,39 @@ admit(#{identity := Identity} = Bond, Bonds) ->
         false -> {ok, Bonds ++ [Bond]}
     end.
 
+%% A drawn id no kept bond has, in its hexadecimal form: drawn again on a clash, which a
+%% draw of 128 random bits meets with a probability of at most bt_bonds_max / 2^128.
+fresh_id(Draw, Bonds) ->
+    <<_:128>> = Drawn = Draw(),
+    Id = binary:encode_hex(Drawn, lowercase),
+    case lists:any(fun(#{id := Kept}) -> Kept =:= Id end, Bonds) of
+        true -> fresh_id(Draw, Bonds);
+        false -> Id
+    end.
+
 %% A change to the bond of the link `Link`, which the store found by the monitor a
-%% `resolve` or a `keep` gave it; a link it does not monitor has no bond to change.
+%% `resolve` or a `keep` gave it, answered `{ok, Id, Store}` with that bond's id; a link
+%% it does not monitor has no bond to change.
 bond_edit(Link, Update, #store{links = Links} = Store) ->
-    case [Identity || {Pid, Identity} <- maps:values(Links), Pid =:= Link] of
-        [Identity | _] ->
-            change(fun(Bonds) ->
-                           case lists:partition(fun(#{identity := Kept}) -> Kept =:= Identity end, Bonds) of
+    case [Id || {Pid, Id} <- maps:values(Links), Pid =:= Link] of
+        [Id | _] ->
+            Edit = fun(Bonds) ->
+                           case lists:partition(fun(#{id := Kept}) -> Kept =:= Id end, Bonds) of
                                {[Bond], Others} -> {ok, Others ++ [Update(Bond)]};
                                {[], _} -> {error, forgotten}
                            end
-                   end, Store);
+                   end,
+            case change(Edit, Store) of
+                {ok, Kept} -> {ok, Id, Kept};
+                Failed -> Failed
+            end;
         [] ->
             {error, forgotten, Store}
     end.
+
+%% The id `admit/2` drew for the bond with that identity, which it keeps unique.
+id_of(Identity, #store{bonds = Bonds}) ->
+    hd([Id || #{identity := Other, id := Id} <- Bonds, Other =:= Identity]).
 
 %% The one route of every change but `forget all`: from the state last read or
 %% confirmed, the edit, one put of the whole result, and the new bonds only at `ok`. An
@@ -281,7 +325,7 @@ edit({ok, Edited}, _Store) -> {ok, Edited};
 edit({error, Reason}, Store) -> {error, Reason, Store}.
 
 encoded({ok, Blob}, _Store) -> {ok, Blob};
-encoded({error, too_large}, Store) -> {error, unavailable, Store}.
+encoded({error, _TooLargeOrDuplicateId}, Store) -> {error, unavailable, Store}.
 
 %% One put under the next generation, which the store counts as put whatever the answer,
 %% since an unconfirmed put may yet land.
@@ -331,9 +375,9 @@ forget_all(#store{address = Address, known = Known} = Store) ->
 %% The bonds become `Bonds`, and each monitored link whose bond is gone is sent
 %% `forgotten` and no longer monitored.
 adopt(Bonds, #store{links = Links} = Store) ->
-    Identities = [Identity || #{identity := Identity} <- Bonds],
-    {Kept, Gone} = maps:fold(fun(Monitor, {_, Identity} = Link, {Keep, Drop}) ->
-                                     case lists:member(Identity, Identities) of
+    Ids = [Id || #{id := Id} <- Bonds],
+    {Kept, Gone} = maps:fold(fun(Monitor, {_, Id} = Link, {Keep, Drop}) ->
+                                     case lists:member(Id, Ids) of
                                          true -> {Keep#{Monitor => Link}, Drop};
                                          false -> {Keep, [{Monitor, Link} | Drop]}
                                      end
@@ -341,8 +385,8 @@ adopt(Bonds, #store{links = Links} = Store) ->
     [begin erlang:demonitor(Monitor, [flush]), Pid ! {store, forgotten} end || {Monitor, {Pid, _}} <- Gone],
     Store#store{bonds = Bonds, links = Kept}.
 
-watch(Link, Identity, #store{links = Links} = Store) ->
-    Store#store{links = Links#{erlang:monitor(process, Link) => {Link, Identity}}}.
+watch(Link, Id, #store{links = Links} = Store) ->
+    Store#store{links = Links#{erlang:monitor(process, Link) => {Link, Id}}}.
 
 %% The backend's state, `{ok, none}`, `{ok, State}` or the reason /proc/bt shows, and the
 %% store with the generation the backend named, when it answered, counted.
@@ -355,10 +399,16 @@ read(#store{backend = #{get := Get}, generation = Generation} = Store) ->
     end.
 
 decoded(none) -> {ok, none};
+%% A blob that does not decode, one of an earlier version included, is never converted:
+%% the log says why, by the decoder's reason's name alone, since a misframed blob can put
+%% an octet of a key where the reason's integer is read.
 decoded(Blob) ->
     case erx_bt_state:decode(Blob) of
-        {ok, State} -> {ok, State};
-        {error, _} -> {error, store_unreadable}
+        {ok, State} ->
+            {ok, State};
+        {error, Reason} ->
+            ?LOG_WARNING(#{what => bt_state_unreadable, reason => erx_report:reason_name(Reason)}),
+            {error, store_unreadable}
     end.
 
 %% One call of the backend, in a process of its own, linked so that it ends with the
@@ -382,10 +432,10 @@ backend(Call, #store{timeout = Timeout}) ->
         {error, unavailable}
     end.
 
-%% A bond as `resolve/1` answers it: no IRK, and its subscriptions by the table's atoms,
+%% A bond as `resolve/1` answers it: its id, no IRK, and its subscriptions by the table's atoms,
 %% a name no atom exists for left out, since no table declares it.
-resolved(#{ltk := Ltk, level := Level, identity := Identity, hash := Hash, subscriptions := Subscriptions}) ->
-    #{ltk => Ltk, level => Level, identity => Identity, hash => Hash,
+resolved(#{id := Id, ltk := Ltk, level := Level, identity := Identity, hash := Hash, subscriptions := Subscriptions}) ->
+    #{id => Id, ltk => Ltk, level => Level, identity => Identity, hash => Hash,
       subscriptions => #{Key => Kind || Names := Kind <- Subscriptions, {_, _} = Key <- [atoms(Names)]}}.
 
 atoms({Service, Char}) ->

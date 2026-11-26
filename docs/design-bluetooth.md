@@ -2547,7 +2547,7 @@ monitor's `'DOWN'`:
 | the controller process | from `link_up` | disconnects the handle |
 | the registry | from the link's `join` | tells the handlers `disconnected`; `Conn` answers `{error, gone}` from then on |
 | the window | from its `open` verdict until the link reports the pairing failed or hands its bond to the store (`keeping`) | counts the pairing failed, `disconnected`, for the pairing wait, and writes `failed ADDR disconnected` if the window is still open |
-| the store | from a `resolve` it answers with a bond, or a `keep` it answers `ok` | drops the link |
+| the store | from a `resolve` it answers with a bond, or a `keep` it answers `{ok, Bond}` | drops the link |
 
 So no owner learns of a link's end from the link. A kill, the shutdown
 that `link_down` gives, a raise in `step/3` and the controller group's

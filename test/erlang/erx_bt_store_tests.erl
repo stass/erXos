@@ -24,14 +24,22 @@
 %% ---------------------------------------------------------------- erx_bt_state
 
 bond(N) ->
-    #{identity => {public, <<0, 0, 0, 0, 0, N>>}, irk => <<(16#1000 + N):128>>, ltk => <<(16#2000 + N):128>>,
+    #{id => id(N), identity => {public, <<0, 0, 0, 0, 0, N>>}, irk => <<(16#1000 + N):128>>, ltk => <<(16#2000 + N):128>>,
       level => authenticated, hash => <<>>, subscriptions => #{}}.
+
+%% The id of bond N, as a counter would make it.
+id(N) -> binary:encode_hex(<<N:128>>, lowercase).
 
 state(Bonds) -> #{address => ?ADDRESS, bonds => Bonds}.
 
 blob(Bonds) ->
     {ok, Blob} = erx_bt_state:encode(state(Bonds)),
     Blob.
+
+%% A blob of the bonds each encoded alone, as no encoder writes a state that breaks a rule
+%% over two bonds.
+joined(Bonds) ->
+    iolist_to_binary([2, ?ADDRESS, length(Bonds) | [binary:part(B, 8, byte_size(B) - 8) || B <- [blob([Bd]) || Bd <- Bonds]]]).
 
 state_round_trips_test() ->
     Full = (bond(1))#{identity := {random, <<2#11:2, 5:46>>}, level := unauthenticated, hash := <<9:256>>,
@@ -43,7 +51,8 @@ state_round_trips_test() ->
 
 state_refuses_another_version_test() ->
     <<_, Rest/binary>> = blob([bond(1)]),
-    ?assertEqual({error, {version, 2}}, erx_bt_state:decode(<<2, Rest/binary>>)),
+    ?assertEqual({error, {version, 1}}, erx_bt_state:decode(<<1, Rest/binary>>)),
+    ?assertEqual({error, {version, 3}}, erx_bt_state:decode(<<3, Rest/binary>>)),
     ?assertEqual({error, empty}, erx_bt_state:decode(<<>>)).
 
 state_refuses_every_truncation_and_trailing_octet_test() ->
@@ -53,30 +62,42 @@ state_refuses_every_truncation_and_trailing_octet_test() ->
 
 state_refuses_oversized_count_test() ->
     Nine = [bond(N) || N <- lists:seq(1, 9)],
-    Blob = iolist_to_binary([1, ?ADDRESS, 9, [binary:part(B, 8, byte_size(B) - 8) || B <- [blob([Bd]) || Bd <- Nine]]]),
+    Blob = iolist_to_binary([2, ?ADDRESS, 9, [binary:part(B, 8, byte_size(B) - 8) || B <- [blob([Bd]) || Bd <- Nine]]]),
     ?assertEqual({error, {too_many_bonds, 9}}, erx_bt_state:decode(Blob)),
     ?assertEqual({error, too_large}, erx_bt_state:encode(state(Nine))).
 
 state_refuses_malformed_fields_test() ->
     One = blob([bond(1)]),
     Field = fun(Offset, Octet) -> <<Head:Offset/binary, _, Tail/binary>> = One, <<Head/binary, Octet, Tail/binary>> end,
-    ?assertEqual({error, identity}, erx_bt_state:decode(Field(8, 2))),
-    ?assertEqual({error, {level, 2}}, erx_bt_state:decode(Field(8 + 39, 2))),
-    ?assertEqual({error, {hash_length, 31}}, erx_bt_state:decode(Field(8 + 40, 31))),
-    ?assertEqual({error, header}, erx_bt_state:decode(<<1, 2#11:2, 7:46>>)),
-    ?assertEqual({error, address}, erx_bt_state:decode(<<1, 0:48, 0>>)),
-    ?assertEqual({error, address}, erx_bt_state:decode(<<1, 2#11:2, (1 bsl 46 - 1):46, 0>>)),
+    ?assertEqual({error, identity}, erx_bt_state:decode(Field(8 + 16, 2))),
+    ?assertEqual({error, {level, 2}}, erx_bt_state:decode(Field(8 + 16 + 39, 2))),
+    ?assertEqual({error, {hash_length, 31}}, erx_bt_state:decode(Field(8 + 16 + 40, 31))),
+    ?assertEqual({error, header}, erx_bt_state:decode(<<2, 2#11:2, 7:46>>)),
+    ?assertEqual({error, address}, erx_bt_state:decode(<<2, 0:48, 0>>)),
+    ?assertEqual({error, address}, erx_bt_state:decode(<<2, 2#11:2, (1 bsl 46 - 1):46, 0>>)),
     Private = (bond(1))#{identity := {random, <<2#01:2, 5:46>>}},
     ?assertEqual({error, identity}, erx_bt_state:decode(blob([Private]))),
     AllOnes = (bond(1))#{identity := {random, <<2#11:2, (1 bsl 46 - 1):46>>}},
     ?assertEqual({error, identity}, erx_bt_state:decode(blob([AllOnes]))),
-    ?assertEqual({error, duplicate_identity}, erx_bt_state:decode(blob([bond(1), bond(1)]))),
+    Again = (bond(1))#{id := id(9)},
+    ?assertEqual({error, duplicate_identity}, erx_bt_state:encode(state([bond(1), Again]))),
+    ?assertEqual({error, duplicate_identity}, erx_bt_state:decode(joined([bond(1), Again]))),
     Two = blob([(bond(1))#{subscriptions := #{{<<"a">>, <<"x">>} => notify, {<<"b">>, <<"y">>} => notify}}]),
     Swapped = binary:replace(Two, <<1, 1, $a, 1, $x, 1, 1, $b, 1, $y>>, <<1, 1, $b, 1, $y, 1, 1, $a, 1, $x>>),
     ?assertEqual({error, subscription_order}, erx_bt_state:decode(Swapped)),
     Bad = (bond(1))#{subscriptions := #{{<<"Nus">>, <<"tx">>} => notify}},
     ?assertEqual({error, name}, erx_bt_state:decode(blob([Bad]))),
     ?assertEqual({error, too_large}, erx_bt_state:decode(<<One/binary, 0:(8 * ?ERX_BT_STATE_MAX)>>)).
+
+%% No two bonds share an id: the encoder refuses such a state, and the decoder refuses a
+%% blob that holds one; a public and a random identity of the same octets are two bonds.
+state_refuses_a_shared_id_test() ->
+    Twin = (bond(2))#{id := id(1)},
+    ?assertEqual({error, duplicate_id}, erx_bt_state:encode(state([bond(1), Twin]))),
+    ?assertEqual({error, duplicate_id}, erx_bt_state:decode(joined([bond(1), Twin]))),
+    Octets = <<16#C0, 0, 0, 0, 0, 1>>,
+    Both = state([(bond(1))#{identity := {public, Octets}}, (bond(2))#{identity := {random, Octets}}]),
+    ?assertEqual({ok, Both}, erx_bt_state:decode(blob(maps:get(bonds, Both)))).
 
 %% The largest state the served table lets the store write fits `bt_state_max`: a bond's
 %% subscriptions are its link's, so they name only characteristics of the table, each
@@ -229,18 +250,22 @@ medium(Script) ->
 
 start(Medium, Gets, Puts) -> start(Medium, Gets, Puts, 500).
 
-start(Medium, Gets, Puts, Timeout) ->
+start(Medium, Gets, Puts, Timeout) -> start(Medium, Gets, Puts, Timeout, #{}).
+
+start(Medium, Gets, Puts, Timeout, Options) ->
     Script = script(Medium, Gets, Puts),
     Backend = #{get => fun() -> ask(Script, {get, self()}) end,
                 put => fun(Generation, Blob) -> ask(Script, {put, Generation, Blob, self()}) end},
-    {start_backend(Backend, Timeout), Script}.
+    {start_backend(Backend, Timeout, Options), Script}.
 
-start_backend(Backend, Timeout) ->
+start_backend(Backend, Timeout) -> start_backend(Backend, Timeout, #{}).
+
+start_backend(Backend, Timeout, Options) ->
     Test = self(),
     is_pid(whereis(erx_bt_fs)) andalso exit(whereis(erx_bt_fs), kill),
     wait_unregistered(erx_bt_fs),
     register(erx_bt_fs, spawn(fun() -> forward(Test, window) end)),
-    {ok, Store} = erx_bt_store:start_link(#{backend => Backend, timeout => Timeout}),
+    {ok, Store} = erx_bt_store:start_link(Options#{backend => Backend, timeout => Timeout}),
     unlink(Store),
     Store.
 
@@ -281,8 +306,8 @@ start_reading_none_makes_the_address_test() ->
     ?assertEqual(Address, erx_bt_store:address()),
     Link = fake_link(),
     keep(Link, 1),
-    ?assertEqual(ok, kept(Link)),
-    ?assertEqual(#{address => Address, bonds => [(bond(1))#{subscriptions := #{{<<"nus">>, <<"tx">>} => notify}}]},
+    {ok, Id} = kept(Link),
+    ?assertEqual(#{address => Address, bonds => [(bond(1))#{id := Id, subscriptions := #{{<<"nus">>, <<"tx">>} => notify}}]},
                  medium(Script)),
     stop(Store).
 
@@ -328,7 +353,7 @@ unconfirmed_put_reads_before_the_next_change_test() ->
     ?assertEqual({unknown, put}, erx_bt_store:known()),
     Second = fake_link(),
     keep(Second, 2),
-    ?assertEqual(ok, kept(Second)),
+    ?assertMatch({ok, <<_:256>>}, kept(Second)),
     ?assertEqual([identity(1), identity(2)], identities(medium(Script))),
     ?assertEqual(identities(medium(Script)), [I || {I, _} <- maps:get(bonds, erx_bt_store:facts())]),
     ?assertEqual(read, erx_bt_store:known()),
@@ -342,7 +367,7 @@ keep_of_a_dead_link_still_reaches_the_window_test() ->
     Monitor = monitor(process, Link),
     receive {'DOWN', Monitor, _, _, _} -> ok end,
     keep(Link, 1),
-    ?assertEqual({bonded, identity(1), authenticated}, outcome(Link)),
+    ?assertMatch({bonded, <<_:256>>, {public, <<0, 0, 0, 0, 0, 1>>}, authenticated}, outcome(Link)),
     ?assertEqual([identity(1)], identities(medium(Script))),
     ?assertMatch(#{links := 0}, erx_bt_store:facts()),
     stop(Store).
@@ -371,7 +396,7 @@ resolve_answers_one_bond_without_any_irk_test() ->
     #{irk := Irk2} = Subscribed,
     Prand = <<2#01:2, 12345:22>>,
     Answer = erx_bt_store:resolve(private_address(Irk2, Prand)),
-    ?assertEqual(#{ltk => maps:get(ltk, Subscribed), level => authenticated, identity => identity(2),
+    ?assertEqual(#{id => id(2), ltk => maps:get(ltk, Subscribed), level => authenticated, identity => identity(2),
                    hash => <<5:256>>, subscriptions => #{{nus, tx} => indicate}}, Answer),
     ?assertEqual(Answer, erx_bt_store:resolve(identity(2))),
     ?assertEqual(none, erx_bt_store:resolve(private_address(<<0:128>>, Prand))),
@@ -412,6 +437,80 @@ forget_matches_the_whole_identity_test() ->
     ?assertEqual({error, enoent}, erx_bt_store:forget({public, Octets})),
     stop(Store).
 
+%% A kept bond's id (docs/design-bluetooth.md, "A bond's name is made with its key"): 32
+%% lower-case hexadecimal digits, given alike by the link's `kept`,
+%% the window's outcome and `resolve/1`; drawn afresh for the same phone after a forget;
+%% forgotten by it, `enoent` once gone.
+bond_id_is_drawn_at_keep_test() ->
+    {Store, Script} = start(none, [], []),
+    Pair = fun() ->
+                   Link = fake_link(),
+                   keep(Link, 1),
+                   {ok, Id} = kept(Link),
+                   ?assertEqual({bonded, Id, identity(1), authenticated}, outcome(Link)),
+                   Id
+           end,
+    First = Pair(),
+    ?assertMatch({match, _}, re:run(First, "^[0-9a-f]{32}$")),
+    ?assertMatch(#{id := First}, erx_bt_store:resolve(identity(1))),
+    ?assertMatch(#{bonds := [#{id := First}]}, medium(Script)),
+    ?assertEqual({error, enoent}, erx_bt_store:forget(id(0))),
+    ?assertEqual(ok, erx_bt_store:forget(First)),
+    ?assertEqual(none, erx_bt_store:resolve(identity(1))),
+    ?assertEqual({error, enoent}, erx_bt_store:forget(First)),
+    Second = Pair(),
+    ?assertNotEqual(First, Second),
+    ?assertMatch(#{id := Second}, erx_bt_store:resolve(identity(1))),
+    stop(Store).
+
+%% The state lost to a blob that does not decode held bond 1 under id 1; after `forget
+%% all` the next bond's id is none it held, whatever the store now counts.
+bond_id_owes_nothing_to_a_lost_state_test() ->
+    {Store, _} = start(blob([bond(1)]), [garbage], []),
+    ?assertEqual(ok, erx_bt_store:forget(all)),
+    Link = fake_link(),
+    keep(Link, 2),
+    {ok, Id} = kept(Link),
+    ?assertNotEqual(maps:get(id, bond(1)), Id),
+    stop(Store).
+
+%% A random source that repeats a kept bond's id once: the store draws again, and the
+%% new bond is kept under a fresh id.
+bond_id_drawn_again_on_a_clash_test() ->
+    Source = fun() ->
+                     case get(drawn) of
+                         undefined -> put(drawn, once), <<1:128>>;
+                         once -> crypto:strong_rand_bytes(16)
+                     end
+             end,
+    {Store, Script} = start(blob([bond(1)]), [], [], 500, #{id_source => Source}),
+    Link = fake_link(),
+    keep(Link, 2),
+    {ok, Id} = kept(Link),
+    ?assertNotEqual(maps:get(id, bond(1)), Id),
+    ?assertEqual([id(1), Id], [Kept || #{id := Kept} <- maps:get(bonds, medium(Script))]),
+    stop(Store).
+
+%% The two identities of one address (row 4127): a public and a random bond of the same
+%% octets are two bonds with two ids.
+two_identities_of_one_address_test() ->
+    Octets = <<16#C0, 0, 0, 0, 0, 1>>,
+    {Store, Script} = start(none, [], []),
+    Pair = fun(Type) ->
+                   Link = fake_link(),
+                   erx_bt_store ! {erx_bt_link, Link, {keep, 7, (paired(1))#{identity := {Type, Octets}}, #{}}},
+                   {ok, Id} = kept(Link),
+                   Id
+           end,
+    Public = Pair(public),
+    Random = Pair(random),
+    ?assertNotEqual(Public, Random),
+    ?assertEqual(ok, erx_bt_store:forget(Public)),
+    ?assertEqual([{random, Octets}], identities(medium(Script))),
+    ?assertEqual({error, enoent}, erx_bt_store:forget(Public)),
+    ?assertMatch(#{id := Random}, erx_bt_store:resolve({random, Octets})),
+    stop(Store).
+
 wait_links(N) ->
     case erx_bt_store:facts() of
         #{links := N} -> ok;
@@ -424,7 +523,7 @@ subscriptions_and_served_change_the_links_bond_test() ->
     Link = spawn(fun() -> _ = erx_bt_store:resolve(identity(1)), forward(Test, link) end),
     wait_links(1),
     erx_bt_store ! {erx_bt_link, Link, {subscriptions, #{{nus, tx} => indicate}}},
-    ?assertEqual(ok, kept(Link)),
+    ?assertEqual({ok, id(1)}, kept(Link)),
     erx_bt_store ! {erx_bt_link, Link, {served, <<3:256>>}},
     #{bonds := [Bond]} = (fun W() -> case medium(Script) of #{bonds := [#{hash := <<3:256>>}]} = M -> M;
                                                             _ -> timer:sleep(10), W() end end)(),
@@ -506,11 +605,16 @@ explore(Known, Request, Put, Reread) ->
     Store1 =:= read andalso ?assertEqual({Case, identities(medium(Script))}, {Case, [I || {I, _} <- Bonds]}),
     stop(Store).
 
-request(keep_new) -> L = fake_link(), keep(L, 2), {kept(L), outcome(L)};
-request(keep_kept) -> L = fake_link(), keep(L, 1), {kept(L), outcome(L)};
+request(keep_new) -> L = fake_link(), keep(L, 2), unnamed(kept(L), outcome(L));
+request(keep_kept) -> L = fake_link(), keep(L, 1), unnamed(kept(L), outcome(L));
 request(forget_one) -> erx_bt_store:forget(identity(1));
 request(forget_missing) -> erx_bt_store:forget(identity(5));
 request(forget_all) -> erx_bt_store:forget(all).
+
+%% A keep's answers with the bond's drawn id taken out, once the link's and the window's
+%% are seen to give the same one.
+unnamed({ok, <<_:256>> = Id}, {bonded, Id, Identity, Level}) -> {ok, {bonded, Identity, Level}};
+unnamed(Kept, Outcome) -> {Kept, Outcome}.
 
 %% The model of "Bonds and the store": whether the change may start, its edit, then its put.
 %% `forget all` starts whenever the get it makes for the generation answers, the
@@ -627,7 +731,7 @@ state_file_step_failing_under_the_store_test() ->
     ok = file:del_dir(filename:dirname(Obstacle)),
     Second = fake_link(),
     keep(Second, 2),
-    ?assertEqual(ok, kept(Second)),
+    ?assertMatch({ok, <<_:256>>}, kept(Second)),
     {ok, _, Kept} = erx_bt_state_file:get(Dir),
     ?assertMatch({ok, #{bonds := [_, _]}}, erx_bt_state:decode(Kept)),
     stop(Store),

@@ -5,13 +5,14 @@
 %% "Bonds and the store" and "Fuzz targets"): erx_bt_state:decode/1, the reader of what a
 %% store returns, untrusted wherever its medium can be written. A round writes a state
 %% from random bonds, encodes it, then decodes it as written, cut, lengthened, with an
-%% octet changed, or replaced by random bytes. Whatever arrives, decode/1 neither makes
-%% an atom nor raises, and:
+%% octet changed, or replaced by random bytes, and decodes a state of nine bonds and one
+%% in which two bonds share an id. Whatever arrives, decode/1 neither makes an atom nor
+%% raises, and:
 %%
 %% * a state written from a term decodes to that term;
 %% * any state decode/1 gives encodes, within bt_state_max, back to its blob byte for
 %%   byte, so every octet is read, none past its layout, and nothing decode/1 accepts
-%%   is a state encode/1 refuses.
+%%   is a state encode/1 refuses, which a shared id is.
 %%
 %% Each round also reads a directory entry's name through erx_bt_state_file:generation/1,
 %% the development store's reader of the names its medium lists: a generation's own name,
@@ -41,6 +42,7 @@ round() ->
     decode(Blob) =:= {ok, State} orelse verdict({decoded_wrongly, State}),
     decode(mutate(Blob)),
     decode(nine()),
+    decode(shared()),
     generation(file_name()).
 
 %% Nine bonds, each written as a state of one writes it, under a count of nine.
@@ -48,7 +50,15 @@ nine() ->
     #{address := Address} = State = state(),
     Bonds = [begin {ok, <<_:8/binary, Bond/binary>>} = erx_bt_state:encode(State#{bonds := [bond(N)]}), Bond end
              || N <- lists:seq(1, 9)],
-    iolist_to_binary([1, Address, 9 | Bonds]).
+    iolist_to_binary([2, Address, 9 | Bonds]).
+
+%% Two bonds of different identities under one id, which no encoder writes.
+shared() ->
+    #{address := Address} = State = state(),
+    Id = binary:encode_hex(rand:bytes(16), lowercase),
+    Bonds = [begin {ok, <<_:8/binary, Bond/binary>>} = erx_bt_state:encode(State#{bonds := [(bond(N))#{id := Id}]}), Bond end
+             || N <- [1, 2]],
+    iolist_to_binary([2, Address, 2 | Bonds]).
 
 decode(Blob) ->
     Result = try erx_bt_state:decode(Blob)
@@ -106,7 +116,7 @@ bond(N) ->
                    public -> {public, <<N, (rand:bytes(5))/binary>>};
                    random -> {random, <<2#11:2, N:6, (rand:bytes(5))/binary>>}
                end,
-    #{identity => Identity, irk => rand:bytes(16), ltk => rand:bytes(16),
+    #{id => binary:encode_hex(rand:bytes(16), lowercase), identity => Identity, irk => rand:bytes(16), ltk => rand:bytes(16),
       level => pick([authenticated, unauthenticated]), hash => pick([<<>>, rand:bytes(32)]),
       subscriptions => maps:from_list([{{name(), name()}, pick([notify, indicate])} || _ <- lists:seq(1, rand:uniform(3) - 1)])}.
 

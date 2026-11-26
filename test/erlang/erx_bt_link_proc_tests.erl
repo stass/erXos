@@ -30,7 +30,7 @@
 %% The identity address identity() distributes (type 1, random), decoded: most significant
 %% octet first, where the PDU sends it least significant octet first.
 -define(DISTRIBUTED, {random, <<16#C1, 16#C2, 16#C3, 16#C4, 16#C5, 16#C6>>}).
--define(BOND, #{ltk => ?BOND_LTK, level => authenticated, identity => ?CENTRAL, hash => <<0:256>>,
+-define(BOND, #{id => <<"00000000000000000000000000000001">>, ltk => ?BOND_LTK, level => authenticated, identity => ?CENTRAL, hash => <<0:256>>,
                 subscriptions => #{{svc, n} => notify}}).
 -define(NAME, {16#40, 1}).
 -define(PASSKEY, 123456).
@@ -84,7 +84,7 @@ just_works_pairing_to_the_store_test() ->
         ?assertMatch({Link, {keep, Tag, #{ltk := Ltk, level := unauthenticated}, #{}}}, addressed(erx_bt_store)),
         ?assertEqual({Link, {keeping, Tag}}, addressed(erx_bt_fs)),
         Link ! {window, {withdraw, Tag}},
-        Link ! {store, {kept, ok}},
+        Link ! {store, {kept, {ok, <<"00000000000000000000000000000001">>}}},
         ?assertEqual({security, #{level => encrypted, bonded => true, identity => ?DISTRIBUTED}}, told(erx_gatt_srv)),
         ?assertEqual([], [Code || <<_:16, 6:16/little, 16#05, Code>> <- sent()]),
         ?assertEqual(nothing, next(erx_bt_fs))

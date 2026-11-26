@@ -103,7 +103,7 @@ a_pairing_reaches_the_opener_as_lines_test() ->
     say(Link, {passkey, 1, 42}),
     ?assertEqual({ok, <<"passkey 000042 C0:01:02:03:04:05\n">>}, reply_within(Read, 1000)),
     say(Link, {keeping, 1}),
-    erx_bt_fs ! {outcome, Link, 1, {bonded, ?IDENTITY, authenticated}},
+    erx_bt_fs ! {outcome, Link, 1, {bonded, <<"00000000000000000000000000000001">>, ?IDENTITY, authenticated}},
     ?assertEqual({ok, <<"bonded 00:1B:DC:0A:0B:0C public authenticated\n">>}, call(Grant, {read, 2, 0, 4096})),
     ?assertEqual({ok, <<>>}, call(Grant, {read, 2, 0, 4096})),
     ?assertMatch({ok, _, _}, open(Grant, 3)),
@@ -162,7 +162,7 @@ no_volume(_Volume) -> ok.
 %% A volume whose state holds one bond, of ?IDENTITY.
 a_bond(Volume) ->
     ok = file:make_dir(Volume),
-    Bond = #{identity => ?IDENTITY, irk => <<1:128>>, ltk => <<2:128>>, level => authenticated,
+    Bond = #{id => <<"00000000000000000000000000000001">>, identity => ?IDENTITY, irk => <<1:128>>, ltk => <<2:128>>, level => authenticated,
              hash => <<>>, subscriptions => #{}},
     {ok, Blob} = erx_bt_state:encode(#{address => <<2#11:2, 7:46>>, bonds => [Bond]}),
     ok = erx_bt_state_file:put(filename:join(Volume, "bt"), 1, Blob).
@@ -284,7 +284,7 @@ a_link_killed_after_keeping_leaves_the_store_to_decide_test() ->
     say(Link, {keeping, 1}),
     exit(Link, kill),
     ?assertEqual({error, ebusy}, open(Grant, 3)),
-    erx_bt_fs ! {outcome, Link, 1, {bonded, ?IDENTITY, unauthenticated}},
+    erx_bt_fs ! {outcome, Link, 1, {bonded, <<"00000000000000000000000000000001">>, ?IDENTITY, unauthenticated}},
     ?assertEqual({ok, <<"bonded 00:1B:DC:0A:0B:0C public unauthenticated\n">>}, call(Grant, {read, 2, 0, 4096})),
     ?assertEqual({wait, 0}, tell(link(), wait)),
     stop(S).

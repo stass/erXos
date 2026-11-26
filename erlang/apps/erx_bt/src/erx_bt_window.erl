@@ -73,7 +73,8 @@ deadline is due.
 """.
 -type input() :: {open, id()} | {write, id(), mode()} | {clunk, id()}
                | {link, link(), erx_bt_link_core:to_window()}
-               | {store, {outcome, link(), tag(), {bonded, erx_smp_crypto:address(), authenticated | unauthenticated}
+               | {store, {outcome, link(), tag(), {bonded, erx_bt_state:id(), erx_smp_crypto:address(),
+                                                           authenticated | unauthenticated}
                                                 | {failed, atom()}}}
                | {store, read}
                | {down, link()}
@@ -233,7 +234,7 @@ input({down, _Link}, _Now, Core) ->
 input({store, {outcome, Link, Tag, Outcome}}, Now, #core{pairing = {Link, Tag, Address, Stage}} = Core) ->
     Demonitor = [{demonitor, Link} || Stage =:= running],
     case Outcome of
-        {bonded, {Type, _} = Identity, Level} ->
+        {bonded, _Id, {Type, _} = Identity, Level} ->
             Line = iolist_to_binary(["bonded ", address(Identity), $\s, atom_to_binary(Type), $\s,
                                     atom_to_binary(Level), $\n]),
             {Demonitor ++ [{log, #{address => Identity, outcome => Outcome}}], ended(Line, Core)};
