@@ -872,6 +872,16 @@ a_single_unit_device_is_asked_no_max_lun_test() ->
     ?assert(lists:member({units, 1}, Actions)),
     ?assertEqual([ok], replies(Actions)).
 
+%% Reset recovery keeps the device's quirks: a single_unit device is asked no Get Max LUN
+%% after a reset either, and the retry's CSW is judged under ignore_csw_tag.
+quirks_hold_after_reset_recovery_test() ->
+    Script = [ok, ok, ok, ok, {raw, <<0>>}, ok, ok, ok, ok, {tagged, 16#dead, 0, 0}],
+    {_, Actions, []} = run(erx_usb_bot_core:new([single_unit, ignore_csw_tag]),
+                           [start, {request, t, none, {test_unit_ready, 0}}], Script),
+    ?assertEqual(2, length([reset || class_reset <- Actions])),
+    ?assertNot(lists:member(get_max_lun, Actions)),
+    ?assertEqual([ok], replies(Actions)).
+
 a_no_inquiry_device_has_its_inquiry_answered_unsent_test() ->
     Inquiry = {request, i, none, {inquiry, 0}},
     ?assertEqual({ok, #{type => 0, qualifier => 0, removable => true}}, reply(step(Inquiry, quirked([no_inquiry])))),
