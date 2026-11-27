@@ -45,10 +45,22 @@ span under a node id of 0 and the node ids of 0 after it in the same
 indirect node among them, and answers the position the next
 call starts from, which is past the one it was given; so its work follows
 the blocks and nodes the directory holds, not the size it claims.
+
+A read-write mount's state ("The volume state", "Allocation") is built
+here alone, by state/2 from what the mount answers, and changed only by
+allocate/3, which hands out a log's next blocks within whole sections,
+set_slot/5 and set_node/5, which keep the SIT's valid maps, the
+unpublished summaries and the counters, and put_node/3 and
+put_dentries/3, which make a block dirty. erx_f2fs_plan reads it through
+epoch/1 and hands back the state its checkpoint commits through
+committed/3, the one place sections join the free set.
 """.
 
 -export([nat/2, inode/3, slot/4, read/5, symlink/3, lookup/4, readdir/4]).
--export_type([nat/0, volume/0, slot/0, dentry/0, failure/0]).
+-export([state/2, allocate/3, set_slot/5, set_node/5, put_node/3, put_dentries/3, logs/1,
+         free_sections/1, epoch/1, committed/3]).
+-export_type([nat/0, volume/0, slot/0, dentry/0, failure/0, blocks/0, state/0, node_value/0,
+              epoch/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -62,6 +74,11 @@ the blocks and nodes the directory holds, not the size it claims.
 %% The steps one readdir takes at most, each a dentry block or a run of
 %% empty slots one node leaves.
 -define(READDIR_STEPS, 8).
+%% A summary entry no block holds yet.
+-define(NO_SUMMARY, #{nid => 0, version => 0, ofs_in_node => 0}).
+
+-record(state, {volume, logs, free, summaries, sit_dirty, nodes, dentries, counts, orphans,
+                allocated}).
 
 -doc "The NAT journal's entries by nid, read only by this module.".
 -opaque nat() :: #{non_neg_integer() => erx_f2fs_codec:nat_entry()}.
@@ -88,6 +105,8 @@ the block's index times 214 plus the slot, or its inline slot ([F 59]).
 -doc "The table a read broke a rule of, and the rule, or a codec failure.".
 -type failure() :: {nat, nid | free | owner | block_addr | journal_nid | journal_duplicate} |
                    {data, block_addr} | {file, inline | size | type} | {dir, dot} |
+                   {space, no_free_section} | {mode, read_only} |
+                   {sit, valid_bit | summary} |
                    erx_f2fs_codec:failure().
 -type blocks() :: #{non_neg_integer() => binary()}.
 -type result(Value) :: {ok, Value} | {need, [non_neg_integer()]} | {error, failure()}.
@@ -530,3 +549,352 @@ require(false, Failure) -> fail(Failure).
 
 -spec fail(failure()) -> no_return().
 fail(Failure) -> throw({?MODULE, failure, Failure}).
+
+%%% The volume state
+
+-doc """
+State Ino of node Nid's footer and one body: an inode's map, a direct
+node's address array or an indirect node's nids ([F 43], [F 53]).
+""".
+-type node_value() :: {inode, erx_f2fs_codec:inode()} |
+                      {direct | indirect, [non_neg_integer()], erx_f2fs_codec:footer()}.
+
+-doc """
+A read-write volume's state (docs/design-f2fs.md, "The volume state"):
+the tables as they stand, the six logs, the free sections, the
+unpublished summaries, the epoch's dirty nodes and dentry blocks and the
+counters. Only this module builds or changes it.
+""".
+-opaque state() :: #state{}.
+
+-doc """
+What the next checkpoint writes, from State: the tables, the six logs'
+next blocks by type, the SIT segments and NAT entries changed or kept
+in a journal since the checkpoint, the unpublished summaries, the dirty
+nodes and dentry blocks, the counters and the orphans.
+""".
+-type epoch() :: #{volume := volume(), logs := [non_neg_integer()],
+                   sit_segments := [non_neg_integer()],
+                   nat := [{non_neg_integer(), erx_f2fs_codec:nat_entry()}],
+                   summaries := [{non_neg_integer(), [erx_f2fs_codec:summary()]}],
+                   nodes := [{non_neg_integer(), node_value()}],
+                   dentries := [{{non_neg_integer(), non_neg_integer()},
+                                 erx_f2fs_codec:dentries()}],
+                   counts := #{atom() => non_neg_integer()},
+                   orphans := [non_neg_integer()]}.
+
+-doc """
+The state of a read-write mount of Mounted, erx_f2fs_mount's answer,
+taken from the durable view's blocks: every block live at the
+checkpoint and every block of the walk's footprint (docs/design-f2fs.md,
+"Read-write mounts: the mount checkpoint"). A section is free when it
+holds none of them and no log of the checkpoint holds it. Each log
+resumes at the block after the last of them in its section, over all its
+segments, and takes the lowest free section instead when no block is
+left there, when it is an SSR log, when another log shares its section,
+or when the block it would resume at lies in another segment of its
+section that holds a live block, whose summary only its SSA block holds.
+The committed logs' summaries are their pack's, or for node logs without
+them rebuilt from the footers of their segments' valid blocks ([F 31]);
+the entries of invalid blocks are read by no one and are left empty.
+""".
+-spec state(erx_f2fs_mount:mounted(), blocks()) -> result(state()).
+state(#{mode := {read_only, _}}, _Blocks) ->
+    {error, {mode, read_only}};
+state(#{superblock := #{main_blkaddr := Main, segs_per_sec := S},
+        checkpoint := Header, sit := Sit, logs := Committed,
+        footprint := Footprint, sit_journal := Journal, orphans := Orphans,
+        data_summaries := Data, node_summaries := Node} = Mounted, Blocks) ->
+    run(fun() ->
+                Volume = maps:with([superblock, checkpoint, sit, nat, pack], Mounted),
+                Sections = tuple_size(Sit) div S,
+                Footed = lists:usort([(A - Main) div ?BLOCKS_PER_SEG div S || A <- Footprint]),
+                LogSections = [Segno div S || {_, Segno, _, _} <- Committed],
+                Held = lists:usort([Sec || Sec <- lists:seq(0, Sections - 1),
+                                           not empty_section(Sit, S, Sec)] ++ Footed ++ LogSections),
+                Free = ordsets:subtract(lists:seq(0, Sections - 1), Held),
+                Summaries = maps:from_list(
+                              lists:zip([Segno || {_, Segno, _, _} <- Committed],
+                                        pad(Data) ++ node_summaries(Volume, Committed, Node, Blocks))),
+                State0 = #state{volume = Volume, logs = #{}, free = Free, summaries = Summaries,
+                                sit_dirty = lists:usort([Segno || #{segno := Segno} <- Journal]),
+                                nodes = #{}, dentries = #{}, orphans = Orphans, allocated = 0,
+                                counts = maps:with([valid_block_count, valid_node_count,
+                                                    valid_inode_count], Header)},
+                lists:foldl(fun(Log, State) -> resume(State, Log, Footprint, LogSections) end,
+                            State0, Committed)
+        end).
+
+%% The committed node logs' summaries: the pack's, or each valid block's
+%% footer's nid ([F 31], [F 46]).
+node_summaries(_Volume, _Logs, Node, _Blocks) when Node =/= none -> pad(Node);
+node_summaries(#{superblock := #{main_blkaddr := Main}, sit := Sit}, Logs, none, Blocks) ->
+    [begin
+         #{valid_map := Map} = element(Segno + 1, Sit),
+         Valid = [I || {I, 1} <- lists:enumerate(0, [B || <<B:1>> <= Map])],
+         Footers = maps:from_list(
+                     [{I, ok(erx_f2fs_codec:node_footer(Block))}
+                      || {I, Block} <- lists:zip(Valid, fetch(Blocks, [Main + Segno * ?BLOCKS_PER_SEG + I
+                                                                       || I <- Valid]))]),
+         list_to_tuple([case Footers of
+                            #{I := #{nid := Nid}} -> #{nid => Nid, version => 0, ofs_in_node => 0};
+                            #{} -> ?NO_SUMMARY
+                        end || I <- lists:seq(0, ?BLOCKS_PER_SEG - 1)])
+     end || {Type, Segno, _, _} <- Logs, Type >= ?ERX_F2FS_LOG_HOT_NODE].
+
+pad(Lists) ->
+    [list_to_tuple(Entries ++ lists:duplicate(?BLOCKS_PER_SEG - length(Entries), ?NO_SUMMARY))
+     || Entries <- Lists].
+
+empty_section(Sit, S, Sec) ->
+    lists:all(fun(Segno) -> maps:get(valid_blocks, element(Segno + 1, Sit)) =:= 0 end,
+              lists:seq(Sec * S, Sec * S + S - 1)).
+
+%% A log's next block at mount, from the last durable block in its section.
+resume(#state{volume = #{superblock := #{main_blkaddr := Main, segs_per_sec := S}, sit := Sit}} = State,
+       {Type, Segno, Offset, Alloc}, Footprint, LogSections) ->
+    Sec = Segno div S,
+    First = Main + Sec * S * ?BLOCKS_PER_SEG,
+    Live = [First + K * ?BLOCKS_PER_SEG + I
+            || K <- lists:seq(0, S - 1),
+               #{valid_map := Map} <- [element(Sec * S + K + 1, Sit)],
+               {I, 1} <- lists:enumerate(0, [B || <<B:1>> <= Map])],
+    InSection = [A || A <- Footprint, A >= First, A < First + S * ?BLOCKS_PER_SEG],
+    Next = lists:max([Main + Segno * ?BLOCKS_PER_SEG + Offset | [A + 1 || A <- Live ++ InSection]]),
+    NextSegno = (Next - Main) div ?BLOCKS_PER_SEG,
+    Shared = length([L || L <- LogSections, L =:= Sec]) > 1,
+    Stranded = NextSegno =/= Segno andalso Next < First + S * ?BLOCKS_PER_SEG andalso
+        maps:get(valid_blocks, element(NextSegno + 1, Sit)) > 0,
+    case Alloc =:= ?ERX_F2FS_ALLOC_SSR orelse Shared orelse Stranded orelse
+        Next =:= First + S * ?BLOCKS_PER_SEG of
+        true -> take_section(State, Type);
+        false when NextSegno =:= Segno -> put_log(State, Type, Next);
+        false -> enter(put_log(State, Type, Next), Type, NextSegno)
+    end.
+
+put_log(#state{logs = Logs} = State, Type, Next) -> State#state{logs = Logs#{Type => Next}}.
+
+%% The log takes the lowest free section and enters its first segment.
+take_section(#state{free = []}, _Type) ->
+    fail({space, no_free_section});
+take_section(#state{free = [Sec | Free],
+                    volume = #{superblock := #{main_blkaddr := Main, segs_per_sec := S}}} = State,
+             Type) ->
+    enter(put_log(State#state{free = Free}, Type, Main + Sec * S * ?BLOCKS_PER_SEG), Type, Sec * S).
+
+%% A log enters Segno, a segment with no live block: the SIT gives it the
+%% log's type and its summary starts empty.
+enter(#state{volume = #{sit := Sit} = Volume, sit_dirty = Dirty, summaries = Summaries} = State,
+      Type, Segno) ->
+    Entry = element(Segno + 1, Sit),
+    State#state{volume = Volume#{sit := setelement(Segno + 1, Sit, Entry#{type := Type})},
+                sit_dirty = ordsets:add_element(Segno, Dirty),
+                summaries = Summaries#{Segno => erlang:make_tuple(?BLOCKS_PER_SEG, ?NO_SUMMARY)}}.
+
+-doc """
+The next N blocks of log Type (docs/design-f2fs.md, "Allocation"), in
+order, and the state with the log past them: within its section, then
+the lowest free section, or enospc, the state unchanged.
+""".
+-spec allocate(state(), 0..5, non_neg_integer()) ->
+          {ok, [non_neg_integer()], state()} | {error, enospc}.
+allocate(State, Type, N) ->
+    try
+        {Addresses, Next} = lists:mapfoldl(fun(_, S) -> advance(S, Type) end, State, lists:seq(1, N)),
+        {ok, Addresses, Next#state{allocated = Next#state.allocated + N}}
+    catch
+        throw:{?MODULE, failure, {space, no_free_section}} -> {error, enospc}
+    end.
+
+advance(#state{logs = Logs, volume = #{superblock := #{main_blkaddr := Main,
+                                                        segs_per_sec := S}}} = State, Type) ->
+    #{Type := Address} = Logs,
+    Next = Address + 1,
+    State1 = put_log(State, Type, Next),
+    {Address, case (Next - Main) rem (S * ?BLOCKS_PER_SEG) of
+                  0 -> take_section(State1, Type);
+                  At when At rem ?BLOCKS_PER_SEG =:= 0 -> enter(State1, Type, (Next - Main) div ?BLOCKS_PER_SEG);
+                  _ -> State1
+              end}.
+
+-doc "The next block of each log, by type.".
+-spec logs(state()) -> [non_neg_integer()].
+logs(#state{logs = Logs}) -> [maps:get(Type, Logs) || Type <- lists:seq(0, ?ERX_F2FS_SIT_TYPES - 1)].
+
+-doc "The free sections, in order.".
+-spec free_sections(state()) -> [non_neg_integer()].
+free_sections(#state{free = Free}) -> Free.
+
+-doc "State with node Nid's value Value dirty, to be written by the next checkpoint.".
+-spec put_node(state(), non_neg_integer(), node_value()) -> state().
+put_node(#state{nodes = Nodes} = State, Nid, Value) -> State#state{nodes = Nodes#{Nid => Value}}.
+
+-doc """
+State with the dentry block of slot Index of node Owner dirty, holding
+Dentries; the next checkpoint writes it to the warm data log.
+""".
+-spec put_dentries(state(), {non_neg_integer(), non_neg_integer()}, erx_f2fs_codec:dentries()) ->
+          state().
+put_dentries(#state{dentries = Dentries} = State, Slot, Value) ->
+    State#state{dentries = Dentries#{Slot => Value}}.
+
+-doc """
+State with slot Index of dirty node Owner, an inode's address array or a
+direct node, holding Address (docs/design-f2fs.md, "Allocation"): the
+old address's valid bit cleared, the new one's set with its summary
+entry, and valid_block_count and the owning inode's i_blocks moved by
+the slots' weights, a real address or NEW_ADDR one and NULL_ADDR none.
+""".
+-spec set_slot(state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), blocks()) ->
+          result(state()).
+set_slot(#state{nodes = Nodes} = State, Owner, Index, Address, Blocks) ->
+    run(fun() ->
+                {Ino, Old, Node} = case maps:get(Owner, Nodes) of
+                                       {inode, #{addresses := As} = I} ->
+                                           {Owner, lists:nth(Index + 1, As),
+                                            {inode, I#{addresses := replace(As, Index, Address)}}};
+                                       {direct, As, #{ino := I} = Footer} ->
+                                           {I, lists:nth(Index + 1, As),
+                                            {direct, replace(As, Index, Address), Footer}}
+                                   end,
+                #{version := Version} = nat_entry(State, Owner, Blocks),
+                Summary = #{nid => Owner, version => Version, ofs_in_node => Index},
+                State1 = mark(unmark(put_node(State, Owner, Node), Old), Address, Summary),
+                count(State1, Ino, [{valid_block_count, weight(Address) - weight(Old)}])
+        end).
+
+-doc """
+State with node Nid of inode Ino at Address (docs/design-f2fs.md,
+"Allocation"): its NAT entry, a summary entry for a real address, and
+every count a node block is in. A node that comes into being, its entry
+NULL_ADDR before, adds one to valid_node_count, valid_block_count and
+its inode's i_blocks, and an inode one to valid_inode_count; a freed
+node, Address NULL_ADDR, takes away exactly that and bumps its entry's
+version ([F 33]); a node that moves changes no count. The inode whose
+i_blocks changes must be dirty.
+""".
+-spec set_node(state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), blocks()) ->
+          result(state()).
+set_node(State, Nid, Ino, Address, Blocks) ->
+    run(fun() ->
+                #{block_addr := Old, version := Version} = Entry = nat_entry(State, Nid, Blocks),
+                Delta = weight(Address) - weight(Old),
+                Bumped = case Delta of
+                             -1 -> (Version + 1) band 16#ff;
+                             _ -> Version
+                         end,
+                #state{volume = #{nat := Nat} = Volume} = State1 =
+                    mark(unmark(State, Old), Address, #{nid => Nid, version => 0, ofs_in_node => 0}),
+                State2 = State1#state{volume = Volume#{nat := Nat#{Nid => Entry#{block_addr := Address,
+                                                                               ino := Ino,
+                                                                               version := Bumped}}}},
+                Counts = [{valid_node_count, Delta}, {valid_block_count, Delta}] ++
+                    [{valid_inode_count, Delta} || Nid =:= Ino],
+                case Delta of
+                    -1 when Nid =:= Ino -> count(forget(State2, Nid), none, Counts);
+                    -1 -> count(forget(State2, Nid), Ino, Counts);
+                    _ -> count(State2, Ino, Counts)
+                end
+        end).
+
+%% A freed node is no longer dirty, nor any dentry block in its slots, so
+%% no checkpoint writes it back.
+forget(#state{nodes = Nodes, dentries = Dentries} = State, Nid) ->
+    State#state{nodes = maps:remove(Nid, Nodes),
+                dentries = maps:filter(fun({Owner, _}, _) -> Owner =/= Nid end, Dentries)}.
+
+%% A node's NAT entry as it stands: the epoch's or the journal's, else its
+%% block's in the selected copy.
+nat_entry(#state{volume = #{superblock := Super, checkpoint := Header, nat := Nat}}, Nid, Blocks) ->
+    require(Nid < erx_f2fs_codec:nat_capacity(Super), {nat, nid}),
+    case Nat of
+        #{Nid := Entry} ->
+            Entry;
+        #{} ->
+            PerBlock = ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK,
+            [Block] = fetch(Blocks, [erx_f2fs_codec:current_block(nat, Super, Header, Nid div PerBlock)]),
+            lists:nth(Nid rem PerBlock + 1, ok(erx_f2fs_codec:nat_block(Block)))
+    end.
+
+weight(?ERX_F2FS_NULL_ADDR) -> 0;
+weight(_) -> 1.
+
+real(Address) -> Address =/= ?ERX_F2FS_NULL_ADDR andalso Address =/= ?ERX_F2FS_NEW_ADDR.
+
+%% The valid bit of a real address, cleared or set; a block has one owner,
+%% so a bit is never set twice or cleared when clear.
+unmark(State, Address) ->
+    case real(Address) of
+        true -> valid_bit(State, Address, 0, none);
+        false -> State
+    end.
+
+mark(State, Address, Summary) ->
+    case real(Address) of
+        true -> valid_bit(State, Address, 1, Summary);
+        false -> State
+    end.
+
+valid_bit(#state{volume = #{superblock := #{main_blkaddr := Main} = Super, sit := Sit} = Volume,
+                 sit_dirty = Dirty, summaries = Summaries} = State, Address, Bit, Summary) ->
+    require(Address >= Main andalso Address < erx_f2fs_codec:main_end(Super), {data, block_addr}),
+    Segno = (Address - Main) div ?BLOCKS_PER_SEG,
+    Offset = (Address - Main) rem ?BLOCKS_PER_SEG,
+    #{valid_map := Map, valid_blocks := Count} = Entry = element(Segno + 1, Sit),
+    <<Before:Offset/bitstring, Was:1, After/bitstring>> = Map,
+    require(Was =:= 1 - Bit, {sit, valid_bit}),
+    Sit1 = setelement(Segno + 1, Sit, Entry#{valid_map := <<Before/bitstring, Bit:1, After/bitstring>>,
+                                             valid_blocks := Count + 2 * Bit - 1}),
+    Summaries1 = case Summary of
+                     none -> Summaries;
+                     #{} ->
+                         require(is_map_key(Segno, Summaries), {sit, summary}),
+                         maps:update_with(Segno, fun(T) -> setelement(Offset + 1, T, Summary) end,
+                                          Summaries)
+                 end,
+    State#state{volume = Volume#{sit := Sit1}, sit_dirty = ordsets:add_element(Segno, Dirty),
+                summaries = Summaries1}.
+
+%% The counters by Deltas, and Ino's i_blocks by the first delta's, unless
+%% Ino is none.
+count(#state{counts = Counts} = State, Ino, [{_, Delta} | _] = Deltas) ->
+    Counts1 = lists:foldl(fun({Name, D}, C) -> maps:update_with(Name, fun(V) -> V + D end, C) end,
+                          Counts, Deltas),
+    State1 = State#state{counts = Counts1},
+    case Ino =:= none orelse Delta =:= 0 of
+        true -> State1;
+        false ->
+            {inode, #{i_blocks := IBlocks} = Inode} = maps:get(Ino, State1#state.nodes),
+            put_node(State1, Ino, {inode, Inode#{i_blocks := IBlocks + Delta}})
+    end.
+
+replace(List, Index, Value) ->
+    {Before, [_ | After]} = lists:split(Index, List),
+    Before ++ [Value | After].
+
+-doc "What the next checkpoint writes, from State.".
+-spec epoch(state()) -> epoch().
+epoch(#state{volume = #{nat := Nat} = Volume, sit_dirty = Sit, summaries = Summaries, nodes = Nodes,
+             dentries = Dentries, counts = Counts, orphans = Orphans} = State) ->
+    #{volume => Volume, logs => logs(State), sit_segments => Sit, nat => lists:sort(maps:to_list(Nat)),
+      summaries => lists:sort([{Segno, tuple_to_list(T)} || Segno := T <- Summaries]),
+      nodes => lists:sort(maps:to_list(Nodes)), dentries => lists:sort(maps:to_list(Dentries)),
+      counts => Counts, orphans => Orphans}.
+
+-doc """
+State once a checkpoint whose header is Header, in the pack at Pack, has
+committed (docs/design-f2fs.md, "Checkpoints"): the epoch's dirty state
+cleared, the summaries the six logs' alone, and the free set every
+section with no live block that no log holds, so the sections the epoch
+emptied join it here and nowhere else.
+""".
+-spec committed(state(), erx_f2fs_codec:checkpoint(), non_neg_integer()) -> state().
+committed(#state{volume = #{superblock := #{main_blkaddr := Main, segs_per_sec := S}, sit := Sit} = Volume,
+                 summaries = Summaries} = State, Header, Pack) ->
+    LogSegments = [(A - Main) div ?BLOCKS_PER_SEG || A <- logs(State)],
+    LogSections = [Segno div S || Segno <- LogSegments],
+    Free = [Sec || Sec <- lists:seq(0, tuple_size(Sit) div S - 1),
+                   not lists:member(Sec, LogSections), empty_section(Sit, S, Sec)],
+    State#state{volume = Volume#{checkpoint := Header, pack => Pack, nat := #{}},
+                free = Free, summaries = maps:with(LogSegments, Summaries),
+                sit_dirty = [], nodes = #{}, dentries = #{}, allocated = 0}.

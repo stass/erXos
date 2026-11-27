@@ -1447,10 +1447,17 @@ mount derives from them alone:
   section, over every segment of the section and not only the committed
   one, which is where an appending log may continue. A log takes a free
   section instead when no block remains after that one, when the
-  committed checkpoint marks it SSR, since erXos appends only, or when
+  committed checkpoint marks it SSR, since erXos appends only, when
   another log's current segment lies in its section, since no two logs
   share a section
-  ([Sections and logs](#sections-and-logs)).
+([Sections and logs](#sections-and-logs)),
+or when that block lies in another segment of its section that holds a
+block live at the checkpoint: that segment's summary is only in its SSA
+block and its type may not be the log's, so the log leaves it closed
+rather than read the one and rewrite the other. Only a volume another
+writer left meets this; a segment past the committed one that holds only
+footprint blocks, as a record across a segment boundary leaves, is
+resumed in.
 
 A log takes its position this way whether or not the mount checkpoint
 writes into it, so no log keeps a position before a block replay made

@@ -878,6 +878,30 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   FreeBSD does (`mmc.c:1876-1882`, `mmcreg.h:362-363` at `release/15.1.0`), and discards with TRIM only
   on a device with GB_CL_EN that matches no row of FreeBSD's TRIM exclusions (`mmc.c:115-130`), after its
   board probe shows sectors outside a discarded range unchanged ([design-storage.md](design-storage.md)).
+* [High] storage, F2FS's read-write mount in the volume process: erx_f2fs_core's state and
+  erx_f2fs_plan's checkpoint are pure and tested on the host, but erx_f2fs_volume still mounts read-only
+  and writes nothing; its write path (each phase's runs to the window, a flush after each, the state
+  adopted after the last) and the mount checkpoint at a read-write mount land with the first operation
+  that changes a volume ([design-f2fs.md](design-f2fs.md#read-write-mounts-the-mount-checkpoint)).
+  It waits on the walk: a second checkpoint in one mount writes its first node at the committed walk
+  start with the committed epoch's version, so a cut before its last block leaves a chain that
+  erx_f2fs_mount refuses as `{walk, chain}` until the walk ends a chain of unmarked checkpoint nodes
+  without replaying them ([design-f2fs.md](design-f2fs.md#the-walk)).
+* [Medium] test, F2FS checkpoint writer's remaining table rows and seeds: a property that every valid
+  block's summary names its owner after each commit, with the "SSA blocks written only for the
+  segments a log left" seed; the shared-section and hot-data-log seeds; an inode created and freed
+  through set_node; the set_node volume made one fsck.f2fs accepts (its nodes linked from the root)
+  before the guest's placement check uses it ([design-f2fs.md](design-f2fs.md#unit-and-property-tests)).
+* [High] test, F2FS two-log placement in the oracle guest: before the namespace operations build on the
+  checkpoint writer, the guest takes an erXos image whose warm node log holds a directory's inode and an
+  indirect node, written by erx_f2fs_plan (the set_node case's volume), runs `fsck.f2fs`, mounts and
+  churns it in Linux writing all six logs, and runs `fsck.f2fs` again; a failure stops the writer and
+  reopens the placement ([design-f2fs.md](design-f2fs.md#unit-and-property-tests)). The same run
+  records what a NAT entry freed by Linux holds in `ino`, which erXos keeps as it was (no facts
+  record says).
+* [Medium] storage, F2FS replay's stale owner: set_slot refuses, as a bug that ends the volume, a real
+  address another slot already holds; clearing that slot first, as only replaying a Linux chain needs,
+  lands with replay ([design-f2fs.md](design-f2fs.md#allocation)).
 * [Low] test, F2FS against more Linux kernels: the guest's batch on other kernels, each a row of image
   pin, kernel version and f2fs-tools package, only the pinned v7.3.4 kernel's result counting against
   erXos, once a difference between kernels matters to a consumer ([design-f2fs.md](design-f2fs.md#the-linux-oracle-guest)).

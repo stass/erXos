@@ -208,8 +208,11 @@ layout erx_f2fs_summary_entry packed_le 1 7
 # The journal of a summary block: a NAT journal, a SIT journal or the
 # hot-node log's statistics, by the log the summary is for [F 28, F 47].
 bytes erx_f2fs_journal 507
-# A summary block of 4096-byte blocks [F 45]: entry_type is 1 for a node
-# segment and 0 for a data segment; Linux checks no check_sum.
+# A summary block of 4096-byte blocks [F 45]: entry_type is
+# f2fs_summary_node for a node segment and f2fs_summary_data for a data
+# segment; Linux checks no check_sum.
+limit f2fs_summary_data u32 0
+limit f2fs_summary_node u32 1
 layout erx_f2fs_summary_block packed_le 1 4096
   field entries erx_f2fs_summary_entry 0 count @f2fs_summaries_per_block
   field journal erx_f2fs_journal 3584
@@ -350,6 +353,8 @@ layout erx_f2fs_inode_extra packed_le 1 36
 # bits and the node offset above them [F 43]; an xattr node's offset is all
 # ones in those 29 bits [F 53].
 limit f2fs_node_mark_bits u32 3
+limit f2fs_node_mark_fsync u32 0x2
+limit f2fs_node_mark_dentry u32 0x4
 limit f2fs_xattr_node_offset u32 0x1fffffff
 # The last 24 bytes of every node block [F 43].
 layout erx_f2fs_node_footer packed_le 1 24

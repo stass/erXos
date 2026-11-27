@@ -70,8 +70,8 @@ describes.
 -define(LOG_TYPES, ?ERX_F2FS_SIT_TYPES).
 -define(UNUSED_LOG, 16#ffffffff).
 %% A summary block's entry_type ([F 45]).
--define(DATA_SUMMARY, 0).
--define(NODE_SUMMARY, 1).
+-define(DATA_SUMMARY, ?ERX_F2FS_SUMMARY_DATA).
+-define(NODE_SUMMARY, ?ERX_F2FS_SUMMARY_NODE).
 %% A directory's dentry file type ([T 23]).
 -define(FILE_TYPE_DIR, 2).
 %% The extra attributes every inode carries: through i_inode_checksum.
@@ -232,8 +232,7 @@ sit_entry(Type) ->
 
 %% Pack 1, its header, its payload, three data and three node summaries
 %% and the header's copy, and pack 2's header, zeros.
-checkpoint(#{main := Main, sit := Sit, nat := Nat, payload := Payload,
-             overprovision := Overprovision},
+checkpoint(#{main := Main, sit := Sit, nat := Nat, overprovision := Overprovision},
            #{cp_blkaddr := Pack1} = Super, Version, Zero) ->
     Logs = fun(First) -> [log_segment(Type) || Type <- lists:seq(First, First + 2)]
                              ++ lists:duplicate(5, ?UNUSED_LOG) end,
@@ -244,9 +243,8 @@ checkpoint(#{main := Main, sit := Sit, nat := Nat, payload := Payload,
             summary([], ?DATA_SUMMARY),
             summary([], ?NODE_SUMMARY), summary(Summaries, ?NODE_SUMMARY),
             summary([], ?NODE_SUMMARY)],
-    Total = 2 + Payload + length(Pack),
     Fields = erx_abi_packed:decode(erx_f2fs_checkpoint, <<0:(?ERX_F2FS_CHECKPOINT_SIZE * 8)>>),
-    {Header, PayloadBlocks} = erx_f2fs_codec:encode_checkpoint(
+    Blocks = erx_f2fs_codec:encode_pack(
                      Super, Fields#{checkpoint_ver => Version,
                                     user_block_count => (Main - Overprovision) * ?BLOCKS_PER_SEG,
                                     valid_block_count => 2,
@@ -258,14 +256,13 @@ checkpoint(#{main := Main, sit := Sit, nat := Nat, payload := Payload,
                                     cur_data_segno => Logs(0),
                                     cur_data_blkoff => Offsets,
                                     ckpt_flags => ?ERX_F2FS_CP_UMOUNT bor ?ERX_F2FS_CP_CRC_RECOVERY,
-                                    cp_pack_total_block_count => Total,
-                                    cp_pack_start_sum => 1 + Payload,
                                     valid_node_count => 1, valid_inode_count => 1,
                                     next_free_nid => ?ERX_F2FS_ROOT_INO + 1,
                                     checksum_offset => ?BLOCK_SIZE - 4,
                                     sit_version_bitmap => zero_bitmap(Sit),
-                                    nat_version_bitmap => zero_bitmap(Nat)}),
-    lists:enumerate(Pack1, [Header | PayloadBlocks] ++ Pack ++ [Header]) ++ [{Pack1 + ?BLOCKS_PER_SEG, Zero}].
+                                    nat_version_bitmap => zero_bitmap(Nat)},
+                     [], Pack),
+    lists:enumerate(Pack1, Blocks) ++ [{Pack1 + ?BLOCKS_PER_SEG, Zero}].
 
 summary(Entries, Type) ->
     Free = #{nid => 0, version => 0, ofs_in_node => 0},

@@ -76,7 +76,7 @@ a summary block is always written with an empty journal.
          sit_journal/1, summary_block/1, compact_summaries/2, inode/3,
          direct_node/4, indirect_node/4, dentry_block/1, inline_dentries/1,
          node_footer/1, crc/2,
-         encode_superblock/1, encode_checkpoint/2, encode_orphan_block/3,
+         encode_superblock/1, encode_checkpoint/2, encode_orphan_block/3, encode_pack/4,
          encode_nat_block/1, encode_sit_block/1, encode_summary_block/2,
          encode_inode/2, encode_direct_node/2, encode_indirect_node/2,
          encode_dentry_block/1, empty_journal/0,
@@ -520,6 +520,25 @@ encode_orphan_block(Inodes, Index, Count) ->
                           #{ino => pad_list(Inodes, ?ERX_F2FS_ORPHANS_PER_BLOCK, 0),
                             blk_addr => Index, blk_count => Count,
                             entry_count => length(Inodes), check_sum => 0}).
+
+-doc """
+A checkpoint pack's blocks, in order from its first ([F 20]): the header
+of Checkpoint, its payload, the orphan blocks holding Orphans, the
+summary blocks Summaries, and the header's copy, its last block. The
+header's cp_pack_total_block_count and cp_pack_start_sum are derived
+here from what the pack holds, so no caller writes them down.
+""".
+-spec encode_pack(superblock(), checkpoint(), [non_neg_integer()], [binary()]) -> [binary()].
+encode_pack(#{cp_payload := Payload} = Super, Checkpoint, Orphans, Summaries) ->
+    OrphanLists = chunks(Orphans, ?ERX_F2FS_ORPHANS_PER_BLOCK),
+    OrphanCount = length(OrphanLists),
+    OrphanBlocks = [encode_orphan_block(Inodes, Index, OrphanCount)
+                    || {Index, Inodes} <- lists:enumerate(OrphanLists)],
+    {Header, PayloadBlocks} =
+        encode_checkpoint(Super, Checkpoint#{cp_pack_start_sum => 1 + Payload + OrphanCount,
+                                             cp_pack_total_block_count =>
+                                                 2 + Payload + OrphanCount + length(Summaries)}),
+    [Header | PayloadBlocks] ++ OrphanBlocks ++ Summaries ++ [Header].
 
 -doc "A NAT block of Entries, its f2fs_nat_entries_per_block entries ([F 33]).".
 -spec encode_nat_block([nat_entry()]) -> binary().
@@ -1305,3 +1324,9 @@ require(false, Rule) -> fail(Rule).
 
 -spec fail(atom()) -> no_return().
 fail(Rule) -> throw({?MODULE, Rule}).
+
+chunks([], _Size) -> [];
+chunks(List, Size) when length(List) =< Size -> [List];
+chunks(List, Size) ->
+    {Chunk, Rest} = lists:split(Size, List),
+    [Chunk | chunks(Rest, Size)].

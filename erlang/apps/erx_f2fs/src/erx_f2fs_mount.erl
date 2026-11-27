@@ -131,8 +131,12 @@ What a mount answers: the chosen superblock copy, each bad copy's number
 and failure, the chosen pack's first block and its header with its version
 bitmaps, the pack's orphan inodes, the data logs' summaries and the node
 logs' when the pack has them (each list hot, warm, cold), the SIT, element
-S + 1 for main segment S, the NAT, which erx_f2fs_core resolves, the root
-inode, and the mode: erx_f2fs_core's volume.
+S + 1 for main segment S, with the SIT journal's entries, which the SIT
+holds and the next checkpoint writes to their blocks, the NAT, which
+erx_f2fs_core resolves, the six logs, each {Type, Segment, Offset,
+AllocType} by type (hot, warm and cold data, then hot, warm and cold
+node), the walk's footprint, every block it read, its end included, the
+root inode, and the mode: erx_f2fs_core's volume.
 """.
 -type mounted() :: #{superblock := erx_f2fs_codec:superblock(),
                      bad_copies := [{0 | 1, failure()}],
@@ -142,6 +146,10 @@ inode, and the mode: erx_f2fs_core's volume.
                      data_summaries := [[erx_f2fs_codec:summary()]],
                      node_summaries := [[erx_f2fs_codec:summary()]] | none,
                      sit := tuple(),
+                     sit_journal := [#{segno := non_neg_integer(),
+                                       entry := erx_f2fs_codec:sit_entry()}],
+                     logs := [{0..5, non_neg_integer(), non_neg_integer(), 0 | 1}],
+                     footprint := [non_neg_integer()],
                      nat := erx_f2fs_core:nat(),
                      root := erx_f2fs_codec:inode(),
                      mode := mode()}.
@@ -166,9 +174,10 @@ mount(Partition, Allowance, Blocks) ->
         %% The SIT and the chain's first block are each placed by what is
         %% read already, so they are asked at once.
         read(Blocks, sit_addresses(Super, Checkpoint) ++ [walk_start(Super, Checkpoint)]),
-        Volume = maps:merge(maps:remove(sit_journal, Contents),
+        Volume = maps:merge(Contents,
                             #{superblock => Super, bad_copies => BadCopies, pack => Pack,
-                              checkpoint => Checkpoint,
+                              checkpoint => Checkpoint, logs => logs(Checkpoint),
+                              footprint => [walk_start(Super, Checkpoint)],
                               sit => sit(Super, Checkpoint, Contents, Blocks)}),
         Root = root(Volume, Blocks),
         check_chain(Super, Checkpoint, Blocks),
