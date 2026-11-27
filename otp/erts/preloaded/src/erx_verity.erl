@@ -302,6 +302,7 @@ hash(Salted, Block) ->
 %% Tag [alias | Alias] is gen's form for a reply sent to the alias Alias. Each request has
 %% its own reply alias, so an answer can only be its own request's; the monitor, which
 %% ends with the call, sees the window end.
+-dialyzer({no_improper_lists, call/2}).
 call(Pid, Requests) ->
     Monitor = monitor(process, Pid),
     Tags = [[alias | alias([reply])] || _ <- Requests],

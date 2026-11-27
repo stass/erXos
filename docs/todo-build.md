@@ -306,7 +306,10 @@ design does not have, to be deleted so no side-by-side table can show it under s
     application, erx_net 36, erx 35, erx_blk 21, the preloaded modules 19, erx_files 19,
     erx_uart 16, erx_shell 15, the rest under 13 each. About 20 are in generated modules
     (`erx_pkg_reader`, `erx_manifest`, `erx_ui_wire`), fixed in their generators.
-  * Each warning is fixed in the code or its spec, not suppressed; where Dialyzer is
+  * Each warning is fixed in the code or its spec. A `-dialyzer` attribute names one
+    function and carries a comment saying why no code fix exists: gen's improper
+    `[alias | Ref]` reply tags, a record field a caller can fill with any term, a process
+    body's fun, which cannot carry a `no_return` spec. Where Dialyzer is
     imprecise, as with `band` and a negative mask in `erx_cmd_ls:columns/2`, the code is
     written plainly. Then a Ruby step under tools/ runs it from `tools/erx check`, with a
     seeded type error that must fail it, and a line in docs/guide/testing.md.

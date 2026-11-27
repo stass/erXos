@@ -251,6 +251,10 @@ owner_id(_, _) -> {error, badarg}.
 
 %% Masked as stock's efile_set_permissions masks it: a record read back carries its type
 %% bits, which are not a mode.
+%% Dialyzer takes #file_info.mode's declared type as the only values the caller can pass,
+%% but a caller's record holds any term there, which stock answers badarg as the last
+%% clause does.
+-dialyzer({no_match, mode_attr/1}).
 mode_attr(undefined) ->
     none;
 mode_attr(Mode) when is_integer(Mode) ->
