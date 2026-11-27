@@ -122,8 +122,8 @@ class ErxMediaVolumeTest < Minitest::Test
               caught_by: 'fat32_volumes_are_checked_within_the_memory_bound_test_/0-fun-2- (8 GB)'),
     # A directory walk that lists the sectors of its whole chain before it reads an entry.
     Fault.new(name: "a directory's chain listed whole before it is read", path: FAT,
-              from: '    links_fold(Fat, data_cluster(Fat, First), 1, Max, Fun, Acc).',
-              to: "    {Listed, Total} = links_fold(Fat, data_cluster(Fat, First), 1, Max,\n" \
+              from: '    links_fold(Fat, data_cluster(Clusters, First), 1, Max, Fun, Acc).',
+              to: "    {Listed, Total} = links_fold(Fat, data_cluster(Clusters, First), 1, Max,\n" \
                   "                                 fun(Sector, Entries, L) -> [{Sector, Entries} | L] end, []),\n" \
                   "    {lists:foldl(fun({Sector, Entries}, A) -> Fun(Sector, Entries, A) end, Acc, " \
                   "lists:reverse(Listed)), Total}.",

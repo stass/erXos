@@ -309,7 +309,8 @@ nth_sector(Wanted) ->
 
 -doc "The sectors of data cluster Cluster, in order.".
 -spec cluster_sectors(fat(), pos_integer()) -> {ok, [pos_integer()]} | {error, does_not_read}.
-cluster_sectors(Fat, Cluster) -> guarded(fun() -> cluster_sectors_of(Fat, data_cluster(Fat, Cluster)) end).
+cluster_sectors(Fat = #fat{clusters = Clusters}, Cluster) ->
+    guarded(fun() -> cluster_sectors_of(Fat, data_cluster(Clusters, Cluster)) end).
 
 -doc """
 Fun(Index, Event, Acc) folded over directory Dir's entries to its end marker, a
@@ -368,18 +369,18 @@ admit(Read, Sectors, <<_:11/binary, ?SECTOR:16/little, PerCluster, Reserved:16/l
              andalso Total =< Sectors andalso DataStart < Total andalso Clusters >= 1
              andalso FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)
              andalso (Type =:= 16 orelse (Version =:= ?VERSION_32 andalso Clusters =< ?CLUSTERS_MAX_32))),
+    Root = case {Type, RootCluster} of
+               {16, none} when RootEntries >= 1 -> {fixed, RootSector, RootEntries};
+               {32, Cluster} when RootEntries =:= 0 -> data_cluster(Clusters, Cluster);
+               _ -> fail(not_its_volume)
+           end,
     Fat = #fat{read = Read, type = Type, per_cluster = PerCluster, fat_start = Reserved + Active * FatSectors,
                first_fat = Reserved, fats = Fats, fat_sectors = FatSectors, mirrored = Mirrored,
                fsinfo = case FsInfo of N when N >= 1, N < Reserved -> N; _ -> none end,
-               data_start = DataStart, clusters = Clusters, root = {fixed, RootSector, RootEntries},
+               data_start = DataStart, clusters = Clusters, root = Root,
                label = Label, serial = Serial, clean = true, hard_error = false},
-    Root = case {Type, RootCluster} of
-               {16, none} when RootEntries >= 1 -> {fixed, RootSector, RootEntries};
-               {32, Cluster} when RootEntries =:= 0 -> data_cluster(Fat, Cluster);
-               _ -> fail(not_its_volume)
-           end,
     #{clean := Clean, hard_error := HardError} = erx_fat_alloc:volume_flags(Type, raw_entry(Fat, 1)),
-    Fat#fat{root = Root, clean = Clean, hard_error = HardError};
+    Fat#fat{clean = Clean, hard_error = HardError};
 admit(_Read, _Sectors, _Boot) ->
     fail(not_its_volume).
 
@@ -416,19 +417,20 @@ raw_entry(#fat{read = Read, type = Type, fat_start = FatStart}, Cluster) ->
     <<_:Offset/binary, Entry:Type/little, _/binary>> = sector(Read, FatStart + Index),
     Entry.
 
-%% Cluster, when it is a cluster of the data area, the one check every cluster a
-%% walk reaches passes: a directory entry's first and every link. A free, reserved
-%% or bad entry is none, and breaks its chain.
-data_cluster(#fat{clusters = Clusters}, Cluster) when is_integer(Cluster), Cluster >= 2, Cluster < Clusters + 2 ->
+%% Cluster, when it is one of the Clusters clusters of the data area, the one check
+%% every cluster a walk reaches passes: the root directory's first, a directory
+%% entry's first and every link. A free, reserved or bad entry is none, and breaks
+%% its chain.
+data_cluster(Clusters, Cluster) when is_integer(Cluster), Cluster >= 2, Cluster < Clusters + 2 ->
     Cluster;
-data_cluster(_Fat, _Cluster) ->
+data_cluster(_Clusters, _Cluster) ->
     fail(does_not_read).
 
 %% Cluster's link: end of chain, or the next cluster of the data area.
 next_link(Fat = #fat{type = Type}, Cluster) ->
     case raw_entry(Fat, Cluster) band mask(Type) of
         Mark when Type =:= 16, Mark >= ?END_MARK_16; Type =:= 32, Mark >= ?END_MARK_32 -> end_of_chain;
-        Next -> data_cluster(Fat, Next)
+        Next -> data_cluster(Fat#fat.clusters, Next)
     end.
 
 mask(16) -> 16#ffff;
@@ -439,7 +441,7 @@ mask(32) -> 16#0fffffff.
 chain(#fat{clusters = Clusters}, _First, Count) when Count > Clusters ->
     fail(does_not_read);
 chain(Fat, First, Count) ->
-    exact_chain(Fat, data_cluster(Fat, First), Count, #{}, []).
+    exact_chain(Fat, data_cluster(Fat#fat.clusters, First), Count, #{}, []).
 
 exact_chain(_Fat, Cluster, _Left, Seen, _Got) when is_map_key(Cluster, Seen) ->
     fail(does_not_read);
@@ -644,7 +646,7 @@ dir_fold(#fat_node{first = First}, Fat, Fun, Acc) ->
 
 chain_fold(Fat = #fat{per_cluster = PerCluster, clusters = Clusters}, First, Fun, Acc) ->
     Max = min(Clusters, max(1, (?DIR_ENTRIES_MAX * ?ENTRY) div (PerCluster * ?SECTOR))),
-    links_fold(Fat, data_cluster(Fat, First), 1, Max, Fun, Acc).
+    links_fold(Fat, data_cluster(Clusters, First), 1, Max, Fun, Acc).
 
 %% Cluster, the Taken-th of a chain of at most Max, folded, then the rest of the chain.
 links_fold(Fat = #fat{per_cluster = PerCluster}, Cluster, Taken, Max, Fun, Acc) ->
