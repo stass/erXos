@@ -149,19 +149,14 @@ log format is known only from GPL code. It is
 
 ### What the code does today
 
-* The volume write tests keep a RAM medium behind a window proxy,
-  `ram/2` in `test/erlang/erx_media_volume_write_tests.erl:22-60`: it
-  answers `info`, one sector's `read`, `write` and `flush` from a base
-  image held as one binary with the written sectors beside it, logs each
-  write's sector and each flush (not the bytes), and answers `eio` to
-  every write after a chosen count, as a stick pulled out mid-batch. Its
-  removal test cuts after every write count
-  (`erx_media_volume_write_tests.erl:239-244`); another samples one cut
-  in forty (`:192-197`).
-* The read-only fake window proxy, `proxy/2` in
-  `test/erlang/erx_media_volume_tests.erl:27-62`, answers `info`, one
-  sector's `read` and `flush`, and sends the test `{flushed, Pid}` at
-  each flush.
+* The volume tests, the media tree's tests and this generator share one
+  RAM window, `erx_ram_window` (`test/erlang/erx_ram_window.erl`): it
+  answers `info`, `read`, `write` and `flush` from a base image held as
+  one binary with the written sectors beside it, answers `eio` to every
+  write after a chosen count, as a stick pulled out mid-batch, and, as
+  the volume tests' read-only proxy, may answer every write `eio` and
+  tell the test of each flush. The volume write tests' removal test
+  cuts after every write count; another samples one cut in forty.
 * `erx_fault_plan` (`test/erlang/erx_fault_plan.erl`, on the
   `fault-harness` branch) holds design-recovery's fault plans, and the
   fake stick takes its faults from it; moving the window proxies onto
@@ -183,7 +178,7 @@ log format is known only from GPL code. It is
   device itself, since nothing promises a reset keeps the volatile cache
   (`erx_blk_virtio.erl:16-33`).
 * design-storage's FAT power-cut harness and `Erx::FatVolume` are
-  designed and not built; no crash-state generator exists.
+  designed and not built.
 
 ## Requirements
 
@@ -429,12 +424,15 @@ A workload is a short sequence of file operations, bounded as Ace
 bounds them: `create`, `write` (within a file, extending it, and past
 its end, each at most two clusters long), `truncate` (shorter and
 longer), `remove`, `rename` (to a new name and onto an existing one,
-across directories), `mkdir` and `rmdir`, over a file set of two
-directories with two files each and one nested directory, on a FAT16
-and a FAT32 image made by fsimg. A persistence point is an operation
+across directories), `mkdir` and `rmdir`, over the volume tests' tree
+(`test/fixtures/fat_volumes.rb`): the root with two files, `sub` with
+one file and the nested directory `sub/Deeper`, which holds one; on its
+FAT16 and FAT32 images made by fsimg. A write is at most 1,024 bytes,
+two of the FAT32 image's clusters. A persistence point is an operation
 whose answer the volume's design names durable
 ([design-drives.md](design-drives.md)): an `fsync`, a commit, the
-finish at eject. The generator inserts one after the last operation of
+finish at eject. The workloads place `fsync` as their persistence
+point, and the generator inserts one after the last operation of
 every workload, so each workload ends acknowledged. `seq-N` is every
 sequence of N operations over the file set, with every placement of
 persistence points between them. The driver runs one operation at a
@@ -456,9 +454,11 @@ sampled workloads are sampled workloads.
 
 `erx_crash_states` is a pure module: from a trace, a device mode and a
 bound it answers the crash states of each epoch, each as the durable
-image plus its choice, a map from sector to an index into `A(s)` (`0`
-for the durable value) or a tear, with the state's earliest moment
-`t_S`. An epoch whose count is at most `Bound` is enumerated whole and
+image plus its choice, a map from each sector not left at its durable
+value to an index into `A(s)` (from 1, `0` being the durable value) or
+a tear, with the state's earliest moment `t_S`. Leaving the durable
+sectors out keeps a choice meaningful only over the image before its
+epoch, so a rebuild over the wrong image shows. An epoch whose count is at most `Bound` is enumerated whole and
 reported `exhaustive`. A larger one gives, in order:
 
 1. the in-order cuts: the state after each prefix of the epoch's
@@ -489,8 +489,9 @@ and a sample named under another version is refused.
 | milestone | 65,536 | FAT `seq-2` whole, and `seq-3` over a narrowed operation set (Ace's guidance) | `atomic` and `torn` |
 
 The landing gate's target is under a minute on the development host;
-the sample's size is fixed to meet it once the first package measures
-the cost of a state, and the run prints its time.
+its `seq-2` sample is 400 workloads drawn with the seed 20261127, a
+size the measured cost of a state fits well within it, and the run
+prints its time.
 
 ## The oracle
 
@@ -528,7 +529,11 @@ these:
   ([design-storage.md](design-storage.md#verification-and-testing),
   "FAT"), read over the whole history rather than its first and last
   entries: each 512-byte block of a file holds that block from some
-  entry, the size is some entry's, and each name is whole under some
+  entry, its bytes past that entry's size being one other entry's bytes
+  at those offsets, which the medium still holds when a size and a
+  data block land apart; the size is some entry's; a file's bytes
+  follow it across a rename, so a file found under its old name may
+  hold what was written under its new one; and each name is whole under some
   entry, missing, or under its short name alone. The whole history
   counts because the server also commits every 5 s while changes wait,
   which can make a state between two persistence points durable before
@@ -599,7 +604,11 @@ and rule plugged into the oracle.
 ## Where it runs and what it reports
 
 The landing gate runs the window recorder's FAT suite as an EUnit
-module in `make check`, within the table's bounds. Everything else,
+module, `erx_crash_fat_tests`, through `test/host/erx_crash_states_test.rb`
+in `make check`, within the table's bounds. `erx_crash_run` records
+each workload, runs the checks of one state and writes the failure
+records; step 4 plugs into it as a checker of a state's sectors, which
+`erx_fat_check` supplies when it joins. Everything else,
 `torn`, `seq-2` whole and up, `fsck_fat`'s repair traces and the
 independent readers, runs at the milestone gate.
 
@@ -614,8 +623,11 @@ and reaches the host terminal only through its one escaping function.
 
 For a failure, the run writes a record into the output directory it was
 handed, never into the repository: the base image, once per run, named
-by its SHA-256; and per failure the base's SHA-256, the trace with its
-bytes and marks, the mode, the epoch, the choice and the failing image.
+by its SHA-256; and, for each of the run's first four failures (an image
+is as large as its volume, and a broken step order fails hundreds of
+states alike), the base's SHA-256, the trace with its bytes and marks,
+the mode, the epoch, the choice and the failing image as the check read
+it.
 Rebuilding from the base, the trace, the epoch and the choice gives the
 failing image byte for byte, without the workload enumeration or the
 fixture build (CS5), which a test checks.

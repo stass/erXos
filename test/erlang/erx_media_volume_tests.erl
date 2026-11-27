@@ -13,70 +13,18 @@
 -include("erx_fs_waits.hrl").
 
 %% The fixtures the media tree's cases share (erx_media_tree_tests).
--export([image/1, proxy/2, mbr/2, sectors/1, facet/1, fat32_shaped/4]).
+-export([image/1, mbr/2, sectors/1, facet/1, fat32_shaped/4]).
 %% The logger handler a case adds.
 -export([log/2]).
 
+-import(erx_ram_window, [proxy/2, reads/1]).
+
 -define(SECTOR, 512).
 -define(START, 2048).
-%% A USB transport's max_sectors (erx_blk_usb), the most sectors the fake window reads at once.
--define(MAX_SECTORS, 64).
 
 image(Name) ->
     {ok, Bytes} = file:read_file(filename:join(os:getenv("ERX_FAT_IMAGES"), Name)),
     Bytes.
-
-%% A window proxy over Medium, a binary or {synthesized, Sectors, Sector}, a medium of
-%% Sectors sectors each Sector(Lba) answers, whose flush answers Flush; it sends the test process
-%% {flushed, self()} at each flush. A read of one to ?MAX_SECTORS sectors, a USB
-%% transport's max_sectors, answers a copy of its sectors, as the window does, never a
-%% sub-binary of the whole medium, which a volume's memory bound counts; a longer one is
-%% einval, as the window's. It keeps a tally of the reads it was asked for, by their
-%% counts of sectors, which reads/1 answers. Sent `stall`, it answers nothing more, as a
-%% stick that hangs.
-proxy(Medium, Flush) ->
-    Test = self(),
-    spawn_link(fun() -> serve(Medium, Flush, Test, #{}) end).
-
-serve(Medium, Flush, Test, Tally) ->
-    receive
-        {'$gen_call', From, reads} ->
-            gen:reply(From, Tally),
-            serve(Medium, Flush, Test, Tally);
-        {'$gen_call', From, Request} ->
-            gen:reply(From, answer(Request, Medium, Flush, Test)),
-            serve(Medium, Flush, Test, tallied(Request, Tally));
-        stall ->
-            stalled();
-        stop ->
-            ok
-    end.
-
-tallied({read, _Lba, Count}, Tally) -> maps:update_with(Count, fun(N) -> N + 1 end, 1, Tally);
-tallied(_Request, Tally) -> Tally.
-
-%% The reads Proxy has been asked for: a map from a read's count of sectors to how many
-%% reads asked for that count.
-reads(Proxy) -> gen_server:call(Proxy, reads).
-
-stalled() ->
-    receive stop -> ok; _Unanswered -> stalled() end.
-
-answer(info, {synthesized, Sectors, _Sector}, _Flush, _Test) ->
-    {ok, #{role => drive, sectors => Sectors, max_sectors => ?MAX_SECTORS}};
-answer({read, _Lba, Count}, _Medium, _Flush, _Test) when Count < 1; Count > ?MAX_SECTORS ->
-    {error, einval};
-answer({read, Lba, Count}, {synthesized, Sectors, Sector}, _Flush, _Test) when Lba + Count =< Sectors ->
-    {ok, << <<(Sector(L))/binary>> || L <- lists:seq(Lba, Lba + Count - 1) >>};
-answer(info, Medium, _Flush, _Test) ->
-    {ok, #{role => drive, sectors => byte_size(Medium) div ?SECTOR, max_sectors => ?MAX_SECTORS}};
-answer({read, Lba, Count}, Medium, _Flush, _Test) when (Lba + Count) * ?SECTOR =< byte_size(Medium) ->
-    {ok, binary:copy(binary:part(Medium, Lba * ?SECTOR, Count * ?SECTOR))};
-answer({read, _Lba, _Count}, _Medium, _Flush, _Test) ->
-    {error, erange};
-answer(flush, _Medium, Flush, Test) ->
-    Test ! {flushed, self()},
-    Flush.
 
 %% The medium's table and its supervisor, read through a proxy over Medium.
 read(Medium, Flush) ->
@@ -454,7 +402,7 @@ the_fat_is_read_in_runs_test_() ->
              Reads = lists:sum(maps:values(Tally)),
              Bytes = lists:sum([Count * ?SECTOR * N || Count := N <- Tally]),
              ?debugFmt("8 GB stick: ~b reads, ~b bytes, ~b ms, by sectors a read ~p", [Reads, Bytes, Took, Tally]),
-             FatRuns = (15_272 + ?MAX_SECTORS - 1) div ?MAX_SECTORS,
+             FatRuns = (15_272 + erx_ram_window:max_sectors() - 1) div erx_ram_window:max_sectors(),
              ?assert(Reads =< 2 * FatRuns + 64),
              ?assert(maps:get(1, Tally, 0) =< 64),
              Proxy ! stop

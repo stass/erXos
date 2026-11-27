@@ -270,6 +270,20 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   a crash of the volume process logs its state, the batch's sector images among them (client file
   data), and formatting that report in the volume can pass its heap bound and kill it; a
   `format_status/1` that leaves out the batch and a write's bytes removes both.
+* [Medium] storage, the crash-state oracle (`test/erlang/erx_fs_model.erl`, `aliases/3`): a short
+  alias found where a cut batch named a long name is matched to the first missing long name of its
+  directory in sorted order, not to the long name it was derived from, so a state holding two such
+  aliases can fail wrongly and any short-looking name can stand for any new long name; derive the
+  FAT basis name from each long name and match on it. The alias pattern also refuses short-name
+  characters such as `-` and `!`.
+* [Medium] storage, the crash-state run (`test/erlang/erx_crash_run.erl`): `record/2` runs without
+  a deadline, so a seeded fault that hangs the volume waits for EUnit's timeout; an exception in
+  `erx_fat:check/1` or the tree read is reported as the worker's crash, not as its step; the
+  `timed_out` path has no test; and `erx_crash_workloads:fits/1` and `named/1` are not yet called
+  by the run.
+* [Low] storage, `erx_ram_window:proxy/2` answers a write `eio` where the volume tests' old proxy
+  crashed, so a read-only volume that writes by mistake fails no test that does not count writes;
+  have the read-only tests assert that `final/1` counted no write.
 * [Medium] storage, the FAT volume's cuts test (`test/erlang/erx_media_volume_write_tests.erl`,
   `cuts_test_`): a cut that leaves the medium `{ro, dirty}` has its tree checked by nothing, and the
   RAM proxy fails every write after the cut, so a write after a failed one is never seen; check each

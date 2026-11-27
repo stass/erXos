@@ -11,85 +11,15 @@
 -module(erx_media_volume_write_tests).
 -include_lib("eunit/include/eunit.hrl").
 
-%% The RAM medium and fsimg's reading of an image, which erx_media_tree_tests shares.
--export([ram/2, ram_final/1, extracted/1, unreadable/1]).
+%% fsimg's reading of an image, which erx_media_tree_tests shares.
+-export([extracted/1, unreadable/1]).
+
+-import(erx_ram_window, [ram/2, ram_final/1, counts/1]).
 
 -define(SECTOR, 512).
 
-%% ---------------------------------------------------------------------------
-%% A RAM medium behind a window proxy
-%% ---------------------------------------------------------------------------
-
-%% A proxy over Medium, a binary or erx_media_volume_tests's {synthesized, Sectors,
-%% Sector}, that answers flush with ok, applies writes until Cut of them
-%% have landed (infinity: all), and answers every later write `eio` unapplied. The
-%% sectors written are kept beside Medium, so a write copies one sector, not the
-%% image. It ends once ram_final/1 has its medium, when the test that made it ends,
-%% or, failing the test, on a request it does not serve, so no volume waits on it.
-ram(Medium, Cut) ->
-    Test = self(),
-    spawn_link(fun() ->
-                       erlang:monitor(process, Test),
-                       ram_serve(#{medium => Medium, sectors => sectors(Medium), written => #{}, cut => Cut, writes => 0,
-                                    reads => 0, log => []})
-               end).
-
-ram_serve(#{medium := Medium, sectors := Sectors, written := Written, cut := Cut, writes := Writes, reads := Reads,
-             log := Log} = S) ->
-    receive
-        {'DOWN', _, process, _Test, _} ->
-            ok;
-        {'$gen_call', From, info} ->
-            gen:reply(From, {ok, #{role => drive, sectors => Sectors}}), ram_serve(S);
-        {'$gen_call', From, {read, _Lba, 1}} when is_map_key(fail_reads, S) ->
-            gen:reply(From, {error, eio}), ram_serve(S);
-        {fail_reads, Test} ->
-            Test ! reads_failing, ram_serve(S#{fail_reads => true});
-        {'$gen_call', From, {read, Lba, 1}} when Lba < Sectors ->
-            Sector = case Written of #{Lba := Bytes} -> Bytes; #{} -> base(Medium, Lba) end,
-            gen:reply(From, {ok, binary:copy(Sector)}), ram_serve(S#{reads := Reads + 1});
-        {'$gen_call', From, flush} ->
-            gen:reply(From, ok), ram_serve(S#{log := [flush | Log]});
-        {'$gen_call', From, {write, _Lba, _Bytes}} when Writes >= Cut ->
-            gen:reply(From, {error, eio}), ram_serve(S);
-        {'$gen_call', From, {write, Lba, <<_:?SECTOR/binary>> = Bytes}} when Lba < Sectors ->
-            gen:reply(From, ok),
-            ram_serve(S#{written := Written#{Lba => Bytes}, writes := Writes + 1, log := [{write, Lba} | Log]});
-        {'$gen_call', _From, Unserved} ->
-            error({unserved, Unserved});
-        {counts, Test} ->
-            Test ! {counts, self(), Reads, Writes}, ram_serve(S);
-        {final, Test} ->
-            Test ! {ram, self(), applied(Medium, Written), Writes, lists:reverse(Log)}
-    end.
-
 sectors({synthesized, Sectors, _Sector}) -> Sectors;
 sectors(Medium) -> byte_size(Medium) div ?SECTOR.
-
-base({synthesized, _Sectors, Sector}, Lba) -> Sector(Lba);
-base(Medium, Lba) -> binary:part(Medium, Lba * ?SECTOR, ?SECTOR).
-
-%% The reads and writes Proxy has answered so far.
-counts(Proxy) ->
-    Proxy ! {counts, self()},
-    receive {counts, Proxy, Reads, Writes} -> {Reads, Writes} end.
-
-%% Medium with each sector of Written in its place.
-applied(Medium, Written) ->
-    {End, Parts} = maps:fold(fun(Lba, Bytes, {At, Acc}) ->
-                                     {(Lba + 1) * ?SECTOR, [Acc, binary:part(Medium, At, Lba * ?SECTOR - At), Bytes]}
-                             end, {0, []}, maps:iterator(Written, ordered)),
-    iolist_to_binary([Parts, binary:part(Medium, End, byte_size(Medium) - End)]).
-
-%% The medium Proxy holds, its count of applied writes and its log, as it ends. A
-%% proxy that ended before fails the test rather than leaving it waiting.
-ram_final(Proxy) ->
-    Ref = erlang:monitor(process, Proxy),
-    Proxy ! {final, self()},
-    receive
-        {ram, Proxy, Medium, Writes, Log} -> erlang:demonitor(Ref, [flush]), {Medium, Writes, Log};
-        {'DOWN', Ref, process, Proxy, Why} -> error({proxy_ended, Why})
-    end.
 
 image(Name) ->
     {ok, Bytes} = file:read_file(filename:join(os:getenv("ERX_FAT_IMAGES"), Name)),
@@ -413,8 +343,7 @@ a_commit_that_cannot_read_ends_the_volume_test() ->
     {ok, dir, Root} = erx_media_volume:root(Pid),
     {ok, file, F} = erx_media_volume:create(Pid, Root, <<"f">>),
     {ok, 5000} = erx_media_volume:write(Pid, F, 0, pattern(5000, 3)),
-    Proxy ! {fail_reads, self()},
-    receive reads_failing -> ok end,
+    ok = erx_ram_window:fail_reads(Proxy),
     %% The end, which the drive's status no longer shows, is logged with its reason.
     ok = logger:add_handler(?MODULE, erx_media_volume_tests, #{config => #{test => self()}}),
     try

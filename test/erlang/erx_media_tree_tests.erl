@@ -14,8 +14,9 @@
 %% The stand-in for erx_media_sup, under which the drive processes start.
 -export([init/1]).
 
--import(erx_media_volume_tests, [image/1, proxy/2, mbr/2, sectors/1, facet/1]).
--import(erx_media_volume_write_tests, [ram/2, ram_final/1, extracted/1]).
+-import(erx_media_volume_tests, [image/1, mbr/2, sectors/1, facet/1]).
+-import(erx_media_volume_write_tests, [extracted/1]).
+-import(erx_ram_window, [proxy/2, ram/2, ram_final/1]).
 
 -define(NOFID, 16#ffffffff).
 -define(START, 2048).

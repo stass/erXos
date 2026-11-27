@@ -20,7 +20,7 @@ class ErxMediaVolumeTest < Minitest::Test
   APPLICATIONS = %w[erx erx_fat erx_media].freeze
   MODULES = %w[erx_media_volume_tests erx_media_tree_tests erx_media_volume_write_tests].freeze
   # Helpers the suites call: fsimg's verify and its port.
-  HELPERS = %w[erx_fat_alloc_tests].freeze
+  HELPERS = %w[erx_fat_alloc_tests erx_ram_window].freeze
   # The suites.
   TESTS = (MODULES + HELPERS).map { |name| "test/erlang/#{name}.erl" }.freeze
   MEDIUM = 'erlang/apps/erx_media/src/erx_media_medium.erl'
