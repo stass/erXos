@@ -928,10 +928,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the mount with eio rather than mounting read-only (design-f2fs.md, "Read-write mounts"); writes leave
   the qid version and data_version 0; the volume keeps a stand-in for the room rule (at most 512 dirty
   nodes an epoch, three free sections left after a write's claim, else a checkpoint first or enospc),
-  not the epoch's charge; unmount writes an ordinary checkpoint, without UMOUNT or the node summaries,
+  not the epoch's charge, and that stand-in is what keeps the walk's 512-block bound; unmount writes an ordinary checkpoint, without UMOUNT or the node summaries,
   and the design's `checkpoint(Volume, #{freeze := boolean()})` is not built; the write move's
   allocation and pairing sit in erx_f2fs_volume rather than the pure step; `place_block/5` digs the
   direct node out of find_slot's decoded map; erx_f2fs_plan's `ino/2` copies erx_f2fs_core's; the walk
-  reruns the whole mount per block it reads; no tests yet for the enotsup refusals, the short write,
-  the tail block's zeros past the size, or a write or flush failure ending the volume
+  reruns the whole mount per block it reads
   ([design-f2fs.md](design-f2fs.md#operations)).

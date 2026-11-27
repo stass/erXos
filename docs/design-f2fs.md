@@ -1295,8 +1295,10 @@ the epoch's charge
 ([The room rule](#the-room-rule)) counts every block either writes: a
 record's node block three times, and each node a checkpoint writes once,
 as the dirty node it was; dentry blocks go to the warm data log, which
-the walk never reads. The charge stays within 512 until a commit clears
-it. So whatever a cut leaves after the checkpoint, complete records, a
+the walk never reads. The volume keeps the charge, since the on-disk
+format bounds no chain: it runs a checkpoint before any step would carry the charge past 512
+([What is durable when](#what-is-durable-when)), so the charge stays
+within 512 until a commit clears it. So whatever a cut leaves after the checkpoint, complete records, a
 torn one, and the nodes a checkpoint the cut interrupted had written,
 which carry the epoch's version and no mark and so extend the chain
 without being replayed, the walk meets at most 512 matching blocks and
