@@ -63,8 +63,8 @@ class ErxF2fsVolumeTest < Minitest::Test
              replacement: 'Cached = lists:foldl(fun({_Address, _Block}, Acc) -> Acc end, Blocks, Writes),',
              failure: case_failed('writes_read_back_across_checkpoints')),
     Seed.new(fault: "a read judging an owner without the state's summaries", source: CORE,
-             anchor: '    Volume#{dirty => Nodes, held => Summaries}.',
-             replacement: '    Volume#{dirty => Nodes, held => maps:without(maps:keys(Summaries), Summaries)}.',
+             anchor: '    Volume#{dirty => Nodes, held => Summaries, counts => Counts}.',
+             replacement: '    Volume#{dirty => Nodes, held => maps:without(maps:keys(Summaries), Summaries), counts => Counts}.',
              failure: WRITE_CASE_FAILED),
     Seed.new(fault: "a read taking a dirty node's committed block", source: CORE,
              anchor: 'node_block(#{superblock := Super, dirty := Dirty}, Nid, Ino, _Blocks) when is_map_key(Nid, Dirty) ->',
@@ -124,8 +124,8 @@ class ErxF2fsVolumeTest < Minitest::Test
              replacement: 'erx_fs:open_permitted(Mode bor 8#400, Access, Truncate)',
              failure: case_failed('an_open_to_read_needs_the_owners_read_bit')),
     Seed.new(fault: "a read-write volume's statfs counting the checkpoint's user blocks", source: REQUEST,
-             anchor: '                 true -> erx_f2fs_mount:offered(Volume);',
-             replacement: '                 true -> User;',
+             anchor: 'true -> {erx_f2fs_mount:offered(Volume), maps:get(counts, Volume)};',
+             replacement: 'true -> {User, maps:get(counts, Volume)};',
              failure: case_failed('statfs_counts_the_space_a_read_write_volume_offers'))
   ].freeze
 
