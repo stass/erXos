@@ -1676,50 +1676,69 @@ mounts at `/media/raw`:
   untrusted. `fsync` on a raw file is the window's flush, and the only
   promise of order or durability a program gets.
 
-**A writing open takes volumes out of service.** An open for writing
-asks the drive process, which takes the drive's requests one at a time,
-before it answers:
+**A writing open takes volumes out of service.** The raw process counts
+an open for writing among the medium's writing opens as soon as it
+arrives, and only then asks the drive process, which takes the drive's
+requests one at a time, for the volumes the file covers. Before it
+answers:
 
-1. For `sN.data`, the drive process sends volume N's process its
-   finish ([Finishing a volume](#finishing-a-volume)), which writes what
-   a writable mount holds, clears its dirty flag and flushes, then ends
-   the process. Volume N shows `sN_mount none raw`, and no walk starts
-   its process again while the raw files hold it.
-2. For `data`, it does the same for every volume of the medium, and the
-   medium shows `medium raw`, listing no volume, since the table itself
-   may be rewritten.
-3. The raw process sends the window one flush. Anything but `ok`
+1. For `sN.data`, unless the raw process already holds volume N, the
+   drive process sends volume N's process its finish ([Finishing a
+   volume](#finishing-a-volume)), which writes what a writable mount
+   holds, clears its dirty flag and flushes, then ends the process.
+   Volume N shows `sN_mount none raw`, and no walk starts its process
+   again while the raw process holds it.
+2. For `data`, the drive process sends every volume the raw process
+   does not already hold its finish at once and waits for each answer,
+   as `eject` does, and the raw process holds the medium: it shows
+   `medium raw`, listing no volume, since the table itself may be
+   rewritten.
+3. A finish that fails refuses the open with its answer. Otherwise the
+   raw process sends the window one flush, and anything but `ok`
    refuses the open: `erofs` when the flush answered `enotsup`, since
    erXos writes no medium that cannot flush, raw or mounted, and the
-   flush's own answer otherwise. The volumes return to the ordinary rule
-   at once, nothing having been written.
+   flush's own answer otherwise.
 4. Every fid of an ended mount answers `eio` from then on, as after
    `eject`; one line of the system log names the drive and the volumes
-   taken out of service. A finish that fails fails the open with its
-   answer, and the volume stays as the failure left it.
+   taken out of service.
+
+What the drive process takes out, a volume whose finish failed
+included, the raw process holds until the barrier below hands it back.
+A refused open hands nothing back itself: it leaves the count as a
+close does, and the barrier decides. So no step of an open returns a
+volume, and a refusal never returns one that another writing open
+still covers.
 
 Writing opens are counted, so two programs may write at once, as two
 UNIX processes may write one disk device; what they do to each other is
 theirs.
 
-**The volumes return behind one barrier.** The raw process hands the
-volumes back when two facts hold together: no writing open of the
-medium's raw files remains, and none of the requests it sent the window
-is unanswered. It then has the window flush and tells the drive
-process, which returns volume N, or for `data` ends the medium's
-supervisor, every open of a raw file of the medium then answering
-`eio`, so the next walk mounts the medium afresh and reads its table
-again. However an open ends, by a clunk, which settles that fid's
-requests first
-([design-files.md](design-files.md#serving-the-erx_fs-behaviour)), by
-its holder's end, whose clunks the grant makes itself, or by the end of
-the grant it came through, which the raw process's monitor counts as
-the close of every open made through it, the same two facts decide, so
-the next mount never reads the medium while a raw write it did not see
-is still on its way. The raw process ends once its last open has ended
-and nothing it sent is unanswered. A flush that answers anything but
-`ok` there, or the raw process ending any other way while it holds a
-writing open, ends the medium: it shows `idle failed` with the cause
+**The volumes return behind one barrier.** The barrier is the only way
+a volume, or the medium, the raw process holds returns to service; every
+other end of the raw process, `eject`, the ordered end and the failures
+below, ends the medium instead. It opens when two facts
+hold together: the count of writing opens is zero, and none of the
+requests the raw process sent the window is unanswered. The raw process
+then has the window flush, when it has sent a write since it took what
+it holds, and hands everything it holds back to the drive process,
+which returns each volume to the ordinary rule, or, when the raw
+process holds the medium, ends the medium's supervisor, every open of a
+raw file of the medium then answering `eio`, so the next walk mounts
+the medium afresh and reads its table again. Every way an open leaves
+the count is followed by the same test: a clunk, which settles that
+fid's requests first
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)), its
+holder's end, whose clunks the grant makes itself, the end of the grant
+it came through, which the raw process's monitor counts as the close of
+every open made through it, and a refusal of the open itself. So the
+next mount never reads the medium while another writer may still write
+it or a raw write it did not see is still on its way. The drive process
+takes the raw process's messages in the order sent, so an open counted
+after a hand-back asks for its volumes again and finds them returned.
+The raw process ends once its last open has ended and nothing it sent
+is unanswered. A flush that answers anything but `ok` at the barrier,
+or the raw process ending any other way while it holds a volume or the
+medium, ends the medium: it shows `idle failed` with the cause
 and, as an ejected medium, mounts again only once it has ended, since
 requests the raw process sent may still reach the window.
 
@@ -1976,7 +1995,7 @@ so a pass shows the code under test ran.
 | the littlefs owner over a fake port on the host: a block request past the volume refused; a program and an erase during the mount of a writable volume, during a read, on a read-only volume and after the finish each refused with the fake window's sectors unchanged, and during a write on a writable volume answered; the port's exit, and its silence past the deadline, ending the volume | the placement check removed; the write admission removed, so the read-only volume's fake window receives the program |
 | the media tree's renames: a rename between two volumes answers `exdev` with neither volume asked, one inside a volume reaches it | the volume comparison dropped, so the rename reaches the source volume |
 | `mount` and `umount`: `mount /media/disk0/s1 /mnt` reads the volume at `/mnt`, `mount -r` refuses a write through `/mnt` with `erofs` while `/media/disk0/s1` still writes, `umount /mnt` removes the entry, a `/dev` source and `-t` are refused naming the working form, `umount` of a path that is no entry names `eject` | `-r` dropped, so the write through `/mnt` succeeds; `umount` that ejects, so `/media/disk0/s1` ends |
-| raw sectors over the fake window, with sentinel sectors around each volume: a `media_raw` grant lists `data` and `sN.data` under each drive, and a `media` grant of either rights reaches no raw file, nor does a program's entry on it narrowed to `rw`; a read of `s2.data` at 0 answers volume 2's first sector; offsets and counts not multiples of 512, and writes past the end or whose sum overflows, answer `einval`; a 64 KiB read whose last 4 KiB lie past the end answers 60 KiB; a 128 KiB write on the virtio transport lands as 32 pieces in order; a reading open leaves `s1` mounted; a writing open of `s1.data` finishes `s1` (its last batch on the fake window first), answers `eio` to an old fid, shows `sN_mount none raw` and leaves `s2` served; a writing open on a window whose flush answers `enotsup` is refused `erofs` and `s1` mounts again; two writers closing in both orders, writers of `data` and `s1.data` together, and readers during writes, after each of which `s1` returns only when the last writer has closed; a write held at the fake window while its writer closes, while its holder ends, and while its grant ends: `s1` returns only after that write is answered and the window flushed; the raw process killed with a writing open, after which the medium shows `idle failed` and no walk mounts it; `eject` with a write queued behind the raw process's finish, which answers `eio` and reaches no window; a writing open of `data` shows `medium raw` and its last close mounts the medium afresh, the table read again; a volume whose boot sector is unreadable has its `sN.data` | the open answered before the finish, so the volume's last batch lands after the program's first write; the placement skipped for `sN.data`, so a write past the volume's end touches a sentinel; the holder's end not counted as a close, so `s1` never returns; the volume returned at the last close without waiting for unanswered writes, so the held write lands after the new mount's first read; the raw process's finish not closing admission, so the queued write is answered `ok` after the eject's flush |
+| raw sectors over the fake window, with sentinel sectors around each volume: a `media_raw` grant lists `data` and `sN.data` under each drive, and a `media` grant of either rights reaches no raw file, nor does a program's entry on it narrowed to `rw`; a read of `s2.data` at 0 answers volume 2's first sector; offsets and counts not multiples of 512, and writes past the end or whose sum overflows, answer `einval`; a 64 KiB read whose last 4 KiB lie past the end answers 60 KiB; a 128 KiB write on the virtio transport lands as 32 pieces in order; a reading open leaves `s1` mounted; a writing open of `s1.data` finishes `s1` (its last batch on the fake window first), answers `eio` to an old fid, shows `sN_mount none raw` and leaves `s2` served; a writing open on a window whose flush answers `enotsup` is refused `erofs`, no second flush is sent, and `s1` mounts again; while a first writer of `s1.data` holds a write at the fake window, a second writer whose flush fails and one of `data` whose finish of `s2` fails are each refused, and `s1` returns only after the first writer closes and its write is answered; two writers closing in both orders, writers of `data` and `s1.data` together, and readers during writes, after each of which `s1` returns only when the last writer has closed; a write held at the fake window while its writer closes, while its holder ends, and while its grant ends: `s1` returns only after that write is answered and the window flushed; the raw process killed with a writing open, after which the medium shows `idle failed` and no walk mounts it; `eject` with a write queued behind the raw process's finish, which answers `eio` and reaches no window; a writing open of `data` shows `medium raw` and its last close mounts the medium afresh, the table read again; a volume whose boot sector is unreadable has its `sN.data` | the open answered before the finish, so the volume's last batch lands after the program's first write; the placement skipped for `sN.data`, so a write past the volume's end touches a sentinel; the holder's end not counted as a close, so `s1` never returns; the volume returned at the last close without waiting for unanswered writes, so the held write lands after the new mount's first read; the raw process's finish not closing admission, so the queued write is answered `ok` after the eject's flush; a refused open handing back its volumes itself, so `s1` mounts while the first writer's write is held; the barrier flushing with no write sent, so the `enotsup` refusal ends the medium `idle failed` |
 
 ### Fuzz targets
 
@@ -2094,7 +2113,7 @@ every such program the same file instead.
 service, but leaves no way back to a mounted volume short of pulling
 the stick, and a fixed drive none at all. A writing open that finishes
 the volumes it covers, and a last close that returns them to the
-ordinary rule, cost one count in the drive process.
+ordinary rule, cost one count in the raw process.
 
 **A grant that answers each window once.** It would keep a medium from
 being mounted twice by refusing a second ask until the medium ended. It

@@ -306,7 +306,7 @@ sentence, the paths it names, and the change its repair makes; or
 
 A repair is a list of **edits**, each a few bytes at an offset in one
 sector: a FAT entry of the first FAT, a 32-byte directory entry, the
-FSInfo sector's signatures, the first FAT's entry 0. Each edit belongs
+FSInfo sector's signatures and hints, the first FAT's entry 0. Each edit belongs
 to one step. The checker decides as if every repair were made, in
 FreeBSD's order, over a **view**: the volume as read, with every edit
 decided so far laid over it, so each later decision sees the earlier
@@ -339,7 +339,7 @@ ownership-check finding the repair removes.
 | Finding (FreeBSD's message) | Source | Repair | Ownership finding removed |
 | --- | --- | --- | --- |
 | a malformed boot sector or FAT geometry (signature, cluster size, reserved sectors, FAT count, sector counts, exFAT, version, FSInfo sector 0, data area, cluster count, root cluster, FAT size) | `boot.c:56-318` | none: fatal | |
-| `Invalid signature in fsinfo block` | `boot.c:206-236` | write the FSInfo sector's signatures: `RRaA` at 0, `rrAa` at `0x1e4`, `00 00 55 AA` at `0x1fc` | |
+| `Invalid signature in fsinfo block` | `boot.c:206-236` | write the FSInfo sector's signatures, `RRaA` at 0, `rrAa` at `0x1e4`, `00 00 55 AA` at `0x1fc`, and both hints unknown, `FFFFFFFF` at `0x1e8` and `0x1ec` | |
 | `FAT starts with odd byte sequence (...)` | `fat.c:865-940` | entry 0 written whole, as FreeBSD's "Correct" writes it: the boot sector's media byte, then `FF` on FAT16, `FF FF 0F` on FAT32; entry 1 written whole at the end (step `clean`) | |
 | the first entries in the dirty form | `fat.c:873-886` | mark the volume clean at the end | |
 | `Cluster N continues with out of range cluster number M` | `fat.c:994-1001` | end the chain at N | a link that is no cluster |
@@ -442,6 +442,7 @@ is a bug, and the fuzz target fails on one.
 | the FAT sector cache | 64 sectors | 32 KiB |
 | edits, and the view's index of them by sector | 12,288 edits | 2 MiB |
 | findings | measured as 64 bytes each plus its path's bytes, within 1 MiB; a path keeps at most its last 1,024 bytes, its earlier names shown as `...` | 1 MiB |
+| the sectors of one commit of a repair, as read and as written; for `mirrors`, the copy's sectors and the first FAT's | 256 sectors each ([The repair order](#the-repair-order)) | 256 KiB |
 | the final ownership check | its own sets and stack, after the checker's sets are dropped | as at a mount |
 
 Text is escaped as each line of the report is written, and no escaped
@@ -485,11 +486,14 @@ in, patches the edited bytes, and writes the images through
 4. **`publication`**: directory entries that come to reach more or are
    corrected in place: the names of lost chains in `LOST.DIR`, the end
    markers turned into deleted entries, and the `.` and `..` fixes.
-5. **`fsinfo`**: the FSInfo sector's signatures, when they were wrong.
+5. **`fsinfo`**: when the FSInfo sector's signatures were wrong, the
+   signatures and both hints written unknown together. Step 1 writes
+   the hints only into a sector whose signatures it accepts, so a
+   sector that lacked them still holds whatever hints it held, and
+   writing the signatures alone would make those stale hints valid.
 6. **`mirrors`**: every copy made equal to the first FAT: each used
    sector of a copy that differs from the first FAT's is written with
-   the first FAT's, in commits of at most 1,024 sectors, each followed
-   by a flush.
+   the first FAT's.
 7. **`clean_mirrors`, `clean`**: entry 1, in the other copies first and
    in the first FAT last, by `erx_fat_alloc:finish/1`. That function
    takes the value to write: for the FAT server, the clean bit set and
@@ -497,7 +501,14 @@ in, patches the edited bytes, and writes the images through
    `FFFF` on FAT16 and `0FFFFFFF` on FAT32, which sets the no-hard-error
    bit too.
 
-Steps with nothing to write are skipped. An empty repair writes nothing.
+Every step is written in **commits** of at most 256 sectors, 128 KiB,
+a raw file's largest request: a commit reads its sectors, writes their
+patched images and flushes, and its images are dropped before the next
+commit reads. A commit is a subset of its step's sectors made durable
+early, a state the crash argument below already allows for any subset,
+so splitting a step changes nothing it promises, and no step holds more
+than one commit's sectors whatever the repair's size. Steps with
+nothing to write are skipped. An empty repair writes nothing.
 
 ### Why a cut loses nothing
 
@@ -511,7 +522,7 @@ Steps with nothing to write are skipped. An empty repair writes nothing.
 * **No name newly reaches a free cluster.** Nothing is freed, and the
   only names added are those of lost chains, which are allocated.
 * **No new sharing.** Step 2 only takes links away and step 3 only takes
-  names away. Step 5 adds names only to lost chains, each named once,
+  names away. Step 4 adds names only to lost chains, each named once,
   after step 3's flush, so the name a chain had before is gone when its
   new one lands. An entry that becomes readable again had its own fixes
   written in step 3, while it was still out of view.
@@ -525,7 +536,8 @@ Steps with nothing to write are skipped. An empty repair writes nothing.
 * **No step undoes another.** Each step reads its sectors after the step
   before it was flushed, so its images hold every earlier step's bytes:
   a cut in the first FAT's first sector keeps the dirty flag that step 1
-  cleared there, and the `fsinfo` step keeps the unknown hints.
+  cleared there, and the `fsinfo` step writes the unknown hints with
+  the signatures it repairs.
 
 FAT entries never straddle a sector and each directory entry lies within
 one, so every entry a step writes lands whole or not at all.
@@ -811,14 +823,14 @@ the tree, names, sizes and content hashes, that the repair must give.
 | each class through `erx_fat_check:check/2`: the declared findings and repairs; the repair written, then a second check finding nothing but kept lost chains, `erx_fat:check/1` answering `ok` and the writable rule allowing `rw` (FK-R2) | each repair removed in turn (cross-link cut, loop cut, copy sync, `..` fix): the second check finds it, or `check/1` answers `tree` |
 | the final ownership check: a directory with a second `.` in slot 5 is repaired; a checker built without that row refuses the volume with `not_writable` instead of answering a repair | the final check skipped, so the checker without the row answers a repair after which the volume mounts `ro tree` |
 | the order of examination: two files sharing a tail, and a file and a directory naming one chain, repaired as FreeBSD chooses | the FAT walk run from the last cluster down, so the other file is cut |
-| each step computed at its turn: a repair with a cut in the first FAT's first sector, the odd-header fix and an FSInfo signature fix, written over a fake medium that records every write; after each step the first FAT's entry 1 reads dirty, the FSInfo hints read unknown after the `fsinfo` step, and only the last write sets the clean bit | the steps' images computed from the medium before the first write, so the `cutting` step writes back the clean bit the `dirty` step cleared |
+| each step computed at its turn: a repair with a cut in the first FAT's first sector, the odd-header fix and an FSInfo signature fix, written over a fake medium that records every write; after each step the first FAT's entry 1 reads dirty, the FSInfo hints read unknown after the `fsinfo` step, a sector whose lead signature was damaged over stale hints among them, and only the last write sets the clean bit | the steps' images computed from the medium before the first write, so the `cutting` step writes back the clean bit the `dirty` step cleared; the `fsinfo` step writing the signatures alone, so the damaged sector's stale hints read valid |
 | crash consistency (FK-R3): for each class's repair on a small image with sentinel sectors around the volume, a cut after every step and after every subset of a step's sectors; each result reads dirty unless the cut followed the last write, keeps every cluster allocated in the input allocated, adds no name to a free cluster and no second name to a cluster; then a second run meets FK-R2, every file the uninterrupted repair keeps reads at its path with its content hashes, and the sentinels and the file's length are unchanged | the `publication` step placed before `preparation`, so a cut leaves a lost chain named while its old name stands; the dirty step left out, so a cut leaves a half repair that reads clean; a file's tail freed instead of cut, so a cut and a rerun lose its clusters |
 | clearing the flag at mount: a dirty volume with nothing else wrong mounts `rw` with only entry 1 of each FAT written; one with a lost chain, differing copies or a cross-link stays read-only `dirty` with nothing written | the first-finding mode answering after the dirty mark alone, so the volume with a cross-link mounts `rw` |
 | the FAT server's own cut: `erx_fat_dir`'s removal of a name whose run crosses a sector boundary, cut between the two sectors of its `preparation`, leaves an orphan run that the check reports and the repair removes | a deleted entry ending a run, so the orphan is read as the next name's |
 | lost chains: with a free slot in `LOST.DIR`, named; with no `LOST.DIR`, a full one, a name taken and a chain of 4 GiB, each kept, reported, the volume marked clean and status 8; a free slot after an orphan long-name run passed over | the size stored as its low 32 bits, so the 4 GiB chain is named with size 0 and the second check finds too many clusters |
 | a truncated image: its boot sector claims more sectors than the file holds; refused before any write, the file's length unchanged | admission given the boot sector's count instead of the file's, so the image is checked and written |
 | the first flush: a fake medium whose `fsync` answers `enotsup` is refused with nothing written | the first `fsync` dropped, so the dirty step lands before the failure |
-| bounds: 4,194,305 clusters and 16,385 pending directories refused with nothing read past the boot sector and FAT; findings past their bound and edits past 12,288 refused with nothing written; a path of 16,384 levels shown as its last 1,024 bytes | the findings' bound removed, so an image of 100,000 lost chains ends the command at its heap limit, which the test counts as a failure |
+| bounds: 4,194,305 clusters and 16,385 pending directories refused with nothing read past the boot sector and FAT; findings past their bound and edits past 12,288 refused with nothing written; a repair of 12,288 edits in distinct sectors written with the process's memory, its binaries included, never above a third of its heap; a path of 16,384 levels shown as its last 1,024 bytes | the findings' bound removed, so an image of 100,000 lost chains ends the command at its heap limit, which the test counts as a failure; a step's images built whole, so that repair's memory passes a third of the heap |
 | refusals: FAT12, 1,024-byte sectors, mirroring off, each with no write | the mirror test dropped, so a volume whose active FAT is 1 is repaired from FAT 0 |
 | `fsck_fat` over a file and over a fake raw file: `-n` writes nothing and exits 8 on damage, 0 when clean; the question answered `y` writes the repair and exits 0, `n` and end of input write nothing and exit 8; `-y` asks nothing; `-p`, `-f`, `-n -y` and a directory are refused; the report lists every finding before the question | the repair written before the question; the exit status 0 after a declined repair |
 | `fsck`: a volume path mapped to its `sN.data`, the format from `status`, `-t fat` on an unknown format, no volume named refused, a session without `media_raw` told so | the format read from the file's own boot sector instead of `status`, so an EROFS volume reaches `fsck_fat` |
