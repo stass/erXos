@@ -409,18 +409,18 @@ admit(Read, Sectors, <<_:11/binary, ?SECTOR:16/little, PerCluster, Reserved:16/l
               {fat_size, FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)},
               {version, Type =:= 16 orelse Version =:= ?VERSION_32},
               {cluster_count, Type =:= 16 orelse Clusters =< ?CLUSTERS_MAX_32}]),
-    Fat = #fat{read = Read, type = Type, per_cluster = PerCluster, fat_start = Reserved + Active * FatSectors,
-               first_fat = Reserved, fats = Fats, fat_sectors = FatSectors, mirrored = Mirrored,
-               fsinfo = case FsInfo of N when N >= 1, N < Reserved -> N; _ -> none end,
-               data_start = DataStart, clusters = Clusters, root = {fixed, RootSector, RootEntries},
-               label = Label, media = Media, serial = Serial, clean = true, hard_error = false},
     Root = case {Type, RootCluster} of
                {16, none} when RootEntries >= 1 -> {fixed, RootSector, RootEntries};
                {32, Cluster} when RootEntries =:= 0 -> data_cluster(Clusters, Cluster);
                _ -> fail({not_its_volume, root})
            end,
+    Fat = #fat{read = Read, type = Type, per_cluster = PerCluster, fat_start = Reserved + Active * FatSectors,
+               first_fat = Reserved, fats = Fats, fat_sectors = FatSectors, mirrored = Mirrored,
+               fsinfo = case FsInfo of N when N >= 1, N < Reserved -> N; _ -> none end,
+               data_start = DataStart, clusters = Clusters, root = Root,
+               label = Label, media = Media, serial = Serial, clean = true, hard_error = false},
     #{clean := Clean, hard_error := HardError} = erx_fat_alloc:volume_flags(Type, raw_entry(Fat, 1)),
-    Fat#fat{root = Root, clean = Clean, hard_error = HardError};
+    Fat#fat{clean = Clean, hard_error = HardError};
 admit(_Read, _Sectors, Boot) ->
     case erx_fat_read:boot_sector(Boot) of
         not_fat -> fail({not_its_volume, not_fat});
