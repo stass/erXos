@@ -451,7 +451,13 @@ short_text(<<First, Base:7/binary, Extension:3/binary>>) ->
         _ -> <<Name/binary, $., (trimmed(Extension))/binary>>
     end.
 
-trimmed(Text) -> string:trim(Text, trailing, " ").
+%% Text without its trailing spaces, byte by byte: a short name is any bytes, not UTF-8.
+trimmed(<<>>) -> <<>>;
+trimmed(Text) ->
+    case binary:last(Text) of
+        $\s -> trimmed(binary:part(Text, 0, byte_size(Text) - 1));
+        _ -> Text
+    end.
 
 %% A named entry (dir.c:820-1003): a file or directory that claims clusters must
 %% start a chain no one has walked, then a directory's own rules, or a file's size.

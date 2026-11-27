@@ -12,6 +12,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% The cases and the tree, which the fuzz target (erx_fat_check_fuzz) takes as seeds.
+-export([cases/0, tree/0]).
+
 -define(SECTOR, 512).
 -define(T, 1767225600).
 %% The command's heap, -erx_heap(16), at which the runtime kills it.
@@ -234,11 +237,18 @@ bounded(V) ->
     atomics:put(Highest, 1, -1),
     Read = erx_fat_damage:read(V),
     Logged = fun(I) -> atomics:put(Highest, 1, max(I, atomics:get(Highest, 1))), Read(I) end,
+    Sectors = erx_fat_damage:sectors(V),
     Self = self(),
-    {Pid, Ref} = spawn_opt(fun() -> Self ! {self(), erx_fat_check:check(Logged, erx_fat_damage:sectors(V))} end,
+    {Pid, Ref} = spawn_opt(fun() -> Self ! {self(), erx_fat_check:check(Logged, Sectors)} end,
                            [monitor, {max_heap_size, #{size => ?HEAP_BYTES div erlang:system_info(wordsize),
                                                         kill => true, error_logger => false}}]),
     receive
         {Pid, Answer} -> erlang:demonitor(Ref, [flush]), {Answer, atomics:get(Highest, 1)};
         {'DOWN', Ref, process, Pid, Why} -> error({checker_died, Why})
     end.
+
+%% A short name's bytes are the medium's, shown whatever they hold.
+a_short_name_of_any_bytes_is_shown_test() ->
+    V = erx_fat_damage:size(maps:get(16, volumes()), ?H, 5000),
+    Named = poke_entry(V, ?H, 0, 0, <<"A     ", 16#c3, " ", "T", 16#c3, " ">>),
+    ?assertEqual({ok, [{size_too_large, <<"/A     ", 16#c3, ".T", 16#c3>>, 5000, 1024}]}, check(Named)).
