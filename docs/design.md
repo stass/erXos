@@ -67,6 +67,7 @@ evidence, not design contracts.
 | [design-pipes.md](design-pipes.md) | pipes in user space |
 | [design-domains.md](design-domains.md) | domains, the pid space, connections, exports, the funnel, frames, facets |
 | [design-system.md](design-system.md) | the root task, the system manifest, the domain library, devices and drivers, the system services, the vault |
+| [design-recovery.md](design-recovery.md) | recovery from silent or failing devices and peers: ladders of rungs in each pure core, paced restarts, retry of operations safe to repeat, what clients keep across a driver restart, identity, fault injection |
 | [design-files.md](design-files.md) | namespaces, the file protocol (9P2000.L), file servers, shared mappings |
 | [design-tmp.md](design-tmp.md) | the RAM file system at `/tmp` |
 | [design-storage.md](design-storage.md) | partitions, the boot image, system partitions, EROFS, FAT, A/B updates |
@@ -1413,6 +1414,27 @@ tests treat the clock as one more input
 ([style.md](style.md#functional-core),
 [design-network-stack.md](design-network-stack.md#deadlines-not-timers)).
 
+**Recovery ladders.** Recovery follows the same rule. Every stack that
+waits on a device or a peer holds, in its pure core, a ladder: an
+ordered list of rungs from one closed set (cancel, protocol reset, device
+reset keeping identity, controller reset, driver restart, domain
+restart), each with its deadline in state and the number of consecutive
+failures it absorbs; a failure climbs one rung and any success returns
+to the bottom. A fault tries its own request's, pipe's and device's
+rungs before a rung that ends a neighbour. A driver that ran and then
+failed restarts at most once per its hold, for ever, as the network
+stack's links do, so a device's faults never end its domain. Only an
+operation its stack marks safe to repeat is retried, inside its caller's
+one deadline. Clients hold the service a driver runs under, never the
+driver, and across domains follow a facet's successor through the
+capability registry. A reset that may have dropped answered writes makes
+the next answer `{error, reset}`, which a file system takes as a power
+cut; nothing is replayed above the process that held it. Each stack's
+failure table names its ladder and what each rung keeps, and every
+rung, deadline and retry limit has a test that injects its fault and a
+seeded fault that removes the rung
+([design-recovery.md](design-recovery.md)).
+
 Every piece of native driver code other than the device NIF is a native
 shim, a row of the driver table, and without the row none runs
 ([design-system.md](design-system.md#the-driver-table)). A native shim
@@ -1811,7 +1833,7 @@ conditions remains exploratory evidence.
 | An Erlang process crashes | the process; links and monitors deliver its exit | OTP's usual supervision |
 | A runtime faults, halts, crashes or exhausts its memory | its domain | links and monitors fire with `{domain_down, D, Info}`; the crash dump in the inspector |
 | A group exhausts its quota | its threads wait for the next period | slower progress; throttling in the inspector |
-| A driver process crashes | that driver; its supervisor resets the device and restarts it | a restart in the log; clients see the driver's process exit and reconnect |
+| A driver process crashes | that driver; its supervisor restarts it after its hold, and its start resets the device | a restart in the log; clients hold the service the driver runs under and lose only the driver's soft state ([design-recovery.md](design-recovery.md#who-holds-what)) |
 | A driver domain faults, a native shim in a sub-space included | the domain's drivers and their clients | as any domain: `{domain_down, D, Info}` to its links and monitors; the system domain's supervision restarts the domain |
 | A domain exceeds a limit | the failing operation, or throttling for CPU | Erlang errors in the domain; counters in the inspector |
 | A malformed kernel call | the call fails with a status | a trace event |

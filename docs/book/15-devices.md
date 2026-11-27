@@ -88,6 +88,18 @@ mid-transfer leaves every closed file intact and the file being
 written cut at a sync.
 Both arrangements are **Built**.
 
+The recovery design ([design-recovery.md](../design-recovery.md))
+gives every device stack the network's arrangement and keeps littlefs's
+reason. Each driver's pure core holds a ladder of recovery steps, from
+cancelling one request up to resetting the controller, climbed one step
+per consecutive failure and cleared by any success; past its top the
+driver restarts at most once per hold, and the block service, which
+holds every window, outlives it. Every answer from a medium carries a
+generation that a reset raises, so a window whose answered writes a
+reset may have dropped answers `{error, reset}`, and the file system
+above remounts as of its last flush, as after a power cut, while a
+volume with nothing unflushed notices nothing. This is **Designed**.
+
 ### 15.1.2 Why drivers are Erlang
 
 A driver is mostly protocol: reset the device, negotiate features,

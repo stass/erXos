@@ -2553,6 +2553,12 @@ a file closed and opened again may get a new qid path
 
 ## Failure handling, diagnostics and debuggability
 
+Recovery from a block device's errors and silences follows the ladder,
+the generation on every answer and the paced driver restart of
+[design-recovery.md](design-recovery.md#storage); where the rows below
+for the block device, the SD card and the block driver's domain differ
+from it, that document is the design.
+
 | Failure | Detection | What remains | Who cleans up | What the user sees |
 | --- | --- | --- | --- | --- |
 | A trial is unhealthy, hangs or panics | the health checks; the lease's deadline; the watchdog | the spare as written; the data partition as the committed system left it (U4) | the reset boots the committed slot, whose record still names it | the update reported failed by the record still naming the committed slot; never retried, since only an install starts a trial |

@@ -1129,7 +1129,9 @@ boot timeout. Beyond the intensity,
 a domain the manifest marks `required` ends the machine the same way, with
 the reason in the log, and any other is left down and shown so in the
 inspector, since a machine without its network is still a machine an
-operator can repair at the console. Each end of a configured domain is one
+operator can repair at the console. Whether such a domain is instead
+started again at its intensity's pace is an open decision of
+[design-recovery.md](design-recovery.md#open-decisions). Each end of a configured domain is one
 log line, and a fault's line names where it struck from the kernel's fault
 record: its program counter, cause and address, the address shown as
 unknown for a fault that names none. An asynchronous error is taken at a

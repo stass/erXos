@@ -3376,7 +3376,10 @@ Bluetooth domain it starts `unknown` and calls `get`:
 | `{error, unavailable}` | `unknown` | none | made now, for this start only | `store_unavailable` |
 
 A store that is `unknown` after the start's read refuses every change
-until `forget all`, below, or the next start, which reads again: the
+until `forget all`, below, or the next start, which reads again (a store
+`unknown` because storage was unavailable takes that start, with the
+controller group's, when the storage facet's successor answers:
+[design-recovery.md](design-recovery.md#bluetooth)): the
 domain runs without bonds and refuses pairing, as it did before stage 4,
 and the address made for this start is not the one a stored state may
 name, so a later read could give bonds an address they were never

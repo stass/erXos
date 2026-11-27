@@ -150,7 +150,11 @@ restart intensity of zero (chapter 3, section
 [3.3.4](03-erlang.md#334-supervisors)), so the end of any child ends
 the supervisor, the application, and with it the whole storage domain.
 The domain service then restarts the domain, at most five times in
-600 seconds, as the manifest's row for it says.
+600 seconds, as the manifest's row for it says. The recovery design
+narrows this to a failed request: a block driver that resets its device
+or restarts while nothing of a volume is outstanding is not seen by the
+volume at all (chapter 15, section
+[15.1.1](15-devices.md#1511-what-a-drivers-end-reaches); **Designed**).
 
 Erlang's habit, the one chapter 3's supervisors teach, is to restart
 only the process that failed. Here that habit would be wrong, because
