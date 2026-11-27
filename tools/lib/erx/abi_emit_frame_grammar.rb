@@ -35,7 +35,7 @@ module Erx
 
       def emit
         [ErlangEmitter::NOTICE.chomp, header, exports, macros, frames, dispatch, finish, builders,
-         kind_checks, sorters, helpers].join("\n\n") + "\n"
+         kind_checks, sorters, helpers, *sort_list].join("\n\n") + "\n"
       end
 
       private
@@ -491,15 +491,23 @@ module Erx
               end;
           sort_key(_, _, V) ->
               V.
+        ERLANG
+      end
 
+      # Builders only: sort_list/5 when a list kind sorts, with an end clause for each
+      # Ascending value a sorter passes and no other, since Dialyzer flags a clause no
+      # caller reaches.
+      def sort_list
+        orders = @kinds.filter_map { |name, kind| kind[:ascending] if kind.fetch(:form) == 'list' && sorts?(name) }.uniq
+        return [] if orders.empty?
+
+        ends = { true => 'lists:sort(Done)', false => 'lists:reverse(Done)' }.slice(*orders.sort_by { |order| order ? 0 : 1 })
+        [<<~ERLANG.chomp]
           %% Builders only: each element of a proper list sorted within, and the list sorted
           %% when Ascending; any other term unchanged.
           sort_list(Sort, Ascending, [E | Es], Original, Done) ->
               sort_list(Sort, Ascending, Es, Original, [Sort(E) | Done]);
-          sort_list(_, true, [], _, Done) ->
-              lists:sort(Done);
-          sort_list(_, false, [], _, Done) ->
-              lists:reverse(Done);
+          #{ends.map { |order, done| "sort_list(_, #{order}, [], _, Done) ->\n    #{done};" }.join("\n")}
           sort_list(_, _, _, Original, _) ->
               Original.
         ERLANG
