@@ -35,7 +35,7 @@ make check
 regenerates `build/gen/`, checks that every authored file is ASCII and every
 import matches its `ORIGIN.md`, runs the build checks (architecture terms,
 chokepoints, the stack proof), builds the web client, runs Dialyzer over
-erXos's Erlang, then runs every
+erXos's applications and its `erx_*` preloaded modules, then runs every
 `test/host/*_test.rb` and the integration tests of `test/integration/`
 except those that boot QEMU, need the hosted runtime, the stock suites'
 runtime or OpenSSL. It never downloads and never boots a guest. A new

@@ -273,6 +273,14 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `Dependencies::DOCKER_ENVIRONMENT` itself while `OracleContainer#prepare_context` keeps a third local-socket
   check, so one connection value should run every docker command; `Dependencies#stale` and `#pinned` name
   deps.lock and `build/third_party` for L4Re's lock too; `local_docker_connection` refuses a context name with `+`.
+* [Medium] gates, `tools/lib/erx/dialyzer.rb`: the PLT cache is its own digest, partial file and
+  stale-file deletion beside `BuildMemo`, which already keys a step by its inputs and tools
+  (`program_identity`), writes atomically and locks; the PLT should be a `BuildMemo` step whose key
+  takes the headers each source reads from `erlc -M` rather than the directories `digest` globs.
+  `ASN1_FLAGS`, `PLT_DEFINES`, the moduli step and the PLT's include list copy facts of OTP's
+  Makefiles (lib/public_key/asn1/Makefile, lib/public_key/src/Makefile, crypto's and compiler's
+  `-D` flags); and `analysis_set` turns `ErlangApps.include_flags` back into directories by
+  position, where an `ErlangApps.include_dirs` would serve both.
 * [Low] erlang: four modules spell gen's call protocol by hand, each with its improper
   `[alias | Ref]` reply tag under a `-dialyzer({no_improper_lists, ...})` attribute:
   `erx_facet:forward/4`, `erx_blk_drive_proxy:grant_answer/2`, `erx_cmd_load:call/3` and

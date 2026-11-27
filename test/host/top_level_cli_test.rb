@@ -21,6 +21,21 @@ class TopLevelCliTest < Minitest::Test
   end
 
 # A check whose run is recorded, so a test can tell that `check` ran it.
+# Stands in for Erx::Dialyzer: records that check built and ran the step, with the
+# oracle's erlc, in order with the other steps.
+class RecordingDialyzer
+  def initialize(commands)
+    @commands = commands
+  end
+
+  def new(root:, runner:, erlc:)
+    @commands << [['dialyzer', root, erlc], { name: 'dialyzer', runner: runner }]
+    self
+  end
+
+  def check = nil
+end
+
 class RecordingCheck
   def initialize(commands, name)
     @commands = commands
@@ -87,7 +102,7 @@ end
     yield runner_class: Factory.new(recording_runner(commands, fail_name: fail_name)),
           checks_class: Factory.new(PassingChecks.new), arch_terms: RecordingCheck.new(commands, 'arch-terms'),
           fiasco_downsides: RecordingCheck.new(commands, 'fiasco-downsides'), runtime: runtime,
-          rc_oracle: rc_oracle, web: web
+          rc_oracle: rc_oracle, web: web, dialyzer: RecordingDialyzer.new(commands)
   end
 
   # The gate needs HVF for its suites and TCG for its smoke and deterministic boots, and never
@@ -139,6 +154,8 @@ def test_check_runs_the_document_checks
   ran = commands.map { |_argv, options| options[:name] }
   assert_includes ran, 'arch-terms'
   assert_includes ran, 'fiasco-downsides'
+  assert_equal ['dialyzer', Erx::ROOT, '/verified/erlc'], commands.find { |_argv, options| options[:name] == 'dialyzer' }.first
+  assert_operator ran.index('dialyzer'), :<, ran.index { |name| name.start_with?('host-tests') }
 end
 
   def test_check_runs_the_stack_proof_and_native_integration

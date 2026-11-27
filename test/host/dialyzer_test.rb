@@ -62,7 +62,7 @@ class DialyzerTest < Minitest::Test
         greeting() -> library:name(42).
       ERLANG
     end
-    assert_match(/\Adialyzer: Dialyzer reported problems; log: /, error.message)
+    assert_match(/\Adialyzer: Dialyzer warned; log: /, error.message)
     assert_match(/breaks the contract/, File.read(error.message[/log: (\S+)/, 1]))
   end
 
