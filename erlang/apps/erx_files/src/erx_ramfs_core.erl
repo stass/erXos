@@ -64,7 +64,6 @@ anything else.
 -define(MODE_BITS, 8#7777).
 %% The owner's permission bits: the domain is one user who owns every file.
 -define(W, 8#200).
--define(X, 8#100).
 
 -type ino() :: pos_integer().
 -type name() :: binary().
@@ -327,7 +326,7 @@ make_existing(_Ino, _What, _Stamp, _Now, _Tree) ->
 make_new(Dir, D, Name, What, Stamp, Now, Tree) ->
     maybe
         ok ?= not_a_removed_directory(D),
-        ok ?= permitted(D, ?W bor ?X),
+        ok ?= changeable(D),
         ok ?= linkable(What, Tree),
         ok ?= unused_stamp(What, Stamp, Tree),
         Charge = entry_charge(Name) + node_charge_of(What),
@@ -458,7 +457,7 @@ unlink(Dir, Name, Kind, Stamp, Now, Tree) ->
         ok ?= searchable(D),
         {ok, Ino} ?= lookup(D, Name),
         ok ?= still_names(Kind, Ino),
-        ok ?= permitted(D, ?W bor ?X),
+        ok ?= changeable(D),
         Victim = fetch(Ino, Tree),
         ok ?= removable_kind(Kind, Victim),
         ok ?= empty_if_directory(Victim),
@@ -488,7 +487,7 @@ rename(Dir, Name, NewDir, NewName, Stamp, Now, Tree) ->
         ok ?= not_holding_source(Target, Dir, Tree),
         %% The same node under both names: done, with nothing changed.
         false ?= same_node(Target, Ino) andalso {done, ok, Tree},
-        ok ?= permitted(D, ?W bor ?X),
+        ok ?= changeable(D),
         {ok, Replaced} ?= replaceable(Target, Moved, NewDir, ND, Tree),
         ok ?= movable(Moved, Dir, NewDir),
         ok ?= empty_if_replaced_directory(Replaced, Tree),
@@ -802,13 +801,13 @@ not_holding_source(error, _Dir, _Tree) ->
 replaceable(error, _Moved, _NewDir, ND, _Tree) ->
     maybe
         ok ?= not_a_removed_directory(ND),
-        ok ?= permitted(ND, ?W bor ?X),
+        ok ?= changeable(ND),
         {ok, none}
     end;
 replaceable({ok, {Target, _Seq}}, Moved, _NewDir, ND, Tree) ->
     Replaced = fetch(Target, Tree),
     maybe
-        ok ?= permitted(ND, ?W bor ?X),
+        ok ?= changeable(ND),
         ok ?= case {kind(Moved), kind(Replaced)} of
                   {directory, directory} -> ok;
                   {directory, _} -> {error, enotdir};
@@ -836,10 +835,17 @@ directory(Ino, Tree) ->
         Error -> Error
     end.
 
-%% A search of a directory, by a walk or any lookup of a name in it: every
-%% file server's one rule, erx_fs:search_permitted/1.
+%% A search of a directory, by a walk or any lookup of a name in it: the
+%% rule erx_ramfs_core's and erx_f2fs's walks share, erx_fs:search_permitted/1.
 searchable(#node{mode = Mode}) ->
     erx_fs:search_permitted(Mode).
+
+%% Adding or removing a name in a directory: a search of it and its w bit.
+changeable(D) ->
+    maybe
+        ok ?= searchable(D),
+        permitted(D, ?W)
+    end.
 
 permitted(#node{mode = Mode}, Bits) ->
     case Mode band Bits of

@@ -746,16 +746,22 @@ an_open_to_read_needs_the_owners_read_bit_test() ->
     ?assertEqual({ok, {Ino, read}}, requested(Readable, {open, Ino, 0})).
 
 %% A walk through a directory needs the owner's x bit, as erx_ramfs_core's
-%% does, whoever walks: a directory without it refuses every name, present
-%% or not, with eacces before its lookup, and one with x alone finds the
-%% name.
+%% does, whoever walks: a directory without it, whatever its group's and
+%% others' bits, refuses every name, present or not, with eacces before its
+%% lookup; a walk from a file answers enotdir first; and a directory with
+%% x alone finds the name.
 a_walk_needs_the_directorys_search_bit_test() ->
-    {Dir, Shut} = erx_f2fs_core_tests:fixture_directory_mode(8#40644),
     [?assertEqual({error, eacces}, requested(View, {walk, Dir, Name}))
-     || View <- [Shut, writable(Shut)], Name <- [<<"zero">>, <<"absent">>]],
+     || Mode <- [8#40644, 8#40011],
+        {Dir, Shut} <- [erx_f2fs_core_tests:fixture_directory_mode(Mode)],
+        View <- [Shut, writable(Shut)], Name <- [<<"zero">>, <<"absent">>]],
+    {File, Unsearchable} = erx_f2fs_core_tests:fixture_file_mode(8#100644),
+    ?assertEqual({error, enotdir}, requested(Unsearchable, {walk, File, <<"x">>})),
     {Dir, Searchable} = erx_f2fs_core_tests:fixture_directory_mode(8#40100),
     ?assertEqual({error, enoent}, requested(Searchable, {walk, Dir, <<"absent">>})),
-    ?assertMatch({failed, 20, _}, requested(Searchable, {walk, Dir, <<"zero">>})).
+    %% The lookup found "zero": the walk's next step reads its inode, nid 20,
+%% which the fixture does not hold.
+?assertMatch({failed, 20, _}, requested(Searchable, {walk, Dir, <<"zero">>})).
 
 %% statfs counts the space the volume offers on a read-write mount, so its
 %% free blocks run out when writes answer enospc, and none are free once
