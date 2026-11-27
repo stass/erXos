@@ -10,7 +10,8 @@
 %% erx_gatt_registry, the registry's core; and the Security Manager's: erx_smp, its codec,
 %% erx_smp_core, its responder, and erx_smp_crypto, its toolbox. Its processes, under
 %% erx_bt_top, the application's top supervisor: the mint of the ble facet, erx_ble_facet,
-%% from the boot script, and erx_bt_sup, which the row's -eval starts with
+%% and the control tree's, erx_bt_tree_mint, from the boot script, and erx_bt_sup, which
+%% the row's -eval starts with
 %% erx_bt_top:start_stack/0 once it has mounted the line at /line: the store,
 %% erx_bt_store, over erx_bt_state_file in development builds; the registry, erx_gatt_srv;
 %% the file service erx_bt_fs, which serves the control tree, erx_bt_fs_tree, and runs the
@@ -23,7 +24,7 @@
              erx_bt_link, erx_bt_link_core, erx_bt_link_sup, erx_bt_patch, erx_bt_state, erx_bt_state_file, erx_bt_store, erx_bt_sup, erx_bt_top, erx_bt_window, erx_gatt_db, erx_gatt_decl,
              erx_gatt_gate, erx_gatt_registry, erx_gatt_server, erx_gatt_srv, erx_h4, erx_hci, erx_l2cap, erx_smp, erx_smp_core, erx_smp_crypto]},
   {registered, [erx_bt_fs, erx_bt_hci, erx_bt_host_sup, erx_bt_line_rx, erx_bt_line_tx, erx_bt_link_sup,
-                erx_bt_store, erx_bt_sup, erx_bt_top, erx_gatt_srv]},
+                erx_bt_store, erx_bt_sup, erx_bt_top, erx_bt_tree_mint, erx_gatt_srv]},
   {applications, [kernel, stdlib, crypto, erx, erx_files, erx_bt_client]},
   {mod, {erx_bt_top, []}},
   {env, []}]}.

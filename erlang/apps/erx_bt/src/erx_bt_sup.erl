@@ -5,13 +5,14 @@
 -moduledoc """
 The stack below `erx_bt_top` (docs/design-bluetooth.md, "Concurrency"): `rest_for_one`, the store
 first, then the registry, then the file service `erx_bt_fs` with the pairing window, then
-the controller group. The store and the registry are temporary, `significant` children
-and the supervisor's `auto_shutdown` is `any_significant`, so the end of either ends
-`erx_bt_sup` and so the domain, and every facet with the mint: no handler stays attached
-to a registry that has forgotten it, and none needs telling. A window's restart ends
-every link it would have to answer, so it restarts the group after it; a group's
-restart, the one a radio peer's traffic can cause beyond its own link, leaves the store,
-its address, the handlers' attachments and the pairing wait alone.
+the controller group. The store, the registry and the file service are temporary,
+`significant` children and the supervisor's `auto_shutdown` is `any_significant`, so the
+end of any of them ends `erx_bt_sup` and so the domain, and every facet and every grant
+of the control tree with the mints: no handler stays attached to a registry that has
+forgotten it, no grant serves from a window process that has ended, and none needs
+telling. A group's restart, the one a radio peer's traffic can cause beyond its own
+link, leaves the store, its address, the handlers' attachments and the pairing wait
+alone.
 
 The registry is given the services it serves, read here once from `erx_bt`'s `services`
 key, which the build derives from the manifest's `ble` rows, and GAP's values, the name
@@ -37,7 +38,8 @@ init([]) ->
           [#{id => erx_bt_store, start => {erx_bt_store, start_link, []}, restart => temporary, significant => true},
            #{id => erx_gatt_srv, start => {erx_gatt_srv, start_link, [gap(), served()]}, restart => temporary,
              significant => true},
-           #{id => erx_bt_fs, start => {erx_bt_fs, start_link, []}},
+           #{id => erx_bt_fs, start => {erx_bt_fs, start_link, []}, restart => temporary,
+             significant => true},
            #{id => erx_bt_host_sup, start => {erx_bt_host_sup, start_link, []}, type => supervisor}]}}.
 
 served() ->

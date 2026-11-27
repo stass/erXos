@@ -563,6 +563,13 @@ domain bt
 service ble
   server @domain.bt
   interface ble
+# bluetooth: the Bluetooth domain's control tree, pair, bonds and ctl
+# (docs/design-bluetooth.md, "The control tree"), a service tree of the svc interface
+# (docs/design-app-trees.md) whose mint the domain names before its ready report, as it
+# names ble's.
+service bluetooth
+  server @domain.bt
+  interface svc
 facet line
   grantee @domain.bt
   service @service.line

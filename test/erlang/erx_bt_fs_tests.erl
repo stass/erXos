@@ -25,13 +25,29 @@
 
 %% Fixtures --------------------------------------------------------------------
 
-%% The service over a store in State, and a grant of its tree with fid 1 at the root.
+%% The service over a stand-in store in State, and a grant of its tree with fid 1 at the
+%% root.
 service(State) ->
-    %% A case that failed before its stop leaves the service of its own running.
-    [stop(#{fs => Old, grant => Old}) || Old <- [whereis(erx_bt_fs)], is_pid(Old)],
-    {ok, Fs} = erx_bt_fs:start_link(State),
+    ended_before(),
+    Store = stand_in_store(State),
+    {ok, Fs} = erx_bt_fs:start_link(),
     unlink(Fs),
-    grant(Fs).
+    (grant(Fs))#{store => Store}.
+
+%% A case that failed before its stop leaves its service and store running.
+ended_before() ->
+    [kill(Old) || Name <- [erx_bt_fs, erx_bt_store], Old <- [whereis(Name)], is_pid(Old)],
+    ok.
+
+%% A stand-in of the store, registered as erx_bt_store, answering known/0 with State.
+stand_in_store(State) ->
+    Store = spawn(fun() -> store_loop(State) end),
+    true = register(erx_bt_store, Store),
+    Store.
+
+store_loop(State) ->
+    receive {'$gen_call', From, known} -> gen_server:reply(From, State) end,
+    store_loop(State).
 
 %% A grant of the tree of the service Fs, with fid 1 at the root.
 grant(Fs) ->
@@ -40,10 +56,14 @@ grant(Fs) ->
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"user">>, <<"bt">>, 0}),
     #{fs => Fs, grant => Grant}.
 
-stop(#{fs := Fs, grant := Grant}) ->
-    [begin Monitor = monitor(process, Pid), exit(Pid, kill), receive {'DOWN', Monitor, _, _, _} -> ok end end
-     || Pid <- [Grant, Fs]],
+stop(Service) ->
+    [kill(maps:get(Key, Service)) || Key <- [grant, fs, store], is_map_key(Key, Service)],
     ok.
+
+kill(Pid) ->
+    Monitor = monitor(process, Pid),
+    exit(Pid, kill),
+    receive {'DOWN', Monitor, _, _, _} -> ok end.
 
 %% Opens pair at Fid for reading and writing: the open's answer.
 open(Grant, Fid) ->
@@ -135,35 +155,48 @@ pair_answers_eio_while_the_store_is_unknown_test() ->
 %% whatever the case's outcome, so a failure leaves no store or service registered for the
 %% cases after it; a case kills the grants it made.
 under_sup(Prepare, Case) ->
+    with_volume(Prepare,
+                fun(Volume) ->
+                        {ok, Sup} = supervisor:start_link(?MODULE, stack(Volume)),
+                        unlink(Sup),
+                        try
+                            Case(Sup, Volume)
+                        after
+                            Down = monitor(process, Sup),
+                            exit(Sup, shutdown),
+                            receive {'DOWN', Down, _, _, _} -> ok end
+                        end
+                end).
+
+%% Case(Volume) with the store's development file at Volume/bt, after Prepare(Volume);
+%% the directory goes whatever the case's outcome.
+with_volume(Prepare, Case) ->
+    ended_before(),
     Volume = filename:absname("bt-volume"),
     _ = file:del_dir_r(Volume),
-    ok = application:set_env(erx_bt, services, []),
     try
         Prepare(Volume),
-        {ok, {Flags, Children}} = erx_bt_sup:init([]),
-        ok = application:unset_env(erx_bt, services),
-        Window = [Spec || #{id := Id} = Spec <- Children, Id =:= erx_bt_store orelse Id =:= erx_bt_fs],
-        ?assertMatch([#{id := erx_bt_store}, #{id := erx_bt_fs}], Window),
-        ?assertMatch(#{strategy := rest_for_one}, Flags),
-        Backend = #{backend => erx_bt_state_file:backend(Volume)},
-        Injected = [case Spec of
-                        #{id := erx_bt_store, start := {erx_bt_store, start_link, []}} ->
-                            Spec#{start := {erx_bt_store, start_link, [Backend]}};
-                        #{} ->
-                            Spec
-                    end || Spec <- Window],
-        {ok, Sup} = supervisor:start_link(?MODULE, {Flags, Injected}),
-        unlink(Sup),
-        try
-            Case(Sup, Volume)
-        after
-            Down = monitor(process, Sup),
-            exit(Sup, shutdown),
-            receive {'DOWN', Down, _, _, _} -> ok end
-        end
+        Case(Volume)
     after
         _ = file:del_dir_r(Volume)
     end.
+
+%% erx_bt_sup's flags and its child specifications of the store and the window, the
+%% store's file backend over Volume injected in place of the mounted grant's.
+stack(Volume) ->
+    ok = application:set_env(erx_bt, services, []),
+    {ok, {Flags, Children}} = erx_bt_sup:init([]),
+    ok = application:unset_env(erx_bt, services),
+    Window = [Spec || #{id := Id} = Spec <- Children, Id =:= erx_bt_store orelse Id =:= erx_bt_fs],
+    ?assertMatch([#{id := erx_bt_store}, #{id := erx_bt_fs}], Window),
+    ?assertMatch(#{strategy := rest_for_one}, Flags),
+    Backend = #{backend => erx_bt_state_file:backend(Volume)},
+    {Flags, [case Spec of
+                 #{id := erx_bt_store, start := {erx_bt_store, start_link, []}} ->
+                     Spec#{start := {erx_bt_store, start_link, [Backend]}};
+                 #{} ->
+                     Spec
+             end || Spec <- Window]}.
 
 -doc false.
 init(Spec) ->
@@ -235,6 +268,17 @@ the_window_starts_with_the_store_and_ends_with_it_test() ->
                       exit(maps:get(grant, Unread), kill)
               end).
 
+%% The window's end ends the stack, and so the domain, rather than restart it
+%% (docs/design-bluetooth.md, "The control tree"): no window process is ever started a
+%% second time under the same mint.
+the_windows_end_ends_the_stack_test() ->
+    under_sup(fun no_volume/1,
+              fun(Sup, _Volume) ->
+                      Stack = monitor(process, Sup),
+                      exit(whereis(erx_bt_fs), kill),
+                      ?assertEqual(ended, receive {'DOWN', Stack, _, _, _} -> ended after 1000 -> running end)
+              end).
+
 %% A store unknown since its start refuses ctl's `forget BOND`, and `forget all` while
 %% it cannot read; once its volume has come, `forget all` puts an empty state, and pair
 %% opens from then on without a restart, the window told by the confirmed answer.
@@ -251,6 +295,82 @@ forget_all_ends_the_refusal_of_a_store_unknown_since_its_start_test() ->
                       ?assertMatch({ok, _, _}, open(Grant, 5)),
                       exit(Grant, kill)
               end).
+
+%% The store, not the grant, tells the window of a confirmed forget
+%% (docs/design-bluetooth.md, "The pairing window"): the process that asked for `forget
+%% all` ends while its call waits in the store's queue, so it never sees the answer, and
+%% pair still opens from then on. The caller is the grant or a process of its own, so the
+%% case ends both.
+a_forget_whose_caller_ended_before_the_answer_still_reaches_the_window_test() ->
+    under_sup(fun no_volume/1,
+              fun(_Sup, Volume) ->
+                      #{grant := Grant} = grant(whereis(erx_bt_fs)),
+                      ?assertEqual({error, eio}, open(Grant, 2)),
+                      ok = file:make_dir(Volume),
+                      Store = whereis(erx_bt_store),
+                      ok = sys:suspend(Store),
+                      {ok, _} = call(Grant, {walk, 1, 3, [<<"ctl">>]}),
+                      {ok, _, _} = call(Grant, {lopen, 3, ?ERX_P9_O_WRONLY}),
+                      _ = send(Grant, {write, 3, 0, <<"forget all\n">>}),
+                      kill(caller_of({forget, all}, Store, 1000)),
+                      kill(Grant),
+                      ok = sys:resume(Store),
+                      ?assertEqual({ok, []}, erx_bt_store:bonds()),
+                      #{grant := Other} = grant(whereis(erx_bt_fs)),
+                      ?assertMatch({ok, _, _}, open(Other, 2)),
+                      kill(Other)
+              end).
+
+%% The process whose gen_server call of Request waits in Server's queue, within Wait ms.
+caller_of(Request, Server, Wait) ->
+    {messages, Queue} = process_info(Server, messages),
+    case [Caller || {'$gen_call', {Caller, _}, Asked} <- Queue, Asked =:= Request] of
+        [Caller] -> Caller;
+        [] when Wait > 0 -> timer:sleep(10), caller_of(Request, Server, Wait - 10);
+        [] -> erlang:error({not_queued, Request})
+    end.
+
+%% Both mints start with erx_bt_top, before its start returns, which is before init's
+%% ready report (docs/design-bluetooth.md, "The control tree", "Concurrency"): a mint
+%% request for bluetooth sent before the stack starts waits in the mint's queue and is
+%% answered with a grant once erx_bt_fs has started, and the window's end ends erx_bt_top.
+%% The stack is the store and the window under erx_bt_sup's flags, started below the top
+%% as start_stack/0 starts erx_bt_sup; the test plays the domain pid the mint answers.
+both_mints_start_before_the_top_returns_and_the_window_ends_it_test() ->
+    with_volume(fun no_volume/1,
+                fun(Volume) ->
+                        Trap = process_flag(trap_exit, true),
+                        persistent_term:put({erx, domain_pid}, self()),
+                        {ok, Top} = erx_bt_top:start_link(),
+                        Down = monitor(process, Top),
+                        try
+                            Mint = whereis(erx_bt_tree_mint),
+                            ?assertMatch(#{ble := _, bluetooth := Mint}, persistent_term:get({erx, provides})),
+                            Mint ! {erx_origin, ?ERX_SYSTEM_DOMAIN_ID,
+                                    {erx_facet_mint, 9, bluetooth, ?ERX_SYSTEM_DOMAIN_ID, <<"system">>, #{}}},
+                            ?assertEqual(none, minted(9, 200)),
+                            {ok, _} = supervisor:start_child(Top, #{id => erx_bt_sup, type => supervisor,
+                                                                    start => {supervisor, start_link, [?MODULE, stack(Volume)]}}),
+                            ?assertMatch({ok, Grant, _} when is_pid(Grant), minted(9, 1000)),
+                            %% The mount took the window's pid, the grants' argument, and
+                            %% linked the mint to it.
+                            Window = whereis(erx_bt_fs),
+                            ?assert(lists:member(Window, element(2, process_info(Mint, links)))),
+                            exit(Window, kill),
+                            ?assertEqual(ended, receive {'DOWN', Down, _, _, _} -> ended after 1000 -> running end)
+                        after
+                            %% The top's end ends the mints and the stack, its linked children.
+                            exit(Top, kill),
+                            receive {'EXIT', Top, _} -> ok end,
+                            persistent_term:erase({erx, provides}),
+                            persistent_term:erase({erx, domain_pid}),
+                            process_flag(trap_exit, Trap)
+                        end
+                end).
+
+%% The mint's answer to the request tagged Tag, within Wait ms, or none.
+minted(Tag, Wait) ->
+    receive {erx_facet_minted, Tag, Reply} -> Reply after Wait -> none end.
 
 %% ctl forgets a kept bond by its id, that bond alone, though the other's id differs only
 %% in its last digit, and then answers enoent for it, as for an id no bond has; any write

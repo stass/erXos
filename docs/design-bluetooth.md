@@ -775,7 +775,8 @@ acknowledges its start, both before the ready report, and only then
 runs its mount, `erx_bt_fs:mounted/0`, which waits for the message
 `{erx_bt_fs, Pid}` that `erx_bt_fs` sends the registered mint as it
 starts and answers `Pid`, the argument every grant of the tree serves
-from. A mint request that arrives first waits in the mint's queue, as
+from, linked to the mint, so the window process's end ends the mint
+whatever the supervisors restart. A mint request that arrives first waits in the mint's queue, as
 it does in the storage domain's. The wait ends when the stack has
 started, whose one wait is the store's first read, bounded by
 `bt_store_timeout_ms`, 5 s, inside the domain service's 10 s deadline
@@ -3101,10 +3102,12 @@ at its start (`erx_bt_store:known/0`) and answers `eio` to every open
 while the store is `unknown` since its start, which refuses every
 change ([Bonds and the store](#bonds-and-the-store)). The store leaves
 that state only by `forget all`, which a grant of the control tree asks
-of it on a write to `ctl`, and that grant tells the window process the
-confirmed answer; it enters that state only at its own start, which
-restarts the
-window process after it ([Concurrency](#concurrency)). A store
+of it on a write to `ctl`. The store itself tells the registered window
+process when a confirmed `forget` leaves it readable, and the window
+process takes the store's state only after it has registered, so a
+grant's lifetime cannot lose that notice. The store enters that state
+only at its own start, which is the domain's
+([Concurrency](#concurrency)). A store
 `unknown` since a put it could not confirm reads before its next
 change, so a window still opens, and the store's outcome of that
 pairing, `failed ... unavailable` when the read or the put fails, is
@@ -3972,12 +3975,12 @@ its line at the system domain's `/proc`: bytes each way, breaks, resets.
   before it under `rest_for_one`, so the store's end ends the window
   process too. A write to `ctl` waits in its grant, as a write of its
   medium may ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
-  "Waiting requests"): on the store, behind the
+  "Waiting requests"): on the store alone, behind the
   requests queued there and then a read and a put, each bounded by
-  `bt_store_timeout_ms`, then on the window process to tell it a
-  confirmed answer. The window process waits on neither, since it answers
-  links' admissions and other grants' calls, and the store waits on
-  neither, so no two processes wait on each other; meanwhile that grant's
+  `bt_store_timeout_ms`; the store tells the window process a confirmed
+  answer with a message and waits on no one. The window process waits on
+  neither, since it answers links' admissions and other grants' calls, so
+  no two processes wait on each other; meanwhile that grant's
   other answers, a `pair` line among them, wait with it. The window process
   sits before the controller group, so a controller restart, the only
   restart a radio peer's traffic can cause beyond its own link, keeps the

@@ -213,7 +213,7 @@ with_top(Test) ->
 
 the_mint_is_provided_and_refuses_the_system_domain_and_an_unconnected_grantee_test() ->
     with_top(fun(_Top, Mint) ->
-        ?assertEqual(#{ble => Mint}, persistent_term:get({erx, provides})),
+        ?assertMatch(#{ble := Mint}, persistent_term:get({erx, provides})),
         ?assertEqual(refused, minted_for(Mint, ?SYSTEM)),
         ?assertEqual(refused, minted_for(Mint, ?GRANTEE)),
         ?assert(is_process_alive(Mint))

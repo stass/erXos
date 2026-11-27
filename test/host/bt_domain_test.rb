@@ -61,6 +61,7 @@ class BtDomainTest < Minitest::Test
     refute_includes source, "facet ble\n"
     refute_includes source, "domain media\n"
     assert_includes source, "service ble\n  server @domain.bt\n"
+    assert_includes source, "service bluetooth\n  server @domain.bt\n  interface svc\n"
     plain = Erx::BtDomain.manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
     connections = ->(text) { Erx::Manifest::Edit.value(text, record: 'machine', field: 'max_connections') }
     max = Erx::Manifest::Edit.value(source, record: 'apps', field: 'max')

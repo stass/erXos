@@ -9,8 +9,9 @@ require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_bt_fs_tests.erl, the control tree's `pair`, `bonds` and `ctl` files
 # (erx_bt_fs_tree) served by a real erx_fs grant over the file service erx_bt_fs, with
-# stand-in links and store or the real store (docs/design-bluetooth.md, "The pairing
-# window", "Bonds and the store"), on stock's emulator (ERX_ERL and ERX_ERLC), against
+# stand-in links and store or the real store, and the tree's mint below erx_bt_top
+# (docs/design-bluetooth.md, "The pairing window", "Bonds and the store", "The control
+# tree"), on stock's emulator (ERX_ERL and ERX_ERLC), against
 # the sources as they are and against each seeded fault, where the named case must fail.
 class ErxBtFsTest < Minitest::Test
   APPLICATIONS = %w[erx_bt].freeze
@@ -25,6 +26,8 @@ class ErxBtFsTest < Minitest::Test
   FS = 'erlang/apps/erx_bt/src/erx_bt_fs.erl'
   TREE = 'erlang/apps/erx_bt/src/erx_bt_fs_tree.erl'
   STORE = 'erlang/apps/erx_bt/src/erx_bt_store.erl'
+  SUP = 'erlang/apps/erx_bt/src/erx_bt_sup.erl'
+  TOP = 'erlang/apps/erx_bt/src/erx_bt_top.erl'
 
   # A seed's file is the service's unless it names another.
   Seed = Data.define(:fault, :anchor, :replacement, :catching_case, :file) do
@@ -49,14 +52,28 @@ class ErxBtFsTest < Minitest::Test
              replacement: 'window_facts(#fs{} = State) -> State;',
              catching_case: 'status_hides_the_lines_test'),
     Seed.new(fault: "the window started without the store's state, so it opens over a store that refuses changes",
-             anchor: '    start_link(erx_bt_store:known()).',
-             replacement: '    start_link(read).',
-             catching_case: 'the_window_starts_with_the_store_and_ends_with_it_test'),
-    Seed.new(fault: "a confirmed forget not told to the window, so it refuses until the store's next start",
-             file: TREE,
-             anchor: '        ok = gen_server:call(Fs, {store, read}),',
+             anchor: '    Core = erx_bt_window:new(erx_bt_store:known()),',
+             replacement: '    Core = erx_bt_window:new(read),',
+             catching_case: 'pair_answers_eio_while_the_store_is_unknown_test'),
+    Seed.new(fault: "a confirmed forget not told to the window by the store, so a caller's end loses it",
+             file: STORE,
+             anchor: "    {erx_bt_fs, node()} ! {store, read},\n",
              replacement: '',
-             catching_case: 'forget_all_ends_the_refusal_of_a_store_unknown_since_its_start_test'),
+             catching_case: 'a_forget_whose_caller_ended_before_the_answer_still_reaches_the_window_test'),
+    Seed.new(fault: "the window not significant, so it restarts and the tree's grants serve from a pid that has ended",
+             file: SUP,
+             anchor: "restart => temporary,\n             significant => true},\n           \#{id => erx_bt_host_sup",
+             replacement: "restart => permanent},\n           \#{id => erx_bt_host_sup",
+             catching_case: 'the_windows_end_ends_the_stack_test'),
+    Seed.new(fault: "the mount answering a pid of its own, not the window's, so the grants serve from no window",
+             anchor: '    receive {erx_bt_fs, Pid} when is_pid(Pid) -> link(Pid), Pid end.',
+             replacement: '    receive {erx_bt_fs, _} -> self() end.',
+             catching_case: 'both_mints_start_before_the_top_returns_and_the_window_ends_it_test'),
+    Seed.new(fault: "the tree's mint not started with the top, so bluetooth is not provided before the ready report",
+             file: TOP,
+             anchor: ",\n           \#{id => erx_bt_tree_mint, start => {erx_bt_fs, start_mint, []}}",
+             replacement: '',
+             catching_case: 'both_mints_start_before_the_top_returns_and_the_window_ends_it_test'),
     Seed.new(fault: 'forget matching a prefix of the id, so the bond whose id differs in its last digit goes too',
              file: STORE,
              anchor: 'case [Bond || #{id := Other} = Bond <- Bonds, Other =/= Id] of',

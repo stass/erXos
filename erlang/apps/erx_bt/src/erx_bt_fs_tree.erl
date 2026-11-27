@@ -27,8 +27,9 @@ service, `erx_bt_fs`, which keeps the window and the tree's waiting reads. The t
   parse/1 takes `forget BOND` and `forget all` and refuses anything else with
   `einval`. The callback asks the store to forget (`erx_bt_store:forget/1`), which
   answers `enoent` when no bond has that id and `eio` when it stays `unknown` or
-  its put is unconfirmed. A confirmed forget leaves the store `read`, and the callback
-  tells the file service so, which ends the window's refusal since the store's start.
+  its put is unconfirmed. A confirmed forget leaves the store `read`, and the store
+  itself tells the file service so, which ends the window's refusal since the store's
+  start; a grant that ends before the answer loses nothing.
 
 Opens by create, which a client's `[write]` open sends with `O_TRUNC`, open the file
 named and ignore `O_TRUNC`; the tree makes nothing.
@@ -153,11 +154,10 @@ write({pair, Id}, Offset, Bytes, Fs) ->
         {error, einval} = Refused ->
             Refused
     end;
-write(ctl, Offset, Bytes, Fs) ->
+write(ctl, Offset, Bytes, _Fs) ->
     maybe
         {ok, {forget, Target}} ?= parse(Bytes),
         ok ?= erx_bt_store:forget(Target),
-        ok = gen_server:call(Fs, {store, read}),
         {ok, byte_size(Bytes), Offset}
     end;
 write(_Handle, _Offset, _Bytes, _Fs) ->

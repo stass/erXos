@@ -76,9 +76,9 @@ class ErxBtStoreTest < Minitest::Test
              catching_case: 'explored_store_table_test_'),
     Seed.new(fault: 'forget all refused while the start left the store unknown',
              module_path: STORE,
-             anchor: "call({forget, all}, _From, Store) ->\n    {Answer, Next} = forget_all(Store),",
-             replacement: "call({forget, all}, _From, Store) ->\n    {Answer, Next} = case Store#store.known of " \
-                          "read -> forget_all(Store); _ -> {{error, eio}, Store} end,",
+             anchor: "call({forget, all}, _From, Store) ->\n    case forget_all(Store) of",
+             replacement: "call({forget, all}, _From, Store) ->\n    case case Store#store.known of " \
+                          "read -> forget_all(Store); _ -> {{error, eio}, Store} end of",
              catching_case: 'explored_store_table_test_'),
     Seed.new(fault: 'a failed forget all after the start leaving the store to read the old bonds under a new address',
              module_path: STORE,

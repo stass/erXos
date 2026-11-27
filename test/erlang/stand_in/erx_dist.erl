@@ -5,11 +5,16 @@
 %% see it on stock's emulator: owner/1 answers the creation a pid or reference carries,
 %% as the BIF erx_dist:owner/1 does, so a name a test builds for another node is that
 %% domain's. Stock delivers every message bare, so a test plays the connection and puts
-%% a frame of another domain in the envelope of edit 16 itself.
+%% a frame of another domain in the envelope of edit 16 itself. export/3 takes every
+%% export, as the export table of a domain with no peers to refuse would.
 
 -module(erx_dist).
 
--export([owner/1]).
+-export([owner/1, export/3]).
+
+-spec export(pid(), [send], pos_integer()) -> ok.
+export(_Pid, _Rights, _Peer) ->
+    ok.
 
 -spec owner(pid() | reference()) -> non_neg_integer().
 owner(Pid) when is_pid(Pid) ->

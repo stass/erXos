@@ -45,10 +45,11 @@ module Erx
     # limits are the PCIe domain's, whose max_frame, 131,072, is the line tree's floor,
     # files_max_frame_min (property 16). Its grant is a share of its own, 50 mcpu on CPU
     # 0, as the PCIe domain's. Its arguments name it, so a scanner tells
-    # it from the host. Its release's script starts erx_bt, whose start names the mint of
-    # ble, and its -eval starts the rest of the stack once init holds the ready answer's
-    # facets, the line grant among them. The service ble, which the domain serves, has
-    # no grant here: its row makes the domain service accept the mint the domain names.
+    # it from the host. Its release's script starts erx_bt, whose start names the mints of
+    # ble and of bluetooth, its control tree, and its -eval starts the rest of the stack
+    # once init holds the ready answer's facets, the line grant among them. The services
+    # ble and bluetooth, which the domain serves, have no grant here: their rows make the
+    # domain service accept the mints the domain names.
     ROWS = <<~ROWS.freeze
       runtime_limits #{DOMAIN}
         max_frame 131072
@@ -97,6 +98,9 @@ module Erx
       service ble
         server @domain.#{DOMAIN}
         interface ble
+      service bluetooth
+        server @domain.#{DOMAIN}
+        interface svc
     ROWS
 
     # The echo domain (docs/design-bluetooth.md, "On QEMU against Bumble"): the handler of

@@ -47,7 +47,8 @@ it names the bond, to the link's `kept`, to the window's outcome, in `resolve/1`
 Link, Message}`. The store monitors a link from a `resolve` it answers with a bond or a
 `keep` it answers `{ok, Id}`, finds the bond of `subscriptions` and `served` by that monitor,
 and drops the link at its `'DOWN'`. It answers a `keep` to the link and tells the window
-(`erx_bt_fs`) the outcome whether or not the link still lives.
+(`erx_bt_fs`) the outcome whether or not the link still lives, and tells the window of
+every `forget` it confirms, whoever asked for it.
 
 **Secrets stay here.** `resolve/1` answers a bond without its IRK; `format_status/1` shows
 `facts/1`, which holds no key, and each message as its kind; and a raise in a callback
@@ -218,8 +219,10 @@ call({resolve, Address}, {Link, _}, #store{bonds = Bonds} = Store) ->
         #{id := Id} = Bond -> {reply, resolved(Bond), watch(Link, Id, Store)}
     end;
 call({forget, all}, _From, Store) ->
-    {Answer, Next} = forget_all(Store),
-    {reply, Answer, Next};
+    case forget_all(Store) of
+        {ok, Next} -> confirmed(Next);
+        {Refused, Next} -> {reply, Refused, Next}
+    end;
 call({forget, <<_:256>> = Id}, _From, Store) ->
     Edit = fun(Bonds) ->
                    case [Bond || #{id := Other} = Bond <- Bonds, Other =/= Id] of
@@ -228,7 +231,7 @@ call({forget, <<_:256>> = Id}, _From, Store) ->
                    end
            end,
     case change(Edit, Store) of
-        {ok, Next} -> {reply, ok, Next};
+        {ok, Next} -> confirmed(Next);
         {error, enoent, Next} -> {reply, {error, enoent}, Next};
         {error, _, Next} -> {reply, {error, eio}, Next}
     end;
@@ -238,6 +241,15 @@ call(bonds, _From, #store{bonds = Bonds} = Store) ->
     {reply, {ok, [record(Bond) || Bond <- lists:sort(fun(#{id := A}, #{id := B}) -> A =< B end, Bonds)]}, Store};
 call(facts, _From, Store) ->
     {reply, facts(Store), Store}.
+
+%% A confirmed forget, answered `ok` and told to the window (`erx_bt_fs`) as `{store,
+%% read}`, which ends its refusal since the store's start (docs/design-bluetooth.md, "The
+%% pairing window"). The store tells it, not the caller, so a caller that ends between
+%% the commit and the answer loses nothing; the window registers before it takes
+%% known/0, so it misses no forget confirmed after that answer.
+confirmed(Store) ->
+    {erx_bt_fs, node()} ! {store, read},
+    {reply, ok, Store}.
 
 %% A bond as the control tree names it (erx_bt_pair:bond()): its id, identity and level,
 %% and no key.

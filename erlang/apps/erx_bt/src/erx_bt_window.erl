@@ -14,9 +14,9 @@ gives each open. While one is open, or while the pairing a closed window admitte
 outcome, `open` answers `ebusy`, so at most one pairing is awaited; while the store is
 `unknown` since its start, which refuses every change, `eio`. The core takes the store's
 state at its start (`erx_bt_store:known/0`): it leaves `unknown` since its start only by
-`forget all`, which a grant of the control tree asks of the store through `ctl`, then
-telling the process the confirmed answer as `{store, read}`; it enters that state only at the store's
-start, which restarts this process. After an unconfirmed put the store reads before the
+`forget all`, which a grant of the control tree asks of the store through `ctl`, the
+store then telling the process the confirmed answer as `{store, read}`; it enters that
+state only at the store's start, which is the domain's. After an unconfirmed put the store reads before the
 next change, so a window opens, and the store's outcome tells what came of its
 pairing. The opener's first write, `display` or
 `nodisplay`, starts the window's `bt_pair_window_s`; later writes are `einval`. A window
@@ -260,7 +260,7 @@ input({store, {outcome, Link, Tag, Outcome}}, Now, #core{pairing = {Link, Tag, _
 input({store, {outcome, _Link, _Tag, _Outcome}}, _Now, Core) ->
     {[], Core};
 %% A confirmed `forget` takes the store out of `unknown` since its start, which it enters
-%% again only by a restart that restarts this process too, so a late one is never wrong.
+%% again only at its start, which is the domain's, so a late one is never wrong.
 input({store, read}, _Now, Core) ->
     {[], Core#core{refusing = false}};
 input(expired, _Now, Core) ->

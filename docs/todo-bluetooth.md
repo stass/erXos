@@ -84,11 +84,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   peer before it reports the connection. Question for the design: rely on Part E 5.3 and check the board's
   controller's handle reuse with a probe, or add such a fence. A cheap narrowing for host-initiated disconnects
   alone: refuse a link's packets once its handle's disconnect is asked.
-* [Low] bluetooth, the window's copy of the store's refusal (`erx_bt_window`'s `refusing`, `erx_bt_fs:start_link/0`): when
-  `erx_bt_fs` alone restarts, a grant of the old instance that the grants' supervisor has not yet killed can confirm a
-  `forget all` after the new instance read `known()`, so `pair` answers `eio` until another `forget` or a store restart
-  (safe: a refusal). Closing it by construction: the store sends the window the confirmed `forget`, as it sends
-  `{outcome, ...}`, and the window reads `known()` in `init/1` after registering.
 * [Medium] bluetooth, no Bluetooth manifest serves the store's grant (`config/manifest/raspi4b-development.txt`,
   the bluetooth suite's rows in `tools/lib/erx/bt_domain.rb`; docs/design-bluetooth.md "The Bluetooth domain", the
   store's grant): the storage domain serves `bt_state` and `ssh_state` (`erx_lfs` trees, roots `bt/` and `ssh/`),
