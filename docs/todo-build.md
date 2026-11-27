@@ -275,8 +275,9 @@ design does not have, to be deleted so no side-by-side table can show it under s
   deps.lock and `build/third_party` for L4Re's lock too; `local_docker_connection` refuses a context name with `+`.
 * [Medium] gates, `tools/lib/erx/dialyzer.rb`: the PLT cache is its own digest, partial file and
   stale-file deletion beside `BuildMemo`, which already keys a step by its inputs and tools
-  (`program_identity`), writes atomically and locks; the PLT should be a `BuildMemo` step whose key
-  takes the headers each source reads from `erlc -M` rather than the directories `digest` globs.
+  (`program_identity`), writes atomically and locks; the PLT should be a `BuildMemo` step keyed by
+  the files `dependencies` reads from `erlc -M`. `BuildMemo` reuses no record off macOS, so the move
+  has to keep the PLT cached on the FreeBSD host `make check` runs on.
   `ASN1_FLAGS`, `PLT_DEFINES`, the moduli step and the PLT's include list copy facts of OTP's
   Makefiles (lib/public_key/asn1/Makefile, lib/public_key/src/Makefile, crypto's and compiler's
   `-D` flags); and `analysis_set` turns `ErlangApps.include_flags` back into directories by

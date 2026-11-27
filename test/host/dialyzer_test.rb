@@ -88,6 +88,20 @@ class DialyzerTest < Minitest::Test
     assert_equal [changed], Dir.glob(File.join(@root, Erx::Dialyzer::OUTPUT, 'plt-*'))
   end
 
+  # A header an include reaches below an include directory, as prim_file.erl reaches
+  # include/generated/erx_abi.hrl, is an input of the PLT like the sources.
+  def test_a_plt_is_rebuilt_when_a_header_below_an_include_directory_changes
+    header = File.join(@root, 'include', 'generated', 'name.hrl')
+    FileUtils.mkdir_p(File.dirname(header))
+    File.write(header, "-type name() :: atom().\n")
+    text = LIBRARY.sub('-spec name(atom())', %(-include("generated/name.hrl").\n-spec name(name())))
+    including = library(text).with(includes: ['include'])
+    built = @dialyzer.plt(including)
+
+    File.write(header, "-type name() :: atom() | integer().\n")
+    refute_equal built, @dialyzer.plt(including)
+  end
+
   # A checkout whose build/ links elsewhere: the step refuses the link before it
   # removes anything, so what the link reaches keeps its files.
   def test_an_output_path_that_crosses_a_link_is_refused_before_anything_is_removed

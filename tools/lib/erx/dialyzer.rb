@@ -6,6 +6,7 @@ require 'digest'
 require 'etc'
 require 'fileutils'
 require 'json'
+require 'tmpdir'
 require_relative 'asn1_specifications'
 require_relative 'erlang_apps'
 require_relative 'error'
@@ -125,18 +126,49 @@ module Erx
 
     private
 
-    # Compiles set's sources into ebin, COMPILE_JOBS erlc processes at once.
+    # Compiles set's sources into ebin.
     def compile(set, ebin:)
-      slices = set.files.each_slice((set.files.size.to_f / COMPILE_JOBS).ceil)
-      failures = slices.with_index.map do |files, index|
-        Thread.new do
-          run(@erlc, *COMPILE_OPTIONS, '-o', ebin, *set.flags, *files, name: "dialyzer-plt-erlc-#{index}", chdir: @root)
-          nil
-        rescue Error => error
-          error
+      in_slices(set.files) do |files, index|
+        run(@erlc, *COMPILE_OPTIONS, '-o', ebin, *set.flags, *files, name: "dialyzer-plt-erlc-#{index}", chdir: @root)
+      end
+    end
+
+    # The files set's sources read, as erlc -M names them: each source and every header
+    # its includes reach, however deep. A path in the root is relative to it.
+    def dependencies(set)
+      inside = "#{File.realpath(@root)}/"
+      rules = Dir.mktmpdir('erx-dialyzer-') do |scratch|
+        in_slices(set.files) do |files, index|
+          path = File.join(scratch, "#{index}.mk")
+          run(@erlc, '-M', *set.flags, *files, name: "dialyzer-plt-depend-#{index}", chdir: @root, stdout: path)
+          File.read(path)
         end
-      end.map(&:value).compact
-      raise failures.first unless failures.empty?
+      end
+      # Make rules, TARGET: FILE..., continued over lines by a final backslash. erlc names
+      # every file a -file attribute names, and a generator's own attributes name files
+      # erlc never opens, which need not exist (core_parse.erl, yecc's output, names its
+      # .yrl and the yeccpre.hrl of the host that generated it), so only files that
+      # exist are inputs.
+      rules.join.gsub("\\\n", ' ').lines.flat_map { |rule| rule.split(':', 2).last.split }
+           .map { |file| file.delete_prefix(inside) }.uniq.sort
+           .select { |file| File.file?(File.expand_path(file, @root)) }
+    end
+
+    # Calls block with each of COMPILE_JOBS slices of files and its index, all at once;
+    # answers the blocks' values in slice order, or raises the first failure.
+    def in_slices(files, &block)
+      slices = files.each_slice([(files.size.to_f / COMPILE_JOBS).ceil, 1].max)
+      outcomes = slices.with_index.map do |slice, index|
+        Thread.new do
+          [:ok, block.call(slice, index)]
+        rescue Error => error
+          [:error, error]
+        end
+      end.map(&:value)
+      failure = outcomes.find { |outcome, _| outcome == :error }
+      raise failure.last if failure
+
+      outcomes.map(&:last)
     end
 
     # Runs Dialyzer, strict: a warning (exit status 2) fails it like an error, a run that
@@ -149,8 +181,8 @@ module Erx
       raise Error, "#{name}: #{what}; log: #{result.fetch('log')}"
     end
 
-    def run(*argv, name:, chdir:)
-      @runner.run(argv, name: name, deadline: DEADLINE, chdir: chdir, env: Oracle::CLEAN_ERLANG_ENV)
+    def run(*argv, name:, chdir:, stdout: nil)
+      @runner.run(argv, name: name, deadline: DEADLINE, chdir: chdir, env: Oracle::CLEAN_ERLANG_ENV, stdout: stdout)
     end
 
     # The erx_* modules of erts' preloaded set and the generated ones.
@@ -188,14 +220,11 @@ module Erx
 
     def public_key_output = File.join(OUTPUT, 'public_key')
 
-    # The digest of what a PLT of set reads: the options, set's flags and files, and
-    # every header an include can reach: beside a source, in an include directory, or
-    # as include_lib's APP/include/NAME or APP/src/NAME under one. The oracle's erlc and
-    # Dialyzer are pinned and verified (Oracle#with_runtime), so they are not part of it.
+    # The digest of what a PLT of set reads: the options, set's flags, and the sources
+    # with every header they include (dependencies). The oracle's erlc and Dialyzer are
+    # pinned and verified (Oracle#with_runtime), so they are not part of it.
     def digest(set)
-      directories = [*set.files.map { |file| File.dirname(file) }, *set.includes].uniq
-      headers = directories.flat_map { |dir| Dir.glob(["#{dir}/*.hrl", "#{dir}/*/{include,src}/*.hrl"], base: @root) }
-      files = [*set.files, *headers].uniq.sort.map { |file| [file, Digest::SHA256.file(File.join(@root, file)).hexdigest] }
+      files = dependencies(set).map { |file| [file, Digest::SHA256.file(File.expand_path(file, @root)).hexdigest] }
       Digest::SHA256.hexdigest(JSON.generate([COMPILE_OPTIONS, PLT_OPTIONS, set.flags, files]))
     end
 
