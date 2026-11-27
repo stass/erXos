@@ -34,11 +34,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
         full, held and broken cases todo-drivers.md asks for, tested by name, and the restart
         handoff's row of design-drives.md's host tests runs over it. A hung device's end is bounded
         only by the transport contract's in-flight bound, 18 s past issue, which ends the device
-        process and every window with it ([design-storage.md](design-storage.md#data-model)); virtio has
-        no bound today ([todo-drivers.md](todo-drivers.md), erx_blk's two items on a device that stops
-        completing), so this package lands with that bound or after it. Until then a hung virtio
-        drive holds its end, its old window and the grant's held asks until its driver is restarted,
-        each holder's ask giving up at the grant's 60 s. The same bound bounds the held asks: they
+        process and every window with it ([design-storage.md](design-storage.md#data-model)); virtio-blk
+        keeps the same bound (`erx_blk_virtio`). The same bound bounds the held asks: they
         are those of holders that restarted during one end, each answered at the window's end.
      3. `erx_blk` serving a `block` device's medium as a drive: `erx_blk_service` reads its `block`
         drive; with one it starts the grant and one window of role `drive` over the whole medium and

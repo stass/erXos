@@ -295,7 +295,7 @@ window itself lies past the medium's end, and the window answers that
 `eio`, as a device error. The maximum request is the
 transport's: 8 sectors on virtio, the sectors one pool buffer holds
 beside its header and status byte; 64 sectors on the SD controller,
-32 KiB (`max_sectors/0` of `erx_blk_sd_host.erl`, beside its
+32 KiB (`blk_sd_max_sectors` of `abi/formats/blk.txt`, beside its
 deadlines), the most whose write a card within its specification
 finishes inside the in-flight bound below. The
 block service reads it from `info/0` when it starts a window, and the
@@ -306,7 +306,9 @@ its requests one after another in the order they arrive, holding a
 bounded backlog while the controller is busy.
 
 **Every request is answered within 28 s of its acceptance**, so a
-device process never writes for a caller that has given up. The device
+device process never writes for a caller that has given up. Every
+transport keeps the same two bounds, `blk_wait_limit_ms` and
+`blk_in_flight_ms` of `abi/formats/blk.txt`. The device
 process stamps each request with the time it accepted it. It issues a
 request only within 10 s of that stamp, the wait limit, and answers one
 still in the backlog after it `{error, {device, deadline}}` without

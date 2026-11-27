@@ -38,6 +38,7 @@ include formats/probe.txt
 include formats/usb.txt
 include formats/xhci.txt
 include formats/sdhci.txt
+include formats/blk.txt
 include formats/pcie.txt
 include formats/vc_property.txt
 include medium.txt

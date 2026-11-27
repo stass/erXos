@@ -13,13 +13,14 @@
 %% open(#{stand_in => Player}) answers {stand_in, Player}, and every call on that device, the TRB ring form's post/4,
 %% complete/2, negotiate/2 and queue_state/2 among them, is sent to Player as
 %% {erx_device, Caller, Call}, the call returning the Answer Player sends back as
-%% {erx_device, Answer}. queue_state/2 is the shape the controller process assumes until
+%% {erx_device, Answer}; queue_create/4 among them, as the block driver's tests
+%% (test/erlang/erx_blk_virtio_tests.erl) play a virtio-blk device. queue_state/2 is the shape the controller process assumes until
 %% the NIF states its own.
 
 -module(erx_device).
 
 -export([open/1, read/2, write/3, read_field/3, write_field/4, field/4, command/2]).
--export([elements/2, negotiate/2, post/4, complete/2, queue_state/2]).
+-export([elements/2, negotiate/2, queue_create/4, post/4, complete/2, queue_state/2]).
 -export([script/1, calls/0, play/2]).
 
 %% Sets the reads' answers, Register => [Value, ...], and clears the record.
@@ -41,6 +42,7 @@ open(_Spec) -> {ok, dev}.
 elements({stand_in, Player}, Register) -> play(Player, {elements, Register}).
 negotiate({stand_in, Player}, Wanted) when is_integer(Wanted); Wanted =:= continue ->
     play(Player, {negotiate, Wanted}).
+queue_create({stand_in, Player}, Queue, Size, BufferSize) -> play(Player, {queue_create, Queue, Size, BufferSize}).
 post({stand_in, Player}, Queue, Tag, Item) -> play(Player, {post, Queue, Tag, Item}).
 complete({stand_in, Player}, Ring) -> play(Player, {complete, Ring}).
 queue_state({stand_in, Player}, Queue) -> play(Player, {queue_state, Queue}).

@@ -40,16 +40,17 @@ device process ends. Times are monotonic milliseconds.
 
 -export_type([event/0, interrupt_event/0, transfer/0, request/0, action/0, command/0, command_action/0]).
 
+-include("generated/erx_abi.hrl").
 -include("generated/erx_hw_sdhci.hrl").
 
 %% The transport contract (docs/design-storage.md, "Data model"): a request
 %% moves at most 64 sectors, 32 KiB, the most whose write a card within its
 %% specification finishes inside the in-flight bound; it is issued only within
 %% 10 s of its acceptance, and one issued must be complete 18 s after it was
-%% issued.
--define(MAX_SECTORS, 64).
--define(WAIT_LIMIT_MS, 10000).
--define(IN_FLIGHT_MS, 18000).
+%% issued (abi/formats/blk.txt).
+-define(MAX_SECTORS, ?ERX_BLK_SD_MAX_SECTORS).
+-define(WAIT_LIMIT_MS, ?ERX_BLK_WAIT_LIMIT_MS).
+-define(IN_FLIGHT_MS, ?ERX_BLK_IN_FLIGHT_MS).
 %% SDHCI 3.00's largest divisor of the 10-bit divided clock (Host
 %% Controller p.68-69; SDHCI_300_MAX_DIVIDER).
 -define(MAX_DIVISOR, 2046).

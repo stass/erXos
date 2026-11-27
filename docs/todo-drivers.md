@@ -965,16 +965,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   firing (`erlang/apps/erx/src/erx_irq_line.erl`), so a hung driver holds its sharers masked until the unit is
   restarted; a deadline after which the owner restarts the slow driver belongs with the hostile-driver work.
 * [Medium] erx_blk, the block driver: the device process's backlog, reply and reset decisions
-  (`erlang/apps/erx_blk/src/erx_blk_virtio.erl`, `submit/3`, `resume/1`, `broken/2`) are tested only end to end, by the
-  `block_device` QEMU suite's good path; they should move into a pure module whose full, held and broken cases are
+  (`erlang/apps/erx_blk/src/erx_blk_virtio.erl`, `submit/4`, `resume/2`, `fail/3`, `due/2`) are tested only through the process, the deadlines by
+  `test/erlang/erx_blk_virtio_tests.erl` against the wall clock and the rest by the `block_device` QEMU suite's good path; they should move into a pure module whose full, held and broken cases are
   tested on the host.
-* [Medium] erx_blk: a device that stops completing leaves its callers to time out in `gen_server:call` (an exit, not
-  `{error, timeout}`), and a timed-out write still lands later. design-storage.md's transport contract gives every
-  request a wait limit of 10 s from its acceptance and an in-flight bound of 18 s, past which the device process ends,
-  below `call/1`'s 30 s; the device process implements neither, and `call/1` should return `{error, _}`.
-* [Medium] erx_blk: a virtio device that stops completing leaves its callers to time out in `gen_server:call` (an exit, not
-  `{error, timeout}`), and a timed-out write still lands later; the driver needs a per-request deadline that ends the
-  device process (as a broken queue does), `call/1` should return `{error, _}`, and held requests of a caller that has gone should be dropped.
+* [Medium] erx_blk: `call/1` exits from `gen_server:call` at its 30 s timeout instead of returning `{error, _}`, and
+  the device process keeps the held requests of a caller that has gone until their wait limit answers them.
 * [Medium] erx_blk, SD register spacing (`erx_blk_sd_regs`; docs/design-storage.md, "The SD host controller"): the
   6 us spacing between non-`data` writes holds only while every such write goes through `erx_blk_sd_regs` with the
   latest handle; spacing in the device NIF for `sdhci` records, or a chokepoint check, would make it hold by

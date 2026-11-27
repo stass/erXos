@@ -294,12 +294,6 @@ enum usb_bot_status u8
   value good 0
   value failed 1
   value phase_error 2
-# The BOT core's deadlines (design-usb.md, "The block transport"), erXos's choice: a
-# request still queued this long after its acceptance is answered without being sent,
-# and one issued this long ago, its REQUEST SENSE and reset recovery included, ends its
-# medium.
-limit usb_bot_queue_deadline_ms u32 10000
-limit usb_bot_issue_deadline_ms u32 18000
 # How often a unit is polled with TEST UNIT READY until its medium is ready, and a
 # removable unit's medium after (design-usb.md, "The SCSI subset"), as FreeBSD's disk
 # driver polls (scsi_da.c:3060-3065, as the design cites it).

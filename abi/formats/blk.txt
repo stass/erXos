@@ -1,0 +1,16 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The block transport contract's bounds (docs/design-storage.md, "Data model"), erXos's
+# choice, which every block transport keeps: virtio-blk's and the SD host controller's
+# device processes and the USB Bulk-Only transport's core. A request still waiting
+# blk_wait_limit_ms after its acceptance is answered {device, deadline} without being
+# issued; one issued blk_in_flight_ms ago and not complete is a failure that ends its
+# device process, or for a USB unit its medium. Their sum stays below erx_blk's 30 s call
+# timeout, so the transport answers before its caller gives up.
+limit blk_wait_limit_ms u32 10000
+limit blk_in_flight_ms u32 18000
+# The most sectors one SD host controller request moves, 32 KiB: the most whose write a
+# card within its specification finishes inside blk_in_flight_ms (63 blocks at 250 ms of
+# busy and the last at 500 ms). It is the SD transport's own limit; virtio-blk's follows
+# from its pool buffer and USB's from the xHCI bulk buffer.
+limit blk_sd_max_sectors u32 64

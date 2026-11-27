@@ -80,9 +80,9 @@ that is gone, or the unit's course.
 A flush of a medium that cannot flush is answered `{error, no_flush}`,
 never `ok`.
 
-A request still queued usb_bot_queue_deadline_ms after its acceptance is
+A request still queued blk_wait_limit_ms (abi/formats/blk.txt) after its acceptance is
 answered `{error, {device, deadline}}` and never sent. One issued
-usb_bot_issue_deadline_ms ago, its sense and reset recovery included, is
+blk_in_flight_ms ago, its sense and reset recovery included, is
 answered the same and ends its unit's medium, and reset recovery starts at
 once: its class reset stops the transfer the device left hanging, whose
 late completion names an older tag and is ignored. A tick checks the
@@ -202,7 +202,7 @@ step({control, Result}, Now, State = #{phase := Phase}) ->
 step({end_medium, Lun, Ref}, _Now, State) ->
     end_medium(Lun, Ref, State);
 step(tick, Now, State = #{phase := Phase, op := #{issued := Issued}})
-  when ?ON_BULK(Phase), Now - Issued >= ?ERX_USB_BOT_ISSUE_DEADLINE_MS ->
+  when ?ON_BULK(Phase), Now - Issued >= ?ERX_BLK_IN_FLIGHT_MS ->
     abandon(Now, State);
 step(tick, Now, State) ->
     expire_queued(Now, State).
@@ -211,11 +211,11 @@ step(tick, Now, State) ->
 -spec deadline(state()) -> integer() | infinity.
 deadline(#{queue := Queue, op := Op, phase := Phase}) ->
     Queued = case queue:peek(Queue) of
-                 {value, #{accepted := Accepted}} -> [Accepted + ?ERX_USB_BOT_QUEUE_DEADLINE_MS];
+                 {value, #{accepted := Accepted}} -> [Accepted + ?ERX_BLK_WAIT_LIMIT_MS];
                  empty -> []
              end,
     Issued = case Op of
-                 #{issued := At} when ?ON_BULK(Phase) -> [At + ?ERX_USB_BOT_ISSUE_DEADLINE_MS];
+                 #{issued := At} when ?ON_BULK(Phase) -> [At + ?ERX_BLK_IN_FLIGHT_MS];
                  _InCallOrNone -> []
              end,
     %% A number sorts before an atom, so infinity is the minimum only of an empty list.
@@ -311,7 +311,7 @@ next(_Now, State) ->
 
 %% A request at the head of the queue is sent only within its deadline, for its unit's
 %% current medium, and, for a flush, to a medium that flushes.
-admit(#{id := Id, accepted := Accepted}, Now, State) when Now - Accepted >= ?ERX_USB_BOT_QUEUE_DEADLINE_MS ->
+admit(#{id := Id, accepted := Accepted}, Now, State) when Now - Accepted >= ?ERX_BLK_WAIT_LIMIT_MS ->
     answer_next(Id, {error, {device, deadline}}, Now, State);
 admit(Entry = #{id := Id, medium := Medium, request := Request}, Now, State) ->
     Current = current(lun(Request), State),
@@ -472,7 +472,7 @@ sense_failed(Now, State) ->
 
 %% Late, the readiness is answered as any late operation, and no medium is made.
 become_ready(_Lun, _Ref, _Flush, Now, State = #{op := #{issued := Issued}})
-  when Now - Issued >= ?ERX_USB_BOT_ISSUE_DEADLINE_MS ->
+  when Now - Issued >= ?ERX_BLK_IN_FLIGHT_MS ->
     abandon(Now, State);
 become_ready(Lun, Ref, Flush, Now, State = #{units := Units}) ->
     none = maps:get(Lun, Units),
@@ -480,7 +480,7 @@ become_ready(Lun, Ref, Flush, Now, State = #{units := Units}) ->
 
 %% The operation done: its answer, then its unit's medium ended when Medium says so, then
 %% the next request, so no queued request runs against a medium the operation has ended.
-finish(_Reply, _Medium, Now, State = #{op := #{issued := Issued}}) when Now - Issued >= ?ERX_USB_BOT_ISSUE_DEADLINE_MS ->
+finish(_Reply, _Medium, Now, State = #{op := #{issued := Issued}}) when Now - Issued >= ?ERX_BLK_IN_FLIGHT_MS ->
     abandon(Now, State);
 finish(Reply, Medium, Now, State = #{op := #{entry := #{id := Id, medium := Ref, request := Request}}}) ->
     Idle = State#{phase := idle, op := none},
@@ -501,7 +501,7 @@ abandon(Now, State = #{op := #{entry := #{id := Id, medium := Ref, request := Re
 
 expire_queued(Now, State = #{queue := Queue}) ->
     {Expired, Kept} = lists:partition(fun(#{accepted := Accepted}) ->
-                                              Now - Accepted >= ?ERX_USB_BOT_QUEUE_DEADLINE_MS
+                                              Now - Accepted >= ?ERX_BLK_WAIT_LIMIT_MS
                                       end, queue:to_list(Queue)),
     {State#{queue := queue:from_list(Kept)}, [{answer, Id, {error, {device, deadline}}} || #{id := Id} <- Expired]}.
 
