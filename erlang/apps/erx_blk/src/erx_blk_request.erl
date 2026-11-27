@@ -10,7 +10,7 @@
 %% A request is virtio's (section 5.2.6 of the specification): a 16-byte header the device
 %% reads, then the sectors it reads or writes, then one status byte it writes. Its segments
 %% are built and posted by erx_blk_write, the one module that posts and so the driver's one
-%% write path, with range/3.
+%% write path, with range/4.
 %%
 %% Everything the device wrote is untrusted. decode/2 takes the bytes erx_device:complete/2
 %% copied out of the pool, of any size, and returns the request's result or a reason built
@@ -18,7 +18,7 @@
 
 -module(erx_blk_request).
 
--export([capacity/2, range/3, decode/2]).
+-export([capacity/2, range/4, decode/2]).
 -export([max_sectors/0, buffer_size/0]).
 
 -export_type([request/0, reason/0]).
@@ -47,15 +47,17 @@ buffer_size() ->
 capacity(Low, High) -> (High bsl 32) bor Low.
 
 %% Whether Count sectors from Sector lie on a device of Capacity sectors, and Count is one
-%% request's worth. The sum is an Erlang integer, so it cannot wrap.
--spec range(term(), term(), non_neg_integer()) -> ok | {error, out_of_range | bad_count}.
-range(_Sector, Count, _Capacity) when not is_integer(Count); Count < 1; Count > ?MAX_SECTORS ->
+%% request's worth, at most Max, the transport's own limit: max_sectors/0 on virtio,
+%% erx_blk_sd_host:max_sectors/0 on the SD controller. The sum is an Erlang integer, so it
+%% cannot wrap.
+-spec range(term(), term(), pos_integer(), non_neg_integer()) -> ok | {error, out_of_range | bad_count}.
+range(_Sector, Count, Max, _Capacity) when not is_integer(Count); Count < 1; Count > Max ->
     {error, bad_count};
-range(Sector, _Count, _Capacity) when not is_integer(Sector); Sector < 0 ->
+range(Sector, _Count, _Max, _Capacity) when not is_integer(Sector); Sector < 0 ->
     {error, out_of_range};
-range(Sector, Count, Capacity) when Sector + Count > Capacity ->
+range(Sector, Count, _Max, Capacity) when Sector + Count > Capacity ->
     {error, out_of_range};
-range(_Sector, _Count, _Capacity) ->
+range(_Sector, _Count, _Max, _Capacity) ->
     ok.
 
 %% The result of a request from the bytes the device wrote into its in segments, end to end

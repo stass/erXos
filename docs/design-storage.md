@@ -295,8 +295,9 @@ window itself lies past the medium's end, and the window answers that
 `eio`, as a device error. The maximum request is the
 transport's: 8 sectors on virtio, the sectors one pool buffer holds
 beside its header and status byte; 64 sectors on the SD controller,
-32 KiB, the most whose write a card within its specification finishes
-inside the in-flight bound below. The
+32 KiB (`max_sectors/0` of `erx_blk_sd_host.erl`, beside its
+deadlines), the most whose write a card within its specification
+finishes inside the in-flight bound below. The
 block service reads it from `info/0` when it starts a window, and the
 window refuses a larger request with `einval`; the window's own `info`
 names it as `max_sectors`, beside its role and length, so a file system

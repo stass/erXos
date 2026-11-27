@@ -17,18 +17,18 @@ capacity_test_() ->
 
 range_test_() ->
     Max = erx_blk_request:max_sectors(),
-    [?_assertEqual(ok, erx_blk_request:range(0, 1, 16)),
-     ?_assertEqual(ok, erx_blk_request:range(15, 1, 16)),
-     ?_assertEqual(ok, erx_blk_request:range(8, Max, 16)),
-     ?_assertEqual({error, out_of_range}, erx_blk_request:range(16, 1, 16)),
-     ?_assertEqual({error, out_of_range}, erx_blk_request:range(15, 2, 16)),
-     ?_assertEqual({error, out_of_range}, erx_blk_request:range(-1, 1, 16)),
-     ?_assertEqual({error, out_of_range}, erx_blk_request:range(0, 1, 0)),
-     ?_assertEqual({error, out_of_range}, erx_blk_request:range(sector, 1, 16)),
-     ?_assertEqual({error, out_of_range}, erx_blk_request:range(1 bsl 64, 1, 1 bsl 64)),
-     ?_assertEqual({error, bad_count}, erx_blk_request:range(0, 0, 16)),
-     ?_assertEqual({error, bad_count}, erx_blk_request:range(0, Max + 1, 1 bsl 20)),
-     ?_assertEqual({error, bad_count}, erx_blk_request:range(0, 1.0, 16))].
+    [?_assertEqual(ok, erx_blk_request:range(0, 1, Max, 16)),
+     ?_assertEqual(ok, erx_blk_request:range(15, 1, Max, 16)),
+     ?_assertEqual(ok, erx_blk_request:range(8, Max, Max, 16)),
+     ?_assertEqual({error, out_of_range}, erx_blk_request:range(16, 1, Max, 16)),
+     ?_assertEqual({error, out_of_range}, erx_blk_request:range(15, 2, Max, 16)),
+     ?_assertEqual({error, out_of_range}, erx_blk_request:range(-1, 1, Max, 16)),
+     ?_assertEqual({error, out_of_range}, erx_blk_request:range(0, 1, Max, 0)),
+     ?_assertEqual({error, out_of_range}, erx_blk_request:range(sector, 1, Max, 16)),
+     ?_assertEqual({error, out_of_range}, erx_blk_request:range(1 bsl 64, 1, Max, 1 bsl 64)),
+     ?_assertEqual({error, bad_count}, erx_blk_request:range(0, 0, Max, 16)),
+     ?_assertEqual({error, bad_count}, erx_blk_request:range(0, Max + 1, Max, 1 bsl 20)),
+     ?_assertEqual({error, bad_count}, erx_blk_request:range(0, 1.0, Max, 16))].
 
 %% A buffer holds one request of the most sectors: header, sectors, status.
 buffer_size_test() ->

@@ -997,6 +997,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Low] erx_blk_table: a data partition whose extended partition, from system A's record at sector 548,864, would
   pass 2^32 - 1 sectors (about 2 TiB less 834 MiB), which an MBR cannot describe, is refused as
   `{mbr, 4, sectors}` rather than as a data length the table cannot hold.
-* [Low] erx_blk_window: a request for more sectors than one device request carries (`erx_blk_request:max_sectors/0`)
+* [Low] erx_blk_window: a request for more sectors than one device request carries (the transport's `max_sectors`)
   is refused with `einval` rather than split, so every client splits its own.
 * [Low] erx_blk_virtio: an interrupt storm costs a scheduler, bounded by the device's rate (Phase 1 residual).

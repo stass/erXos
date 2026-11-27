@@ -315,7 +315,7 @@ service(#state{dev = Dev, regs = Regs, irq = Irq} = S) ->
 
 handle_call(info, _From, State = #state{card = Card, clock = Clock}) ->
     #{addressing := Addressing, sectors := Sectors, cid := Cid, cache := Cache} = Card,
-    {reply, {ok, #{transport => sdhci, capacity => Sectors, max_sectors => erx_blk_request:max_sectors(),
+    {reply, {ok, #{transport => sdhci, capacity => Sectors, max_sectors => erx_blk_sd_host:max_sectors(),
                    flush => true,
                    detail => #{addressing => Addressing, clock => Clock, bus_width => 4, cid => Cid,
                                cache => Cache}}}, State};

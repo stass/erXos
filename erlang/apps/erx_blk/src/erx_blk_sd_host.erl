@@ -36,15 +36,18 @@ device process ends. Times are monotonic milliseconds.
 -export([inhibited/2, dat0_high/1, base_clock/2, version/1]).
 -export([command/1, command_step/2, awaited/1]).
 -export([new/1, step/2, phase/1, deadline/1]).
--export([wait_limit_ms/0, in_flight_ms/0]).
+-export([max_sectors/0, wait_limit_ms/0, in_flight_ms/0]).
 
 -export_type([event/0, interrupt_event/0, transfer/0, request/0, action/0, command/0, command_action/0]).
 
 -include("generated/erx_hw_sdhci.hrl").
 
 %% The transport contract (docs/design-storage.md, "Data model"): a request
-%% is issued only within 10 s of its acceptance, and one issued must be
-%% complete 18 s after it was issued.
+%% moves at most 64 sectors, 32 KiB, the most whose write a card within its
+%% specification finishes inside the in-flight bound; it is issued only within
+%% 10 s of its acceptance, and one issued must be complete 18 s after it was
+%% issued.
+-define(MAX_SECTORS, 64).
 -define(WAIT_LIMIT_MS, 10000).
 -define(IN_FLIGHT_MS, 18000).
 %% SDHCI 3.00's largest divisor of the 10-bit divided clock (Host
@@ -365,6 +368,10 @@ data_action(buffer_write_ready) -> [write_block];
 data_action(transfer_complete) -> [].
 
 %%% The transfer
+
+-doc "The most sectors one request moves, which info/0 of erx_blk reports as max_sectors.".
+-spec max_sectors() -> pos_integer().
+max_sectors() -> ?MAX_SECTORS.
 
 -doc "The wait limit, from acceptance to issue, in milliseconds.".
 -spec wait_limit_ms() -> pos_integer().

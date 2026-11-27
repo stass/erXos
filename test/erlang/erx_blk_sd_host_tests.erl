@@ -125,6 +125,14 @@ in_flight_bound_test() ->
 deadlines_below_the_callers_test() ->
     ?assert(?H:wait_limit_ms() + ?H:in_flight_ms() < 30000).
 
+%% The in-flight bound covers the largest request at the specification's own limits
+%% (docs/design-storage.md, "Data model"; Physical Layer 4.6.2, p.95): each block written
+%% at 250 ms of busy, the last at up to 500 ms, and each block read at 100 ms.
+in_flight_bound_covers_the_largest_request_test() ->
+    Max = ?H:max_sectors(),
+    ?assert((Max - 1) * 250 + 500 =< ?H:in_flight_ms()),
+    ?assert(Max * 100 =< ?H:in_flight_ms()).
+
 %%% The transfer, exhaustively
 
 %% The events the exploration offers at every point.

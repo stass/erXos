@@ -17,6 +17,10 @@
 %% SDHCI_DAT_INHIBIT, sdhci.h:148-149).
 -define(CMD_INHIBIT, 1).
 -define(DAT_INHIBIT, 2).
+%% The SD transport's request limit as the design states it, and the transfer mode of a
+%% multi-block write: block count enabled, Auto CMD12 and multiple blocks (sdhci.c:1730-1743).
+-define(SD_MAX_SECTORS, 64).
+-define(MULTI_WRITE_MODE, 16#26).
 
 issue(Plan, Reads) ->
     erx_device:script(Reads),
@@ -88,3 +92,35 @@ step_feed_test() ->
     erx_device:script(#{}),
     ok = ?W:sd_feed(erx_blk_sd_regs:new(dev), Plan, 0),
     ?assertEqual(Block, << <<W:32/little>> || {write, data, W} <- ops(erx_device:calls()) >>).
+
+%% The largest write the SD transport takes, 64 sectors, 32 KiB (docs/design-storage.md,
+%% "Data model"), is one command sequence: one CMD25 with a block count of 64 and Auto
+%% CMD12, each of the 64 blocks of the caller's data fed through `data` on its
+%% buffer-ready event, and CMD13 after transfer complete. One sector more is refused by the
+%% plan builder, which is pure, so before the device is touched.
+largest_write_test() ->
+    Data = << <<(I rem 251):8>> || I <- lists:seq(0, ?SD_MAX_SECTORS * 512 - 1) >>,
+    {ok, Plan} = ?W:sd_write_plan(0, Data, ?CARD),
+    {{ok, Regs}, Calls} = issue(Plan, #{}),
+    [Word] = [W || {command, W} <- ops(Calls)],
+    ?assertEqual({25, ?MULTI_WRITE_MODE}, {(Word bsr 24) band 16#3f, Word band 16#ffff}),
+    ?assertEqual([(?SD_MAX_SECTORS bsl 16) bor 512], [S || {write, blksizecnt, S} <- ops(Calls)]),
+    ?assertEqual(Data, fed(Plan, Regs)),
+    ?assertEqual({error, bad_count}, ?W:sd_write_plan(0, <<Data/binary, 0:4096>>, ?CARD)).
+
+%% The transfer core run over a write plan as the device process runs it, each block it asks
+%% for fed from the plan to the stand-in, until it issues CMD13; the words fed, as bytes.
+fed(Plan, Regs) ->
+    #{data := {write, 512, Count}} = ?W:sd_shape(Plan),
+    T0 = erx_blk_sd_host:new(#{op => write, sector => 0, count => Count, capacity => maps:get(sectors, ?CARD),
+                               accepted => 0}),
+    {T1, [{issue, transfer}]} = erx_blk_sd_host:step(T0, {start, 0}),
+    {T2, []} = erx_blk_sd_host:step(T1, {command_complete, 16#900}),
+    erx_device:script(#{}),
+    T3 = lists:foldl(fun(Index, T) ->
+                             {Next, [{write_block, Index}]} = erx_blk_sd_host:step(T, buffer_write_ready),
+                             ok = ?W:sd_feed(Regs, Plan, Index),
+                             Next
+                     end, T2, lists:seq(0, Count - 1)),
+    {_Done, [{issue, status}]} = erx_blk_sd_host:step(T3, {transfer_complete, 16#900}),
+    << <<W:32/little>> || {write, data, W} <- ops(erx_device:calls()) >>.

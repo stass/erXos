@@ -243,7 +243,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [Low] storage, the SD controller's request size: docs/design-storage.md gives it 64 sectors, 32 KiB, a request, but `erx_blk_sd:handle_call(info, ...)` answers `erx_blk_request:max_sectors()`, 8, and its windows take 8; decide which is meant and make the other follow.
 * [Medium] storage, create-or-open's refused truncate (`erx_media_volume:emptied/3`): a refusal
   after part of the truncate committed forgets the caller's hold of the file outright, though a
   holder is counted once however many fids name the file, so a hold an earlier walk took goes too

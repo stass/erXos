@@ -94,7 +94,7 @@
 -spec read_segments(term(), term(), non_neg_integer()) ->
           {ok, [erx_device:segment()]} | {error, out_of_range | bad_count}.
 read_segments(Sector, Count, Capacity) ->
-    case erx_blk_request:range(Sector, Count, Capacity) of
+    case erx_blk_request:range(Sector, Count, erx_blk_request:max_sectors(), Capacity) of
         ok ->
             {ok, [{out, header(?ERX_VIRTIO_BLK_T_IN, Sector)},
                   {in, Count * ?ERX_VIRTIO_BLK_SECTOR_SIZE},
@@ -111,7 +111,7 @@ read_segments(Sector, Count, Capacity) ->
 write_segments(Sector, Data, Capacity) when is_binary(Data),
                                             byte_size(Data) rem ?ERX_VIRTIO_BLK_SECTOR_SIZE =:= 0 ->
     Count = byte_size(Data) div ?ERX_VIRTIO_BLK_SECTOR_SIZE,
-    case erx_blk_request:range(Sector, Count, Capacity) of
+    case erx_blk_request:range(Sector, Count, erx_blk_request:max_sectors(), Capacity) of
         ok ->
             {ok, [{out, header(?ERX_VIRTIO_BLK_T_OUT, Sector)}, {out, Data}, {in, ?STATUS_BYTES}]};
         Refused ->
@@ -309,8 +309,8 @@ sd_feed_of(_Data) -> none.
 
 -spec sd_read_plan(term(), term(), erx_blk_sd_card:card()) ->
           {ok, sd_plan()} | {error, out_of_range | bad_count}.
-sd_read_plan(Sector, Count, #{sectors := Sectors} = Card) ->
-    case erx_blk_request:range(Sector, Count, Sectors) of
+sd_read_plan(Sector, Count, Card) ->
+    case sd_range(Sector, Count, Card) of
         ok -> {ok, sd_plan_of(sd_index(Count, 17, 18), sd_address(Sector, Card), r1,
                               {read, ?SD_BLOCK, Count}, none)};
         Refused -> Refused
@@ -318,10 +318,10 @@ sd_read_plan(Sector, Count, #{sectors := Sectors} = Card) ->
 
 -spec sd_write_plan(term(), term(), erx_blk_sd_card:card()) ->
           {ok, sd_plan()} | {error, out_of_range | bad_count}.
-sd_write_plan(Sector, Data, #{sectors := Sectors} = Card)
+sd_write_plan(Sector, Data, Card)
   when is_binary(Data), byte_size(Data) rem ?SD_BLOCK =:= 0 ->
     Count = byte_size(Data) div ?SD_BLOCK,
-    case erx_blk_request:range(Sector, Count, Sectors) of
+    case sd_range(Sector, Count, Card) of
         ok -> {ok, sd_plan_of(sd_index(Count, 24, 25), sd_address(Sector, Card), r1,
                               {write, ?SD_BLOCK, Count}, Data)};
         Refused -> Refused
@@ -339,6 +339,11 @@ sd_status_plan(#{rca := Rca}) ->
                                data := none | {read | write, pos_integer(), pos_integer()}}.
 sd_shape(#sd_plan{response = Response, data = Data}) ->
     #{response => Response, data => Data}.
+
+%% Whether Count sectors from Sector are one request on Card, at most the SD transport's own
+%% limit (erx_blk_sd_host:max_sectors/0).
+sd_range(Sector, Count, #{sectors := Sectors}) ->
+    erx_blk_request:range(Sector, Count, erx_blk_sd_host:max_sectors(), Sectors).
 
 sd_blocks(none, _Count) -> none;
 sd_blocks({Direction, Size}, Count) -> {Direction, Size, Count}.

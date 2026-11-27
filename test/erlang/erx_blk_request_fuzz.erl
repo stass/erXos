@@ -4,7 +4,7 @@
 %% Random completions through erx_blk_request:decode/2, the block driver's parse of what a
 %% device wrote, and random requests through its checks. Whatever arrives, decode/2
 %% returns ok, {ok, Data} or {error, Reason} with Reason one of the fixed shapes, and agrees
-%% with reference/2, which judges the bytes by their size and last byte alone; range/3 and
+%% with reference/2, which judges the bytes by their size and last byte alone; range/4 and
 %% erx_blk_write:write_segments/3 agree with a reference of plain comparisons. Sizes cluster at
 %% the boundaries (empty, one short, exact, one long), so every path is common. The seed
 %% comes from make check-fuzz.
@@ -98,7 +98,7 @@ check_range() ->
                    Sector < 0; Sector + Count > Capacity -> {error, out_of_range};
                    true -> ok
                end,
-    case erx_blk_request:range(Sector, Count, Capacity) of
+    case erx_blk_request:range(Sector, Count, Max, Capacity) of
         Expected -> ok;
         Other -> error({range_disagrees, Sector, Count, Capacity, Other})
     end,

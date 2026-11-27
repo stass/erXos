@@ -93,7 +93,14 @@ class ErxBlkSdTest < Minitest::Test
               from: "     {?ERX_HW_SDHCI_INTERRUPT_CARD_REMOVE_MASK, card_remove}\n     | error_bits()].",
               to: "     {?ERX_HW_SDHCI_INTERRUPT_CARD_REMOVE_MASK, card_remove}\n" \
                   "     | error_bits() -- [{?ERX_HW_SDHCI_INTERRUPT_RESP_ERR_MASK, response}]].",
-              cases: 'erx_blk_sd_host_tests')
+              cases: 'erx_blk_sd_host_tests'),
+    Fault.new(name: "SD plans bounded by virtio's request limit", source: WRITE,
+              from: 'erx_blk_request:range(Sector, Count, erx_blk_sd_host:max_sectors(), Sectors)',
+              to: 'erx_blk_request:range(Sector, Count, erx_blk_request:max_sectors(), Sectors)',
+              cases: 'erx_blk_sd_issue_tests'),
+    Fault.new(name: "the SD limit taken from virtio's", source: HOST,
+              from: 'max_sectors() -> ?MAX_SECTORS.', to: 'max_sectors() -> erx_blk_request:max_sectors().',
+              cases: 'erx_blk_sd_issue_tests')
   ].freeze
 
   def test_sd_cores_pass_under_eunit
