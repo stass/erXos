@@ -23,13 +23,13 @@ class ErxF2fsFormatTest < Minitest::Test
   Seed = Data.define(:fault, :anchor, :replacement, :failure)
 
   SEEDS = [
-    Seed.new(fault: "segment 0 on a section boundary of the partition, not of the medium",
-             anchor: '    Segment0 = ceil_to(First + ?SUPER_BLOCKS, Section) - First,',
-             replacement: '    Segment0 = ceil_to(?SUPER_BLOCKS, Section),',
+    Seed.new(fault: "segment 0 on a segment boundary of the partition, not of the medium",
+             anchor: '    Segment0 = ceil_to(First + ?SUPER_BLOCKS, ?BLOCKS_PER_SEG) - First,',
+             replacement: '    Segment0 = ceil_to(?SUPER_BLOCKS, ?BLOCKS_PER_SEG),',
              failure: VALID),
     Seed.new(fault: 'two logs sharing a section',
-             anchor: 'log_segment(#{section := S}, Type) -> Type * S.',
-             replacement: 'log_segment(#{section := _}, Type) -> Type.',
+             anchor: 'log_segment(Type) -> Type.',
+             replacement: 'log_segment(Type) -> Type div 2.',
              failure: VALID),
     Seed.new(fault: "the SIT's count missing the root's dentry block",
              anchor: "                ?WARM_DATA -> 1;\n",

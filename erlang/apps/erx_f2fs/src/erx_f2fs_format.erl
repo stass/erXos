@@ -11,15 +11,12 @@ host and writes each phase, ending each in a flush; a mount never formats.
 [F n] cites fact n of the F2FS facts record, part 1, and [T n] fact n of
 its f2fs-tools record.
 
-The geometry: S segments a section, S the allocation unit in 2 MiB
-segments, rounded up, from 1 to 8, and halved, so that it still divides
-the unit, until it is at most the partition's segments over 256; segment 0 on the first absolute section boundary of the medium
-at least 8 KiB into the partition, so the two superblock copies fit before
-it; the checkpoint area 2 segments, the SIT and NAT copies sized as [T 12]
-gives, the SSA a block per main segment and one more, and the four areas
-padded together to whole sections, so the main area starts on an absolute
-section boundary too. 8 sections are reserved, and the larger of 16
-sections and 2 % of the main area, in whole sections, is overprovisioned.
+The geometry: one segment, 2 MiB, a section, on every volume; segment 0
+on the first absolute segment boundary of the medium at least 8 KiB into
+the partition, so the two superblock copies fit before it; the checkpoint
+area 2 segments, the SIT and NAT copies sized as [T 12] gives, and the
+SSA a block per main segment and one more. 8 sections are reserved, and
+the larger of 16 sections and 2 % of the main area is overprovisioned.
 The SIT version bitmap moves to payload blocks after the checkpoint
 header when it leaves the NAT's no room there ([F 23]). A partition with
 fewer than 20 main sections is refused, and so is one of more than
@@ -28,8 +25,8 @@ f2fs_segment_count_max segments, 16 TiB ([F 54]).
 The contents: the root directory, nid 3, in the first block of the warm
 node log, and its dentry block, "." and "..", in the first block of the
 warm data log, the two logs erXos writes (docs/design-f2fs.md, "Scope:
-features and forms"); each log of the six at the first segment of its
-own section, section T for the log of type T; the next block of the warm
+features and forms"); each log of the six in its own section, main
+segment T for the log of type T; the next block of the warm
 node log zeros, so a stale block there reads as no chain ([T 25]); NAT
 block 0 with nids 1 and 2 at address 1 and the root ([T 26], [T 73]); the
 SIT's first copy with the logs' types and the two valid blocks, every
@@ -55,19 +52,12 @@ describes.
 -define(SECTORS_PER_BLOCK, (?BLOCK_SIZE bsr ?LOG_SECTOR_SIZE)).
 %% The superblock copies' blocks, which lie before segment 0 ([F 7]).
 -define(SUPER_BLOCKS, 2).
-%% The allocation unit an installation that knows none passes, the size
-%% Bergmann found most common (docs/design-f2fs.md, "Formatting a volume").
--define(DEFAULT_UNIT, (4 bsl 20)).
--define(SECTION_SEGMENTS_MAX, 8).
-%% A section is at most the partition's segments over this, so the 16
-%% sections the cleaner keeps stay within a sixteenth of the partition.
--define(PARTITION_SEGMENTS_PER_SECTION, 256).
 -define(CHECKPOINT_SEGMENTS, 2).
 -define(RESERVED_SECTIONS, 8).
 -define(OVERPROVISION_SECTIONS, 16).
 -define(OVERPROVISION_PERCENT, 2).
-%% The fewest main sections: 16 overprovisioned and 4 for files, 8 MiB at
-%% one segment a section, as mkfs.f2fs's smallest volume holds ([T 17]).
+%% The fewest main sections: 16 overprovisioned and 4 for files, 8 MiB,
+%% as mkfs.f2fs's smallest volume holds ([T 17]).
 -define(MAIN_SECTIONS_MIN, 20).
 %% The checkpoint header's room for the version bitmaps, between its
 %% fixed part and the checksum in its last word ([F 23]).
@@ -99,13 +89,11 @@ abi/medium.txt places it.
 """.
 -type geometry() :: #{start := non_neg_integer(), sectors := non_neg_integer()}.
 -doc """
-The installation's choices: the medium's allocation unit in bytes (4 MiB
-when absent), the checkpoint version, an odd 31-bit number, the volume's
-UUID and the root's times in seconds; random for an installation and fixed
-for a test.
+The installation's choices: the checkpoint version, an odd 31-bit number,
+the volume's UUID and the root's times in seconds; random for an
+installation and fixed for a test.
 """.
--type options() :: #{unit => pos_integer(), version := pos_integer(),
-                     uuid := <<_:128>>, time := non_neg_integer()}.
+-type options() :: #{version := pos_integer(), uuid := <<_:128>>, time := non_neg_integer()}.
 -doc """
 The three phases, each a list of blocks to write, an address in the
 partition and its 4096 bytes; a phase starts only after the flush that
@@ -114,14 +102,14 @@ ends the one before it.
 -type plan() :: [[{non_neg_integer(), binary()}]].
 -doc "What the format refuses: a geometry or an option, by its name.".
 -type failure() :: {geometry, start | too_small | too_large} |
-                   {options, unit | version | uuid | time}.
+                   {options, version | uuid | time}.
 
 -doc "The plan of a volume on Geometry with Options, or what it refuses.".
 -spec plan(geometry(), options()) -> {ok, plan()} | {error, failure()}.
 plan(Geometry, Options) ->
     try
-        #{version := Version, uuid := Uuid, time := Time} = Checked = options(Options),
-        Layout = layout(Geometry, maps:get(unit, Checked, ?DEFAULT_UNIT)),
+        #{version := Version, uuid := Uuid, time := Time} = options(Options),
+        Layout = layout(Geometry),
         Super = superblock(Layout, Uuid),
         Zero = <<0:(?BLOCK_SIZE * 8)>>,
         SuperBlock = erx_f2fs_codec:encode_superblock(Super),
@@ -136,10 +124,6 @@ plan(Geometry, Options) ->
 %%% The options and the layout
 
 options(#{version := Version, uuid := Uuid, time := Time} = Options) ->
-    require(case Options of
-                #{unit := Unit} -> is_integer(Unit) andalso Unit > 0;
-                #{} -> true
-            end, {options, unit}),
     require(is_integer(Version) andalso Version > 0 andalso Version < 1 bsl 31
             andalso Version band 1 =:= 1, {options, version}),
     require(is_binary(Uuid) andalso byte_size(Uuid) =:= 16, {options, uuid}),
@@ -149,15 +133,15 @@ options(#{}) ->
     fail({options, version}).
 
 %% Every count and address of the volume, in blocks and segments of the
-%% partition; segment 0 and the main area on absolute section boundaries.
-layout(#{start := Start, sectors := Sectors}, Unit) ->
+%% partition; segment 0, and so every segment, on an absolute segment
+%% boundary of the medium, as F2FS places segment 0 on a zone boundary of
+%% the device ([F 16]).
+layout(#{start := Start, sectors := Sectors}) ->
     require(Start rem ?SECTORS_PER_BLOCK =:= 0, {geometry, start}),
     First = Start div ?SECTORS_PER_BLOCK,
     Blocks = Sectors div ?SECTORS_PER_BLOCK,
-    S = section_segments(Unit, Blocks div ?BLOCKS_PER_SEG),
-    Section = S * ?BLOCKS_PER_SEG,
-    Segment0 = ceil_to(First + ?SUPER_BLOCKS, Section) - First,
-    Segments = max(0, Blocks - Segment0) div Section * S,
+    Segment0 = ceil_to(First + ?SUPER_BLOCKS, ?BLOCKS_PER_SEG) - First,
+    Segments = max(0, Blocks - Segment0) div ?BLOCKS_PER_SEG,
     Sit = 2 * ceil_div(ceil_div(Segments, ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK), ?BLOCKS_PER_SEG),
     require(Segments =< ?ERX_F2FS_SEGMENT_COUNT_MAX, {geometry, too_large}),
     %% The NAT's bitmap shares the header with the SIT's, unless the SIT's
@@ -172,36 +156,26 @@ layout(#{start := Start, sectors := Sectors}, Unit) ->
                          ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK),
     Nat = 2 * min(NatRoom, max(1, ceil_div(NatBlocks, ?BLOCKS_PER_SEG))),
     Tables = ?CHECKPOINT_SEGMENTS + Sit + Nat,
-    Metadata = ceil_to(Tables + ceil_div(Segments - Tables + 1, ?BLOCKS_PER_SEG), S),
+    Metadata = Tables + ceil_div(Segments - Tables + 1, ?BLOCKS_PER_SEG),
     Main = Segments - Metadata,
-    require(Main >= ?MAIN_SECTIONS_MIN * S, {geometry, too_small}),
-    Overprovision = ceil_to(max(?OVERPROVISION_SECTIONS * S,
-                                ceil_div(Main * ?OVERPROVISION_PERCENT, 100)), S),
-    #{blocks => Blocks, section => S, segment0 => Segment0, segments => Segments, payload => Payload,
+    require(Main >= ?MAIN_SECTIONS_MIN, {geometry, too_small}),
+    #{blocks => Blocks, segment0 => Segment0, segments => Segments, payload => Payload,
       sit => Sit, nat => Nat, ssa => Metadata - Tables, main => Main,
       main_blkaddr => Segment0 + Metadata * ?BLOCKS_PER_SEG,
-      reserved => ?RESERVED_SECTIONS * S, overprovision => Overprovision}.
-
-section_segments(Unit, PartitionSegments) ->
-    halved(max(1, min(ceil_div(Unit, ?BLOCK_SIZE * ?BLOCKS_PER_SEG), ?SECTION_SEGMENTS_MAX)),
-           PartitionSegments div ?PARTITION_SEGMENTS_PER_SECTION).
-
-halved(S, Most) when S > 1, S > Most -> halved(S div 2, Most);
-halved(S, _Most) -> S.
+      overprovision => max(?OVERPROVISION_SECTIONS, ceil_div(Main * ?OVERPROVISION_PERCENT, 100))}.
 
 %% A version bitmap selecting copy 0 of every block of a table of Segments.
 zero_bitmap(Segments) -> <<0:(erx_f2fs_codec:bitmap_bytes(Segments) * 8)>>.
 
-%% The first segment of log Type's section, the main area's section Type.
-log_segment(#{section := S}, Type) -> Type * S.
+%% The main segment of log Type, the first of a section of its own, and
+%% the first block of that segment.
+log_segment(Type) -> Type.
 
-%% The first block of log Type's segment.
-log_block(#{main_blkaddr := Main} = Layout, Type) ->
-    Main + log_segment(Layout, Type) * ?BLOCKS_PER_SEG.
+log_block(#{main_blkaddr := Main}, Type) -> Main + log_segment(Type) * ?BLOCKS_PER_SEG.
 
 %%% The records
 
-superblock(#{blocks := Blocks, section := S, segment0 := Segment0, segments := Segments,
+superblock(#{blocks := Blocks, segment0 := Segment0, segments := Segments,
              payload := Payload,
              sit := Sit, nat := Nat, ssa := Ssa, main := Main,
              main_blkaddr := MainAddress}, Uuid) ->
@@ -213,8 +187,8 @@ superblock(#{blocks := Blocks, section := S, segment0 := Segment0, segments := S
           log_sectors_per_block => ?ERX_F2FS_LOG_BLOCK_SIZE - ?LOG_SECTOR_SIZE,
           log_blocksize => ?ERX_F2FS_LOG_BLOCK_SIZE,
           log_blocks_per_seg => ?ERX_F2FS_LOG_BLOCKS_PER_SEG,
-          segs_per_sec => S, secs_per_zone => 1,
-          block_count => Blocks, section_count => Main div S, segment_count => Segments,
+          segs_per_sec => 1, secs_per_zone => 1,
+          block_count => Blocks, section_count => Main, segment_count => Segments,
           segment_count_ckpt => ?CHECKPOINT_SEGMENTS, segment_count_sit => Sit,
           segment_count_nat => Nat, segment_count_ssa => Ssa, segment_count_main => Main,
           segment0_blkaddr => Segment0, cp_blkaddr => Segment0, sit_blkaddr => SitAddress,
@@ -226,7 +200,7 @@ superblock(#{blocks := Blocks, section := S, segment0 := Segment0, segments := S
 %% The tables' first copies: SIT blocks of the logs' entries, then zeros;
 %% NAT block 0 with the reserved nids and the root, then zeros.
 tables(#{sit := Sit, nat := Nat} = Layout, Super, Zero) ->
-    SitBlocks = sit_blocks(Layout),
+    SitBlocks = sit_blocks(),
     Nids = [#{version => 0, ino => Nid, block_addr => Address}
             || {Nid, Address} <- [{0, 0}, {?ERX_F2FS_NODE_INO, 1}, {?ERX_F2FS_META_INO, 1},
                                   {?ERX_F2FS_ROOT_INO, log_block(Layout, ?WARM_NODE)}]],
@@ -240,14 +214,12 @@ tables(#{sit := Sit, nat := Nat} = Layout, Super, Zero) ->
         [{erx_f2fs_codec:table_block(nat, Super, 0, Index), case Index of 0 -> NatBlock; _ -> Zero end}
          || Index <- lists:seq(0, erx_f2fs_codec:copy_blocks(Nat) - 1)].
 
-%% The SIT blocks through the last log's segment: each log's segment with
-%% its type, and the root's two blocks valid.
-sit_blocks(Layout) ->
-    Logs = maps:from_list([{log_segment(Layout, Type), Type} || Type <- lists:seq(0, ?LOG_TYPES - 1)]),
-    Entries = [sit_entry(maps:get(Segno, Logs, none))
-               || Segno <- lists:seq(0, log_segment(Layout, ?LOG_TYPES - 1))],
-    [erx_f2fs_codec:encode_sit_block(Chunk)
-     || Chunk <- chunks(Entries, ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK)].
+%% The SIT's first block, through the last log's segment: each log's
+%% segment with its type, and the root's two blocks valid.
+sit_blocks() ->
+    Logs = maps:from_list([{log_segment(Type), Type} || Type <- lists:seq(0, ?LOG_TYPES - 1)]),
+    [erx_f2fs_codec:encode_sit_block([sit_entry(maps:get(Segno, Logs))
+                                      || Segno <- lists:seq(0, log_segment(?LOG_TYPES - 1))])].
 
 sit_entry(Type) ->
     Valid = case Type of
@@ -255,15 +227,15 @@ sit_entry(Type) ->
                 ?WARM_DATA -> 1;
                 _ -> 0
             end,
-    #{valid_blocks => Valid, type => case Type of none -> 0; _ -> Type end,
-      valid_map => <<Valid:1, 0:(?BLOCKS_PER_SEG - 1)>>, mtime => 0}.
+    #{valid_blocks => Valid, type => Type, valid_map => <<Valid:1, 0:(?BLOCKS_PER_SEG - 1)>>,
+      mtime => 0}.
 
 %% Pack 1, its header, its payload, three data and three node summaries
 %% and the header's copy, and pack 2's header, zeros.
-checkpoint(#{main := Main, sit := Sit, nat := Nat, reserved := Reserved, payload := Payload,
-             overprovision := Overprovision} = Layout,
+checkpoint(#{main := Main, sit := Sit, nat := Nat, payload := Payload,
+             overprovision := Overprovision},
            #{cp_blkaddr := Pack1} = Super, Version, Zero) ->
-    Logs = fun(First) -> [log_segment(Layout, Type) || Type <- lists:seq(First, First + 2)]
+    Logs = fun(First) -> [log_segment(Type) || Type <- lists:seq(First, First + 2)]
                              ++ lists:duplicate(5, ?UNUSED_LOG) end,
     %% The warm logs have written one block each, the others none.
     Offsets = [0, 1, 0, 0, 0, 0, 0, 0],
@@ -278,7 +250,7 @@ checkpoint(#{main := Main, sit := Sit, nat := Nat, reserved := Reserved, payload
                      Super, Fields#{checkpoint_ver => Version,
                                     user_block_count => (Main - Overprovision) * ?BLOCKS_PER_SEG,
                                     valid_block_count => 2,
-                                    rsvd_segment_count => Reserved,
+                                    rsvd_segment_count => ?RESERVED_SECTIONS,
                                     overprov_segment_count => Overprovision,
                                     free_segment_count => Main - ?LOG_TYPES,
                                     cur_node_segno => Logs(?ERX_F2FS_LOG_HOT_NODE),
@@ -329,12 +301,6 @@ root(Layout, Super, Version, Time, Zero) ->
 ceil_div(A, B) -> (A + B - 1) div B.
 
 ceil_to(A, B) -> ceil_div(A, B) * B.
-
-chunks([], _Size) -> [];
-chunks(List, Size) when length(List) =< Size -> [List];
-chunks(List, Size) ->
-    {Chunk, Rest} = lists:split(Size, List),
-    [Chunk | chunks(Rest, Size)].
 
 require(true, _Failure) -> ok;
 require(false, Failure) -> fail(Failure).

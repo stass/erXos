@@ -19,8 +19,8 @@
 > commit, the reset count, the vault's storage domain, drives, whose
 > FAT and EROFS volumes the media domain serves at `/media`, checking
 > and repairing a drive's FAT volume with `fsck_fat` over its raw sectors,
-> erXos's F2FS as a mounted file system with its power-cut harness and
-> its sections fitted to the card, and the SD driver's discard.
+> erXos's F2FS as a mounted file system with its power-cut harness,
+> and the SD driver's discard.
 
 **Background needed.** [Chapter 1](01-operating-systems.md) (block
 devices, file systems, journals), [chapter 10](10-domains.md)
@@ -470,26 +470,28 @@ An SD card is flash behind a small controller that maps and erases in
 large **allocation units**, often 4 MiB, keeps only a few of them open
 for writing at once, and is fastest when each unit is written from start
 to end. F2FS's own unit of cleaning is the **section**, a run of 2 MiB
-segments, and the design makes the section the one unit in which the
-volume meets the card
-([design-f2fs.md, The section is the medium's
-unit](../design-f2fs.md#the-section-is-the-mediums-unit)). The format
-sizes a section to the card's allocation unit, as timings on the card
-show it rather than as the card reports it, and starts every section
-on one; each log fills a whole section of its own before it takes
-another, and a volume whose logs `mkfs.f2fs` placed in one section has
-them moved apart by its first read-write mount; and the cleaner empties
-whole sections. Six streams would make a card that keeps two units open
+segments, and the logs, the cleaner and the reserves all count
+sections
+([design-f2fs.md, Sections and logs](../design-f2fs.md#sections-and-logs)).
+The format makes every section one segment, 2 MiB, on every card, as
+Linux's formatter does by default, and sizes nothing to
+the card, whose report of its unit need not be the unit it uses; it
+starts every segment on a 2 MiB boundary of the card. A volume another
+system formatted with larger sections mounts read-write all the same.
+Each log fills a whole section of its own before it takes another, and
+a volume whose logs `mkfs.f2fs` placed in one section has them moved
+apart by its first read-write mount; and the cleaner empties whole
+sections. Six streams would make a card that keeps two units open
 close and reopen them, so the volume writes two logs, one for nodes and
 one for data, on every medium, while every checkpoint still names the
 six that Linux's format requires. The price is cleaning: data of
 different lifetimes share a log, so a section the cleaner empties holds
 more live blocks. Writes that lie next to each other on the medium
 travel as one request. A measurement on the Pi's own card, against
-Linux's F2FS on the same card, chooses the section size and the number
-of logs, and decides whether a later stage tells the card of each
-section a checkpoint frees with a **discard**, so the card learns of a
-whole free unit. This is designed and not built.
+Linux's F2FS on the same card, chooses the number of logs, and decides
+whether a later stage tells the card of each section a checkpoint frees
+with a **discard**, so the card learns of a whole free section. This is
+designed and not built.
 
 ## 16.5 FAT, drives and the SD controller
 
@@ -638,7 +640,8 @@ survives a power cycle. Moving data by DMA through the controller's
 descriptor tables is designed and not built, and so is the discard
 that tells the card a range is free: an erase of at most one
 allocation unit, which the driver builds, like every write, after the
-trial check. The card's own write cache stays off.
+trial check. The card's own write cache stays off until the measurement
+on the Pi's card shows it pays.
 
 ## 16.6 Updates through two slots
 

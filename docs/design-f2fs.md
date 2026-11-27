@@ -47,11 +47,13 @@ where it links:
   ([Scope](#scope-features-and-forms)) and converts an inline file or
   directory to blocks in the step that first changes it
   ([Directories](#directories)).
-* **The section is the medium's unit.** A section spans the medium's
-  allocation unit and starts on one; every log takes whole sections,
-  cleaning moves whole sections and the reserves count sections. Two
-  logs are written on every medium, one for nodes and one for data
-  ([The section is the medium's unit](#the-section-is-the-mediums-unit)).
+* **Sections are the logs' unit.** erXos formats every volume with
+  one-segment sections, 2 MiB, as `mkfs.f2fs` does by default, and sizes nothing to the card; every log takes whole
+  sections, cleaning moves whole sections and the reserves count
+  sections, so a volume another writer formatted with any section size
+  Linux accepts mounts read-write. Two logs are written on every
+  medium, one for nodes and one for data
+  ([Sections and logs](#sections-and-logs)).
 
 ## Context
 
@@ -146,14 +148,18 @@ and "the smallest efficient block size for reads and writes is 64KB"
 ([LWN 428584](https://lwn.net/Articles/428584/)). F2FS's own
 documentation "expects that the section size would be the same as the
 unit size of garbage collection in FTL" (`f2fs.rst` l.785-787, section
-Default Block Allocation, in [References](#references)). How far current A1 and A2 cards
-relax the open-unit limit is unverified; the measurement of
-[Performance](#performance) settles it for the Pi's card. A reported
-unit is a starting point, not a fact about the card's insides: in the
+Default Block Allocation, in [References](#references)), yet its
+formatter does not size a section from the medium: `mkfs.f2fs` makes
+one segment a section unless told otherwise ([T 2]), and Android's
+formatter is reported never to tell it otherwise (`fs_mgr_format.cpp`,
+unverified, in [References](#references)). erXos makes one segment a
+section on every medium
+([Formatting a volume](#formatting-a-volume)), sizing nothing to a
+card, whose report of its unit need not be the one it uses (in the
 same article "all cards currently seem to report 4MB segments, even
-those that actually use 2MB or 8MB segments internally", so the unit
-the format uses is the one the card profile infers from the card's
-timings where there is one.
+those that actually use 2MB or 8MB segments internally"). How far current A1 and A2 cards
+relax the open-unit limit is unverified; the measurement of
+[Performance](#performance) settles it for the Pi's card.
 
 F2FS's records are packed, with a 64-bit `block_count` at offset 36 of
 the superblock and 32-bit fields at odd offsets in NAT entries, summary
@@ -249,8 +255,8 @@ mounts read-only a volume whose main area of 16 sections or fewer leaves
 erXos's cleaner no room
 ([The space a volume offers](#the-space-a-volume-offers)). Any number
 of segments per section that Linux accepts ([F 54]) mounts read-write,
-since every rule below counts sections ([The section is the medium's
-unit](#the-section-is-the-mediums-unit)). A
+since every rule below counts sections
+([Sections and logs](#sections-and-logs)). A
 volume marked as needing a check (`FSCK` or `QUOTA_NEED_FSCK`, or a
 non-zero `s_errors` or stop-reason count in the superblock, [F 12])
 mounts as Linux mounts it ([F 56]), with the mark kept and shown: erXos
@@ -367,7 +373,7 @@ Reply, Plan}`, where a plan is a sequence of phases, each a set of block
 writes followed by a flush, or a set of block reads. The volume process
 carries the plan out: it sends every read and write to the window
 itself, asynchronously, contiguous blocks of one phase as one request
-([Runs](#the-section-is-the-mediums-unit)), collects the answers, and
+([Runs](#sections-and-logs)), collects the answers, and
 continues the step that waited for them. Since the window answers one request at a time in
 the order it receives them, and the volume process is its only client, a
 read the volume issued before a write is answered before that write
@@ -418,24 +424,25 @@ lands on the walk's footprint or on data the chain names. So:
   dnode of an inode that never reached the chain, say, can ever be linked
   into a later chain and replayed against a reused nid.
 
-### The section is the medium's unit
+### Sections and logs
 
 A section is `segs_per_sec` consecutive segments of 512 blocks, from
-the superblock ([F 54]), and it is the one unit in which the volume meets
-the medium. The format sizes a section to the medium's allocation unit
-and starts the main area on an absolute section boundary of the medium
-([Formatting a volume](#formatting-a-volume)), so a section covers whole
-allocation units, or part of one on a medium whose unit is larger than
-the largest section. Everything else follows from treating the section
-as the unit:
+the superblock ([F 54]), and it is the unit in which the logs, the
+cleaner and the reserves count space. erXos formats every volume with
+one segment a section, 2 MiB, on every medium, and chooses no size per
+card ([Formatting a volume](#formatting-a-volume)). A volume another
+writer formatted keeps its own section size, any that Linux accepts, and
+mounts read-write, as F2-R2 promises, so every rule below holds for any
+`segs_per_sec`: only what erXos formats is fixed, not what it reads and
+writes. Everything follows from treating the section as the unit:
 
 * **Allocation.** A log takes a free section, one that no log holds and
   whose every block is free, and appends through its segments in order;
   no two logs share a section. This is Linux's own shape: its allocator
   takes a new segment "first within the current section" and skips "a
-  section in use by a log" ([R 34]). Each log's writes therefore fill one
-  allocation unit from its start to its end before they touch another,
-  which is the write a card handles best. The format and the allocator
+  section in use by a log" ([R 34]). Each log's writes therefore run in
+  address order through a section of their own, one appending stream
+  per log, which is the write a card handles best. The format and the allocator
   keep this for every volume erXos writes, but Linux requires only that
   the six current segments differ ([F 55]), and `mkfs.f2fs` puts the hot
   node, warm node, cold node and hot data logs in main segments 0 to 3
@@ -448,13 +455,12 @@ as the unit:
   from that commit on the invariant holds and erXos's allocation keeps
   it. The sections those logs leave are closed, part written, and the
   cleaner takes them like any other.
-* **Cleaning.** A victim is a whole section, so a cleaned section frees
-  whole allocation units ([The cleaner](#the-cleaner)).
+* **Cleaning.** A victim is a whole section ([The cleaner](#the-cleaner)).
 * **Space.** The reserves and the room rule count sections
   ([Space and the cleaner](#space-and-the-cleaner)).
 * **Discard.** In the discard stage, each section a checkpoint's commit
   frees is discarded after the commit ([Discards](#discards)), so the
-  card learns of whole free units.
+  card learns of whole free sections.
 * **Logs written.** A checkpoint always names six current segments, as
   Linux requires ([F 55]), and the volume writes two of them, with the
   mapping of [Scope](#scope-features-and-forms). The four it does not
@@ -1187,7 +1193,7 @@ the sections released to the allocator one step before their discards
 are sent); and every workload gives the same trees with discards and
 without (seeded fault: a new dentry block written only up to its last
 used slot, trusting a discarded section to read as zeros). Whether the
-erase of a whole unit stalls the requests queued behind it is part of
+erase of a whole section stalls the requests queued behind it is part of
 the measurement that enables the stage.
 
 ## Mount and recovery
@@ -1444,7 +1450,7 @@ mount derives from them alone:
   committed checkpoint marks it SSR, since erXos appends only, or when
   another log's current segment lies in its section, since no two logs
   share a section
-  ([The section is the medium's unit](#the-section-is-the-mediums-unit)).
+  ([Sections and logs](#sections-and-logs)).
 
 A log takes its position this way whether or not the mount checkpoint
 writes into it, so no log keeps a position before a block replay made
@@ -1775,32 +1781,23 @@ of the medium. It is the same Erlang the guest runs, so the format has
 one implementation; F2FS in fsimg would be a second, and would need the
 clean room's facts too.
 
-* **Section.** S segments per section and one section per zone, where S
-  is the medium's allocation unit in 2 MiB segments, rounded up, at
-  least 1 and at most 8, and halved, so that it still divides the unit,
-  until it is at most the partition's segments over 256,
-  so that the 16 sections the cleaner reserves stay within a sixteenth
-  of the partition. The unit is the allocation unit the installation passes
-  in `Options`: the unit the card profile inferred for the card or its
-  model where there is one ([Performance](#performance)), else the unit
-  the card reports when the installation knows it, and 4 MiB otherwise,
-  the size Bergmann found most common
-  ([The medium under the volume](#the-medium-under-the-volume)); an
-  image built once for every card takes the default. So the vault's
-  64 MiB and the data partition's 128 MiB as packed have one-segment
-  sections, and a data partition grown to the rest of a card of a few
-  GiB has the card's unit, or a half or quarter of it below 256 of its
-  units, up to 16 MiB. A larger unit costs reserve:
-  16 sections of 16 MiB are 256 MiB.
+* **Section.** One segment per section and one section per zone, on
+  every volume and every medium, as `mkfs.f2fs` makes by default
+  ([T 2]); `Options` carries no
+  section size and nothing about the medium sizes one
+  ([The medium under the volume](#the-medium-under-the-volume)). So the
+  16 sections the cleaner keeps are 32 MiB on every volume.
 * **Geometry.** Blocks of 4096 bytes, segments of 512; segment 0 at the
-  first absolute section boundary of the medium at or past the
-  partition's start plus 8 KiB, as `mkfs.f2fs` places it at a zone
-  boundary of the device, not of the partition ([F 16]), so the two
-  superblocks fit before it: on the data partition, which starts at
-  590 MiB ([abi/medium.txt](../abi/medium.txt)), segment 0 is 2 MiB in,
-  at 592 MiB, a 16 MiB boundary and so a section boundary for S of 1,
-  2, 4 or 8; for any other S it lies at the first section boundary past
-  590 MiB and 8 KiB, and the gap is at most one section. `Geometry`
+  first absolute segment boundary of the medium at or past the
+  partition's start plus 8 KiB, as F2FS places it at a zone boundary
+  of the device, not of the partition ([F 16]), which `mkfs.f2fs`
+  itself does not do, since it ignores the partition's offset ([T 11]); so the two
+  superblocks fit before it and every segment is a 2 MiB-aligned run
+  of the medium, which no aligned power-of-two unit of 2 MiB or more
+  splits: on the data partition, which starts at 590 MiB
+  ([abi/medium.txt](../abi/medium.txt)), segment 0 is 2 MiB in, at
+  592 MiB, and on any partition it lies at most a segment and a block
+  in. `Geometry`
   carries the partition's start on the medium for this, which the medium
   writer takes from [abi/medium.txt](../abi/medium.txt), the layout's one
   source. The
@@ -1808,11 +1805,11 @@ clean room's facts too.
   gives, the SIT bitmap moving to payload blocks when it passes 3836
   bytes ([F 23]), past 3 TiB, and a partition of more than 2^23 segments,
   16 TiB, refused ([F 54]); the SSA one block per main segment and one more
-  ([F 17]); the four areas padded together to whole sections, as
-  `mkfs.f2fs` pads them to a zone ([T 12]), so the main area starts on an
-  absolute section boundary and every section covers whole units. The
+  ([F 17]); each area whole segments, so the main area starts on an
+  absolute segment boundary too, as `mkfs.f2fs`'s padding to a zone of
+  one segment leaves it ([T 12]). The
   reserve: `rsvd_segment_count` 8 sections, and overprovisioning of the
-  larger of 16 sections and 2 % of the main area, rounded up to sections
+  larger of 16 sections and 2 % of the main area
   ([Space](#space-and-the-cleaner));
   `user_block_count` is the main area less the overprovisioned segments.
   These satisfy every check of [F 55] and [T 47-48]. The smallest
@@ -2527,15 +2524,15 @@ inputs, each paired with the seeded fault it must catch:
 | a read-only mount writes nothing, over a window that fails every write | a read-only mount that writes its mount checkpoint |
 | the walk ends at an address it already read, and at its bound, computed from the charge, fails the mount naming the remedy | the footprint check dropped, so a two-block loop runs to the bound |
 | a cut of a checkpoint after its nodes landed and before its last block, behind a one-node record and with 200 dirty inodes, mounts and replays the record | the bound counted from the records' node blocks alone, so the walk fails at 170 |
-| a record across the boundary of a two-segment section, the warm node log at the first segment's last block: the mount checkpoint resumes past the walk's end block, and every cut of it recovers the record again | the position taken from the committed segment alone, so the mount checkpoint writes over the commit block |
+| a record across the boundary of a two-segment section, on a volume re-described with wider sections as below, the warm node log at the first segment's last block: the mount checkpoint resumes past the walk's end block, and every cut of it recovers the record again | the position taken from the committed segment alone, so the mount checkpoint writes over the commit block |
 | a record whose data lies in a section free at the checkpoint and held by no log of it: the mount leaves that section out of its free set, and every cut of the mount checkpoint recovers the record again | the free set rebuilt from the footprint alone, so the mount checkpoint's nodes land on the record's data |
 | `set_node` keeps `valid_block_count` and each inode's `i_blocks` equal to a recount through creating, moving and freeing direct, indirect and xattr nodes | an indirect node left out of its inode's `i_blocks` |
 | replay of a Linux chain whose last marked block is a direct node past the end of the file gives the size Linux's mount gives | the size left as the inode block had it |
 | filling and churning at every format size keeps `need` covered and the cleaner freeing segments | victims restricted to full segments |
 | repeated mounts of a busy volume keep the room rule | the mount checkpoint moving every log to a free section |
-| after every commit the six current segments lie in six sections, through a read-write mount and churn of syzkaller's writable seeds with two segments per section and of erXos-formatted volumes with two and four, their logs edited to `mkfs.f2fs`'s segments 0 to 3 ([T 19]) | the shared-section test dropped from the mount checkpoint, so the hot node log appends into the section the warm node log holds |
-| the format's S for every unit from 16 KiB to 64 MiB and every partition from 56 MiB to 64 GiB is the section rule's, and its main area starts on an absolute section boundary for partitions starting at 525 and 590 MiB | segment 0 placed from the partition's start rather than the medium's, which misaligns both partitions |
-| filling and churning with sections of 1, 2, 4 and 8 segments keeps `need` covered and the cleaner freeing sections, no step moving more than 512 blocks | a step that moves the whole victim |
+| after every commit the six current segments lie in six sections, through a read-write mount and churn of syzkaller's writable seeds with two segments per section and of erXos-formatted volumes re-described with two and four segments per section, whose logs at main segments 0 to 5 then share sections as `mkfs.f2fs`'s do ([T 19]) | the shared-section test dropped from the mount checkpoint, so the hot node log appends into the section the warm node log holds |
+| every plan, for partitions from 56 MiB to 8 GiB at starts to 4 GiB, writes one-segment sections with segment 0 on an absolute segment boundary of the medium | segment 0 placed from the partition's start rather than the medium's |
+| filling and churning with sections of 1, 2, 4 and 8 segments, the wider ones erXos's one-segment volumes re-described with S-segment sections in the superblock, the main area trimmed to whole sections, as the mount tests re-describe them, keeps `need` covered and the cleaner freeing sections, no step moving more than 512 blocks | a step that moves the whole victim |
 | every block written lands in the warm node or warm data log, and the other four logs keep their positions through every workload | a checkpoint's dirty dentry block placed in the hot data log |
 | a phase's runs cover exactly its blocks, each run contiguous, at most `max_sectors` and within one phase | two blocks one block apart merged into a run |
 | a workload that crosses many data segments with few dirty nodes, and an unlink of a large file, each take a checkpoint when the epoch's dirty state reaches its share | the unpublished summaries left out of the count |
@@ -2554,8 +2551,8 @@ placement. Linux's own two-log output proves none of this: mounted with
 `active_logs=2`, Linux writes every node to the hot node log and a
 checkpoint at every `fsync` ([R 32], [R 40]), so it leaves no chain;
 the guest checks only that erXos mounts and churns the images it
-leaves. Beyond that, erXos's images with 2, 4 and 8 segments per
-section, written and churned by erXos, pass `fsck.f2fs` and Linux's
+leaves. Beyond that, `mkfs.f2fs -s 2`, `-s 4` and `-s 8` images,
+churned by erXos, pass `fsck.f2fs` and Linux's
 mount, and Linux churns them in turn; and `mkfs.f2fs -s 2` and `-s 4`
 images, fresh from `mkfs.f2fs` before Linux writes them, so that two or
 four logs share a section ([T 19]), mount read-write in erXos, whose
@@ -2573,16 +2570,15 @@ watch list ([todo-performance.md](todo-performance.md)):
   against Linux's one preflush and FUA write;
 * small writes without a buffer: a write of less than a block rewrites
   the whole block out of place, so a stream of short appends rewrites its
-  last block each time, which on an SD card may cost more than any
-  section size saves; whether a bounded per-file buffer of dirty blocks
+  last block each time, which on an SD card may cost more than the
+  cleaning it causes; whether a bounded per-file buffer of dirty blocks
   ([Alternatives considered](#alternatives-considered)) earns its
   complexity is a question the card measurement settles, with short
   application appends among its workloads;
 * the volume process carries every block request and its answer, at 4 KiB
   per request on virtio and 32 KiB on an SD card, each phase's
   contiguous blocks merged into runs;
-* on the Pi's card: whether a section the size of the card's unit beats
-  one-segment sections, whether two logs beat six, what each discard
+* on the Pi's card: whether two logs beat six, what each discard
   costs and whether erases stall the requests behind them, the commit
   block's rewrite over its pre-image, a backward write a card's
   controller may handle worst, on which records rest
@@ -2591,8 +2587,7 @@ watch list ([todo-performance.md](todo-performance.md)):
   or a per-file write buffer would turn into fewer writes
   ([Alternatives considered](#alternatives-considered)); the card
   profile and the comparison with Linux's F2FS on the same card in
-  [todo-performance.md](todo-performance.md) settle the section size
-  and the number of logs;
+  [todo-performance.md](todo-performance.md) settle the number of logs;
 * checkpoint cost: whole NAT and SIT blocks for every changed entry, with
   no journals, a checkpoint per timer tick while anything is dirty, and a
   checkpoint whenever the epoch's charge reaches its 512 blocks;
@@ -2633,11 +2628,15 @@ watch list ([todo-performance.md](todo-performance.md)):
   Rejected: the free set and the logs' appending already keep the mount
   checkpoint off the chain, and six moves per mount would strand part-written sections and
   take the free sections the cleaner and later checkpoints need.
-* **One-segment sections on every medium.** Rejected: on a card whose
-  allocation unit is 4 MiB, a cleaned 2 MiB section frees half a unit,
-  and the card copies the other half when the section is written again;
-  sections the size of the unit cost only a larger reserve, which the
-  format keeps within a sixteenth of the partition.
+* **Sections sized to the card's allocation unit.** Rejected: a cleaned
+  section the size of the unit would free whole units, but
+  `mkfs.f2fs` does not size sections from the medium ([T 2]),
+  a card's report of its unit need not be the unit it uses (Bergmann),
+  and every larger section costs reserve, 16 sections of 8 MiB being
+  128 MiB. It would take the unit from the transport or a card profile
+  through the installation into the format, with section sizes the
+  format must halve to fit small partitions, for a gain no measurement
+  shows.
 * **Six logs, on every medium or where a medium keeps many units
   open.** Rejected for the media erXos writes F2FS on: a card or USB
   drive that keeps two units open closes and reopens them under six
@@ -2720,12 +2719,6 @@ watch list ([todo-performance.md](todo-performance.md)):
    cleaner runs. Recommendation: two, Linux's own smallest mode, until
    the card profile shows the Pi's cards keep three or more units open
    and the comparison shows two logs cleaning measurably more.
-2. **The default section of an image built for every card.**
-   Recommendation: 4 MiB, the size Bergmann found most common, until the
-   card profile infers the units of the cards erXos is tested on from
-   their timings rather than their reports; a larger default costs every
-   volume a larger reserve, and an 8 MiB section would cover units of 2,
-   4 and 8 MiB whole.
 
 ## Risks
 
@@ -2736,7 +2729,7 @@ watch list ([todo-performance.md](todo-performance.md)):
 | Linux, extending a file, reads the nodes a cut left mapped past its size | low | after a cut between a large truncate's steps, the file's old bytes in Linux's extension of it | the nodes-past-a-size probe settles it; if Linux reads them, a large truncate frees from the file's end and lowers the size at each step, so no checkpoint commits a slot past a size |
 | A medium that tears within a sector | low | a torn commit block or superblock | the storage design's sector assumption; recorded with the block driver's residual |
 | A cheap card keeps fewer than two units open, as some of Bergmann's did | medium | two logs alternate, and writes fall to tens of KB/s | the card profile of [todo-performance.md](todo-performance.md) measures the open-unit limit before G13; a card below two is a reason to revisit the file system, recorded with the measurement |
-| A card's unit is larger than 16 MiB, or the image's default 4 MiB is not the card's, or the card reports a unit it does not use | medium | a cleaned section frees part of a unit, and the card copies the rest | the card profile infers the unit from timings, and the installation passes the inferred unit; the measurement compares section sizes |
+| A card's unit is larger than the 2 MiB section | medium | a cleaned section frees part of a unit, and the card copies the rest | accepted: `mkfs.f2fs`'s default makes the same one-segment sections on such cards ([T 2]); no measurement of section sizes is planned |
 | SD cards that ignore flushes | medium | any ordering lost on the Pi | recorded with the block driver's residual; the Pi's half of G13 measures it |
 | Two flushes and a pre-image per `fsync` too slow | medium | commit latency at G13 | the measurement decides; group commit across waiting `fsync`s and a forced-unit-access write are the fixes on the table |
 | A fragmented volume whose cleaner cannot gain | low | `enospc` before the volume is full | the property tests measure it at every format size; the overprovisioning is the knob |
@@ -2776,6 +2769,11 @@ watch list ([todo-performance.md](todo-performance.md)):
   the `discard`, `active_logs` and `discard_unit` options (l.129-139,
   l.348-355), the on-disk layout (l.545-560) and Default Block
   Allocation (l.785-790).
+* Android's `fs_mgr_format.cpp` (Apache-2.0), `format_f2fs`, which runs
+  `make_f2fs` with feature flags and the block size and never `-s`:
+  `https://android.googlesource.com/platform/system/core/+/refs/heads/main/fs_mgr/fs_mgr_format.cpp`,
+  read on 2026-11-27 through a summarizing fetcher with no hash
+  recorded, so unverified until re-read.
 * Arnd Bergmann, "Optimizing Linux with cheap flash drives", LWN,
   2011-02-18, https://lwn.net/Articles/428584/, section "Pages, erase
   blocks and segments" (SHA-256 of the page read

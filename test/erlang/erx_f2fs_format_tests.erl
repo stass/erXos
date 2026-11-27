@@ -7,10 +7,10 @@ EUnit cases for erx_f2fs_format (docs/design-f2fs.md, "Formatting a volume"
 and "Unit and property tests"): a fresh volume mounts read-write in erXos's
 own mount, every table check passing, and its root lists only "." and "..";
 over generated geometries, from the smallest partition the format takes to
-8 GiB with sections of 1, 2, 4 and 8 segments, the plan writes only inside
-the partition, in its three phases, with segment 0 and the main area on
-absolute section boundaries of the medium, each log in its own section and
-the SIT's valid blocks exactly the main-area blocks the plan fills. Whether
+8 GiB, the plan writes only inside the partition, in its three phases, with
+one segment a section, segment 0 on an absolute segment boundary of the
+medium, each log in its own section and the SIT's valid blocks exactly the
+main-area blocks the plan fills. Whether
 Linux's fsck.f2fs and mount accept the volume is the oracle guest's check.
 """.
 
@@ -67,17 +67,12 @@ a_fresh_volume_mounts_read_write_with_an_empty_root_test() ->
                  need(fun(Given) -> erx_f2fs_core:lookup(Volume, Root, <<"absent">>, Given) end,
                       Blocks)).
 
-%% The vault's 64 MiB and the data partition's 128 MiB as packed take
-%% one-segment sections, whatever the unit; the data partition's segment 0
-%% is 2 MiB in, at 592 MiB.
-the_packed_partitions_take_one_segment_sections_test_() ->
-    [?_assertMatch(#{segs_per_sec := 1}, superblock(Geometry, #{unit => 16 bsl 20}))
-     || Geometry <- [data(), vault()]] ++
-        [?_assertMatch(#{segment0_blkaddr := 512}, superblock(data(), #{}))].
+%% The data partition's segment 0 is 2 MiB in, at 592 MiB.
+the_data_partitions_segment0_is_at_592_mib_test() ->
+    ?assertMatch(#{segment0_blkaddr := 512}, superblock(data())).
 
-superblock(Geometry, Unit) ->
-    {ok, [_, _, [{1, Block}, {0, Block}]]} =
-        erx_f2fs_format:plan(Geometry, maps:merge(options(), Unit)),
+superblock(Geometry) ->
+    {ok, [_, _, [{1, Block}, {0, Block}]]} = erx_f2fs_format:plan(Geometry, options()),
     {ok, Super} = erx_f2fs_codec:superblock(Block),
     Super.
 
@@ -85,7 +80,7 @@ superblock(Geometry, Unit) ->
 %% the data partition's start; one block less is refused.
 the_smallest_partition_holds_twenty_main_sections_test() ->
     Smallest = #{start => ?ERX_MEDIUM_DATA_START, sectors => 56 * ?MIB_SECTORS},
-    ?assertMatch(#{segment_count_main := 20}, superblock(Smallest, #{})),
+    ?assertMatch(#{segment_count_main := 20}, superblock(Smallest)),
     ?assertEqual({error, {geometry, too_small}},
                  erx_f2fs_format:plan(Smallest#{sectors := 56 * ?MIB_SECTORS - 8}, options())).
 
@@ -94,7 +89,6 @@ refusals_test_() ->
      || {Geometry, Options, Failure} <-
             [{(data())#{start := ?ERX_MEDIUM_DATA_START + 1}, #{}, {geometry, start}},
              {(data())#{sectors := 0}, #{}, {geometry, too_small}},
-             {data(), #{unit => 0}, {options, unit}},
              {data(), #{version => 16#2468ace0}, {options, version}},
              {data(), #{version => 1 bsl 31 + 1}, {options, version}},
              {data(), #{uuid => <<1, 2, 3>>}, {options, uuid}},
@@ -102,28 +96,20 @@ refusals_test_() ->
 
 %%% Properties over geometries
 
-%% Explicit geometries for each section size, at the start of the data
-%% partition, of the vault and on no section boundary, and generated ones
-%% from the smallest partition to 8 GiB, starts to 4 GiB and units of
-%% 512 KiB to 32 MiB.
+%% Explicit geometries at the start of the data partition, of the vault
+%% and on no segment boundary, and generated ones from the smallest
+%% partition to 8 GiB and starts to 4 GiB.
 geometries() ->
     rand:seed(exsss, {16#f2f5, 2010, 8}),
-    Explicit = [{data(), #{}}, {vault(), #{}},
-                {#{start => ?ERX_MEDIUM_DATA_START, sectors => 1024 * ?MIB_SECTORS}, #{unit => 4 bsl 20}},
-                {#{start => ?ERX_MEDIUM_VAULT_START, sectors => 2048 * ?MIB_SECTORS}, #{unit => 8 bsl 20}},
-                {#{start => 8, sectors => 4096 * ?MIB_SECTORS}, #{unit => 16 bsl 20}},
-                {#{start => 3 * ?SEGMENT_SECTORS + 8, sectors => 8192 * ?MIB_SECTORS}, #{unit => 32 bsl 20}}],
-    Units = [512 bsl 10, 2 bsl 20, 3 bsl 20, 4 bsl 20, 8 bsl 20, 16 bsl 20, 32 bsl 20],
-    Generated = [{#{start => 8 * (rand:uniform(1 bsl 20) - 1),
-                    sectors => 56 * ?MIB_SECTORS + 8 * rand:uniform(8192 * ?MIB_SECTORS div 8)},
-                  #{unit => lists:nth(rand:uniform(length(Units)), Units)}}
+    Explicit = [data(), vault(),
+                #{start => ?ERX_MEDIUM_DATA_START, sectors => 1024 * ?MIB_SECTORS},
+                #{start => ?ERX_MEDIUM_VAULT_START, sectors => 2048 * ?MIB_SECTORS},
+                #{start => 8, sectors => 4096 * ?MIB_SECTORS},
+                #{start => 3 * ?SEGMENT_SECTORS + 8, sectors => 8192 * ?MIB_SECTORS}],
+    Generated = [#{start => 8 * (rand:uniform(1 bsl 20) - 1),
+                   sectors => 56 * ?MIB_SECTORS + 8 * rand:uniform(8192 * ?MIB_SECTORS div 8)}
                  || _ <- lists:seq(1, 24)],
     Explicit ++ Generated.
-
-every_section_size_is_covered_test() ->
-    ?assertEqual([1, 2, 4, 8],
-                 lists:usort([S || {Geometry, Unit} <- geometries(),
-                                   #{segs_per_sec := S} <- [superblock(Geometry, Unit)]])).
 
 %% Past 3 TiB the SIT's bitmap moves to payload blocks, which the pack
 %% carries before its summaries; past 2^23 segments, 16 TiB, the format
@@ -144,12 +130,11 @@ a_large_volume_carries_the_sit_bitmap_in_payload_blocks_test_() ->
      end}.
 
 each_plan_writes_a_valid_volume_inside_its_partition_test_() ->
-    {timeout, 300, [?_test(valid(Geometry, Unit)) || {Geometry, Unit} <- geometries()]}.
+    {timeout, 300, [?_test(valid(Geometry)) || Geometry <- geometries()]}.
 
-valid(#{start := Start, sectors := Sectors}, Unit) ->
+valid(#{start := Start, sectors := Sectors} = Geometry) ->
     Partition = Sectors div 8,
-    {ok, [Zeros, Body, Supers] = Plan} =
-        erx_f2fs_format:plan(#{start => Start, sectors => Sectors}, maps:merge(options(), Unit)),
+    {ok, [Zeros, Body, Supers] = Plan} = erx_f2fs_format:plan(Geometry, options()),
     Zero = <<0:(?BLOCK * 8)>>,
     ?assertEqual([{0, Zero}, {1, Zero}], Zeros),
     ?assertMatch([{1, Block}, {0, Block}], Supers),
@@ -158,20 +143,13 @@ valid(#{start := Start, sectors := Sectors}, Unit) ->
                                                              byte_size(Block) =/= ?BLOCK]),
     ?assertEqual(length(Body), length(lists:ukeysort(1, Body))),
     Blocks = written(Plan),
-    {ok, #{superblock := Super, checkpoint := Checkpoint, sit := Sit, mode := Mode}} =
+    {ok, #{superblock := Super, sit := Sit, mode := Mode}} =
         mount(Partition, Blocks),
     ?assertEqual(read_write, Mode),
-    #{segs_per_sec := S, segment0_blkaddr := Segment0, main_blkaddr := Main,
+    #{segs_per_sec := 1, segment0_blkaddr := Segment0, main_blkaddr := Main,
       segment_count_main := MainSegments} = Super,
-    Section = S * 512,
-    First = Start div 8,
-    %% Segment 0 and the main area on absolute section boundaries.
-    ?assertEqual({0, 0}, {(First + Segment0) rem Section, (First + Main) rem Section}),
-    %% Each of the six logs at the first segment of a section of its own.
-    #{cur_node_segno := [N0, N1, N2 | _], cur_data_segno := [D0, D1, D2 | _]} = Checkpoint,
-    Logs = [N0, N1, N2, D0, D1, D2],
-    ?assertEqual(6, length(lists:usort([Segno div S || Segno <- Logs]))),
-    ?assertEqual([0, 0, 0, 0, 0, 0], [Segno rem S || Segno <- Logs]),
+    %% Segment 0 on an absolute segment boundary.
+    ?assertEqual(0, (Start div 8 + Segment0) rem 512),
     %% The SIT marks valid exactly the main-area blocks the plan fills.
     Valid = [Main + Segno * 512 + Offset
              || Segno <- lists:seq(0, MainSegments - 1),

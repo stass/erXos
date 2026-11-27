@@ -277,8 +277,8 @@ calls, so nothing above it depends on the controller:
   in sectors of 512 bytes, the most sectors one read or write moves, whether the
   medium flushes; the most sectors one discard covers, or `none`; and a map
   of what the transport reports about itself for the log and the
-  inspector (virtio's version and features; the card's type, bus width,
-  clock and the allocation unit it reports).
+  inspector (virtio's version and features; the card's type, bus width
+  and clock).
 
 Each answers with one closed set of errors: `{error, bad_count}` for
 bytes that are not whole sectors, a read or write count above
@@ -1184,26 +1184,29 @@ the card clears it, within the specification's 1 s, before it answers.
 The contract already makes an answered write durable only at an answered
 flush, as virtio's write-back cache requires (virtio 1.2, 5.2.5), and
 every client flushes for durability, so a client sees the same device
-model either way. Whether the cache pays is the card profile's to
-measure ([todo-performance.md](todo-performance.md)).
+model either way. Linux differs here: since a 2021 change to its MMC
+core, Ulf Hansson's "mmc: core: Add support for cache ctrl for SD
+cards", it sets Cache Enable at card start on a card that supports the
+SD cache and flushes it with Flush Cache
+([the patch thread](https://lore.kernel.org/all/20210506145829.198823-3-ulf.hansson@linaro.org/T/),
+cover letters and replies only, read on 2026-11-27; the first release
+carrying it unverified). erXos and FreeBSD keep it off. Whether the
+cache pays is the card profile's to measure
+([todo-performance.md](todo-performance.md)), and the measurement
+decides between the two.
 
 **The allocation unit.** The SD status that ACMD13 reads for the cache
 also carries AU_SIZE, four bits from bit 428, which FreeBSD decodes
 (`mmc.c:1325`) and turns into a unit of `16 << AU_SIZE` sectors when the
 field is not zero (`mmc.c:1735-1737`): 16 KiB for 1 up to 4 MiB for 9.
-The driver decodes 1 to 9 so and reports the unit in `info/0`'s detail,
-for the log and the inspector, and reports `unknown` for 0 and for 10
-to 15, whose coding by the specification is unverified, since its table
-was not read. The value sizes only the largest discard, below, so a
-wrong one costs speed and no data. It is the card's report, not a
-measurement: Bergmann found that "all cards currently seem to report
-4MB segments, even those that actually use 2MB or 8MB segments
-internally" ([LWN 428584](https://lwn.net/Articles/428584/), section
-Partitioning), so the unit a format uses comes from the card profile's
-timings, through the installation
-([design-f2fs.md](design-f2fs.md#formatting-a-volume)), never from this
-field. How many units a card keeps open no register says; the card
-profile measures it ([todo-performance.md](todo-performance.md)).
+The driver decodes 1 to 9 so, and takes 0 and 10 to 15, whose coding
+by the specification is unverified, since its table was not read, as
+`unknown`. The value sizes only the largest discard, below, so a wrong
+one costs speed and no data; nothing else reads it, and the file system
+sizes nothing to the card
+([design-f2fs.md](design-f2fs.md#formatting-a-volume)). How many units
+a card keeps open no register says; the card profile measures it
+([todo-performance.md](todo-performance.md)).
 
 **Discards.** A high-capacity card whose CSD lists command class 5, bit
 5 of the CCC field in bits 95 to 84 (`mmc.c:1236`), takes a discard as
@@ -1223,7 +1226,7 @@ block-addressed card erases any whole sectors (Linux's documentation:
 for SD, "erase_size" is "512 if the card is block-addressed",
 `mmc-dev-attrs.rst` l.47-52), so the driver does not round a range to
 unit boundaries as FreeBSD does (`mmcsd.c:1265-1271`); the file system
-above discards whole units when its sections cover them. A
+above discards whole sections. A
 standard-capacity card, whose erase granularity its CSD gives
 (`mmc.c:1221`) and the driver does not read, and a card without class 5
 report `discard => none`. What an erased sector then reads is the card's

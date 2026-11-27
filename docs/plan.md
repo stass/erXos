@@ -3533,8 +3533,8 @@ F2FS to the boards, which creates the data partition and the vault's
 partition afresh, with nothing littlefs wrote carried across, and the
 update service's refusal of an update whose storage formats differ from
 the running system's ([design-storage.md](design-storage.md#system-updates));
-then the SD policy the card measurement chooses, the section size and
-the logs, and the discard stage once that measurement shows discards
+then the SD policy the card measurement chooses, the number of logs
+and the cache, and the discard stage once that measurement shows discards
 pay ([design-f2fs.md](design-f2fs.md#discards)).
 These follow 0.2, which ships littlefs on the boards.
 

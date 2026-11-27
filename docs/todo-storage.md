@@ -872,8 +872,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   facet, with Linux as the oracle for the on-disk format. Until then the
   flag is refused, as every unimplemented feature is
   ([design-storage.md](design-storage.md#read-write-storage)).
-* [Low] storage, eMMC: a driver for an eMMC device, when a supported board has one, reports its
-  allocation unit from EXT_CSD's high-capacity erase group (byte 224 once ERASE_GROUP_DEF, byte 175,
+* [Low] storage, eMMC: a driver for an eMMC device, when a supported board has one, sizes its
+  largest discard from EXT_CSD's high-capacity erase group (byte 224 once ERASE_GROUP_DEF, byte 175,
   is set), turns its cache on and flushes it through CACHE_CTRL and FLUSH_CACHE (bytes 33 and 32), as
   FreeBSD does (`mmc.c:1876-1882`, `mmcreg.h:362-363` at `release/15.1.0`), and discards with TRIM only
   on a device with GB_CL_EN that matches no row of FreeBSD's TRIM exclusions (`mmc.c:115-130`), after its

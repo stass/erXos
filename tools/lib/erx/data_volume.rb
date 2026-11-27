@@ -44,11 +44,10 @@ module Erx
     # expression as plain arguments, never as code.
     F2FS_EVAL = <<~'ERLANG'
       try
-          [Path, Start, Sectors, Unit, Version, Time, Uuid] = init:get_plain_arguments(),
+          [Path, Start, Sectors, Version, Time, Uuid] = init:get_plain_arguments(),
           Int = fun erlang:list_to_integer/1,
-          Options = maps:from_list([{version, Int(Version)}, {time, Int(Time)},
-                                    {uuid, binary:decode_hex(list_to_binary(Uuid))}
-                                    | [{unit, Int(Unit)} || Unit =/= "default"]]),
+          Options = #{version => Int(Version), time => Int(Time),
+                      uuid => binary:decode_hex(list_to_binary(Uuid))},
           case erx_f2fs_format:plan(#{start => Int(Start), sectors => Int(Sectors)}, Options) of
               {ok, Phases} ->
                   ok = file:write_file(Path, [<<Phase:8, Address:32, Block/binary>>
@@ -102,10 +101,9 @@ module Erx
     # Formats an F2FS volume on the partition of sectors sectors from sector start of
     # the medium (abi/medium.txt): compiles erx_f2fs and the layouts it reads with the
     # oracle's erlc into directory, which the caller owns, runs the plan with version,
-    # uuid (16 bytes), time and the medium's allocation unit in bytes (unit, nil for
-    # the format's default), and answers an F2fsVolume. Raises Error with what the
+    # uuid (16 bytes) and time, and answers an F2fsVolume. Raises Error with what the
     # format refuses.
-    def f2fs(root:, runner:, directory:, start:, sectors:, version:, uuid:, time:, unit: nil)
+    def f2fs(root:, runner:, directory:, start:, sectors:, version:, uuid:, time:)
       erl = Oracle.new(root: root).erl_path(Runtime::HOST_OTP_FLAVOUR)
       compile = ErlangCompile.new(erlc: File.join(File.dirname(erl), 'erlc'), root: root, runner: runner)
       beams = File.join(directory, F2FS_TOOL_DIRECTORY)
@@ -113,7 +111,7 @@ module Erx
       [File.join(Generated::OUTPUT, ABI::PackedEmitter::ERLANG_PATH), *ErlangApps.modules(root: root, application: 'erx_f2fs')]
         .each { |source| compile.call(File.join(root, source), output: beams) }
       plan = File.join(directory, F2FS_PLAN)
-      arguments = [plan, start, sectors, unit || 'default', version, time, uuid.unpack1('H*')].map(&:to_s)
+      arguments = [plan, start, sectors, version, time, uuid.unpack1('H*')].map(&:to_s)
       runner.run([erl, '-noshell', '-noinput', '-boot', 'no_dot_erlang', '-pa', beams, '-eval', F2FS_EVAL, '-extra', *arguments],
                  name: 'f2fs-format', deadline: 120, chdir: directory, env: Oracle::CLEAN_ERLANG_ENV)
       F2fsVolume.new(start: start, phases: f2fs_phases(File.binread(plan)))
