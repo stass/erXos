@@ -139,11 +139,15 @@ read_only(#{attributes := A}) -> A band ?READ_ONLY =/= 0.
 -spec held_mtime(integer()) -> non_neg_integer().
 held_mtime(Time) ->
     {Date, Clock} = fat_time(Time),
-    mtime(#{date => Date, time => Clock}).
+    seconds(Date, Clock).
 
 -doc "A short entry's modification time in UNIX seconds (see the module's doc).".
 -spec mtime(short()) -> non_neg_integer().
 mtime(#{date := Date, time := Time}) ->
+    seconds(Date, Time).
+
+%% UNIX seconds of a FAT date and time; an invalid one is the first time FAT holds.
+seconds(Date, Time) ->
     Day = {1980 + (Date bsr 9), (Date bsr 5) band 16#0f, Date band 16#1f},
     {Hour, Minute, Second} = Clock = {Time bsr 11, (Time bsr 5) band 16#3f, (Time band 16#1f) * 2},
     case calendar:valid_date(Day) andalso Hour < 24 andalso Minute < 60 andalso Second < 60 of
