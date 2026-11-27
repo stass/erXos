@@ -20,13 +20,13 @@ The test plants faults as erx_fault_plan rules over four kinds of
 transfer, `cbw`, `data_out`, `data_in` and `csw`, which the stick asks
 at each. It acts them as the controller's answers: `silent` is `hold`,
 the transfer left unanswered with the stick's state where it was, so
-the device can be unplugged mid-transfer; `{late, Ms}` is
-`{late, Ms, Answer}`, the right answer and state, delivered late;
+the device can be unplugged mid-transfer;
 `{wrong_once, Answer}` replaces the right answer, the state moving on
 as for the right one (a CSW of 12 bytes, or one with a wrong signature);
 `gone` is `{error, gone}`. `{error, Reason}` is `{error, Reason}`, and in
-a data phase it also fails the command with MEDIUM ERROR, as an
-unreadable sector does.
+a data phase, in or out, it also fails the command with MEDIUM ERROR,
+as an unreadable sector does. The stick does not act `{late, Ms}`, whose
+effect must land when the transfer completes: a test that plants it fails.
 A stick told to lie about residue (lie_about_residue/1) reports FFFFFFFFh
 as every CSW's residue from then on, as a device that cannot count; a
 wedged stick (wedge/1) stalls every bulk transfer, its class reset and
@@ -41,7 +41,7 @@ properties of the device, not faults of one transfer.
 -export_type([answer/0]).
 
 %% A transfer's answer as the controller gives it, or a fault's form of one (the moduledoc).
--type answer() :: {ok, binary()} | {error, term()} | hold | {late, non_neg_integer(), answer()}.
+-type answer() :: {ok, binary()} | {error, term()} | hold.
 
 -define(BLOCKS, 128).
 -define(BLOCK, 512).
@@ -78,7 +78,8 @@ bulk_out(Data, Stick = #{phase := {data_out, Tag, Length, Lun, Sector}, media :=
     <<Before:Offset/binary, _Old:Length/binary, After/binary>> = maps:get(Lun, Media),
     exchange(data_out, Stick,
              fun(S) -> {{ok, <<>>}, S#{media := Media#{Lun := <<Before/binary, Data/binary, After/binary>>},
-                                       phase := {csw, Tag, 0, 0}}} end);
+                                       phase := {csw, Tag, 0, 0}}} end,
+             fun(S) -> S#{phase := {csw, Tag, Length, 1}, sense := ?MEDIUM_ERROR} end);
 bulk_out(_OutOfTurn, Stick) ->
     {{error, stall}, Stick}.
 
@@ -113,7 +114,7 @@ exchange(Kind, Stick = #{plan := Plan0}, Right, Failed) ->
         silent -> {hold, Asked};
         gone -> {{error, gone}, Asked};
         {error, Reason} -> {{error, Reason}, Failed(Asked)};
-        {late, Ms} -> {Answer, Moved} = Right(Asked), {{late, Ms, Answer}, Moved};
+        {late, _Ms} -> error({not_acted_by_the_stick, Fault});
         {wrong_once, Wrong} -> {Answer, Moved} = Right(Asked), {erx_fault_plan:wrong_answer(Wrong, Answer), Moved}
     end.
 

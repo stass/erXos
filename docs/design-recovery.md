@@ -965,7 +965,7 @@ module refuses it with a plain message naming the kind.
 **How a cell names its faults.** A cell declares the faults it injects
 with its other facts, each a kind and its named targets: `faults:
 [[:block_error, drive: :data, op: :read, nth: 3], [:kill_domain, domain:
-:network]]`. `Erx::Faults.declare` checks the declaration whole before
+:'network@erxos']]`. `Erx::Faults.declare` checks the declaration whole before
 QEMU starts: a kind outside the set, a kind the probe has not shown or
 whose relay is not written, a missing, extra or malformed target (a
 target is a short name the module checks before it reaches a QMP command

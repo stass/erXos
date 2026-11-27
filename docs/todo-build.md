@@ -1355,6 +1355,18 @@ design does not have, to be deleted so no side-by-side table can show it under s
 
 ## Planned features
 
+* [Medium] `test/erlang/erx_fault_plan.erl` (docs/design-recovery.md, layer 2): of the stand-ins the
+  design's table names, only the fake USB stick asks the plan. The fake xHCI's own `fail_status_transfer`,
+  the SD card model, the Bluetooth line model, the network pipe, the domain library's fake and the display's
+  devices still gain their five modes with the ladder package that tests each. The fake stick refuses
+  `{late, Ms}`: acting it needs the fake xHCI to hold the transfer and apply the stick's moved state when
+  the delay ends, dropping it at an unplug.
+* [Medium] The two fake window proxies, `proxy/2` in `test/erlang/erx_media_volume_tests.erl` (a `stall`
+  message) and `ram/2` in `test/erlang/erx_media_volume_write_tests.erl` (writes cut after N), are one
+  stand-in written twice with two fault vocabularies. Move them into one module over erx_fault_plan,
+  serving two volumes of one medium with durable and volatile parts, as the storage ladder's cases need
+  (docs/design-recovery.md, layer 2).
+
 * [Medium] `make check`: no check finds a call to a function no module exports. A removed export with a live
   caller in another application survived to a QEMU run before; the host tests load only the modules they name,
   so a caller outside them compiles and fails only at run time. Add `xref`'s `undefined_function_calls` over

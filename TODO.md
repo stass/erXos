@@ -206,7 +206,7 @@ document's "residual risks accepted" paragraph.
 * [Website and book](docs/todo-site.md#planned-features): the website, the book and the user guide.
   19 items (8 Medium, 11 Low).
 * [Build, tooling and tests](docs/todo-build.md#planned-features): the build, the host tools, the test harnesses and the gates.
-  8 items (5 Medium, 3 Low).
+  10 items (7 Medium, 3 Low).
 
 ## Other category documents
 

@@ -317,7 +317,6 @@ transfer(From, Request = {Bulk, Pipe, _Tag, Payload}, S = #{refs := Refs, world 
             Held = put_stick(Place, Stick, S),
             case Answer of
                 hold -> Held#{held := [{Place, From, Request} | maps:get(held, Held)]};
-                {late, Ms, Late} -> erlang:send_after(Ms, From, erx_usb_pipe:reply(Request, Late)), Held;
                 _ -> From ! erx_usb_pipe:reply(Request, Answer), Held
             end;
         #{} ->
