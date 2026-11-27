@@ -53,7 +53,7 @@ stop_device(Device) ->
     receive {'DOWN', Monitor, process, Device, _} -> ok end.
 
 window() ->
-    {ok, Window} = erx_blk_window:start_link({data, 8, 16}),
+    {ok, Window} = erx_blk_window:start_link({data, 8, 16}, 8),
     Window.
 
 %% A write answered ok before the device process was replaced, then a flush after: the
@@ -67,7 +67,7 @@ a_window_whose_device_ended_answers_eio() ->
     ?assertEqual({error, eio}, erx_blk_window:flush(Window)),
     ?assertEqual({error, eio}, erx_blk_window:write(Window, 0, <<1:(?SECTOR)/unit:8>>)),
     ?assertEqual({error, eio}, erx_blk_window:read(Window, 0, 1)),
-    ?assertEqual({ok, #{role => data, sectors => 16}}, erx_blk_window:info(Window)),
+    ?assertEqual({ok, #{role => data, sectors => 16, max_sectors => 8}}, erx_blk_window:info(Window)),
     unlink(Window),
     exit(Window, kill),
     stop_device(Second).
@@ -98,7 +98,7 @@ a_window_binds_on_its_first_reach() ->
 %% The system window is read-only (PW1): a write answers erofs before it reaches a device,
 %% so with no device process running it is erofs and not eio, and a read reaches the device.
 a_system_window_takes_no_write() ->
-    {ok, Window} = erx_blk_window:start_link({system, 8, 16}),
+    {ok, Window} = erx_blk_window:start_link({system, 8, 16}, 8),
     ?assertEqual({error, erofs}, erx_blk_window:write(Window, 0, <<1:(?SECTOR)/unit:8>>)),
     Device = start_device(),
     ?assertEqual({error, erofs}, erx_blk_window:write(Window, 0, <<1:(?SECTOR)/unit:8>>)),

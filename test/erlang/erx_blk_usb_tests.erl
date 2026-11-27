@@ -46,7 +46,7 @@ the_medium_s_window_reaches_the_function_under_its_reference_test() ->
     Ref = make_ref(),
     Transport = transport(Function, Ref, Grant),
     {ok, Window} = granted(Grant),
-    ?assertEqual({ok, #{role => drive, sectors => ?CAPACITY}}, erx_blk_window:info(Window)),
+    ?assertEqual({ok, #{role => drive, sectors => ?CAPACITY, max_sectors => 64}}, erx_blk_window:info(Window)),
     ?assertEqual({ok, <<0:(2 * ?SECTOR)/unit:8>>}, erx_blk_window:read(Window, ?CAPACITY - 2, 2)),
     receive {ran, Ran, Request} -> ?assertEqual({Ref, {read, ?LUN, ?CAPACITY - 2, 2}}, {Ran, Request})
     after 5000 -> ?assert(false)

@@ -73,11 +73,11 @@ init([]) ->
 handle_continue(admit, admitting) ->
     {noreply, serve(admit())}.
 
--spec serve({ok, [erx_blk_table:window()]} | {error, term()}) -> state().
-serve({ok, Windows}) ->
+-spec serve({ok, [erx_blk_table:window()], pos_integer()} | {error, term()}) -> state().
+serve({ok, Windows, MaxSectors}) ->
     {Slot, System} = booted(erx_blk_table:booted(erx_device_record:records())),
     Booted = System ++ image_windows(Slot),
-    Served = maps:from_list([{Role, start_window(Window)}
+    Served = maps:from_list([{Role, start_window(Window, MaxSectors)}
                              || Window = {Role, _Start, _Sectors} <- Windows ++ Booted]),
     log("partition table admitted; ~b windows", [map_size(Served)]),
     {served, Served};
@@ -89,8 +89,8 @@ serve({error, Reason}) ->
     log("the medium is not served: ~0p", [Reason]),
     {refused, Reason}.
 
-start_window(Window) ->
-    {ok, Pid} = erx_blk_window:start_link(Window),
+start_window(Window, MaxSectors) ->
+    {ok, Pid} = erx_blk_window:start_link(Window, MaxSectors),
     Pid.
 
 %% The booted slot and its system window, with a refused boot value's or system_image
@@ -131,15 +131,17 @@ manifest_path() ->
     <<"system/", Path/binary>> = ?ERX_SYSTEM_MANIFEST_PATH_BYTES,
     <<"/", Path/binary>>.
 
-%% The capacity, then the records at the sectors the layout fixes, then the table. Every
-%% value in a refusal is an atom of this driver's or an integer, never bytes the medium
-%% holds.
+%% The capacity and the most sectors a request carries, then the records at the sectors
+%% the layout fixes, then the table, answered with the windows it admits and that most.
+%% Every value in a refusal is an atom of this driver's or an integer, never bytes the
+%% medium holds.
 admit() ->
     maybe
-        {ok, #{capacity := Capacity}} ?= device(catch_exit(fun erx_blk:info/0)),
+        {ok, #{capacity := Capacity, max_sectors := MaxSectors}} ?= device(catch_exit(fun erx_blk:info/0)),
         ok ?= erx_blk_table:check_capacity(Capacity),
         {ok, Records} ?= read_records(erx_blk_table:records(), []),
-        erx_blk_table:admit(Capacity, Records)
+        {ok, Windows} ?= erx_blk_table:admit(Capacity, Records),
+        {ok, Windows, MaxSectors}
     end.
 
 read_records([], Read) ->

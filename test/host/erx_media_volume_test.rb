@@ -41,8 +41,8 @@ class ErxMediaVolumeTest < Minitest::Test
               to: "start => {erx_media_volume, start_link, [Proxy, Volume]},\n             restart => permanent}",
               caught_by: 'each_volume_runs_under_its_memory_bound_and_ends_alone_test'),
     Fault.new(name: "a volume's sectors read from the medium's start", path: VOLUME,
-              from: '{ok, Lba} -> erx_media_medium:window(Proxy, {read, Lba, 1});',
-              to: '{ok, _Lba} -> erx_media_medium:window(Proxy, {read, Sector, 1});',
+              from: '{ok, Lba} -> erx_media_medium:window(Proxy, {read, Lba, Count});',
+              to: '{ok, _Lba} -> erx_media_medium:window(Proxy, {read, First, Count});',
               caught_by: 'each_volume_reads_at_its_own_place_test'),
     Fault.new(name: 'a failed flush taken as a medium that cannot flush', path: VOLUME,
               from: 'flushed({error, enotsup}, _Own) -> {ro, flush};',
@@ -52,7 +52,8 @@ class ErxMediaVolumeTest < Minitest::Test
               from: '{true, [Name | _]} -> {ro, {also, Name}};', to: '{true, [_Name | _]} -> flushed(Flush(), Own);',
               caught_by: 'the_rule_names_its_first_failing_condition_test'),
     Fault.new(name: 'a read-only mount not logged', path: VOLUME,
-              from: '            log_read_only(Volume, Outcome),', to: '            log_read_only(Volume, Outcome#{mount := rw}),',
+              from: 'log_mount(Volume, Outcome, erlang:monotonic_time(millisecond) - Started),',
+              to: 'log_mount(Volume, Outcome#{mount := rw}, erlang:monotonic_time(millisecond) - Started),',
               caught_by: 'a_dirty_fat_volume_mounts_read_only_test'),
     Fault.new(name: "a read-only volume's status without its reason", path: TREE,
               from: 'Reason <- [erx_media_volume:ro_reason(Shown)], Reason =/= none]',
@@ -99,8 +100,8 @@ class ErxMediaVolumeTest < Minitest::Test
               to: "                          ok\n",
               caught_by: 'round_trip_test_/0-fun-1- (fat16.img)'),
     Fault.new(name: 'the ownership check skipped at a writable mount', path: VOLUME,
-              from: 'ok -> case erx_fat:check(Fat) of',
-              to: 'ok -> case erx_fat_alloc:writable(erx_fat:info(Fat)) of',
+              from: 'ok -> checked(Fat, Proxy, Volume)',
+              to: 'ok -> erx_fat_alloc:writable(erx_fat:info(Fat))',
               caught_by: 'a_crossed_chain_mounts_read_only_test'),
     Fault.new(name: "the ownership check's stack filled past its places", path: FAT,
               from: 'pushed(_Dir, _Parent, #{depth := Depth}) when Depth >= ?CHECK_PENDING_MAX ->',
@@ -108,8 +109,8 @@ class ErxMediaVolumeTest < Minitest::Test
               caught_by: 'fat32_volumes_are_checked_within_the_memory_bound_test_/0-fun-2- (one past a full stack)'),
     # A FAT pass that lists each sector's entries and every sector's index over the whole FAT.
     Fault.new(name: "the ownership check's FAT pass building lists over the whole FAT", path: FAT,
-              from: "fat_pass(Fat = #fat{clusters = Clusters}, Fun) ->\n    fat_pass(Fat, Fun, 2, Clusters + 2).",
-              to: "fat_pass(Fat = #fat{read = Read, type = Type, fat_start = Start, clusters = Clusters}, Fun) ->\n" \
+              from: "fat_pass(Fat = #fat{clusters = Clusters}, Runs, Fun) ->\n    fat_pass(Fat, Runs, Fun, 2, Clusters + 2).",
+              to: "fat_pass(Fat = #fat{read = Read, type = Type, fat_start = Start, clusters = Clusters}, Runs, Fun) ->\n" \
                   "    PerSector = ?SECTOR * 8 div Type,\n" \
                   "    lists:foreach(fun(Index) ->\n" \
                   "                          Values = [Entry band mask(Type) || <<Entry:Type/little>> <= " \
@@ -118,8 +119,13 @@ class ErxMediaVolumeTest < Minitest::Test
                   "lists:enumerate(Index * PerSector, Values),\n" \
                   "                                                  Cluster >= 2, Cluster < Clusters + 2]\n" \
                   "                  end, lists:seq(0, (Clusters + 1) div PerSector)),\n" \
-                  '    fat_pass(Fat, Fun, Clusters + 2, Clusters + 2).',
+                  '    fat_pass(Fat, Runs, Fun, Clusters + 2, Clusters + 2).',
               caught_by: 'fat32_volumes_are_checked_within_the_memory_bound_test_/0-fun-2- (8 GB)'),
+    # A FAT pass that reads a sector a request: one round trip per FAT sector.
+    Fault.new(name: "the ownership check's FAT pass reading a sector at a time", path: FAT,
+              from: '    Count = min(Max, Last - Index + 1),',
+              to: '    Count = min(Max, 1),',
+              caught_by: 'the_fat_is_read_in_runs_test_/0-fun-4-'),
     # A directory walk that lists the sectors of its whole chain before it reads an entry.
     Fault.new(name: "a directory's chain listed whole before it is read", path: FAT,
               from: '    links_fold(Fat, data_cluster(Clusters, First), 1, Max, Fun, Acc).',

@@ -39,8 +39,9 @@ byte of the volume is untrusted input.
   the chain; a link out of the data area, a cluster seen twice and an end of
   chain before the clusters needed are `does_not_read`. A read answers at most
   the bytes the directory entry's size gives.
-* **The ownership check.** check/1 runs before a writable mount writes anything:
-  two passes over the FAT the server reads and a walk of every directory, which
+* **The ownership check.** check/3 runs before a writable mount writes anything:
+  two passes over the FAT the server reads, each in runs of as many sectors as the
+  function it is handed reads at once, and a walk of every directory, which
   marks in two sets of one bit a cluster every cluster an entry links to and every
   name's first cluster, and finds a cluster linked to twice, a first cluster named
   twice or linked to, a dot entry that names no parent, and a reached cluster whose
@@ -61,10 +62,10 @@ throw, `{erx_fat, Finding}`, caught at each exported entry; anything else the re
 function raises propagates.
 """.
 
--export([mount/2, info/1, layout/1, check/1, root/1, walk/3, attr/1, list/2, read/4, key/1]).
+-export([mount/2, info/1, layout/1, check/1, check/3, root/1, walk/3, attr/1, list/2, read/4, key/1]).
 -export([with_read/2, first/1, fold/4, cluster_sectors/2, entry_slot/2, refreshed/2, with_contents/3,
          with_attributes/3]).
--export_type([fat/0, fat_node/0, finding/0, read_sector/0, dir/0, event/0]).
+-export_type([fat/0, fat_node/0, finding/0, read_sector/0, read_run/0, dir/0, event/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -92,16 +93,22 @@ function raises propagates.
 -define(BAD_32, 16#0ffffff7).
 %% What the ownership check holds is arrays outside the heap, fixed in size before it
 %% reads a sector, which the volume's memory bound counts at exactly that size; its
-%% heap holds one sector, the directory being walked with its parent, and the walk's
-%% accumulator at a time. The two sets, one bit a cluster each, stay within half of the bound, so the check holds at most 4,194,304
+%% heap holds one sector or one run of the FAT (?RUN_MAX), the directory being walked
+%% with its parent, and the walk's accumulator at a time. The two sets, one bit a
+%% cluster each, stay within half of the bound, so the check holds at most 4,194,304
 %% clusters.
 -define(CHECKED_CLUSTERS_MAX, (?ERX_MEDIA_VOLUME_BYTES div 2 * 8 div 2)).
 %% The stack of directories found and not yet walked, two 8-byte slots each, its
 %% first cluster and its parent's, stays within an eighth of the bound: 16,384. The
 %% rest of the bound holds the volume's heap.
 -define(CHECK_PENDING_MAX, (?ERX_MEDIA_VOLUME_BYTES div 8 div 16)).
+%% The longest run of FAT sectors a pass of the check reads at once, a thirty-second
+%% of the volume's memory bound (64 KiB of 2 MiB) whatever its function would read.
+-define(RUN_MAX, (?ERX_MEDIA_VOLUME_BYTES div 32 div ?SECTOR)).
 
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
+%% Count sectors of the volume from First, the check's reads of its FAT.
+-type read_run() :: fun((First :: non_neg_integer(), Count :: pos_integer()) -> {ok, binary()} | {error, term()}).
 -type finding() :: not_its_volume | does_not_read | read_failed.
 
 %% The volume as its boot sector lays it out, in sectors from the placement's start.
@@ -473,41 +480,65 @@ The ownership check a writable mount runs before it writes anything
 (docs/design-storage.md, "The ownership check"): `ok` when the volume's names and
 chains form one tree; `{read_only, too_large}` for a volume of more than
 ?CHECKED_CLUSTERS_MAX clusters, read not at all; `{read_only, tree}` for a
-finding; `{error, read_failed}` when a sector does not read.
+finding; `{error, read_failed}` when a sector does not read. The whole check reads
+the volume through ReadRun, never through Fat's own function: the FAT in runs of at
+most Max sectors, and at most ?RUN_MAX, so a medium that costs a round trip a read,
+as a USB stick does, is not read a sector at a time; its directories a sector at a
+time.
 """.
--spec check(fat()) -> ok | {read_only, too_large | tree} | {error, read_failed}.
-check(#fat{clusters = Clusters}) when Clusters > ?CHECKED_CLUSTERS_MAX ->
+-spec check(fat(), read_run(), pos_integer()) -> ok | {read_only, too_large | tree} | {error, read_failed}.
+check(#fat{clusters = Clusters}, _ReadRun, _Max) when Clusters > ?CHECKED_CLUSTERS_MAX ->
     {read_only, too_large};
-check(Fat = #fat{clusters = Clusters}) ->
+check(Volume = #fat{clusters = Clusters}, ReadRun, Max) ->
+    Fat = with_read(Volume, fun(Sector) -> ReadRun(Sector, 1) end),
     Sets = {bits(Clusters), bits(Clusters)},
+    Runs = {ReadRun, min(Max, ?RUN_MAX)},
     try
-        fat_pass(Fat, fun(Cluster, Value) -> linked_once(Fat, Sets, Cluster, Value) end),
+        fat_pass(Fat, Runs, fun(Cluster, Value) -> linked_once(Fat, Sets, Cluster, Value) end),
         names_pass(Fat, Sets),
-        fat_pass(Fat, fun(Cluster, Value) -> held_allocated(Fat, Sets, Cluster, Value) end)
+        fat_pass(Fat, Runs, fun(Cluster, Value) -> held_allocated(Fat, Sets, Cluster, Value) end)
     catch
         throw:{?MODULE, read_failed} -> {error, read_failed};
         throw:{?MODULE, too_large} -> {read_only, too_large};
         throw:{?MODULE, _Tree} -> {read_only, tree}
     end.
 
+-doc "check/3 of Fat read through its own function, a sector at a time.".
+-spec check(fat()) -> ok | {read_only, too_large | tree} | {error, read_failed}.
+check(Fat = #fat{read = Read}) ->
+    check(Fat, fun(First, 1) -> Read(First) end, 1).
+
 %% Fun applied to every cluster of the data area with its entry's value, the FAT the
-%% server reads taken a sector at a time from start to end. The pass holds one sector
-%% and the next cluster's number and builds nothing, so it needs the same memory
-%% whatever the volume's size.
-fat_pass(Fat = #fat{clusters = Clusters}, Fun) ->
-    fat_pass(Fat, Fun, 2, Clusters + 2).
+%% server reads taken from start to end in runs, {ReadRun, Max}, of at most Max
+%% sectors. The pass holds one run and the next cluster's number and builds nothing,
+%% so it needs the same memory whatever the volume's size.
+fat_pass(Fat = #fat{clusters = Clusters}, Runs, Fun) ->
+    fat_pass(Fat, Runs, Fun, 2, Clusters + 2).
 
 %% The clusters from Cluster up to End, End not among them: those whose entries the
-%% sector holding Cluster's entry holds, then the rest.
-fat_pass(_Fat, _Fun, End, End) ->
+%% run from the sector holding Cluster's entry holds, then the rest. A run ends at
+%% the sector holding End - 1's entry, inside the FAT, which mount/2 admitted as
+%% holding an entry for every cluster; no entry straddles two sectors.
+fat_pass(_Fat, _Runs, _Fun, End, End) ->
     ok;
-fat_pass(Fat = #fat{read = Read, type = Type, fat_start = Start}, Fun, Cluster, End) ->
+fat_pass(Fat = #fat{type = Type, fat_start = Start}, Runs = {ReadRun, Max}, Fun, Cluster, End) ->
     {Index, Skip} = erx_fat_alloc:entry_place(Type, Cluster),
-    Next = min(End, Cluster + (?SECTOR - Skip) * 8 div Type),
+    {Last, _} = erx_fat_alloc:entry_place(Type, End - 1),
+    Count = min(Max, Last - Index + 1),
+    Next = min(End, Cluster + (Count * ?SECTOR - Skip) * 8 div Type),
     Bytes = (Next - Cluster) * Type div 8,
-    <<_:Skip/binary, Entries:Bytes/binary, _/binary>> = sector(Read, Start + Index),
+    <<_:Skip/binary, Entries:Bytes/binary, _/binary>> = run(ReadRun, Start + Index, Count),
     fat_entries(Entries, Type, Cluster, Fun),
-    fat_pass(Fat, Fun, Next, End).
+    fat_pass(Fat, Runs, Fun, Next, End).
+
+%% Count sectors from First, read through ReadRun; anything but exactly their bytes is
+%% read_failed, as for sector/2.
+run(ReadRun, First, Count) ->
+    Size = Count * ?SECTOR,
+    case ReadRun(First, Count) of
+        {ok, <<Bytes:Size/binary>>} -> Bytes;
+        _ -> fail(read_failed)
+    end.
 
 %% Fun applied to each entry of Entries, the first Cluster's.
 fat_entries(<<>>, _Type, _Cluster, _Fun) ->

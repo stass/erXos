@@ -85,10 +85,24 @@ round_of({Seed, Count}, Hello) ->
         _ -> 0
     end.
 
-%% The ownership check over a mounted volume: it answers one of its outcomes, and a
-%% volume it finds no tree is one fsimg's verify (ERX_FSIMG) also rejects.
+%% Read as a run reader: Count sectors from First, each read through Read, or the first
+%% answer that is not a sector.
+runs(Read) ->
+    fun(First, Count) ->
+            lists:foldl(fun(Sector, {ok, Acc}) ->
+                                case Read(Sector) of
+                                    {ok, Bytes} -> {ok, <<Acc/binary, Bytes/binary>>};
+                                    Other -> Other
+                                end;
+                           (_Sector, Failed) -> Failed
+                        end, {ok, <<>>}, lists:seq(First, First + Count - 1))
+    end.
+
+%% The ownership check over a mounted volume, its FAT read in runs of one to four
+%% sectors so the runs end at every place: it answers one of its outcomes, and a volume
+%% it finds no tree is one fsimg's verify (ERX_FSIMG) also rejects.
 owned(Fat, Sectors, Count) ->
-    case erx_fat:check(Fat) of
+    case erx_fat:check(Fat, runs(reader(Sectors, Count)), rand:uniform(4)) of
         ok -> rand:uniform(?CHANGES_EVERY) =:= 1 andalso changed_volume(Fat, Sectors, Count), ok;
         {read_only, too_large} -> ok;
         {error, read_failed} -> ok;

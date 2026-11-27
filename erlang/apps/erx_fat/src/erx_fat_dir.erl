@@ -8,7 +8,7 @@ creating, removing and renaming names of one FAT16 or FAT32 volume as a pure cor
 over the volume's sector reader and its allocator, erx_fat_alloc. A batch gathers
 changes and commit/1 answers its write plan, `[{Step, [{Sector, Bytes}]}]`, which
 the caller writes in order with a flush after each step. It starts on a volume
-whose ownership check (erx_fat:check/1) passed.
+whose ownership check (erx_fat:check/3) passed.
 
 * **Steps.** A directory sector is kept as one image for each step that changes
   it, and a change at a step goes into that step's image and every later one, so

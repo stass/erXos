@@ -298,7 +298,9 @@ beside its header and status byte; 64 sectors on the SD controller,
 32 KiB, the most whose write a card within its specification finishes
 inside the in-flight bound below. The
 block service reads it from `info/0` when it starts a window, and the
-window refuses a larger request with `einval`. A device process serves
+window refuses a larger request with `einval`; the window's own `info`
+names it as `max_sectors`, beside its role and length, so a file system
+sizes its long reads to it. A device process serves
 its requests one after another in the order they arrive, holding a
 bounded backlog while the controller is busy.
 
@@ -1955,9 +1957,11 @@ designed. It maps the format onto the file protocol as follows:
   within an eighth of it, 16,384 of them, and a volume whose walk
   would hold more also mounts read-only with `too large`. The sets and the
   stack are arrays outside the process's heap, sized before the check reads
-  a sector, which the bound counts at exactly that size; each read of the
-  FAT takes one sector at a time and builds no list of its sectors or
-  entries, and a directory is read within the size the read path admits,
+  a sector, which the bound counts at exactly that size; each pass over
+  the FAT reads it in runs of as many sectors as one window request
+  carries (the window's `max_sectors`, 32 KiB over USB), at most 64 KiB,
+  so a medium that costs a round trip a request is not read a sector at
+  a time, and builds no list of its sectors or entries; a directory is read within the size the read path admits,
   so the rest of what the check holds is the same for every size of
   volume. The sets are dropped once the check passes, since from then
   on the batches keep what it found; a read-only mount does not run it,

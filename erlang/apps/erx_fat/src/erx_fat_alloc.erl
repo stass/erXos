@@ -9,7 +9,7 @@ sectors through the function its layout carries (erx_fat:layout/1) and answers
 write plans, `[{Step, [{Sector, Bytes}]}]`, which its caller writes in order with a
 flush after each step. It does no I/O of its own, and its function must answer the
 medium as every plan answered before has left it. It starts on a volume whose
-ownership check (erx_fat:check/1) passed, so every chain it reaches is one name's
+ownership check (erx_fat:check/3) passed, so every chain it reaches is one name's
 and no chain reaches a free cluster.
 
 * **A batch.** grow/3 and shrink/3 change chains in an overlay of FAT entries,
@@ -142,7 +142,7 @@ volume_flags(Type, Entry) ->
 The writable rule's fourth condition (docs/design-drives.md, "The writable rule")
 over erx_fat:info/1: the volume is not dirty, records no hard error and mirrors its
 FATs, checked in that order; otherwise the reason it mounts read-only. The
-ownership check, erx_fat:check/1, follows it.
+ownership check, erx_fat:check/3, follows it.
 """.
 -spec writable(#{clean := boolean(), hard_error := boolean(), mirrored := boolean(), _ => _}) ->
           ok | {read_only, dirty | hard_error | mirror}.

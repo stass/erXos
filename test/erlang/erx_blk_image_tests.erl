@@ -50,9 +50,9 @@ manifest(Name) ->
 %% An image window refuses a write without reaching a device: no erx_blk runs here, so
 %% a write that reached one would answer eio.
 image_window_is_read_only_test() ->
-    {ok, Window} = erx_blk_window:start_link({{image, <<"release">>}, 0, 8}),
+    {ok, Window} = erx_blk_window:start_link({{image, <<"release">>}, 0, 8}, 8),
     ?assertEqual({error, erofs}, erx_blk_window:write(Window, 0, <<0:4096>>)),
-    ?assertEqual({ok, #{role => {image, <<"release">>}, sectors => 8}}, erx_blk_window:info(Window)),
+    ?assertEqual({ok, #{role => {image, <<"release">>}, sectors => 8, max_sectors => 8}}, erx_blk_window:info(Window)),
     unlink(Window),
     exit(Window, kill).
 

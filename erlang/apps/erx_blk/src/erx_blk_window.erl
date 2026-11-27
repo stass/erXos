@@ -8,7 +8,7 @@
 %% the device process, erx_blk, at the medium's sector. erx_blk_service starts one per
 %% partition the table admits, linked to itself; a USB medium's transport, erx_blk_usb,
 %% starts one of role drive over the whole medium, linked to itself and bound to it from
-%% the start (start_link/2), so its requests reach that transport alone.
+%% the start (start_link/3), so its requests reach that transport alone.
 %%
 %% A request answers {ok, Bytes} for a read and ok for a write or a flush, or {error,
 %% Reason}: einval for a request that names no whole sectors or more than one device
@@ -16,10 +16,13 @@
 %% erofs for a write to a read-only window or passed on from the write path, and eio for
 %% anything else the device process answered or a device process that did not answer. A
 %% flush is the whole medium's (erx_blk:flush/1), and enotsup on a medium that cannot
-%% flush. A window answers one request at a time, in order.
+%% flush. A window answers one request at a time, in order. Its info names its role, its
+%% length in sectors and max_sectors, the most sectors one request carries, which its
+%% starter takes from the device's info (erx_blk:info/1): the block service, or the
+%% transport a window is bound to.
 %%
-%% A window is bound to one device process's life. One started by start_link/2 is bound
-%% from its start to the transport it names. One started by start_link/1 is bound by its
+%% A window is bound to one device process's life. One started by start_link/3 is bound
+%% from its start to the transport it names. One started by start_link/2 is bound by its
 %% first request that reaches the device to the process erx_blk names then
 %% (erx_blk:device/0); it calls that
 %% process by pid from then on and monitors it. Once that process has ended, every request
@@ -40,7 +43,7 @@
 -module(erx_blk_window).
 -behaviour(gen_server).
 
--export([start_link/1, start_link/2, read/3, write/3, flush/1, info/1]).
+-export([start_link/2, start_link/3, read/3, write/3, flush/1, info/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -include("generated/erx_abi.hrl").
@@ -51,20 +54,23 @@
 %% The window's sectors, and the device process it is bound to: unbound until a request
 %% first reaches the device, {bound, Pid, Monitor} after, and ended once Pid has ended, for
 %% good. Calling by pid alone already fails once Pid has ended; the monitor makes the end
-%% final, so a later process that reused the pid is never reached.
+%% final, so a later process that reused the pid is never reached. max_sectors is the
+%% most sectors one request to the device carries, which info answers.
 -record(state, {window :: erx_blk_table:window(),
+                max_sectors :: pos_integer(),
                 device = unbound :: unbound | {bound, pid(), reference()} | ended}).
 
--spec start_link(erx_blk_table:window()) -> {ok, pid()}.
-start_link(Window) ->
-    gen_server:start_link(?MODULE, Window, []).
+-spec start_link(erx_blk_table:window(), pos_integer()) -> {ok, pid()}.
+start_link(Window, MaxSectors) ->
+    gen_server:start_link(?MODULE, {Window, MaxSectors}, []).
 
 %% A window bound from its start to the transport Device, a process that answers erx_blk's
-%% calls by pid, as a USB medium's transport does (erx_blk_usb): it reaches no process
-%% registered as erx_blk, and answers eio once Device has ended.
--spec start_link(erx_blk_table:window(), pid()) -> {ok, pid()}.
-start_link(Window, Device) ->
-    gen_server:start_link(?MODULE, {bound, Window, Device}, []).
+%% calls by pid, as a USB medium's transport does (erx_blk_usb), whose requests carry at
+%% most MaxSectors sectors: it reaches no process registered as erx_blk, and answers eio
+%% once Device has ended.
+-spec start_link(erx_blk_table:window(), pid(), pos_integer()) -> {ok, pid()}.
+start_link(Window, Device, MaxSectors) ->
+    gen_server:start_link(?MODULE, {bound, Window, Device, MaxSectors}, []).
 
 %% Count sectors from Sector of the window.
 -spec read(pid(), non_neg_integer(), pos_integer()) -> {ok, binary()} | {error, einval | erange | erofs | eio}.
@@ -78,19 +84,20 @@ write(Window, Sector, Bytes) -> call(Window, {write, Sector, Bytes}).
 -spec flush(pid()) -> ok | {error, enotsup | eio}.
 flush(Window) -> call(Window, flush).
 
-%% The window's role and its length in sectors; where it lies on the medium is not the
-%% client's to know.
--spec info(pid()) -> {ok, #{role := erx_blk_table:role(), sectors := pos_integer()}} | {error, eio}.
+%% The window's role, its length in sectors and the most sectors one request carries;
+%% where it lies on the medium is not the client's to know.
+-spec info(pid()) -> {ok, #{role := erx_blk_table:role(), sectors := pos_integer(), max_sectors := pos_integer()}}
+                     | {error, eio}.
 info(Window) -> call(Window, info).
 
 %% A window that is gone or did not answer is the client's eio.
 call(Window, Request) ->
     try gen_server:call(Window, Request, ?CALL_TIMEOUT) catch exit:_ -> {error, eio} end.
 
-init({bound, Window, Device}) ->
-    {ok, #state{window = Window, device = {bound, Device, monitor(process, Device)}}};
-init(Window) ->
-    {ok, #state{window = Window}}.
+init({bound, Window, Device, MaxSectors}) ->
+    {ok, #state{window = Window, max_sectors = MaxSectors, device = {bound, Device, monitor(process, Device)}}};
+init({Window, MaxSectors}) ->
+    {ok, #state{window = Window, max_sectors = MaxSectors}}.
 
 handle_call({read, Sector, Count}, _From, State = #state{window = Window}) ->
     case erx_blk_table:place(Window, Sector, Count) of
@@ -116,8 +123,8 @@ handle_call({write, Sector, Bytes}, _From, State = #state{window = Window = {Rol
 %% A flush covers the whole medium, so it covers the window's sectors too.
 handle_call(flush, _From, State) ->
     on_bound_device(fun erx_blk:flush/1, fun flush_answer/1, State);
-handle_call(info, _From, State = #state{window = {Role, _Start, Sectors}}) ->
-    {reply, {ok, #{role => Role, sectors => Sectors}}, State};
+handle_call(info, _From, State = #state{window = {Role, _Start, Sectors}, max_sectors = Max}) ->
+    {reply, {ok, #{role => Role, sectors => Sectors, max_sectors => Max}}, State};
 handle_call(_Other, _From, State) ->
     {reply, {error, einval}, State}.
 

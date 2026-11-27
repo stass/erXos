@@ -1025,6 +1025,12 @@ alone:
    file could land in another's clusters
    ([design-storage.md](design-storage.md#removable-media-fat)).
 
+A writable mount logs one line too, naming the volume, its label and
+the milliseconds the mount took, the check's reading included, so a
+slow medium shows where the wait before its first answer went; the
+label is the medium's text, which the log service escapes when it
+renders the line ([design-log.md](design-log.md)).
+
 A flush that answers anything else, `eio` or the window's end, **refuses**
 the mount, with nothing written: the volume shows `none flush` with the
 answer, and every request on it answers `eio`. A refusal is not a

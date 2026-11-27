@@ -88,8 +88,8 @@ class ErxFatTest < Minitest::Test
               to: 'Held andalso entry_kind(Fat, Value) =:= never andalso fail(tree).',
               caught_by: 'a_reached_cluster_whose_entry_is_free_or_bad_is_a_tree_finding_test'),
     Fault.new(name: 'a volume past the checked count read',
-              from: 'check(#fat{clusters = Clusters}) when Clusters > ?CHECKED_CLUSTERS_MAX ->',
-              to: 'check(#fat{clusters = Clusters}) when Clusters < 0 ->',
+              from: 'check(#fat{clusters = Clusters}, _ReadRun, _Max) when Clusters > ?CHECKED_CLUSTERS_MAX ->',
+              to: 'check(#fat{clusters = Clusters}, _ReadRun, _Max) when Clusters < 0 ->',
               caught_by: 'a_volume_past_the_checked_count_is_too_large_and_unread_test')
   ].freeze
 

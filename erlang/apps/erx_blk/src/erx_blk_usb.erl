@@ -55,7 +55,7 @@ start_monitor(Medium) ->
 -doc false.
 init(Medium = #{function := Function, lun := Lun, ref := Ref, capacity := Capacity, drive := Drive}) ->
     _ = monitor(process, Function),
-    {ok, Window} = erx_blk_window:start_link({drive, 0, Capacity}, self()),
+    {ok, Window} = erx_blk_window:start_link({drive, 0, Capacity}, self(), ?MAX_SECTORS),
     _ = Drive =/= none andalso erx_blk_drive:serve(Drive, Window, {Function, {Lun, Ref}}),
     {ok, Medium}.
 

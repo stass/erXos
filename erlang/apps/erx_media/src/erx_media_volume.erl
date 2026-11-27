@@ -20,7 +20,7 @@ call made while it mounts waits for the mount. Its outcome is what `sN_mount` an
 * `rw`;
 * `{ro, Reason}`, the writable rule's first condition that does not hold: `format`,
   `{also, Name}`, `flush` (the medium cannot flush), `dirty`, `hard_error`, `mirror`,
-  `too_large` or `tree`, the last two the ownership check's (erx_fat:check/1), which
+  `too_large` or `tree`, the last two the ownership check's (erx_fat:check/3), which
   runs only once every condition before it holds;
 * `{none, Reason}`, no files: `format` for a format not served, FAT12 among them,
   `unknown`, `{flush, Reason}` for a flush that answered neither `ok` nor `enotsup`,
@@ -336,9 +336,10 @@ init({Proxy, Volume}) ->
 handle_continue(mount, #{proxy := Proxy, volume := #{length := Length} = Volume} = State) ->
     case new_mount() of
         {ok, Mount} ->
-            Read = fun(Sector) -> read_sector(Proxy, Volume, Sector) end,
-            {Outcome, Fat} = mounted(erx_media_probe:format(Read, Length, ?WRITTEN), Read, Length, Proxy),
-            log_read_only(Volume, Outcome),
+            Started = erlang:monotonic_time(millisecond),
+            Read = fun(Sector) -> read_run(Proxy, Volume, Sector, 1) end,
+            {Outcome, Fat} = mounted(erx_media_probe:format(Read, Length, ?WRITTEN), Read, Length, Proxy, Volume),
+            log_mount(Volume, Outcome, erlang:monotonic_time(millisecond) - Started),
             Batch = case Outcome of #{mount := rw} -> erx_fat_dir:new(Fat); #{} -> read_only end,
             {noreply, named_root(State#{outcome => Outcome, mount => Mount, fat => Fat, batch => Batch})};
         enfile ->
@@ -800,51 +801,75 @@ errno(_Finding) -> eio.
 %% volume (none otherwise). Only FAT16 and FAT32 are served; the selected format is the
 %% volume's one reading, and the FAT type shown is the one the mount read, since the
 %% medium answers each read afresh.
-mounted({error, Why}, _Read, _Length, _Proxy) ->
+mounted({error, Why}, _Read, _Length, _Proxy, _Volume) ->
     {#{format => unknown, mount => {none, {failed, Why}}}, none};
-mounted({ok, #{format := msdosfs, also := Also, fat := Type}}, Read, Length, Proxy)
+mounted({ok, #{format := msdosfs, also := Also, fat := Type}}, Read, Length, Proxy, Volume)
   when Type =:= 16; Type =:= 32 ->
     case erx_fat:mount(Read, Length) of
         {ok, Fat} ->
             #{type := Mounted, label := Label, serial := Serial} = erx_fat:info(Fat),
-            Mount = writable(msdosfs, Also, fun() -> erx_media_medium:window(Proxy, flush) end, fun() -> owned(Fat) end),
+            Mount = writable(msdosfs, Also, fun() -> erx_media_medium:window(Proxy, flush) end,
+                             fun() -> owned(Fat, Proxy, Volume) end),
             {#{format => msdosfs, fat => Mounted, label => Label, serial => Serial, mount => Mount}, served(Mount, Fat)};
         {error, Finding} ->
             {#{format => msdosfs, fat => Type, mount => {none, {failed, Finding}}}, none}
     end;
-mounted({ok, #{format := msdosfs, fat := Type}}, _Read, _Length, _Proxy) ->
+mounted({ok, #{format := msdosfs, fat := Type}}, _Read, _Length, _Proxy, _Volume) ->
     {#{format => msdosfs, fat => Type, mount => {none, format}}, none};
-mounted({ok, #{format := unknown}}, _Read, _Length, _Proxy) ->
+mounted({ok, #{format := unknown}}, _Read, _Length, _Proxy, _Volume) ->
     {#{format => unknown, mount => {none, unknown}}, none};
-mounted({ok, #{format := Format}}, _Read, _Length, _Proxy) ->
+mounted({ok, #{format := Format}}, _Read, _Length, _Proxy, _Volume) ->
     {#{format => Format, mount => {none, format}}, none}.
 
-%% A read-only mount's one log line, naming the volume and the rule's reason.
-log_read_only(#{number := Number}, #{format := Format} = Outcome) ->
+%% A mount's one log line: a writable mount's names the volume, its label and the
+%% milliseconds its mount took, the ownership check's reading of the whole volume
+%% among them; a read-only mount's names the rule's reason. The label is the
+%% medium's text, which the log service escapes when it renders the line
+%% (docs/design-log.md, "Escaping once"). A volume that serves no files logs none.
+log_mount(#{number := Number}, #{format := Format, mount := rw} = Outcome, Took) ->
+    logger:notice("erx_media: volume s~b (~s) mounted rw~ts in ~b ms",
+                  [Number, Format, labelled(maps:get(label, Outcome, none)), Took]);
+log_mount(#{number := Number}, #{format := Format} = Outcome, _Took) ->
     case ro_reason(Outcome) of
         none -> ok;
         Reason -> logger:notice("erx_media: volume s~b (~s) mounted read-only: ~s", [Number, Format, Reason])
     end.
 
+labelled(none) -> <<>>;
+labelled(Label) -> [<<", label ">>, Label].
+
 %% The writable rule's fourth condition: the volume's flags, then the ownership
-%% check, which runs only on a volume the flags admit and reads it whole.
-owned(Fat) ->
+%% check, which runs only on a volume the flags admit and reads it whole, its FAT in
+%% runs as long as the window takes in one request (run_sectors/1).
+owned(Fat, Proxy, Volume) ->
     case erx_fat_alloc:writable(erx_fat:info(Fat)) of
         {read_only, Reason} -> Reason;
-        ok -> case erx_fat:check(Fat) of
-                  ok -> ok;
-                  {read_only, Reason} -> Reason;
-                  {error, Why} -> {none, {failed, Why}}
-              end
+        ok -> checked(Fat, Proxy, Volume)
+    end.
+
+%% The ownership check's outcome, the volume read through the proxy.
+checked(Fat, Proxy, Volume) ->
+    ReadRun = fun(First, Count) -> read_run(Proxy, Volume, First, Count) end,
+    Max = run_sectors(erx_media_medium:window(Proxy, info)),
+    case erx_fat:check(Fat, ReadRun, Max) of
+        ok -> ok;
+        {read_only, Reason} -> Reason;
+        {error, Why} -> {none, {failed, Why}}
     end.
 
 %% A mount the writable rule refused, for a flush that failed, serves no files.
 served({none, _Reason}, _Fat) -> none;
 served(_Mount, Fat) -> Fat.
 
-%% The volume's sector Sector, read through the proxy at its place on the medium.
-read_sector(Proxy, Volume, Sector) ->
-    case erx_media_table:place(Volume, Sector, 1) of
-        {ok, Lba} -> erx_media_medium:window(Proxy, {read, Lba, 1});
+%% Count of the volume's sectors from First, read through the proxy at their place on
+%% the medium in one request.
+read_run(Proxy, Volume, First, Count) ->
+    case erx_media_table:place(Volume, First, Count) of
+        {ok, Lba} -> erx_media_medium:window(Proxy, {read, Lba, Count});
         {error, erange} = Refused -> Refused
     end.
+
+%% The most sectors one window request reads, as the window's info names it (the
+%% transport's max_sectors); a window that names none is read a sector at a time.
+run_sectors({ok, #{max_sectors := Max}}) when is_integer(Max), Max >= 1 -> Max;
+run_sectors(_Answer) -> 1.
