@@ -13,7 +13,7 @@
 > the EROFS reader in every runtime reads only blocks that pass the
 > tree, and the storage domain serves the partition's packages as the
 > `system` tree. The pure FAT reader that finds root's login keys on
-> the card is built. The F2FS codec and mount core are built and tested
+> the card is built. The F2FS codec, mount core and node-tree reads are built and tested
 > on the host.
 > **Designed:** the slot writer, updates with a trial boot and a
 > commit, the reset count, the vault's storage domain, drives, whose

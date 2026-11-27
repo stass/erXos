@@ -578,7 +578,7 @@ the only effects.
 | --- | --- |
 | `erx_f2fs_codec` | every on-disk record's decoder and encoder over the generated layouts, the CRC, the dentry hash, the bitmaps' bit orders; the only module that reads or builds block bytes |
 | `erx_f2fs_mount` | choosing the superblock copy and the checkpoint pack, the mount checks, loading the SIT, the chain walk, orphan cleanup and replay; answers the initial state |
-| `erx_f2fs_core` | the volume state and every operation on it: lookup, create, write, truncate, link, unlink, rename, setattr, readdir, holds; the allocator, the room rule and the one slot-setting function |
+| `erx_f2fs_core` | the volume state and every operation on it: lookup, create, write, truncate, link, unlink, rename, setattr, readdir, holds; the NAT's one lookup and the node tree's reads; the allocator, the room rule and the one slot-setting function |
 | `erx_f2fs_plan` | the checkpoint plan, the mount checkpoint's copies, the `fsync` record plan and the decision between record and checkpoint, and `need/1`, the free sections the next checkpoint takes |
 | `erx_f2fs_clean` | victim choice and the move step |
 | `erx_f2fs_format` | the format plan of a new volume |
@@ -744,6 +744,23 @@ indirect and one double indirect node, with the node offsets of [F 53].
 A regular file holds at most 920 + 2 x 1018 + 2 x 1018^2 + 1018^3
 blocks with E = 3 and X = 0, 4,329,690,873,856 bytes; a write past that
 answers `efbig`.
+
+**Every node is read at its one place.** A nid resolves only through the
+core's one NAT lookup, the journal's entry over its NAT block's
+([F 35]), which admits an entry only when it is used, owned by the
+inode the reader expects, and places its node in the main area at a
+block the SIT marks valid; the mount reads the root through it too.
+The codec then checks the block's footer: its `nid` is the nid asked
+for, its `ino` the file's inode, and its node offset the one the node's
+place in the file's tree gives, 0 for the inode itself ([F 43],
+[F 53]). Every node offset of a file is one place, so a crafted image
+cannot name a node from two places, from itself or from another file:
+no walk loops or aliases, and a walk to one file block reads at most
+one node a level. A slot's address is `NULL_ADDR`, `NEW_ADDR` or a main
+area block the SIT marks valid; any other fails the read, and both
+sentinels read as zeros. A slot's index in an inode counts after the
+extra attributes, as the summaries do ([F 46]). The read path never
+reads an xattr node.
 
 ### Directories
 
@@ -1648,7 +1665,10 @@ module-private `throw` caught at the codec's entry, answered as
 running `test/erlang/erx_f2fs_fuzz.erl` on the host's stock OTP, one
 entry per reader and one for a whole mount: the superblock, the
 checkpoint pack, the NAT block and journal, the SIT block and journal,
-the inode with its inline area, the dentry block and inline dentries,
+the inode with its inline area, the direct and indirect nodes, a file's
+slots and bytes read through its node tree, run as the need loop with
+every address it asks for checked against the partition and its rounds
+bounded by the nodes on the paths, the dentry block and inline dentries,
 and a whole mount, through the walk and replay, of an image with one of
 the blocks a mount of it reads mutated, under an allowance sometimes too
 small for its SIT, run as the mount's need loop: every address it asks
@@ -1674,6 +1694,7 @@ failure named for them:
 | dentry | a long name's run allowed past the last slot |
 | mount | the walk's footprint check and its bound removed |
 | mount | a NAT entry's node allowed outside the main area |
+| node tree | a slot's data address allowed outside the main area |
 
 ## Formatting a volume
 

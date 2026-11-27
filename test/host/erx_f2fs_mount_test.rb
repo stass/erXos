@@ -16,12 +16,16 @@ require_relative '../../tools/lib/erx/dependencies'
 class ErxF2fsMountTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   MOUNT = 'erlang/apps/erx_f2fs/src/erx_f2fs_mount.erl'
+  CORE = 'erlang/apps/erx_f2fs/src/erx_f2fs_core.erl'
   TESTS = %w[test/erlang/erx_f2fs_codec_tests.erl test/erlang/erx_f2fs_corpus.erl
              test/erlang/erx_f2fs_mount_tests.erl].freeze
   CORPUS = File.join(ROOT, 'build/third_party')
   LOCK = File.join(ROOT, 'deps.lock')
 
-  Seed = Data.define(:fault, :anchor, :replacement, :failure)
+  # A seeded fault in the mount, or in erx_f2fs_core, whose NAT lookup the root's read uses.
+  Seed = Data.define(:fault, :anchor, :replacement, :failure, :source) do
+    def initialize(source: MOUNT, **fields) = super
+  end
 
   SEEDS = [
     Seed.new(fault: "the packs compared without wrap-around",
@@ -56,7 +60,7 @@ class ErxF2fsMountTest < Minitest::Test
              replacement: "    require(Ssa * ?BLOCKS_PER_SEG >= 0, {superblock, ssa_area}).",
              failure: /each_superblock_rule_fails_with_its_name[^\n]*ssa_area[^\n]*failed/),
     Seed.new(fault: "the main area allowed past the partition",
-             anchor: "    require(Blocks =< Partition andalso main_end(Super) =< Partition,",
+             anchor: "    require(Blocks =< Partition andalso erx_f2fs_codec:main_end(Super) =< Partition,",
              replacement: "    require(Blocks =< Partition andalso Super =:= Super,",
              failure: /each_superblock_rule_fails_with_its_name[^\n]*partition[^\n]*failed/),
     Seed.new(fault: "a checkpoint area of one segment allowed",
@@ -66,11 +70,11 @@ class ErxF2fsMountTest < Minitest::Test
              anchor: "    require(lists:all(fun(Segment) -> Segment < Main end, Segments), {sit, journal_segno}),\n",
              replacement: "",
              failure: /\(a SIT journal segment past the main area\)[^\n]*failed/),
-    Seed.new(fault: "a NAT entry's node allowed outside the main area",
-             anchor: "    require(Node =:= ?ERX_F2FS_NULL_ADDR orelse valid_block(Super, Sit, Node), {nat, block_addr}),",
+    Seed.new(fault: "a NAT entry's node allowed outside the main area", source: CORE,
+             anchor: "    require(valid_block(Volume, Address), {nat, block_addr}),",
              replacement: "    ok,",
              failure: /\(the root's node outside the main area\)[^\n]*failed/),
-    Seed.new(fault: "a NAT entry's node allowed at a block the SIT holds free",
+    Seed.new(fault: "a NAT entry's node allowed at a block the SIT holds free", source: CORE,
              anchor: "            Valid =:= 1;", replacement: "            Valid =:= Valid;",
              failure: /\(the root's node at a block the SIT holds free\)[^\n]*failed/),
     Seed.new(fault: "normal summaries found from the pack's start alone",
@@ -91,10 +95,10 @@ class ErxF2fsMountTest < Minitest::Test
              anchor: "    <<_:Index, Bit:1, _/bitstring>> = Bitmap,\n    Bit.",
              replacement: "    <<_:Index, _Bit:1, _/bitstring>> = Bitmap,\n    0.",
              failure: /the_fixture_mounts_read_write_from_pack_1[^\n]*failed/),
-    Seed.new(fault: "the NAT's copy 1 placed a whole interleave further",
+    Seed.new(fault: "the NAT's copy 1 placed a whole interleave further", source: CORE,
              anchor: "    First + Index div ?BLOCKS_PER_SEG * 2 * ?BLOCKS_PER_SEG + Index rem ?BLOCKS_PER_SEG +\n" \
-                     "        version_bit(Bitmap, Index) * ?BLOCKS_PER_SEG.",
-             replacement: "    First + Index + version_bit(Bitmap, Index) * 2 * ?BLOCKS_PER_SEG.",
+                     "        Copy * ?BLOCKS_PER_SEG.",
+             replacement: "    First + Index + Copy * 2 * ?BLOCKS_PER_SEG.",
              failure: /the_fixture_mounts_read_write_from_pack_1[^\n]*failed/),
     Seed.new(fault: "the compact form allowed the normal form's three blocks",
              anchor: "DataBlocks < ?LOGS_PER_KIND;", replacement: "DataBlocks =< ?LOGS_PER_KIND;",
@@ -118,10 +122,11 @@ class ErxF2fsMountTest < Minitest::Test
   end
 
   def test_each_seeded_fault_fails_its_case
-    text = File.read(File.join(ROOT, MOUNT))
+    texts = [MOUNT, CORE].to_h { |path| [path, File.read(File.join(ROOT, path))] }
     SEEDS.each do |seed|
+      text = texts.fetch(seed.source)
       assert_equal 1, text.scan(seed.anchor).size, "the seed no longer applies: #{seed.fault}"
-      output, status = eunit({ MOUNT => text.sub(seed.anchor, seed.replacement) })
+      output, status = eunit({ seed.source => text.sub(seed.anchor, seed.replacement) })
       refute status.success?, "#{seed.fault} passed:\n#{output}"
       assert_match seed.failure, output, seed.fault
     end

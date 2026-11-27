@@ -6,7 +6,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
 
--export([fixture_volume/0]).
+-export([fixture_volume/0, cleared_fuchsia/0]).
 
 -define(BLOCK, 4096).
 -define(SEGMENT, 512).
@@ -183,11 +183,14 @@ every_corpus_image_mounts_as_its_features_and_geometry_say_test_() ->
 fuchsia_without_encrypt_and_verity_mounts_test_() ->
     {timeout, 600,
      fun() ->
-             [Pin] = [Pin || #{id := "f2fs-fuchsia"} = Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))],
-             Image = corpus_image(Pin),
-             Cleared = lists:foldl(fun clear_features/2, Image, [0, 1]),
-             ?assertEqual({ok, read_write}, mount_image(Cleared))
+             ?assertEqual({ok, read_write}, mount_image(cleared_fuchsia()))
      end}.
+
+%% Fuchsia's image with ENCRYPT and VERITY cleared, which erx_f2fs_core_tests
+%% also reads.
+cleared_fuchsia() ->
+    [Pin] = [Pin || #{id := "f2fs-fuchsia"} = Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))],
+    lists:foldl(fun clear_features/2, corpus_image(Pin), [0, 1]).
 
 clear_features(Copy, Image) ->
     At = Copy * ?BLOCK + ?ERX_F2FS_SUPER_OFFSET + ?ERX_F2FS_SUPER_BLOCK_OFF_FEATURE,
@@ -456,10 +459,10 @@ nat_bits_past_the_segment_fail_test() ->
 %% normal data summaries; each log has written one block.
 the_fixture_answers_its_contents_and_tables_test() ->
     {ok, #{orphans := [], data_summaries := [[_], [_], [_]],
-           node_summaries := [[_], [_], [_]], sit := Sit, nat_journal := Journal,
-           nat_blocks := #{0 := _}, root := #{i_mode := 8#40755, i_size := ?BLOCK}}} =
+           node_summaries := [[_], [_], [_]], sit := Sit, nat := _,
+           root := #{i_mode := 8#40755, i_size := ?BLOCK}}} =
         mount(volume(super())),
-    ?assertEqual({24, #{}}, {tuple_size(Sit), Journal}),
+    ?assertEqual(24, tuple_size(Sit)),
     ?assertMatch(#{type := ?ERX_F2FS_LOG_HOT_NODE, valid_blocks := 1}, element(1, Sit)).
 
 %% A pack of Total blocks with Flags added and its start_sum at StartSum,
@@ -497,9 +500,8 @@ a_compact_pack_without_node_summaries_test() ->
     [Compact] = erx_f2fs_codec_tests:compact_blocks(Nat, no_sits(), Summaries),
     Blocks = volume(super(), maps:merge(pack(?PACK1, Pack#{cur_data_blkoff := [1, 0, 0, 0, 0, 0, 0, 0]}),
                                         #{513 => Compact})),
-    {ok, #{data_summaries := Got, node_summaries := none, nat_journal := #{3 := _},
-           nat_blocks := NatBlocks}} = mount(Blocks),
-    ?assertEqual({Summaries, #{}}, {Got, NatBlocks}).
+    {ok, #{data_summaries := Got, node_summaries := none}} = mount(Blocks),
+    ?assertEqual(Summaries, Got).
 
 orphans_are_read_when_the_pack_has_them_test() ->
     Orphans = erx_f2fs_codec_tests:orphan_block([7, 8], 2),
@@ -550,8 +552,8 @@ content_cases() ->
       root_at(erx_f2fs_codec_tests:nat_entry(0, 3, ?PARTITION))},
      {"the root's node at a block the SIT holds free", {nat, block_addr},
       root_at(erx_f2fs_codec_tests:nat_entry(0, 3, ?ROOT_INODE + 1))},
-     {"the root's nid free", {root, nat_entry}, root_at(erx_f2fs_codec_tests:nat_entry(0, 0, 0))},
-     {"the root's NAT entry owned by another inode", {root, nat_entry},
+     {"the root's nid free", {nat, free}, root_at(erx_f2fs_codec_tests:nat_entry(0, 0, 0))},
+     {"the root's NAT entry owned by another inode", {nat, owner},
       root_at(erx_f2fs_codec_tests:nat_entry(0, 4, ?ROOT_INODE))},
      {"a root that is a file", {root, not_directory}, root_is(#{i_mode => 8#100644})},
      %% The codec refuses any inode without blocks, the root's among them.
@@ -594,14 +596,15 @@ the_sit_journal_overrides_the_blocks_test() ->
     {ok, #{sit := Sit}} = mount(Blocks),
     ?assertMatch(#{valid_blocks := 0, type := ?ERX_F2FS_LOG_HOT_NODE}, element(10, Sit)).
 
-%% With the root in the NAT journal the mount reads no NAT block, and the
-%% journal's entry wins over the block's.
+%% With the root in the NAT journal, the journal's entry wins over the
+%% block's, which holds the root's nid free.
 the_nat_journal_overrides_the_blocks_test() ->
     Entry = erx_f2fs_codec_tests:nat_entry(0, 3, ?ROOT_INODE),
     Blocks = maps:merge(journals(nat_journal([{3, Entry}]), no_sits()),
                         #{current(?NAT_COPIES) => nat([])}),
-    {ok, #{nat_journal := #{3 := Entry}, nat_blocks := NatBlocks}} = mount(Blocks),
-    ?assertEqual(#{}, NatBlocks).
+    ?assertMatch({ok, #{root := #{i_mode := 8#40755}}}, mount(Blocks)),
+    ?assertEqual({nat, free}, failure(maps:merge(journals(no_nats(), no_sits()),
+                                                 #{current(?NAT_COPIES) => nat([])}))).
 
 %% The SIT's 24 segments are admitted at 160 bytes each before any SIT
 %% block is asked for.

@@ -44,16 +44,19 @@ its inline dentries, where its geometry puts them ([F 41], [F 48]). A
 dentry block (dentry_block/1) answers its used slots. Both dentry forms
 are read by one walk; their bitmaps are first-bit-least-significant
 ([F 5]), and the codec answers each as a bitstring in Erlang's own order,
-first bit most significant. Any block's last bytes read as a node footer
-(node_footer/1), which is how the mount asks whether a log's next block
-holds a node of the checkpoint ([F 43]).
+first bit most significant. A direct node (direct_node/4) answers its
+addresses and an indirect node (indirect_node/4) its node ids, once its
+footer shows it is the node its parent names ([F 43], [F 53]). Any
+block's last bytes read as a node footer (node_footer/1), which is how the
+mount asks whether a log's next block holds a node of the checkpoint
+([F 43]).
 """.
 
 -export([superblock/1, checkpoint/1, checkpoint_copy/1, checkpoint/3,
          orphan_block/1, nat_block/1, nat_journal/1, sit_block/2,
          sit_journal/1, summary_block/1, compact_summaries/2, inode/3,
-         dentry_block/1, node_footer/1, crc/2, extra_attr_features/0,
-         nat_capacity/1]).
+         direct_node/4, indirect_node/4, dentry_block/1, node_footer/1, crc/2,
+         extra_attr_features/0, nat_capacity/1, main_end/1]).
 -export_type([superblock/0, checkpoint/0, nat_entry/0, sit_entry/0,
               summary/0, inode/0, dentries/0, footer/0, failure/0]).
 
@@ -121,7 +124,8 @@ used slot's record with its name ([F 59], [F 60]).
 -doc "The structure a decoder read and the first rule its bytes broke.".
 -type failure() :: {superblock | checkpoint | orphan_block | nat_block |
                     nat_journal | sit_block | sit_journal | summary_block |
-                    compact_summary | inode | dentry_block | node_footer,
+                    compact_summary | inode | direct_node | indirect_node |
+                    dentry_block | node_footer,
                     atom()}.
 
 %%% Entries
@@ -262,6 +266,32 @@ inode(Super, Nid, Block) ->
     decode(inode, fun() -> read_inode(Super, Nid, Block) end).
 
 -doc """
+Direct node Nid of inode Ino, at node offset Offset of its file's tree
+([F 53]): its f2fs_addrs_per_block address words, once its footer names
+that nid, that inode and that offset ([F 43]). Whether each address names
+a valid block is for the reader of the block to check.
+""".
+-spec direct_node(non_neg_integer(), non_neg_integer(), non_neg_integer(), binary()) ->
+          {ok, [non_neg_integer()]} | {error, failure()}.
+direct_node(Nid, Ino, Offset, Block) ->
+    decode(direct_node, fun() ->
+                                read_node(erx_f2fs_direct_node, addr, Nid, Ino, Offset, Block)
+                        end).
+
+-doc """
+Indirect node Nid of inode Ino, at node offset Offset of its file's tree
+([F 53]): its f2fs_nids_per_block node ids, 0 for none, once its footer
+names that nid, that inode and that offset ([F 43]). Each node id is
+resolved, and refused if the NAT cannot hold it, by its reader.
+""".
+-spec indirect_node(non_neg_integer(), non_neg_integer(), non_neg_integer(), binary()) ->
+          {ok, [non_neg_integer()]} | {error, failure()}.
+indirect_node(Nid, Ino, Offset, Block) ->
+    decode(indirect_node, fun() ->
+                                  read_node(erx_f2fs_indirect_node, nid, Nid, Ino, Offset, Block)
+                          end).
+
+-doc """
 A dentry block's slots ([F 59]): each used slot's record and name, a long
 name's run of slots answered once, at its first slot ([F 60]).
 """.
@@ -277,6 +307,14 @@ f2fs_nat_entries_per_block for each block of one of its two copies
 -spec nat_capacity(superblock()) -> non_neg_integer().
 nat_capacity(#{segment_count_nat := Segments}) ->
     ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK * (Segments div 2) * ?BLOCKS_PER_SEG.
+
+-doc """
+The first block past the main area of a volume whose superblock is Super
+([F 14]): main area blocks are those from main_blkaddr up to it.
+""".
+-spec main_end(superblock()) -> non_neg_integer().
+main_end(#{main_blkaddr := Main, segment_count_main := Segments}) ->
+    Main + Segments * ?BLOCKS_PER_SEG.
 
 -doc """
 The footer of a node block, its last 24 bytes ([F 43]), read from any
@@ -622,12 +660,19 @@ bound_hash_depth(Inode) ->
 valid_nid(Super, Nid) ->
     Nid >= ?ERX_F2FS_ROOT_INO andalso Nid < nat_capacity(Super).
 
-%% The block is the node asked for, an inode, whose footer names it as its
-%% own inode, and not an xattr node, whose node offset is
-%% f2fs_xattr_node_offset ([F 43], [F 53]).
-check_inode_footer(Nid, #{nid := FooterNid, ino := Ino, flag := Flag}) ->
-    require(FooterNid =:= Nid andalso Ino =:= Nid andalso
-                Flag bsr ?ERX_F2FS_NODE_MARK_BITS =/= ?ERX_F2FS_XATTR_NODE_OFFSET,
+%% The block is the node asked for, an inode: node offset 0 of its own
+%% inode ([F 43], [F 53]).
+check_inode_footer(Nid, Footer) ->
+    check_node_footer(Nid, Nid, 0, Footer).
+
+%% A node block is the node its parent names: its footer names its own nid,
+%% the file's inode and the node offset its place in the file's tree gives
+%% ([F 43], [F 53]). Every node offset of a file is one place, so a node
+%% named from two places, from itself or from another file fails here, and
+%% no walk of a tree loops or reads another file's node as its own.
+check_node_footer(Nid, Ino, Offset, #{nid := FooterNid, ino := FooterIno, flag := Flag}) ->
+    require(FooterNid =:= Nid andalso FooterIno =:= Ino andalso
+                Flag bsr ?ERX_F2FS_NODE_MARK_BITS =:= Offset,
             footer).
 
 %% With EXTRA_ATTR the extra attributes lie over the first words of the
@@ -768,6 +813,16 @@ inode_body(#{i_inline := Inline, i_size := Size}, Words, ExtraWords,
 
 inline_content([_Reserved | Words]) ->
     << <<Word:32/little>> || Word <- Words >>.
+
+%%% Direct and indirect nodes
+
+%% A direct or an indirect node, by its layout: the words of its Field,
+%% once its footer is the one its parent expects.
+read_node(Layout, Field, Nid, Ino, Offset, Block) ->
+    require_block(Block),
+    #{Field := Words, footer := Footer} = erx_abi_packed:decode(Layout, Block),
+    check_node_footer(Nid, Ino, Offset, Footer),
+    Words.
 
 %%% Node footers
 

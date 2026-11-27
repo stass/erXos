@@ -64,6 +64,8 @@
                                       inline_data_blocks, inline_data_transformed,
                                       inline_data | ?DENTRY_RULES]]
         ++ [{dentry_block, Rule} || Rule <- [ok, block_size | ?DENTRY_RULES]]
+        ++ [{Node, Rule} || Node <- [direct_node, indirect_node], Rule <- [ok, block_size, footer]]
+        ++ [{walk, ok}, {data, block_addr}, {nat, free}, {nat, nid}, {file, size}]
         ++ [{mount, ok}, {allowance, sit}, {nat, block_addr}, {sit, valid_nodes}]).
 %% The mount's allowance in most cases: more than any seed's SIT needs.
 -define(ALLOWANCE, (1 bsl 30)).
@@ -71,6 +73,16 @@
 -define(MOUNT_ROUNDS, 16).
 %% The blocks of erx_f2fs_mount_tests' fixture volume.
 -define(FIXTURE_PARTITION, 16384).
+%% The most needs a walk of the fixture file may answer: its inode and its
+%% NAT block, three nodes and a NAT block for each on each of two paths,
+%% and the data.
+-define(WALK_ROUNDS, 16).
+%% The fixture's NAT area, both copies, and its main area's start: every
+%% block a walk asks for lies in one of the two.
+-define(FIXTURE_NAT, 2560).
+-define(FIXTURE_MAIN, 4096).
+%% The fixture file's inode (erx_f2fs_core_tests).
+-define(FILE_INO, 4).
 -define(SIT_RULES, [valid_blocks, valid_map, type]).
 -define(DENTRY_RULES, [name_len, name_run]).
 -define(AREA_FIELDS, [segment0_blkaddr, cp_blkaddr, sit_blkaddr, nat_blkaddr,
@@ -85,7 +97,8 @@ run([Seed, Cases, ThirdParty, Lock]) ->
              fun orphan_case/0, fun nat_case/0, fun nat_journal_case/0,
              fun sit_case/0, fun sit_journal_case/0, fun summary_case/0,
              fun compact_case/0, fun inode_case/0, fun inode_case/0,
-             fun dentry_case/0, fun mount_case/0, fun mount_case/0],
+             fun dentry_case/0, fun mount_case/0, fun mount_case/0, fun node_case/0,
+             fun walk_case/0, fun walk_case/0],
     Outcomes = [(pick(Kinds))() || _ <- lists:seq(1, Count)],
     io:format("fuzz: ~b cases ok~n", [Count]),
     %% How often each rule answered, so a run shows which checks the cases reach.
@@ -602,6 +615,112 @@ mount_loop(Partition, Allowance, Blocks, Given, Rounds) ->
     catch
         Class:Reason:Stack -> fail(crash, {mount, Class, Reason, hd(Stack)})
     end.
+
+%% A direct or indirect node of the fixture file, its bytes or a footer word
+%% mutated, read as the node its parent names: it answers a word for each
+%% slot (`size`).
+node_case() ->
+    {Kind, Nid, Offset, Block} = pick(erx_f2fs_core_tests:fixture_nodes()),
+    Mutated = case rand:uniform(3) of
+                  1 -> mutate_bytes(Block, ?BLOCK);
+                  2 -> write_word(Block, pick([4072, 4076, 4080]),
+                                  pick([0, Nid, Nid + 1, ?FILE_INO, ?FILE_INO + 1,
+                                        Offset bsl ?ERX_F2FS_NODE_MARK_BITS,
+                                        (Offset + 1) bsl ?ERX_F2FS_NODE_MARK_BITS,
+                                        rand:uniform(16#ffffffff)]));
+                  3 -> Block
+              end,
+    Result = read(Kind, fun erx_f2fs_codec:Kind/4, [Nid, ?FILE_INO, Offset, resize(Mutated)]),
+    case Result of
+        {ok, Words} when length(Words) =/= ?ERX_F2FS_ADDRS_PER_BLOCK -> fail(size, {Kind, length(Words)});
+        _ -> ok
+    end,
+    outcome(Kind, Result).
+
+%% The fixture file with one of its blocks mutated, by bytes or by a word set
+%% to a nid, an address or a node offset, then a slot, a read of up to four
+%% blocks or the file read as a symlink's target, through the need loop.
+walk_case() ->
+    {#{superblock := Super} = Volume, Blocks} = erx_f2fs_core_tests:fixture_file(),
+    Address = pick(lists:sort(maps:keys(Blocks))),
+    Old = maps:get(Address, Blocks),
+    New = case rand:uniform(3) of
+              1 -> mutate_bytes(Old, ?BLOCK);
+              2 -> write_word(Old, walk_offset(), walk_value());
+              3 -> Old
+          end,
+    Mutated = Blocks#{Address := maybe_fix_inode(Super, New)},
+    Block = file_block(),
+    Length = rand:uniform(4 * ?BLOCK),
+    Op = case rand:uniform(3) of
+             1 -> fun(Inode, Given) -> erx_f2fs_core:slot(Volume, Inode, Block, Given) end;
+             2 -> fun(Inode, Given) ->
+                          erx_f2fs_core:read(Volume, Inode, Block * ?BLOCK + rand:uniform(?BLOCK) - 1,
+                                             Length, Given)
+                  end;
+             3 -> fun(Inode, Given) ->
+                          erx_f2fs_core:symlink(Volume, Inode#{i_mode := 8#120777}, Given)
+                  end
+         end,
+    Step = fun(Given) ->
+                   case erx_f2fs_core:inode(Volume, ?FILE_INO, Given) of
+                       {ok, Inode} -> Op(Inode, Given);
+                       Other -> Other
+                   end
+           end,
+    Result = walk_loop(Step, Mutated, #{}, ?WALK_ROUNDS),
+    case Result of
+        {ok, Bytes} when is_binary(Bytes), byte_size(Bytes) > max(Length, ?BLOCK) ->
+            fail(size, byte_size(Bytes));
+        _ ->
+            ok
+    end,
+    outcome(walk, Result).
+
+%% The walk's need loop over Blocks, as mount_loop's: every address inside
+%% the NAT or the main area of the partition and not given before, within
+%% Rounds needs, which bounds a walk's work by the nodes on its paths.
+walk_loop(Step, Blocks, Given, Rounds) ->
+    try Step(Given) of
+        {need, [_ | _] = Addresses} when Rounds > 0 ->
+            [fail(partition, {Address, ?FIXTURE_PARTITION})
+             || Address <- Addresses, not is_integer(Address) orelse Address < ?FIXTURE_NAT orelse
+                                          (Address >= ?FIXTURE_NAT + 2 * 512 andalso
+                                               Address < ?FIXTURE_MAIN) orelse
+                                          Address >= ?FIXTURE_PARTITION],
+            [fail(repeat, Address) || Address <- Addresses, is_map_key(Address, Given)],
+            Read = maps:from_list([{A, maps:get(A, Blocks, <<0:(?BLOCK * 8)>>)} || A <- Addresses]),
+            walk_loop(Step, Blocks, maps:merge(Given, Read), Rounds - 1);
+        {need, _} = Need -> fail(rounds, Need);
+        {ok, _} = Result -> Result;
+        {error, {_Structure, _Rule}} = Result -> Result;
+        Other -> fail(shape, Other)
+    catch
+        Class:Reason:Stack -> fail(crash, {walk, Class, Reason, hd(Stack)})
+    end.
+
+%% A word where a node's slots, an inode's address array or node ids, or a
+%% footer's nid, ino and flag lie, else anywhere.
+walk_offset() ->
+    case rand:uniform(5) of
+        1 -> 4 * (rand:uniform(4) - 1);
+        2 -> ?ERX_F2FS_INODE_BLOCK_OFF_I_ADDR + 4 * (rand:uniform(8) - 1);
+        3 -> ?ERX_F2FS_INODE_BLOCK_OFF_I_NID + 4 * (rand:uniform(?ERX_F2FS_NIDS_PER_INODE) - 1);
+        4 -> pick([4072, 4076, 4080]);
+        5 -> 4 * (rand:uniform(?BLOCK div 4) - 1)
+    end.
+
+walk_value() ->
+    pick([0, 1, 3, ?FILE_INO, 5 + rand:uniform(6), 11, ?ERX_F2FS_NEW_ADDR, 16#fffffffe,
+          4096 + rand:uniform(16), 5632 + rand:uniform(8), ?FIXTURE_PARTITION - 1,
+          ?FIXTURE_PARTITION, rand:uniform(16#ffffffff),
+          pick([1, 2, 3, 5, 1022, 2041, 2042, 2044]) bsl ?ERX_F2FS_NODE_MARK_BITS]).
+
+%% A file block in the fixture file's address array, at its nodes' edges, or
+%% anywhere.
+file_block() ->
+    pick([0, 1, 2, 919, 920, 921, 1937, 1938, 2956, 3976, 2075604, 2076625,
+          rand:uniform(1 bsl 31)]).
 
 %% A checkpoint header or copy keeps a valid checksum in nine cases of ten,
 %% and an inode block of a volume with inode checksums too.

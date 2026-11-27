@@ -24,9 +24,11 @@ module ErxF2fsFuzz
   Erx::Generated.ensure(root: ROOT)
   # The modules a seeded fault may change, by name.
   TARGETS = { codec: File.join(ROOT, 'erlang/apps/erx_f2fs/src/erx_f2fs_codec.erl'),
-              mount: File.join(ROOT, 'erlang/apps/erx_f2fs/src/erx_f2fs_mount.erl') }.freeze
+              mount: File.join(ROOT, 'erlang/apps/erx_f2fs/src/erx_f2fs_mount.erl'),
+              core: File.join(ROOT, 'erlang/apps/erx_f2fs/src/erx_f2fs_core.erl') }.freeze
   SOURCES = [File.join(Erx::Generated::OUTPUT, 'erlang/apps/erx/src/generated/erx_abi_packed.erl'),
-             *%w[erx_f2fs_codec_tests erx_f2fs_mount_tests erx_f2fs_corpus erx_f2fs_fuzz].map do |name|
+             *%w[erx_f2fs_codec_tests erx_f2fs_mount_tests erx_f2fs_core_tests erx_f2fs_corpus
+                 erx_f2fs_fuzz].map do |name|
                File.join(ROOT, "test/erlang/#{name}.erl")
              end].freeze
   CORPUS = File.join(ROOT, 'build/third_party')
@@ -62,9 +64,12 @@ module ErxF2fsFuzz
     Seed.new(fault: "a long name's run allowed past the last slot",
              anchor: '            require(Run =< 1 + bit_size(Bits), name_run),',
              replacement: '            ok,', failure: 'crash'),
-    Seed.new(fault: "a NAT entry's node allowed outside the main area", target: :mount,
-             anchor: '    require(Node =:= ?ERX_F2FS_NULL_ADDR orelse valid_block(Super, Sit, Node), {nat, block_addr}),',
-             replacement: '    ok,', failure: 'partition')
+    Seed.new(fault: "a NAT entry's node allowed outside the main area", target: :core,
+             anchor: '    require(valid_block(Volume, Address), {nat, block_addr}),',
+             replacement: '    ok,', failure: 'partition'),
+    Seed.new(fault: "a slot's data address allowed outside the main area", target: :core,
+             anchor: '    require(Address =:= ?ERX_F2FS_NULL_ADDR orelse Address =:= ?ERX_F2FS_NEW_ADDR orelse',
+             replacement: '    require(true orelse', failure: 'partition')
   ].freeze
 
   module_function
@@ -83,7 +88,8 @@ module ErxF2fsFuzz
       output, status = fuzz(faulty, seed: seed, cases: cases)
       abort("#{fault.fault} passed:\n#{output}") if status.success? || !output.include?("fuzz failure: #{fault.failure}")
     end
-    puts "erx_f2fs_codec and erx_f2fs_mount fail every mutated record and volume cleanly over #{cases} " \
+    puts "erx_f2fs_codec, erx_f2fs_mount and erx_f2fs_core fail every mutated record, volume and file " \
+         "cleanly over #{cases} " \
          "cases, and each of #{SEEDS.size} seeded faults fails"
   end
 

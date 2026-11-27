@@ -4,12 +4,13 @@
 %% erXos's F2FS (docs/design-f2fs.md), Linux's on-disk format served from the
 %% storage domain, whose boot script carries it beside erx_storage: the codec,
 %% erx_f2fs_codec, the only module that reads a volume's block bytes, and the
-%% mount, erx_f2fs_mount, which relates the records it reads. Its modules are
+%% mount, erx_f2fs_mount, which relates the records it reads, and the node
+%% tree's reads, erx_f2fs_core, behind the one lookup of the NAT. Its modules are
 %% pure, and it starts no process.
 {application, erx_f2fs,
  [{description, "erXos F2FS"},
   {vsn, "1"},
-  {modules, [erx_f2fs_codec, erx_f2fs_mount]},
+  {modules, [erx_f2fs_codec, erx_f2fs_core, erx_f2fs_mount]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.

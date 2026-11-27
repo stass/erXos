@@ -65,10 +65,9 @@ each block from the copy its version bit selects, with the SIT journal
 over it, and checked: the node segments' valid blocks are valid_node_count
 and all segments' at most valid_block_count, and every log's next block is
 free in its segment, with every later block free too for an LFS log. The
-NAT is read by block, as a lookup needs one, the NAT journal over it
-([F 35]); a used entry's block lies in the main area and is valid in the
-SIT. The root is the inode its NAT entry places, a directory with blocks,
-a size and links ([F 55]).
+NAT journal is handed to erx_f2fs_core, which alone resolves a nid. The
+root is the inode erx_f2fs_core reads, a directory with blocks, a size and
+links ([F 55]).
 
 The chain: the warm node log's next block starts the checkpoint's chain of
 fsynced node blocks when its footer carries the checkpoint's version
@@ -134,8 +133,8 @@ What a mount answers: the chosen superblock copy, each bad copy's number
 and failure, the chosen pack's first block and its header with its version
 bitmaps, the pack's orphan inodes, the data logs' summaries and the node
 logs' when the pack has them (each list hot, warm, cold), the SIT, element
-S + 1 for main segment S, the NAT journal's entries by nid and the NAT
-blocks read, by their index in one copy, the root inode, and the mode.
+S + 1 for main segment S, the NAT, which erx_f2fs_core resolves, the root
+inode, and the mode: erx_f2fs_core's volume.
 """.
 -type mounted() :: #{superblock := erx_f2fs_codec:superblock(),
                      bad_copies := [{0 | 1, failure()}],
@@ -145,14 +144,13 @@ blocks read, by their index in one copy, the root inode, and the mode.
                      data_summaries := [[erx_f2fs_codec:summary()]],
                      node_summaries := [[erx_f2fs_codec:summary()]] | none,
                      sit := tuple(),
-                     nat_journal := #{non_neg_integer() => erx_f2fs_codec:nat_entry()},
-                     nat_blocks := #{non_neg_integer() => [erx_f2fs_codec:nat_entry()]},
+                     nat := erx_f2fs_core:nat(),
                      root := erx_f2fs_codec:inode(),
                      mode := mode()}.
 -doc "The structure the mount read and the first rule it broke.".
 -type failure() :: {superblock | checkpoint | sit | nat | root | walk | allowance,
                     term()} |
-                   erx_f2fs_codec:failure().
+                   erx_f2fs_core:failure() | erx_f2fs_codec:failure().
 
 -doc """
 The mount of a partition of Partition blocks, holding at most Allowance
@@ -167,20 +165,16 @@ mount(Partition, Allowance, Blocks) ->
         {Pack, Checkpoint} = checkpoint(Super, Blocks),
         Contents = contents(Super, Pack, Checkpoint, Blocks),
         admit_sit(Super, Allowance),
-        #{nat_journal := Journal} = Contents,
-        Root = maps:get(root_ino, Super),
-        %% The SIT, the chain's first block and the root's NAT block are
-        %% each placed by what is read already, so they are asked at once.
-        read(Blocks, sit_addresses(Super, Checkpoint) ++ [walk_start(Super, Checkpoint)] ++
-                 nat_addresses(Super, Checkpoint, Journal, Root)),
-        Sit = sit(Super, Checkpoint, Contents, Blocks),
-        {RootEntry, NatBlocks} = nat_lookup(Super, Checkpoint, Sit, Journal, Blocks, Root),
-        RootInode = root(Super, RootEntry, Blocks),
+        %% The SIT and the chain's first block are each placed by what is
+        %% read already, so they are asked at once.
+        read(Blocks, sit_addresses(Super, Checkpoint) ++ [walk_start(Super, Checkpoint)]),
+        Volume = maps:merge(maps:remove(sit_journal, Contents),
+                            #{superblock => Super, bad_copies => BadCopies, pack => Pack,
+                              checkpoint => Checkpoint,
+                              sit => sit(Super, Checkpoint, Contents, Blocks)}),
+        Root = root(Volume, Blocks),
         check_chain(Super, Checkpoint, Blocks),
-        {ok, maps:merge(maps:remove(sit_journal, Contents),
-                        #{superblock => Super, bad_copies => BadCopies, pack => Pack,
-                          checkpoint => Checkpoint, sit => Sit, nat_blocks => NatBlocks,
-                          root => RootInode, mode => mode(Super)})}
+        {ok, Volume#{root => Root, mode => mode(Super)}}
     catch
         throw:{?MODULE, need, Addresses} -> {need, Addresses};
         throw:{?MODULE, failure, Failure} -> {error, Failure}
@@ -220,7 +214,7 @@ superblock_copy(Partition, Block) ->
     end.
 
 check_partition(Partition, #{block_count := Blocks} = Super) ->
-    require(Blocks =< Partition andalso main_end(Super) =< Partition,
+    require(Blocks =< Partition andalso erx_f2fs_codec:main_end(Super) =< Partition,
             {superblock, partition}).
 
 %% Every bit in R, and the features that extend an inode with EXTRA_ATTR
@@ -419,7 +413,7 @@ contents(#{cp_payload := PayloadBlocks} = Super, Start,
                                || Block <- read(Blocks, Orphans)]),
       data_summaries => DataSummaries,
       node_summaries => node_summaries(NodeLogs, read(Blocks, Node)),
-      nat_journal => nat_journal(Super, NatJournal),
+      nat => erx_f2fs_core:nat(nat_journal(Super, NatJournal)),
       sit_journal => sit_journal(Super, SitJournal)}.
 
 %% The data logs' summaries and the NAT and SIT journals' bytes: the
@@ -514,61 +508,13 @@ next_block_free(Sit, {_Type, Segment, Offset, Alloc}) ->
     <<_:Offset, Next:1, Later/bitstring>> = Map,
     Next =:= 0 andalso (Alloc =:= ?ERX_F2FS_ALLOC_SSR orelse Later =:= <<0:(bit_size(Later))>>).
 
-%% The NAT block a lookup of Nid reads, none when the journal has it.
-nat_addresses(Super, Header, Journal, Nid) ->
-    require(Nid < erx_f2fs_codec:nat_capacity(Super), {nat, nid}),
-    case is_map_key(Nid, Journal) of
-        true -> [];
-        false -> [nat_address(Super, Header, Nid div ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK)]
-    end.
-
-%% NAT block Index of one copy: the copies interleave a segment at a time,
-%% and its version bit selects the second ([F 34]).
-nat_address(#{nat_blkaddr := First}, #{nat_version_bitmap := Bitmap}, Index) ->
-    First + Index div ?BLOCKS_PER_SEG * 2 * ?BLOCKS_PER_SEG + Index rem ?BLOCKS_PER_SEG +
-        version_bit(Bitmap, Index) * ?BLOCKS_PER_SEG.
-
-%% Nid's NAT entry, the journal's over its block's ([F 35]), and the NAT
-%% block it read, by index; a used entry's node lies in the main area at a
-%% block the SIT marks valid.
-nat_lookup(Super, Header, Sit, Journal, Blocks, Nid) ->
-    {Entry, Read} =
-        case nat_addresses(Super, Header, Journal, Nid) of
-            [] ->
-                {maps:get(Nid, Journal), #{}};
-            Addresses ->
-                [Block] = read(Blocks, Addresses),
-                Entries = ok(erx_f2fs_codec:nat_block(Block)),
-                PerBlock = ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK,
-                {lists:nth(Nid rem PerBlock + 1, Entries), #{Nid div PerBlock => Entries}}
-        end,
-    #{block_addr := Node} = Entry,
-    require(Node =:= ?ERX_F2FS_NULL_ADDR orelse valid_block(Super, Sit, Node), {nat, block_addr}),
-    {Entry, Read}.
-
-%% Whether Address is a main-area block the SIT marks valid.
-valid_block(#{main_blkaddr := Main} = Super, Sit, Address) ->
-    case Address >= Main andalso Address < main_end(Super) of
-        true ->
-            Segment = (Address - Main) div ?BLOCKS_PER_SEG,
-            #{valid_map := Map} = element(Segment + 1, Sit),
-            Offset = (Address - Main) rem ?BLOCKS_PER_SEG,
-            <<_:Offset, Valid:1, _/bitstring>> = Map,
-            Valid =:= 1;
-        false ->
-            false
-    end.
-
 %%% The root
 
-%% The root's inode, at the block its NAT entry names, a directory with
-%% blocks, a size and links ([F 55]); the codec refuses every inode
-%% without blocks.
-root(#{root_ino := Root} = Super, #{block_addr := Address, ino := Owner}, Blocks) ->
-    require(Address =/= ?ERX_F2FS_NULL_ADDR andalso Owner =:= Root, {root, nat_entry}),
-    [Block] = read(Blocks, [Address]),
+%% The root's inode, a directory with blocks, a size and links ([F 55]);
+%% the codec refuses every inode without blocks.
+root(#{superblock := #{root_ino := Root}} = Volume, Blocks) ->
     #{i_mode := Mode, i_size := Size, i_links := Links} = Inode =
-        ok(erx_f2fs_codec:inode(Super, Root, Block)),
+        ok(erx_f2fs_core:inode(Volume, Root, Blocks)),
     require(Mode band ?ERX_F2FS_MODE_TYPE_MASK =:= ?ERX_F2FS_MODE_DIR, {root, not_directory}),
     require(Size =/= 0, {root, no_size}),
     require(Links =/= 0, {root, no_links}),
@@ -668,9 +614,6 @@ names(Classified, Class) -> [Name || {Name, Of} <- Classified, Of =:= Class].
 
 %%% Geometry
 
-main_end(#{main_blkaddr := Main, segment_count_main := Segments}) ->
-    Main + Segments * ?BLOCKS_PER_SEG.
-
 %% The blocks of one copy of a table of Segments segments, which holds two
 %% copies ([F 23], [F 36]).
 table_blocks(Segments) -> Segments div 2 * ?BLOCKS_PER_SEG.
@@ -701,6 +644,7 @@ read(Blocks, Addresses) ->
     end.
 
 ok({ok, Value}) -> Value;
+ok({need, Addresses}) -> throw({?MODULE, need, Addresses});
 ok({error, Failure}) -> fail(Failure).
 
 require(true, _Failure) -> ok;

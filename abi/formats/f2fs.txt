@@ -166,6 +166,8 @@ limit f2fs_nat_entries_per_block u32 455
 # A NAT entry: the node's version, its inode and its block, f2fs_null_addr
 # when the nid is free [F 33].
 limit f2fs_null_addr u32 0
+# A slot's address allocated but not yet written, which reads as zeros [F 4].
+limit f2fs_new_addr u32 0xffffffff
 layout erx_f2fs_nat_entry packed_le 1 9
   field version u8 0
   field ino u32 1
@@ -339,6 +341,17 @@ layout erx_f2fs_node_footer packed_le 1 24
   field flag u32 8
   field cp_ver u64 12
   field next_blkaddr u32 20
+# A file's blocks past its inode's address array map through direct nodes,
+# each of f2fs_addrs_per_block addresses, and indirect nodes, each of
+# f2fs_nids_per_block node ids, both ending in the node footer [F 53].
+limit f2fs_addrs_per_block u32 1018
+limit f2fs_nids_per_block u32 1018
+layout erx_f2fs_direct_node packed_le 1 4096
+  field addr u32 0 count @f2fs_addrs_per_block
+  field footer erx_f2fs_node_footer 4072
+layout erx_f2fs_indirect_node packed_le 1 4096
+  field nid u32 0 count @f2fs_nids_per_block
+  field footer erx_f2fs_node_footer 4072
 # An inode block [F 40]: the fixed part, the address words, the node ids of
 # direct node 1, direct node 2, indirect node 1, indirect node 2 and the
 # double indirect node, and the footer.
