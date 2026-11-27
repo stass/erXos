@@ -195,7 +195,10 @@ handles and its `code_objects_max` copies fit its handle table (`BOOT_CAP_LIMIT`
   close. A copy into `/apps` reports a refused package only through that close
   ([design-packaging.md](design-packaging.md#other-subsystems)). Fix: `cp` opens the target itself and
   copies in the 64 KiB pieces design-shell.md's info report describes, checking `file:close/1`'s answer; a
-  test with a tree whose close answers `eio`.
+  test with a tree whose close answers `eio`. The same change fixes which name a failure shows: `run/2`
+  reports every failure under the source's name, so a target that cannot be opened (`cp f /ro/f`) reads
+  `f: permission denied`, where FreeBSD's cp(1) names the target as the user wrote it, joined with the
+  source's last name for a directory; `erx_cmd_mv:pairs/2` then also returns the target's shown name.
 * [Medium] shell, `host` (`erlang/apps/erx_shell/src/erx_cmd_host.erl`, `run/2`): a name or server
   argument with an empty label or a label over 63 bytes (`host a..b`, `host .foo`, `host www .foo`)
   crashes the command with `function_clause` from `inet_dns:encode_labels`, which stock OTP 29.1.2
