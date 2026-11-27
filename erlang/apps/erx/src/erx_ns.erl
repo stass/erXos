@@ -69,7 +69,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0, start_link/1, mount/3, mount_facets/1, mount_own/2, unmount/1, bind/2, bind/3, tmp_limit/0,
-         change/2, packages_place/0, home_place/1]).
+         change/2, place/1, packages_place/0, home_place/1]).
 -export([image_log/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 -export_type([entry/0, table/0, option/0]).

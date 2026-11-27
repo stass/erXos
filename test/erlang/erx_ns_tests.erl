@@ -447,6 +447,13 @@ the_packages_place_is_the_system_domains_alone() ->
     ?assertEqual(ok, erx_ns:mount_facets([packages, system, data, apps, start, machine, line])),
     ?assertEqual([], [Entry || #{point := [<<"packages">> | _]} = Entry <- at_use()]).
 
+%% A facet's place is read from outside erx_ns too: the Bluetooth store finds its
+%% bt_state grant's mount at /data/bt (erx_bt_store:start_link/0), so place/1 answers it
+%% to another module; a facet with no place answers none.
+a_facets_place_is_read_from_outside_test() ->
+    ?assertEqual({<<"/data/bt">>, [rw]}, erx_ns:place(bt_state)),
+    ?assertEqual(none, erx_ns:place(packages)).
+
 %% A user's home lies at FreeBSD's paths, root's at /root and any other user's at
 %% /home/NAME, and a name that is not one path name has none, so no name places a
 %% home above /home (docs/design-files.md, "A user's home").
