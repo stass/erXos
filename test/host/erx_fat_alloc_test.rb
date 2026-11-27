@@ -65,7 +65,11 @@ class ErxFatAllocTest < Minitest::Test
     Fault.new(name: 'the dirty flag set in every FAT in one step',
               from: '[{dirty, Read}, {dirty_mirrors, Mirrors ++ fsinfo_writes(Alloc, ?UNKNOWN)}]',
               to: '[{dirty, Read ++ Mirrors ++ fsinfo_writes(Alloc, ?UNKNOWN)}]',
-              caught_by: 'the_dirty_and_clean_steps_keep_the_top_bits_and_set_the_hints_test')
+              caught_by: 'the_dirty_and_clean_steps_keep_the_top_bits_and_set_the_hints_test'),
+    Fault.new(name: "a view's FAT sector rebuilt once for each of its entries",
+              from: 'iolist_to_binary([Parts, binary:part(Sector, End, ?SECTOR - End)]).',
+              to: 'lists:foldl(fun({C, V}, S) -> put_entry(Alloc, C, V, S) end, Sector, Entries).',
+              caught_by: 'a_view_read_builds_its_fat_sector_once_test')
   ].freeze
 
   def self.images

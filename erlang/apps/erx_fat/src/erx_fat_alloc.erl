@@ -179,19 +179,28 @@ new(#{read := Read, type := Type, fat_start := FatStart, fats := Fats, fat_secto
 -doc """
 The volume as the batch leaves it: a function that reads one of its sectors, each
 sector of the first FAT with every entry the batch changes, so a reader that
-follows chains through it (erx_fat:with_read/2) sees the batch's.
+follows chains through it (erx_fat:with_read/2) sees the batch's. Making it reads
+nothing and costs nothing, and a read of a FAT sector looks up only that sector's
+entries, so what a read costs does not grow with the batch.
 """.
 -spec view(alloc()) -> read_sector().
-view(Alloc = #alloc{read = Read, fat_start = FatStart, batch = Batch}) ->
-    BySector = maps:groups_from_list(fun({Cluster, _Value}) -> entry_sector(Alloc, Cluster) end,
-                                     [{Cluster, Value} || Cluster := {_Kind, Value} <- Batch]),
-    fun(Sector) ->
-            Index = Sector - FatStart,
-            case BySector of
-                #{Index := Entries} -> guarded(fun() -> patched(Alloc, Index, Entries) end);
-                #{} -> Read(Sector)
-            end
+view(Alloc = #alloc{read = Read, fat_start = FatStart, fat_sectors = FatSectors}) ->
+    fun(Sector) when Sector >= FatStart, Sector < FatStart + FatSectors ->
+            case sector_entries(Alloc, Sector - FatStart) of
+                [] -> Read(Sector);
+                Entries -> guarded(fun() -> patched(Alloc, Sector - FatStart, Entries) end)
+            end;
+       (Sector) ->
+            Read(Sector)
     end.
+
+%% The batch's {Cluster, Value} entries that lie in FAT sector Index.
+sector_entries(#alloc{batch = Batch}, _Index) when map_size(Batch) =:= 0 ->
+    [];
+sector_entries(#alloc{type = Type, batch = Batch}, Index) ->
+    PerSector = ?SECTOR * 8 div Type,
+    [{Cluster, Value} || Cluster <- lists:seq(Index * PerSector, Index * PerSector + PerSector - 1),
+                         {_Kind, Value} <- [maps:get(Cluster, Batch, none)]].
 
 -doc "The chain from First as the batch leaves it, first to last.".
 -spec chain(alloc(), cluster()) -> {ok, [cluster()]} | {error, finding()}.
@@ -512,10 +521,19 @@ release(Alloc, BySector, [{Cluster, Left} | Rest] = Waiting, Sectors) ->
             release(Alloc, BySector, Waiting, Sectors#{Index => patched(Alloc, Index, Overlay)})
     end.
 
-%% FAT sector Index of the first FAT with Entries, each of which lies in it, written.
-patched(Alloc, Index, Entries) ->
-    lists:foldl(fun({Cluster, Value}, Sector) -> put_entry(Alloc, Cluster, Value, Sector) end,
-                fat_sector(Alloc, Index), Entries).
+%% FAT sector Index of the first FAT with Entries, each of which lies in it, written,
+%% a later entry of a cluster over an earlier one. The sector is built once, whatever
+%% the count of entries: a view reads a FAT sector at every link a walk follows, and
+%% one rebuilt for each entry would leave garbage in proportion to the entries.
+patched(Alloc = #alloc{type = Type}, Index, Entries) ->
+    Sector = fat_sector(Alloc, Index),
+    Values = maps:from_list([{entry_offset(Alloc, Cluster), Value} || {Cluster, Value} <- Entries]),
+    {End, Parts} = maps:fold(fun(Offset, Value, {At, Acc}) ->
+                                     <<_:Offset/binary, Old:Type/little, _/binary>> = Sector,
+                                     {Offset + Type div 8,
+                                      [Acc, binary:part(Sector, At, Offset - At), <<(encode(Type, Old, Value)):Type/little>>]}
+                             end, {0, []}, maps:iterator(Values, ordered)),
+    iolist_to_binary([Parts, binary:part(Sector, End, ?SECTOR - End)]).
 
 %% Sector, the one holding Cluster's entry, with that entry set to Value.
 put_entry(Alloc = #alloc{type = Type}, Cluster, Value, Sector) ->

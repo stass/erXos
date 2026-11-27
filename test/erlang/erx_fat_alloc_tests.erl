@@ -583,3 +583,31 @@ collect(Port, Acc) ->
         {Port, {data, Data}} -> collect(Port, <<Acc/binary, Data/binary>>);
         {Port, {exit_status, Status}} -> {Status, Acc}
     end.
+
+%% A FAT sector read through the view is built once, whatever the count of the
+%% batch's entries in it: a walk reads a FAT sector at every link it follows, and a
+%% sector rebuilt once per entry would make each read up to 128 sectors of garbage.
+%% The read runs in a process of its own, collected first, so its refc binaries
+%% afterwards are what the read made; the sector it answers holds every entry of
+%% the batch.
+a_view_read_builds_its_fat_sector_once_test() ->
+    L = synthetic(32, 1000, 2, fun zero/1),
+    {ok, Run, A} = erx_fat_alloc:grow(erx_fat_alloc:new(L), none, 126),
+    View = erx_fat_alloc:view(A),
+    Parent = self(),
+    Image = get(image),
+    {Pid, Ref} = spawn_monitor(fun() ->
+                                       put(image, Image),
+                                       erlang:garbage_collect(),
+                                       {binary, Before} = process_info(self(), binary),
+                                       {ok, Sector} = View(2),
+                                       {binary, After} = process_info(self(), binary),
+                                       Parent ! {self(), Sector, length(After) - length(Before)}
+                               end),
+    {Sector, Made} = receive
+                         {Pid, S, M} -> erlang:demonitor(Ref, [flush]), {S, M};
+                         {'DOWN', Ref, process, Pid, Why} -> error({reader_ended, Why})
+                     end,
+    ?assertEqual(links(L, Run),
+                 [{C, binary:decode_unsigned(binary:part(Sector, C * 4, 4), little) band 16#0fffffff} || C <- Run]),
+    ?assert(Made =< 2, {binaries_made, Made}).
