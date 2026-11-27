@@ -838,9 +838,12 @@ module Erx
        "-define(#{name}_MASK, #{erlang_integer(((1 << field.width) - 1) << field.offset)}).",
        "-define(#{name}_GET(Word), (((Word) bsr #{field.offset}) band #{field_max})).",
        "-define(#{name}_FITS(Value), (is_integer(Value) andalso (Value) >= 0 andalso (Value) =< #{field_max})).",
-       "-define(#{name}_PUT(Value),", "        (case ?#{name}_FITS(Value) of",
-       "             true -> (Value) bsl #{field.offset};",
-       "             false -> erlang:error({badfield, {#{location}}, Value})", '         end)).',
+       # The check is an orelse, not a case on true and false: Dialyzer flags a
+       # case's false clause as unreachable wherever Value is a literal that fits.
+       "-define(#{name}_PUT(Value),",
+       "        (begin ?#{name}_FITS(Value) orelse erlang:error({badfield, {#{location}}, Value}),",
+       "               (Value) bsl #{field.offset}",
+       '         end)).',
        *field.values.map { |label, value| "-define(#{name}_#{label.upcase}, #{value})." }, '']
     end
 
