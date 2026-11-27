@@ -46,7 +46,23 @@ class ErxF2fsPlanTest < Minitest::Test
     Seed.new(fault: "an old block's valid bit cleared without its summary's confirmation", file: CORE,
              anchor: '                Cleared = case not real(Old) orelse confirms(State, Old, Owner, Index, Blocks) of',
              replacement: '                Cleared = case not real(Old) orelse is_boolean(confirms(State, Old, Owner, Index, Blocks)) of',
-             case_name: 'set_slot_clears_only_what_the_summary_confirms_test_')
+             case_name: 'set_slot_clears_only_what_the_summary_confirms_test_'),
+    Seed.new(fault: 'a write admitted one block past the space the volume offers', file: CORE,
+             anchor: '    case After > max(Before, erx_f2fs_mount:offered(Volume)) of',
+             replacement: '    case After > max(Before, erx_f2fs_mount:offered(Volume)) + 1 of',
+             case_name: 'a_write_stays_within_the_space_the_volume_offers_test_'),
+    Seed.new(fault: 'a volume past its space refused a rewrite', file: CORE,
+             anchor: '    case After > max(Before, erx_f2fs_mount:offered(Volume)) of',
+             replacement: '    case After > max(Before - Before, erx_f2fs_mount:offered(Volume)) of',
+             case_name: 'a_write_stays_within_the_space_the_volume_offers_test_'),
+    Seed.new(fault: "an epoch let one node past the walk's bound", file: CORE,
+             anchor: 'map_size(Nodes) + map_size(Dentries) =< erx_f2fs_mount:walk_blocks().',
+             replacement: 'map_size(Nodes) + map_size(Dentries) =< erx_f2fs_mount:walk_blocks() + 1.',
+             case_name: 'the_room_rule_bounds_the_epoch_by_the_walk_test'),
+    Seed.new(fault: "an epoch's charge leaving out its dentry blocks", file: CORE,
+             anchor: 'map_size(Nodes) + map_size(Dentries) =< erx_f2fs_mount:walk_blocks().',
+             replacement: 'map_size(Nodes) + 0 * map_size(Dentries) =< erx_f2fs_mount:walk_blocks().',
+             case_name: 'the_room_rule_bounds_the_epoch_by_the_walk_test')
   ].freeze
 
   def test_eunit_cases_pass

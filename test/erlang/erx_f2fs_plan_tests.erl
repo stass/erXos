@@ -17,7 +17,8 @@ state at the plan's phase boundaries, under a device that honours flushes
 and writes a sector whole or not at all, mounts to the old checkpoint or
 the new one. set_node keeps the counters and i_blocks through creating,
 moving and freeing nodes, and a dirty dentry block goes to the warm data
-log.
+log. A write stays within the space the volume offers, and the room
+rule bounds the epoch by the matching blocks the walk passes.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -429,3 +430,50 @@ a_second_checkpoint_in_one_mount_cuts_to_either_side_test_() ->
              {Plan2, _} = checkpoint(Dirty(Committed1), After1),
              crash_states({Partition, After1}, Mounted1, Plan2)
      end}.
+
+%%% The space a volume offers and the room rule
+
+%% A volume whose checkpoint offers two blocks more than it holds takes
+%% two new blocks in the root's empty slots, refuses a third with {space,
+%% full}, still rewrites a block it holds, and its checkpoint remounts at
+%% exactly its space; a volume already past its space rewrites a block.
+a_write_stays_within_the_space_the_volume_offers_test_() ->
+    {timeout, 120,
+     fun() ->
+             {Partition, Medium} = Fresh = fresh(),
+             {ok, #{checkpoint := #{valid_block_count := Valid} = Header} = Mounted} = mount(Fresh),
+             Space = Valid + 2,
+             State0 = state(Mounted#{checkpoint := Header#{user_block_count := Space}}, Medium),
+             Write = fun(State, Slots) ->
+                             {ok, Addresses, Claimed} = erx_f2fs_core:allocate(State, ?WARM_DATA, length(Slots)),
+                             need(fun(B) -> erx_f2fs_core:write(Claimed, ?ERX_F2FS_ROOT_INO,
+                                                                lists:zip(Slots, Addresses), 0, 0, B) end,
+                                  Medium)
+                     end,
+             {ok, Full} = Write(State0, [1, 2]),
+             ?assertEqual({error, {space, full}}, Write(Full, [3])),
+             {ok, Rewritten} = Write(Full, [0]),
+             {Plan, _} = checkpoint(Rewritten, Medium),
+             ?assertMatch({ok, #{checkpoint := #{valid_block_count := Space, user_block_count := Space}}},
+                          mount({Partition, written(Medium, Plan)})),
+             Past = state(Mounted#{checkpoint := Header#{user_block_count := Valid - 1}}, Medium),
+             ?assertMatch({ok, _}, Write(Past, [0])),
+             ?assertEqual({error, {space, full}}, Write(Past, [1]))
+     end}.
+
+%% The next checkpoint has room for an epoch of 512 dirty nodes and dentry
+%% blocks, the matching blocks the walk passes, and none for one more.
+the_room_rule_bounds_the_epoch_by_the_walk_test() ->
+    {_Partition, Medium} = Fresh = fresh(),
+    {ok, #{root := Root} = Mounted} = mount(Fresh),
+    State = state(Mounted, Medium),
+    Dirtied = fun(Count) ->
+                      lists:foldl(fun(Nid, S) -> erx_f2fs_core:put_node(S, Nid, {inode, Root}) end,
+                                  State, lists:seq(1000, 999 + Count))
+              end,
+    ?assertEqual(512, erx_f2fs_mount:walk_blocks()),
+    ?assert(erx_f2fs_core:roomy(Dirtied(512))),
+    ?assertNot(erx_f2fs_core:roomy(Dirtied(513))),
+    ?assertNot(erx_f2fs_core:roomy(erx_f2fs_core:put_dentries(Dirtied(512), {1000, 0}, []))),
+    ?assertNot(erx_f2fs_core:changed(State)),
+    ?assert(erx_f2fs_core:changed(Dirtied(1))).

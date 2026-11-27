@@ -42,7 +42,7 @@ class ErxF2fsVolumeTest < Minitest::Test
              replacement: 'when map_size(Blocks) < 0 ->',
              failure: CORPUS_CASE_FAILED),
     Seed.new(fault: 'an open for truncation admitted', source: REQUEST,
-             anchor: '                               Flags band ?ERX_P9_O_TRUNC =/= 0 ->',
+             anchor: '                                               Flags band ?ERX_P9_O_TRUNC =/= 0 ->',
              replacement: '                               false ->',
              failure: /every_mutation_answers_erofs[^\n]*failed/),
     Seed.new(fault: "a readdir's core calls bounded by the volume's blocks, not the directory's",
@@ -61,7 +61,7 @@ class ErxF2fsVolumeTest < Minitest::Test
     Seed.new(fault: 'a written block kept out of the cache', source: VOLUME,
              anchor: 'Cached = lists:foldl(fun({Address, Block}, Acc) -> Acc#{Address => Block} end, Blocks, Writes),',
              replacement: 'Cached = lists:foldl(fun({_Address, _Block}, Acc) -> Acc end, Blocks, Writes),',
-             failure: WRITE_CASE_FAILED),
+             failure: case_failed('writes_read_back_across_checkpoints')),
     Seed.new(fault: "a read judging an owner without the state's summaries", source: CORE,
              anchor: '    Volume#{dirty => Nodes, held => Summaries}.',
              replacement: '    Volume#{dirty => Nodes, held => maps:without(maps:keys(Summaries), Summaries)}.',
@@ -110,7 +110,15 @@ class ErxF2fsVolumeTest < Minitest::Test
     Seed.new(fault: "a failed fsync's checkpoint leaving the volume running", source: VOLUME,
              anchor: "        {ok, Committed} -> {ok, Committed};\n        {error, eio} -> {ended, {error, eio}, State}",
              replacement: "        {ok, Committed} -> {ok, Committed};\n        {error, eio} -> {{error, eio}, State}",
-             failure: case_failed('a_failed_write_or_flush_ends_the_volume_with_eio'))
+             failure: case_failed('a_failed_write_or_flush_ends_the_volume_with_eio')),
+    Seed.new(fault: 'a handle answering an access it was not opened for', source: REQUEST,
+             anchor: 'opened_for({Nid, Access}, Need) when Access =:= Need; Access =:= read_write -> {ok, Nid};',
+             replacement: 'opened_for({Nid, _Access}, _Need) when is_integer(Nid) -> {ok, Nid};',
+             failure: case_failed('a_handle_answers_its_access_and_a_write_open_needs_the_owners_bits')),
+    Seed.new(fault: "an open for writing admitted without the owner's bits", source: REQUEST,
+             anchor: '        {_, _, false} -> {error, eacces};',
+             replacement: '        {_, _, false} when false -> {error, eacces};',
+             failure: case_failed('a_handle_answers_its_access_and_a_write_open_needs_the_owners_bits'))
   ].freeze
 
   def test_eunit_cases_pass

@@ -101,7 +101,7 @@ pack's blocks of 1020 numbers each, is bounded by the format and not
 admitted.
 """.
 
--export([mount/3]).
+-export([mount/3, walk_blocks/0, offered/1]).
 -export_type([blocks/0, mounted/0, mode/0, failure/0]).
 
 -include("generated/erx_abi.hrl").
@@ -131,6 +131,24 @@ admitted.
 %% blocks a checkpoint's nodes stay within (docs/design-f2fs.md, "The walk"
 %% and "The room rule").
 -define(WALK_BLOCKS, 512).
+
+-doc """
+The matching node blocks a walk passes at most, the bound the epoch's
+charge stays within (docs/design-f2fs.md, "The walk" and "The room rule").
+""".
+-spec walk_blocks() -> pos_integer().
+walk_blocks() -> ?WALK_BLOCKS.
+
+-doc """
+The blocks Volume offers, the most valid_block_count may reach
+(docs/design-f2fs.md, "The space a volume offers"): the checkpoint's
+user_block_count, or less, since erXos counts at most the main area less
+the sections its cleaner keeps back, and none for a main area of no more.
+""".
+-spec offered(#{superblock := map(), checkpoint := map(), _ => _}) -> non_neg_integer().
+offered(#{superblock := #{section_count := Sections, segs_per_sec := PerSection},
+          checkpoint := #{user_block_count := User}}) ->
+    min(User, max(0, Sections - ?CLEANER_RESERVE_SECTIONS) * PerSection * ?BLOCKS_PER_SEG).
 
 -doc "The blocks a mount has read, by address.".
 -type blocks() :: #{non_neg_integer() => binary()}.

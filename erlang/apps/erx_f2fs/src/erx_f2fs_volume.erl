@@ -34,9 +34,12 @@ the state's view, and every change is held in the state until an fsync,
 or unmount/1, runs erx_f2fs_plan's checkpoint: each phase's blocks
 written, contiguous ones as one request, all sent at once, then a flush,
 and the committed state adopted only once the last flush is answered
-("Checkpoints"). A write's blocks are claimed in the warm data log,
-written and answered before their slots are set, so a checkpoint's first
-flush covers them (ordering 1). Every block written joins the cache over
+("Checkpoints"). A write's blocks are claimed in the warm data log and
+set in their slots in a state of its own, which is adopted only once the
+blocks are written, so a checkpoint's first flush covers them (ordering
+1); a state that would leave the next checkpoint no room is dropped
+for a checkpoint and a second try, and a write past the space the volume
+offers answers enospc having changed nothing. Every block written joins the cache over
 whatever it held at that address, so no read and no plan takes a block
 older than the medium's. A write or flush the window refuses ends the
 volume with eio: until the last flush, the medium holds the committed
@@ -57,14 +60,6 @@ checkpoint whole, and the restart mounts it.
 -define(CACHE_BLOCKS, 1024).
 %% The log a write's blocks are claimed in (docs/design-f2fs.md, "Scope: features and forms").
 -define(WARM_DATA, 1).
-%% The dirty nodes an epoch holds at most, so a cut checkpoint leaves no
-%% more than the walk's 512 matching blocks (docs/design-f2fs.md, "The
-%% walk"); the nodes one write step dirties at most, its inode and a
-%% direct node; and the free sections a write leaves the checkpoint after
-%% it, one for each log that checkpoint writes and one more.
--define(EPOCH_NODES, 512).
--define(WRITE_NODES, 2).
--define(CHECKPOINT_SECTIONS, 3).
 
 %% The blocks a request's steps may use: the cache's, by address, the
 %% order they joined it in, oldest first, and how many it keeps.
@@ -165,8 +160,8 @@ refused({error, {walk, {chain, Start, Ino}}}) ->
                  "replays the chain and writes a checkpoint", [Start, Ino]),
     eintegrity;
 refused({error, {walk, long}}) ->
-    logger:error("f2fs: the volume holds more than 512 matching node blocks after its checkpoint; mount it once in "
-                 "Linux, which replays the chain and writes a checkpoint"),
+    logger:error("f2fs: the volume holds more than ~b matching node blocks after its checkpoint; mount it once "
+                 "in Linux, which replays the chain and writes a checkpoint", [erx_f2fs_mount:walk_blocks()]),
     eintegrity;
 refused({unread, _Runs}) ->
     eio;
@@ -217,10 +212,7 @@ moved(checkpoint, State) ->
         {error, eio} -> {ended, {error, eio}, State}
     end;
 moved({write, _Ino, _Placed, _Size, _Reply} = Write, State) ->
-    case uncrowded(State) of
-        {ok, Roomy} -> claimed(Write, Roomy);
-        {error, eio} -> {ended, {error, eio}, State}
-    end;
+    stored(Write, State, first);
 moved({then, Step}, #{cache := #{blocks := Cached} = Cache} = State) ->
     Reader = reader(State),
     {Move, Blocks, Read} = need_loop(fun(Given) -> Step(Reader, Given) end, Cached, [], State),
@@ -230,59 +222,75 @@ moved({then, Step}, #{cache := #{blocks := Cached} = Cache} = State) ->
         _ -> moved(Move, State1)
     end.
 
-%% State, checkpointed first when a write step's nodes would pass the
-%% epoch's bound or only a checkpoint's sections are left.
-uncrowded(#{core := Core} = State) ->
-    #{nodes := Dirty} = erx_f2fs_core:epoch(Core),
-    case length(Dirty) + ?WRITE_NODES > ?EPOCH_NODES orelse
-        length(erx_f2fs_core:free_sections(Core)) =< ?CHECKPOINT_SECTIONS of
-        true -> checkpoint(State);
-        false -> {ok, State}
-    end.
-
 %% A checkpoint when the epoch changed anything, else nothing to write.
 committed(#{core := Core} = State) ->
-    case erx_f2fs_core:epoch(Core) of
-        #{nodes := [], dentries := []} -> {ok, State};
-        #{} -> checkpoint(State)
+    case erx_f2fs_core:changed(Core) of
+        false -> {ok, State};
+        true -> checkpoint(State)
     end.
 
-%% A write's blocks claimed in the warm data log, unless the claim would
-%% leave the checkpoint after it too few free sections (enospc), written,
-%% then set in their slots.
-claimed({write, Ino, Placed, Size, Reply}, #{core := Core} = State) ->
+%% A write tried on the state: its blocks claimed in the warm data log and
+%% set in their slots. The state that leaves is adopted once the blocks are
+%% written, if it leaves the next checkpoint room (erx_f2fs_core:roomy/1);
+%% else the volume checkpoints what it holds and tries once more, and
+%% answers enospc when it holds nothing to commit or the second try finds
+%% no room either. A write past the space the volume offers answers enospc
+%% at once, as a checkpoint frees none of it. Nothing is written or adopted
+%% before the write is admitted.
+stored(Write, State, Try) ->
+    case tried(Write, State) of
+        {ok, Core, Writes, State1} ->
+            case erx_f2fs_core:roomy(Core) of
+                true -> adopted(Write, Core, Writes, State1);
+                false -> made_room(Write, State1, Try)
+            end;
+        {no_room, State1} ->
+            made_room(Write, State1, Try);
+        Refused ->
+            Refused
+    end.
+
+%% The write tried again after a checkpoint, when the first try found no
+%% room and the state holds something to commit.
+made_room(Write, #{core := Core} = State, first) ->
+    case erx_f2fs_core:changed(Core) andalso checkpoint(State) of
+        false -> {{error, enospc}, State};
+        {ok, Committed} -> stored(Write, Committed, second);
+        {error, eio} -> {ended, {error, eio}, State}
+    end;
+made_room(_Write, State, second) ->
+    {{error, enospc}, State}.
+
+%% The core's state after the write, and the blocks to write, {Address,
+%% Bytes} each; no_room when no free section takes the blocks.
+tried({write, Ino, Placed, Size, _Reply}, #{core := Core, cache := #{blocks := Cached} = Cache} = State) ->
     {Blocks, Bytes} = lists:unzip(Placed),
     case erx_f2fs_core:allocate(Core, ?WARM_DATA, length(Placed)) of
         {ok, Addresses, Claimed} ->
-            case length(erx_f2fs_core:free_sections(Claimed)) < ?CHECKPOINT_SECTIONS of
-                true -> {{error, enospc}, State};
-                false -> placed(Ino, lists:zip(Blocks, Addresses), Bytes, Size, Reply, Claimed, State)
+            Time = erlang:system_time(nanosecond),
+            Set = fun(Given) ->
+                          erx_f2fs_core:write(Claimed, Ino, lists:zip(Blocks, Addresses), Size, Time, Given)
+                  end,
+            {Answer, Read, Order} = need_loop(Set, Cached, [], State),
+            State1 = State#{cache := trimmed(Cache#{blocks := Read}, Order)},
+            case Answer of
+                {ok, Written} -> {ok, Written, lists:zip(Addresses, Bytes), State1};
+                {error, {space, full}} -> {{error, enospc}, State1};
+                {unread, _Runs} -> {{error, eio}, State1};
+                {error, Failure} ->
+                    logger:error("f2fs: setting a write's slots failed: ~0p", [Failure]),
+                    {{error, eio}, State1}
             end;
         {error, enospc} ->
-            {{error, enospc}, State}
+            {no_room, State}
     end.
 
-placed(Ino, Placed, Bytes, Size, Reply, Claimed, State) ->
-    case written(lists:zip([A || {_, A} <- Placed], Bytes), State) of
-        {ok, State1} ->
-            Time = erlang:system_time(nanosecond),
-            installed(fun(Given) -> erx_f2fs_core:write(Claimed, Ino, Placed, Size, Time, Given) end,
-                      Reply, State1);
+%% The write's blocks written, then its state adopted and its answer given.
+adopted({write, _Ino, _Placed, _Size, Reply}, Core, Writes, State) ->
+    case written(Writes, State) of
+        {ok, State1} -> {Reply, State1#{core := Core}};
         {error, eio} ->
             {ended, {error, eio}, State}
-    end.
-
-%% A write's second step: Set, the core's write over the blocks read so
-%% far, run through the need loop and adopted, then the write's Reply.
-installed(Set, Reply, #{cache := #{blocks := Cached} = Cache} = State) ->
-    {Answer, Blocks, Read} = need_loop(Set, Cached, [], State),
-    State1 = State#{cache := trimmed(Cache#{blocks := Blocks}, Read)},
-    case Answer of
-        {ok, Core} -> {Reply, State1#{core := Core}};
-        {unread, _Runs} -> {ended, {error, eio}, State1};
-        {error, Failure} ->
-            logger:error("f2fs: setting a write's slots failed: ~0p", [Failure]),
-            {ended, {error, eio}, State1}
     end.
 
 %%% Checkpoints and writes

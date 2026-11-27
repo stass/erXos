@@ -1638,7 +1638,10 @@ nothing above the callback module changes.
   the parity corpus. `xattr` answers `enotsup`. A device node, FIFO or
   socket Linux made shows in `readdir` and `getattr` and answers `open`
   with `enotsup`; a directory opened for writing answers `eisdir`, and a
-  symlink, which the server never follows, `eloop`.
+  symlink, which the server never follows, `eloop`. An open for writing
+  or truncation needs the owner's permission bits for its access, and a
+  handle answers only the access it was opened for (`eacces` and `ebadf`),
+  as erx_ramfs's opens and handles do.
 * **Nodes and identity.** A node is a nid. A qid's path is the nid in the
   low 32 bits and `i_generation` in the high 32
   ([design-storage.md](design-storage.md#read-write-storage)), unique

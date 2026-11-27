@@ -33,12 +33,14 @@ for writing, a write is the first step of "Operations", answering the move
 {write, Ino, Blocks, Size, Reply}: at most ?WRITE_BLOCKS whole blocks in file
 order, each {Block, Bytes} merged over the old block's bytes below the
 file's size and zeros at and past it, the size once they are set and the
-write's answer, naming the bytes they take, so a write may be short. The volume claims the blocks,
-writes them and sets them in their slots. An fsync answers the move
-checkpoint. A write into an inline file, one that starts past the block
+write's answer, naming the bytes they take, so a write may be short. The
+volume claims the blocks, sets them in their slots and writes them
+(erx_f2fs_volume). An fsync answers the move checkpoint. A write into an inline file, one that starts past the block
 holding the size (which needs the truncate that raises a size) or one
 whose slot no node holds, an open for truncation or for appending and
-the other mutations answer enotsup.
+the other mutations answer enotsup. An open for writing needs the owner's
+permission bits for its access (eacces), and a handle answers only the
+access it was opened for (ebadf).
 
 A readdir's entry offset is the position past the entry's first slot,
 where the next call resumes ("Directories"); "." is listed with the
@@ -61,7 +63,7 @@ one per slot.
 """.
 
 -export([start/2]).
--export_type([request/0, step/0, move/0, failure/0]).
+-export_type([request/0, handle/0, step/0, move/0, failure/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -71,6 +73,9 @@ one per slot.
 %% The blocks one write takes at most, so a step needs at most one free section.
 -define(WRITE_BLOCKS, 64).
 -define(NAME_MAX, ?ERX_F2FS_NAME_LEN_MAX).
+%% The owner's permission bits an open for writing needs, as erx_ramfs_core checks them.
+-define(OWNER_READ, 8#400).
+-define(OWNER_WRITE, 8#200).
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK
                         bor ?ERX_P9_GETATTR_MASK_UID bor ?ERX_P9_GETATTR_MASK_GID
                         bor ?ERX_P9_GETATTR_MASK_ATIME bor ?ERX_P9_GETATTR_MASK_MTIME
@@ -80,14 +85,20 @@ one per slot.
 
 -doc """
 A request: the root, or one of erx_fs's callbacks on a node, a nid, or a
-handle, which is the open node's nid.
+handle.
 """.
 -type request() :: root | {walk, non_neg_integer(), binary()} | {getattr, non_neg_integer()}
                  | {open, non_neg_integer(), non_neg_integer()}
-                 | {read, non_neg_integer(), non_neg_integer(), pos_integer()}
-                 | {readdir, non_neg_integer(), non_neg_integer(), pos_integer()}
-                 | {readlink, non_neg_integer()} | statfs | {fsync, non_neg_integer()}
+                 | {read, handle(), non_neg_integer(), pos_integer()}
+                 | {readdir, handle(), non_neg_integer(), pos_integer()}
+                 | {readlink, non_neg_integer()} | statfs | {fsync, handle()}
                  | {write | make | setattr | unlink | rename, term()}.
+-doc """
+An open node's handle: its nid and the access it was opened for. A read
+through a handle not opened for reading, and a write through one not
+opened for writing, answer ebadf, as erx_ramfs_core's do.
+""".
+-type handle() :: {non_neg_integer(), read | write | read_write}.
 -doc "A check of the medium a step broke: the core's, or a readdir past its bound.".
 -type failure() :: erx_f2fs_core:failure() | {dir, blocks}.
 -doc "What a request does next.".
@@ -112,17 +123,23 @@ start({getattr, Nid}, _Volume) ->
     {then, step(Nid, fun(Inode, _, _) -> {reply, {ok, attr(Inode)}} end)};
 start({open, Nid, Flags}, Volume) ->
     Writable = writable(Volume),
-    {then, step(Nid, fun(Inode, _, _) -> {reply, opened(Nid, kind(Inode), Flags, Writable)} end)};
-start({read, Nid, Offset, Count}, _Volume) ->
-    {then, step(Nid, fun(Inode, Volume, Blocks) ->
-                             maybe
-                                 ok ?= readable(kind(Inode)),
-                                 {ok, Bytes} ?= erx_f2fs_core:read(Volume, Inode, Offset, Count, Blocks),
-                                 {reply, {ok, Bytes}}
-                             end
-                     end)};
-start({readdir, Nid, Position, Max}, _Volume) ->
-    {then, core_call(Nid, Position, Max, [], 1)};
+    {then, step(Nid, fun(Inode, _, _) -> {reply, opened(Nid, Inode, Flags, Writable)} end)};
+start({read, Handle, Offset, Count}, _Volume) ->
+    maybe
+        {ok, Nid} ?= opened_for(Handle, read),
+        {then, step(Nid, fun(Inode, Volume, Blocks) ->
+                                 maybe
+                                     ok ?= readable(kind(Inode)),
+                                     {ok, Bytes} ?= erx_f2fs_core:read(Volume, Inode, Offset, Count, Blocks),
+                                     {reply, {ok, Bytes}}
+                                 end
+                         end)}
+    end;
+start({readdir, Handle, Position, Max}, _Volume) ->
+    maybe
+        {ok, Nid} ?= opened_for(Handle, read),
+        {then, core_call(Nid, Position, Max, [], 1)}
+    end;
 start({readlink, Nid}, _Volume) ->
     {then, step(Nid, fun(Inode, Volume, Blocks) ->
                              maybe
@@ -138,8 +155,11 @@ start({fsync, _Nid}, Volume) ->
         true -> checkpoint;
         false -> {reply, ok}
     end;
-start({write, {Nid, Offset, Bytes}}, #{dirty := _}) ->
-    {then, step(Nid, fun(Inode, Volume, Blocks) -> write(Inode, Offset, Bytes, Volume, Blocks) end)};
+start({write, {Handle, Offset, Bytes}}, #{dirty := _}) ->
+    maybe
+        {ok, Nid} ?= opened_for(Handle, write),
+        {then, step(Nid, fun(Inode, Volume, Blocks) -> write(Inode, Offset, Bytes, Volume, Blocks) end)}
+    end;
 start({Mutation, _Arguments}, #{dirty := _})
   when Mutation =:= make; Mutation =:= setattr; Mutation =:= unlink; Mutation =:= rename ->
     {reply, {error, enotsup}};
@@ -183,18 +203,49 @@ walk(Dir, Name, Volume, Blocks) ->
         Other -> Other
     end.
 
-%% An open's handle, the node's nid.
-opened(_Nid, Kind, _Flags, _Writable) when Kind =:= device; Kind =:= other -> {error, enotsup};
-opened(_Nid, symlink, _Flags, _Writable) -> {error, eloop};
-opened(Nid, Kind, Flags, Writable) when Flags band ?ERX_P9_O_ACCMODE =/= 0;
-                                         Flags band ?ERX_P9_O_TRUNC =/= 0 ->
-    case {Kind, Writable} of
-        {directory, _} -> {error, eisdir};
-        {_, false} -> {error, erofs};
+%% An open's handle, the node's nid and the access it was opened for. An
+%% open for writing or truncation needs the owner's permission bits for
+%% that access, as erx_ramfs_core grants them, root's opens too.
+opened(Nid, Inode, Flags, Writable) -> opened(Nid, Inode, kind(Inode), Flags, Writable).
+
+opened(_Nid, _Inode, Kind, _Flags, _Writable) when Kind =:= device; Kind =:= other -> {error, enotsup};
+opened(_Nid, _Inode, symlink, _Flags, _Writable) -> {error, eloop};
+opened(Nid, Inode, Kind, Flags, Writable) when Flags band ?ERX_P9_O_ACCMODE =/= 0;
+                                               Flags band ?ERX_P9_O_TRUNC =/= 0 ->
+    Access = access(Flags),
+    case {Kind, Writable, permitted(Inode, Access, Flags)} of
+        {directory, _, _} -> {error, eisdir};
+        {_, false, _} -> {error, erofs};
+        {_, _, false} -> {error, eacces};
         _ when Flags band (?ERX_P9_O_TRUNC bor ?ERX_P9_O_APPEND) =/= 0 -> {error, enotsup};
-        _ -> {ok, Nid}
+        _ -> {ok, {Nid, Access}}
     end;
-opened(Nid, _Kind, _Flags, _Writable) -> {ok, Nid}.
+opened(Nid, _Inode, _Kind, _Flags, _Writable) -> {ok, {Nid, read}}.
+
+%% The access an open's flags ask for.
+access(Flags) ->
+    case Flags band ?ERX_P9_O_ACCMODE of
+        0 -> read;
+        ?ERX_P9_O_WRONLY -> write;
+        _ -> read_write
+    end.
+
+%% Whether Inode's owner bits allow Access, a truncation needing write too.
+permitted(#{i_mode := Mode}, Access, Flags) ->
+    Bits = case Access of
+               read -> ?OWNER_READ;
+               write -> ?OWNER_WRITE;
+               read_write -> ?OWNER_READ bor ?OWNER_WRITE
+           end,
+    Needed = case Flags band ?ERX_P9_O_TRUNC of
+                 0 -> Bits;
+                 _ -> Bits bor ?OWNER_WRITE
+             end,
+    Mode band Needed =:= Needed.
+
+%% Handle's nid, when it was opened for Need, else ebadf.
+opened_for({Nid, Access}, Need) when Access =:= Need; Access =:= read_write -> {ok, Nid};
+opened_for(_Handle, _Need) -> {reply, {error, ebadf}}.
 
 %% Whether Volume is a read-write volume's view, which holds its dirty
 %% nodes (erx_f2fs_core:view/1).

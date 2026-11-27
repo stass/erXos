@@ -9,7 +9,7 @@
 -module(erx_f2fs_core_tests).
 -export([fixture_file/0, fixture_nodes/0, fixture_directory/0, fixture_names/0,
          fixture_node_directory/1, fixture_repeating_directory/1, fixture_unmapped_file/0,
-         fixture_inline_file/0, summary/3]).
+         fixture_inline_file/0, fixture_file_mode/1, summary/3]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
@@ -195,6 +195,11 @@ fixture_file() -> file().
 fixture_unmapped_file() ->
     Block = ?B_DIRECT1 + ?PER,
     {?INO, Block, file(#{inode => (inode_fields_inode())#{i_size := (Block + 1) * ?BLOCK}}, [])}.
+
+%% erx_f2fs_volume_tests' open checks: the test file with i_mode Mode, and
+%% its inode nid.
+fixture_file_mode(Mode) ->
+    {?INO, file(#{inode => (inode_fields_inode())#{i_mode := Mode}}, [])}.
 
 %% A file of five bytes of inline data, and its inode nid.
 fixture_inline_file() ->

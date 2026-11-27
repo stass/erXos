@@ -71,7 +71,7 @@ every change since the checkpoint and no summary a commit replaced.
 
 -export([nat/2, inode/3, slot/4, read/5, symlink/3, lookup/4, readdir/4]).
 -export([state/2, allocate/3, set_slot/5, set_node/5, put_node/3, put_dentries/3, logs/1,
-         free_sections/1, epoch/1, committed/3, view/1, write/6, encode_node/2]).
+         free_sections/1, roomy/1, changed/1, epoch/1, committed/3, view/1, write/6, encode_node/2]).
 -export_type([nat/0, volume/0, slot/0, dentry/0, failure/0, blocks/0, state/0, node_value/0,
               epoch/0]).
 
@@ -87,6 +87,9 @@ every change since the checkpoint and no summary a commit replaced.
 %% The steps one readdir takes at most, each a dentry block or a run of
 %% empty slots one node leaves.
 -define(READDIR_STEPS, 8).
+%% The free sections a step leaves the checkpoint after it, one for each log
+%% that checkpoint writes and one more (docs/design-f2fs.md, "The room rule").
+-define(CHECKPOINT_SECTIONS, 3).
 %% A summary entry no block holds yet.
 -define(NO_SUMMARY, #{nid => 0, version => 0, ofs_in_node => 0}).
 
@@ -122,7 +125,7 @@ the block's index times 214 plus the slot, or its inline slot ([F 59]).
 -doc "The table a read broke a rule of, and the rule, or a codec failure.".
 -type failure() :: {nat, nid | free | owner | block_addr | journal_nid | journal_duplicate} |
                    {data, block_addr | owner} | {file, inline | size | type} | {dir, dot} |
-                   {space, no_free_section} | {mode, read_only} |
+                   {space, no_free_section | full} | {mode, read_only} |
                    {sit, valid_bit | summary} | {file, unmapped} |
                    erx_f2fs_codec:failure().
 -type blocks() :: #{non_neg_integer() => binary()}.
@@ -613,7 +616,9 @@ fetch(Blocks, Addresses) ->
         Missing -> throw({?MODULE, need, lists:usort(Missing)})
     end.
 
+%% A result's value; a need or failure goes on to the enclosing run.
 ok({ok, Value}) -> Value;
+ok({need, Addresses}) -> throw({?MODULE, need, Addresses});
 ok({error, Failure}) -> fail(Failure).
 
 require(true, _Failure) -> ok;
@@ -794,6 +799,22 @@ logs(#state{logs = Logs}) -> [maps:get(Type, Logs) || Type <- lists:seq(0, ?ERX_
 -doc "The free sections, in order.".
 -spec free_sections(state()) -> [non_neg_integer()].
 free_sections(#state{free = Free}) -> Free.
+
+-doc """
+Whether State leaves the next checkpoint room (docs/design-f2fs.md, "The
+room rule"): at least ?CHECKPOINT_SECTIONS free sections, and an epoch
+charge, its dirty nodes and dentry blocks, within the matching blocks the
+walk passes, so whatever a cut leaves of that checkpoint the walk reads to
+its end.
+""".
+-spec roomy(state()) -> boolean().
+roomy(#state{free = Free, nodes = Nodes, dentries = Dentries}) ->
+    length(Free) >= ?CHECKPOINT_SECTIONS andalso
+        map_size(Nodes) + map_size(Dentries) =< erx_f2fs_mount:walk_blocks().
+
+-doc "Whether State holds a change for the next checkpoint: a dirty node or dentry block.".
+-spec changed(state()) -> boolean().
+changed(#state{nodes = Nodes, dentries = Dentries}) -> map_size(Nodes) + map_size(Dentries) > 0.
 
 -doc "State with node Nid's value Value dirty, to be written by the next checkpoint.".
 -spec put_node(state(), non_neg_integer(), node_value()) -> state().
@@ -994,7 +1015,9 @@ a block written at Address of the warm data log, set in its slot
 dirty, from the medium when it was clean, then set_slot/5; and the
 inode's size raised to at least Size, its mtime and ctime Time, in
 nanoseconds. A slot no node holds fails {file, unmapped}: the step that
-claimed the blocks checked each slot first, so only a bug reaches it.
+claimed the blocks checked each slot first, so only a bug reaches it. A
+write that would take valid_block_count past the space the volume offers
+fails {space, full} (docs/design-f2fs.md, "The space a volume offers").
 """.
 -spec write(state(), non_neg_integer(), [{non_neg_integer(), non_neg_integer()}], non_neg_integer(),
             non_neg_integer(), blocks()) -> result(state()).
@@ -1005,10 +1028,21 @@ write(State0, Ino, Placed, Size, Time, Blocks) ->
                 {inode, #{i_size := Old} = Inode} = maps:get(Ino, State#state.nodes),
                 Seconds = Time div 1000000000,
                 Nanos = Time rem 1000000000,
-                put_node(State, Ino, {inode, Inode#{i_size := max(Old, Size),
-                                                    i_mtime := Seconds, i_mtime_nsec := Nanos,
-                                                    i_ctime := Seconds, i_ctime_nsec := Nanos}})
+                within_space(State0, put_node(State, Ino, {inode, Inode#{i_size := max(Old, Size),
+                                                                         i_mtime := Seconds,
+                                                                         i_mtime_nsec := Nanos,
+                                                                         i_ctime := Seconds,
+                                                                         i_ctime_nsec := Nanos}}))
         end).
+
+%% State, unless it raises valid_block_count from Before's past the space
+%% the volume offers; a volume already past it may still rewrite its blocks.
+within_space(#state{counts = #{valid_block_count := Before}},
+             #state{volume = Volume, counts = #{valid_block_count := After}} = State) ->
+    case After > max(Before, erx_f2fs_mount:offered(Volume)) of
+        true -> fail({space, full});
+        false -> State
+    end.
 
 %% State with inode Ino dirty, from the medium when it was clean.
 dirty_inode(#state{nodes = Nodes} = State, Ino, _Blocks) when is_map_key(Ino, Nodes) ->

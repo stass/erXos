@@ -7,7 +7,7 @@ The erx_fs callback module of an F2FS volume (docs/design-f2fs.md, "The
 interface"): every callback of erx_fs, each one call to the volume
 process, erx_f2fs_volume, which answers it, so nothing is kept in the
 grant that calls it. The tree's handle is the volume's pid; a node is a
-nid and a handle the open node's nid. A read-only volume answers every
+nid and a handle its nid and the access it was opened for (erx_f2fs_request:handle()). A read-only volume answers every
 mutation erofs, a read-write one those it does not offer enotsup; xattr answers enotsup here, as the design
 states for every volume. clunk has nothing to release.
 """.
@@ -21,6 +21,7 @@ states for every volume. clunk has nothing to release.
 
 -type nid() :: non_neg_integer().
 -type error() :: {error, file:posix()}.
+-type handle() :: erx_f2fs_request:handle().
 
 -doc false.
 -spec init(pid()) -> {ok, pid()}.
@@ -41,13 +42,13 @@ walk(Dir, Name, Volume) -> erx_f2fs_volume:call(Volume, {walk, Dir, Name}).
 -spec getattr(nid(), pid()) -> {ok, erx_fs:attr()} | error().
 getattr(Node, Volume) -> erx_f2fs_volume:call(Volume, {getattr, Node}).
 -doc false.
--spec open(nid(), non_neg_integer(), pid()) -> {ok, nid()} | error().
+-spec open(nid(), non_neg_integer(), pid()) -> {ok, handle()} | error().
 open(Node, Flags, Volume) -> erx_f2fs_volume:call(Volume, {open, Node, Flags}).
 -doc false.
--spec read(nid(), non_neg_integer(), pos_integer(), pid()) -> {ok, binary()} | error().
+-spec read(handle(), non_neg_integer(), pos_integer(), pid()) -> {ok, binary()} | error().
 read(Handle, Offset, Count, Volume) -> erx_f2fs_volume:call(Volume, {read, Handle, Offset, Count}).
 -doc false.
--spec readdir(nid(), non_neg_integer(), pos_integer(), pid()) -> {ok, [erx_fs:dirent()]} | error().
+-spec readdir(handle(), non_neg_integer(), pos_integer(), pid()) -> {ok, [erx_fs:dirent()]} | error().
 readdir(Handle, Offset, Max, Volume) -> erx_f2fs_volume:call(Volume, {readdir, Handle, Offset, Max}).
 -doc false.
 -spec readlink(nid(), pid()) -> {ok, binary()} | error().
@@ -56,10 +57,10 @@ readlink(Node, Volume) -> erx_f2fs_volume:call(Volume, {readlink, Node}).
 -spec statfs(pid()) -> {ok, erx_fs:statfs()} | error().
 statfs(Volume) -> erx_f2fs_volume:call(Volume, statfs).
 -doc false.
--spec clunk(nid(), pid()) -> ok.
+-spec clunk(handle(), pid()) -> ok.
 clunk(_Handle, _Volume) -> ok.
 -doc false.
--spec write(nid(), non_neg_integer(), binary(), pid()) ->
+-spec write(handle(), non_neg_integer(), binary(), pid()) ->
           {ok, non_neg_integer(), non_neg_integer()} | error().
 write(Handle, Offset, Bytes, Volume) -> erx_f2fs_volume:call(Volume, {write, {Handle, Offset, Bytes}}).
 -doc false.
@@ -76,7 +77,7 @@ unlink(Dir, Name, Kind, Volume) -> erx_f2fs_volume:call(Volume, {unlink, {Dir, N
 rename(Dir, Name, NewDir, NewName, Volume) ->
     erx_f2fs_volume:call(Volume, {rename, {Dir, Name, NewDir, NewName}}).
 -doc false.
--spec fsync(nid(), pid()) -> ok | error().
+-spec fsync(handle(), pid()) -> ok | error().
 fsync(Handle, Volume) -> erx_f2fs_volume:call(Volume, {fsync, Handle}).
 -doc false.
 -spec xattr(nid(), term(), pid()) -> {error, enotsup}.

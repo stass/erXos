@@ -442,18 +442,18 @@ given(Step, Blocks, Given) ->
 a_readdir_reads_on_through_the_core_calls_test() ->
     {Ino, Dir} = erx_f2fs_core_tests:fixture_node_directory(0),
     {Ino, Named} = erx_f2fs_core_tests:fixture_node_directory(Ino),
-    {ok, Entries} = requested(Named, {readdir, Ino, 0, 256}),
+    {ok, Entries} = requested(Named, {readdir, {Ino, read}, 0, 256}),
     ?assertEqual([<<".">>, <<"..">> | [<<"n", D>> || D <- "01234"]], [Name || {_, _, _, Name} <- Entries]),
     {ok, #{qid := Qid}} = requested(Named, {getattr, Ino}),
     {ok, #{qid := RootQid}} = requested(Named, {getattr, ?ERX_F2FS_ROOT_INO}),
     ?assertNotEqual(Qid, RootQid),
     ?assertEqual([{Qid, 1}, {RootQid, 2}, {Qid, 3}], [{Q, At} || {Q, At, _, _} <- lists:sublist(Entries, 3)]),
     ?assertEqual([Qid], lists:usort([Q || {Q, _, _, _} <- lists:nthtail(2, Entries)])),
-    ?assertEqual({ok, lists:sublist(Entries, 2)}, requested(Named, {readdir, Ino, 0, 2})),
-    ?assertEqual({ok, lists:nthtail(2, Entries)}, requested(Named, {readdir, Ino, 2, 256})),
+    ?assertEqual({ok, lists:sublist(Entries, 2)}, requested(Named, {readdir, {Ino, read}, 0, 2})),
+    ?assertEqual({ok, lists:nthtail(2, Entries)}, requested(Named, {readdir, {Ino, read}, 2, 256})),
     %% An entry whose inode fails its check fails the readdir, naming that
     %% inode's nid, not the directory's.
-    ?assertMatch({failed, 0, _}, requested(Dir, {readdir, Ino, 0, 256})).
+    ?assertMatch({failed, 0, _}, requested(Dir, {readdir, {Ino, read}, 0, 256})).
 
 %% A directory's core calls are bounded by its i_blocks: one whose 1,018
 %% slots each name an empty dentry block of its own lists, reading on past
@@ -461,9 +461,9 @@ a_readdir_reads_on_through_the_core_calls_test() ->
 %% fails once it claims only three blocks.
 a_readdir_is_bounded_by_the_blocks_its_directory_holds_test() ->
     {Ino, Honest} = erx_f2fs_core_tests:fixture_repeating_directory(1020),
-    ?assertEqual({ok, []}, requested(Honest, {readdir, Ino, 0, 256})),
+    ?assertEqual({ok, []}, requested(Honest, {readdir, {Ino, read}, 0, 256})),
     {Ino, Claimed} = erx_f2fs_core_tests:fixture_repeating_directory(3),
-    ?assertEqual({failed, Ino, {dir, blocks}}, requested(Claimed, {readdir, Ino, 0, 256})).
+    ?assertEqual({failed, Ino, {dir, blocks}}, requested(Claimed, {readdir, {Ino, read}, 0, 256})).
 
 %%% The mount
 
@@ -710,15 +710,61 @@ landings(Writes, Medium) ->
 %% Fixture as a read-write view, whose requests take the write path.
 writable({Volume, Blocks}) -> {Volume#{dirty => #{}}, Blocks}.
 
+%% A handle answers only the access it was opened for: a write through one
+%% opened to read, appending or not, and a read through one opened only to
+%% write answer ebadf. An open for writing or truncation needs the owner's
+%% permission bits for its access, as erx_ramfs_core's opens do, whoever
+%% opens it.
+a_handle_answers_its_access_and_a_write_open_needs_the_owners_bits_test() ->
+    {Ino, ReadOnly} = erx_f2fs_core_tests:fixture_file_mode(8#100444),
+    {ok, Reader} = requested(writable(ReadOnly), {open, Ino, 0}),
+    {ok, Appender} = requested(writable(ReadOnly), {open, Ino, ?ERX_P9_O_APPEND}),
+    [?assertEqual({error, ebadf}, requested(writable(ReadOnly), {write, {Handle, 0, <<"x">>}}))
+     || Handle <- [Reader, Appender]],
+    [?assertEqual({error, eacces}, requested(writable(ReadOnly), {open, Ino, Flags}))
+     || Flags <- [?ERX_P9_O_WRONLY, ?ERX_P9_O_RDWR, ?ERX_P9_O_TRUNC]],
+    {Ino, WriteOnly} = erx_f2fs_core_tests:fixture_file_mode(8#100200),
+    {ok, Writer} = requested(writable(WriteOnly), {open, Ino, ?ERX_P9_O_WRONLY}),
+    ?assertEqual({error, ebadf}, requested(writable(WriteOnly), {read, Writer, 0, 1})),
+    ?assertEqual({error, eacces}, requested(writable(WriteOnly), {open, Ino, ?ERX_P9_O_RDWR})),
+    {Ino, Owned} = erx_f2fs_core_tests:fixture_file_mode(8#100600),
+    {ok, Both} = requested(writable(Owned), {open, Ino, ?ERX_P9_O_RDWR}),
+    ?assertMatch({ok, <<_>>}, requested(writable(Owned), {read, Both, 0, 1})).
+
+%% Three writes, each committed by an fsync, read back through the volume
+%% after each, and a medium after unmount whose file holds all three: each
+%% checkpoint reads the tables and nodes the one before it wrote, which the
+%% cache must hold as written.
+writes_read_back_across_checkpoints_test_() ->
+    {timeout, 300,
+     fun() ->
+             {Medium, Path, _Mounted, _File} = writable_file(fun any_size/1),
+             Old = file_on(Medium, Path),
+             {Volume, Device} = start_on(Medium, read_write),
+             {ok, Handle} = erx_f2fs:open(node(Volume, Path), ?ERX_P9_O_RDWR, Volume),
+             New = lists:foldl(fun(Round, Was) ->
+                                       Patch = binary:copy(<<Round>>, 100),
+                                       At = Round * 1000,
+                                       {ok, 100, At} = erx_f2fs:write(Handle, At, Patch, Volume),
+                                       ok = erx_f2fs:fsync(Handle, Volume),
+                                       Now = overwritten(Was, At, Patch),
+                                       ?assertEqual(Now, contents(Volume, Handle)),
+                                       Now
+                               end, Old, [1, 2, 3]),
+             ?assertEqual(ok, erx_f2fs_volume:unmount(Volume)),
+             {After, _Journal} = gen_server:call(Device, journal),
+             ?assertEqual(New, file_on(After, Path))
+     end}.
+
 %% A write needs a node to hold each block's slot, and blocks of the file's
 %% own: one reaching a block no node holds, from it or from the block
 %% before, and one into inline data answer enotsup.
 a_write_refuses_a_slot_no_node_holds_and_inline_data_test() ->
     {Ino, Block, File} = erx_f2fs_core_tests:fixture_unmapped_file(),
-    ?assertEqual({error, enotsup}, requested(writable(File), {write, {Ino, Block * ?BLOCK, <<"x">>}})),
-    ?assertEqual({error, enotsup}, requested(writable(File), {write, {Ino, Block * ?BLOCK - 1, <<"xy">>}})),
+    ?assertEqual({error, enotsup}, requested(writable(File), {write, {{Ino, read_write}, Block * ?BLOCK, <<"x">>}})),
+    ?assertEqual({error, enotsup}, requested(writable(File), {write, {{Ino, read_write}, Block * ?BLOCK - 1, <<"xy">>}})),
     {InlineIno, Inline} = erx_f2fs_core_tests:fixture_inline_file(),
-    ?assertEqual({error, enotsup}, requested(writable(Inline), {write, {InlineIno, 0, <<"x">>}})).
+    ?assertEqual({error, enotsup}, requested(writable(Inline), {write, {{InlineIno, read_write}, 0, <<"x">>}})).
 
 %% A read-write volume opens no file to append or truncate, and refuses a
 %% write that starts past the block holding the size, which would leave
