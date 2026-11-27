@@ -234,9 +234,9 @@ module Erx
         valid = functions.is_a?(Hash) && !functions.empty? &&
                 functions.all? { |slot, device| slot.is_a?(Integer) && slot.between?(1, 31) && PCIE_DEVICES.include?(device) }
         raise Error, "PCIe functions are slots 1 to 31, each one of #{PCIE_DEVICES.join(', ')}" unless valid
-        unless usb.is_a?(Array) && usb.all? { |device| USB_DEVICES.include?(device) || device.is_a?(Disk) } &&
+        unless usb.is_a?(Array) && usb.all? { |device| USB_DEVICES.include?(device) || (device.is_a?(Disk) && device.plain?) } &&
                (usb.empty? || functions.size == 1)
-          raise Error, "USB devices are each one of #{USB_DEVICES.join(', ')} or a disk, on a plan's one controller"
+          raise Error, "USB devices are each one of #{USB_DEVICES.join(', ')} or a raw, written disk with no serial, on a plan's one controller"
         end
 
         super(qmp_socket: qmp_socket.dup.freeze, functions: functions.dup.freeze, usb: usb.dup.freeze)
@@ -279,18 +279,34 @@ module Erx
     # bytes less the NUL.
     SOCKET_PATH_MAX = 103
 
-    # A raw disk image the guest writes. The board attaches it where its storage goes: a
-    # virtio-blk device on QEMU virt's virtio-mmio bus, or the card on a board's SD bus
-    # (Machine#card_bus), which takes one. Its path is absolute, so QEMU reads it as a
-    # file and never as a protocol prefix such as `nbd:`, and holds no comma, which QEMU
-    # reads as the end of an option, and no NUL.
-    Disk = Data.define(:path) do
-      def initialize(path:)
+    # A disk image. The board attaches it where its storage goes: a virtio-blk device on
+    # QEMU virt's virtio-mmio bus, or the card on a board's SD bus (Machine#card_bus),
+    # which takes one. Its path is absolute, so QEMU reads it as a file and never as a
+    # protocol prefix such as `nbd:`, and holds no comma, which QEMU reads as the end of
+    # an option, and no NUL. A virtio disk may also be another of QEMU's formats (qcow2,
+    # a cloud image's), be read-only to the guest (access :read) or take the guest's
+    # writes into a temporary file QEMU discards at exit (:snapshot), so the image is
+    # never written, and carry a serial a Linux guest names it by
+    # (/dev/disk/by-id/virtio-SERIAL); every other board attaches only a raw, writable
+    # disk with no serial.
+    Disk = Data.define(:path, :format, :access, :serial) do
+      def initialize(path:, format: 'raw', access: :write, serial: nil)
         unless path.is_a?(String) && path.start_with?('/') && !path.match?(/[\0,]/)
           raise Error, 'a disk image path is absolute and holds no comma'
         end
+        raise Error, 'a disk is raw or qcow2' unless %w[raw qcow2].include?(format)
+        raise Error, 'a disk is written (:write), read-only (:read) or a snapshot (:snapshot)' unless %i[write read snapshot].include?(access)
+        raise Error, 'a disk serial is 1 to 20 lowercase letters and digits' unless serial.nil? || serial.match?(/\A[a-z0-9]{1,20}\z/)
 
-        super(path: path.dup.freeze)
+        super(path: path.dup.freeze, format: format, access: access, serial: serial)
+      end
+
+      # Whether every board attaches it: raw, written and without a serial.
+      def plain? = format == 'raw' && access == :write && serial.nil?
+
+      # Its -drive options, with no front end of its own, as id.
+      def drive(id)
+        ["file=#{path}", "format=#{format}", 'if=none', "id=#{id}", *({ read: 'readonly=on', snapshot: 'snapshot=on' }[access])].join(',')
       end
     end
     # The sizes QEMU's SD card model is given: it takes an image of a power-of-two size up
@@ -335,7 +351,7 @@ module Erx
     def argv(platform:, accel:, image:, serial:, cpus: 1, memory_mib: memory_of(platform),
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
              disks: [], hostlink: nil, nic: nil, stub: nil, firmware: nil, display: nil, pcie: nil, line: nil,
-             virtualization: false)
+             virtualization: false, bios: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
       raise Error, 'virtualization is true or false' unless [true, false].include?(virtualization)
       board = machine_of(platform)
@@ -344,12 +360,14 @@ module Erx
       if board.loads
         raise Error, "#{board.base} takes no PCIe functions" if pcie
         raise Error, "#{board.base} is not entered at the hypervisor's level" if virtualization
+        raise Error, "#{board.base} boots no UEFI firmware" if bios
 
         return loaded_argv(board, accel: accel, image: image, serial: serial, serial_input: serial_input, cpus: cpus, program: program,
                                   stub: stub, firmware: firmware, dtb: dtb, disks: disks, display: display, refused: { initrd: initrd, command_line: command_line, nic: nic, line: line,
                                                                                  hostlink: hostlink == NO_HOSTLINK ? nil : :hostlink })
       end
       raise Error, "platform #{platform.name} boots from no stub" if stub || firmware
+      raise Error, 'invalid QEMU firmware path' unless bios.nil? || (bios.is_a?(String) && bios.start_with?('/') && !bios.include?("\0"))
       unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
         raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}"
       end
@@ -390,7 +408,7 @@ module Erx
        *device_arguments(devices), *line&.arguments, *qmp_arguments(qmp_socket(display) || pcie&.qmp_socket),
        *pcie&.arguments,
        '-no-reboot', *serial_arguments(serial, serial_input), *hostlink_arguments(hostlink),
-       '-kernel', image,
+       *(bios ? ['-bios', bios] : []), '-kernel', image,
        *(initrd ? ['-initrd', initrd] : []), *(kernel_line ? ['-append', kernel_line] : []),
        *(dtb ? ['-dtb', dtb] : [])].freeze
     end
@@ -424,6 +442,7 @@ module Erx
       raise Error, 'disks are QemuPlan::Disk values' unless disks.is_a?(Array) && disks.all?(Disk)
       raise Error, "#{board.base} takes no disk" unless disks.empty? || board.card_bus
       raise Error, "#{board.base} takes one disk, its SD card" if disks.size > 1
+      raise Error, "#{board.base}'s card is a raw, written disk with no serial" unless disks.all?(&:plain?)
       raise Error, "#{board.base} runs under TCG alone" unless accel == 'tcg'
       asked = refused.compact.keys
       raise Error, "#{board.base} takes no #{asked.join(', ')}" unless asked.empty?
@@ -459,7 +478,7 @@ module Erx
     # the transport options reach only plans that have a device to use them.
     def disk_arguments(disks)
       disks.each_with_index.flat_map do |disk, index|
-        ['-drive', "file=#{disk.path},format=raw,if=none,id=disk#{index}"]
+        ['-drive', disk.drive("disk#{index}")]
       end
     end
 
@@ -513,7 +532,7 @@ module Erx
     def placements(platform, disks:, nic:, display:, line:)
       first_disk = disks.empty? ? nil : transport_of(platform, key: 'block', role: 'block')
       [*disks.each_index.map do |index|
-         Placement.new(unit: 'block', bus: first_disk - index, device: "virtio-blk-device,drive=disk#{index}")
+         Placement.new(unit: 'block', bus: first_disk - index, device: "virtio-blk-device,drive=disk#{index}#{",serial=#{disks[index].serial}" if disks[index].serial}")
        end,
        *(nic ? [Placement.new(unit: 'net', bus: transport_of(platform, key: 'net', role: 'network'),
                               device: "virtio-net-device,netdev=#{nic_guest_netdev(nic)}")] : []),
@@ -856,6 +875,10 @@ module Erx
     # with a line is never reused, since that controller's answers are not QEMU's inputs,
     # and never remote, since the remote host cannot reach the port.
     #
+    # bios, on QEMU virt, is the UEFI firmware QEMU starts first, which then starts image,
+    # an EFI application such as a distribution's compressed kernel, with initrd and
+    # command_line; a boot with one is never reused and never remote.
+    #
     # Inside the QEMU gate (QemuReuse.active), a boot that passed before on
     # the same inputs does not start QEMU: its stored serial log is written to
     # the run's serial log and replayed, and the report names it under
@@ -869,7 +892,7 @@ module Erx
     # during the boot raises QemuRemote::Unreachable.
     def run(platform:, accel:, image:, cpus: 1, memory_mib: QemuPlan.memory_of(platform), checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
             dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil, stub: nil, firmware: nil, display: nil,
-            pcie: nil, line: nil, virtualization: false)
+            pcie: nil, line: nil, virtualization: false, bios: nil)
       # Every input of this run by its parameter's name, from this class's own signature,
       # read before the body reassigns any.
       inputs = Qemu.instance_method(:run).parameters.to_h { |_, name| [name, binding.local_variable_get(name)] }
@@ -903,7 +926,7 @@ module Erx
              else
                QemuPlan.argv(**plan, image: image, serial: serial, serial_input: keyboard, initrd: initrd, dtb: dtb,
                                      disks: disks, hostlink: socket || hostlink, nic: nic, stub: stub, firmware: firmware, display: display,
-                                     pcie: pcie, line: line)
+                                     pcie: pcie, line: line, bios: bios)
              end
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
