@@ -62,10 +62,10 @@ throw, `{erx_fat, Finding}`, caught at each exported entry; anything else the re
 function raises propagates.
 """.
 
--export([mount/2, info/1, layout/1, check/1, check/3, root/1, walk/3, attr/1, list/2, read/4, key/1]).
+-export([mount/2, admission/2, info/1, layout/1, geometry/1, checked_clusters_max/0, check/1, check/3, root/1, walk/3, attr/1, list/2, read/4, key/1]).
 -export([with_read/2, first/1, fold/4, cluster_sectors/2, entry_slot/2, refreshed/2, with_contents/3,
          with_attributes/3]).
--export_type([fat/0, fat_node/0, finding/0, read_sector/0, read_run/0, dir/0, event/0]).
+-export_type([fat/0, fat_node/0, finding/0, refusal/0, read_sector/0, read_run/0, dir/0, event/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -110,6 +110,10 @@ function raises propagates.
 %% Count sectors of the volume from First, the check's reads of its FAT.
 -type read_run() :: fun((First :: non_neg_integer(), Count :: pos_integer()) -> {ok, binary()} | {error, term()}).
 -type finding() :: not_its_volume | does_not_read | read_failed.
+%% Why admission refuses a volume, the boot sector's first failed rule.
+-type refusal() :: not_fat | fat12 | sector_size | no_clusters | fat32_fields | cluster_size | reserved
+                 | fat_count | active_fat | longer_than_file | data_area | fat_size | version
+                 | cluster_count | root.
 
 %% The volume as its boot sector lays it out, in sectors from the placement's start.
 %% root is FAT16's fixed root region, {fixed, FirstSector, Entries}, or FAT32's root
@@ -130,6 +134,7 @@ function raises propagates.
               clusters :: pos_integer(),
               root :: {fixed, pos_integer(), pos_integer()} | pos_integer(),
               label :: binary() | none,
+              media :: byte(),
               serial :: non_neg_integer() | none,
               clean :: boolean()}).
 
@@ -169,6 +174,18 @@ from the boot sector and its FAT's second entry.
 """.
 -spec mount(read_sector(), non_neg_integer()) -> {ok, fat()} | {error, finding()}.
 mount(Read, Sectors) ->
+    case admission(Read, Sectors) of
+        {error, {not_its_volume, _Why}} -> {error, not_its_volume};
+        Admitted -> Admitted
+    end.
+
+-doc """
+mount/2 with the reason a volume is not admitted: the first rule of the module's
+doc that its boot sector fails, which the checker (erx_fat_check) reports.
+""".
+-spec admission(read_sector(), non_neg_integer()) ->
+          {ok, fat()} | {error, {not_its_volume, refusal()} | read_failed}.
+admission(Read, Sectors) ->
     guarded(fun() -> admit(Read, Sectors, sector(Read, 0)) end).
 
 -doc """
@@ -194,6 +211,18 @@ layout(#fat{read = Read, type = Type, first_fat = First, fats = Fats, fat_sector
             clusters = Clusters, fsinfo = FsInfo}) ->
     #{read => Read, type => Type, fat_start => First, fats => Fats, fat_sectors => FatSectors,
       clusters => Clusters, fsinfo => FsInfo}.
+
+-doc """
+What the checker (erx_fat_check) reads of the volume beyond layout/1: its root
+directory, FAT16's fixed region {fixed, FirstSector, Entries} or FAT32's root
+cluster, and the boot sector's media byte, which a FAT's first entry repeats.
+""".
+-spec geometry(fat()) -> #{root := {fixed, pos_integer(), pos_integer()} | pos_integer(), media := byte()}.
+geometry(#fat{root = Root, media = Media}) -> #{root => Root, media => Media}.
+
+-doc "The most clusters the ownership check, check/1, examines; a larger volume is too_large.".
+-spec checked_clusters_max() -> pos_integer().
+checked_clusters_max() -> ?CHECKED_CLUSTERS_MAX.
 
 -doc "The volume's root directory.".
 -spec root(fat()) -> fat_node().
@@ -358,41 +387,52 @@ sector(Read, Index) ->
 %% 3.2 and 3.3), each destructured once. A FAT32 volume states its size and its
 %% FAT's only in their 32-bit fields.
 admit(Read, Sectors, <<_:11/binary, ?SECTOR:16/little, PerCluster, Reserved:16/little, Fats,
-                       RootEntries:16/little, Total16:16/little, _Media, FatSize16:16/little, _:8/binary,
+                       RootEntries:16/little, Total16:16/little, Media, FatSize16:16/little, _:8/binary,
                        Total32:32/little, Tail/binary>> = Boot) ->
     Total = case Total16 of 0 -> Total32; _ -> Total16 end,
     Type = case erx_fat_read:boot_sector(Boot) of
                {fat, 16} -> 16;
                {fat, 32} when FatSize16 =:= 0, Total16 =:= 0 -> 32;
-               _ -> fail(not_its_volume)
+               {fat, 32} -> fail({not_its_volume, fat32_fields});
+               {fat, 12} -> fail({not_its_volume, fat12});
+               {fat, none} -> fail({not_its_volume, no_clusters});
+               not_fat -> fail({not_its_volume, not_fat})
            end,
     #{fat_size := FatSectors, active := Active, root := RootCluster, serial := Serial, label := Label,
       version := Version, fsinfo := FsInfo, mirrored := Mirrored} = tail(Type, FatSize16, Tail),
     RootSector = Reserved + Fats * FatSectors,
     DataStart = RootSector + (RootEntries * ?ENTRY + ?SECTOR - 1) div ?SECTOR,
     Clusters = (Total - DataStart) div max(PerCluster, 1),
-    admitted(lists:member(PerCluster, [1, 2, 4, 8, 16, 32, 64, 128])
-             andalso Reserved >= 1 andalso Fats >= 1 andalso Active < Fats
-             andalso Total =< Sectors andalso DataStart < Total andalso Clusters >= 1
-             andalso FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)
-             andalso (Type =:= 16 orelse (Version =:= ?VERSION_32 andalso Clusters =< ?CLUSTERS_MAX_32))),
-    Root = case {Type, RootCluster} of
-               {16, none} when RootEntries >= 1 -> {fixed, RootSector, RootEntries};
-               {32, Cluster} when RootEntries =:= 0 -> data_cluster(Clusters, Cluster);
-               _ -> fail(not_its_volume)
-           end,
+    admitted([{cluster_size, lists:member(PerCluster, [1, 2, 4, 8, 16, 32, 64, 128])},
+              {reserved, Reserved >= 1}, {fat_count, Fats >= 1}, {active_fat, Active < Fats},
+              {longer_than_file, Total =< Sectors}, {data_area, DataStart < Total}, {no_clusters, Clusters >= 1},
+              {fat_size, FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)},
+              {version, Type =:= 16 orelse Version =:= ?VERSION_32},
+              {cluster_count, Type =:= 16 orelse Clusters =< ?CLUSTERS_MAX_32}]),
     Fat = #fat{read = Read, type = Type, per_cluster = PerCluster, fat_start = Reserved + Active * FatSectors,
                first_fat = Reserved, fats = Fats, fat_sectors = FatSectors, mirrored = Mirrored,
                fsinfo = case FsInfo of N when N >= 1, N < Reserved -> N; _ -> none end,
-               data_start = DataStart, clusters = Clusters, root = Root,
-               label = Label, serial = Serial, clean = true, hard_error = false},
+               data_start = DataStart, clusters = Clusters, root = {fixed, RootSector, RootEntries},
+               label = Label, media = Media, serial = Serial, clean = true, hard_error = false},
+    Root = case {Type, RootCluster} of
+               {16, none} when RootEntries >= 1 -> {fixed, RootSector, RootEntries};
+               {32, Cluster} when RootEntries =:= 0 -> data_cluster(Clusters, Cluster);
+               _ -> fail({not_its_volume, root})
+           end,
     #{clean := Clean, hard_error := HardError} = erx_fat_alloc:volume_flags(Type, raw_entry(Fat, 1)),
-    Fat#fat{clean = Clean, hard_error = HardError};
-admit(_Read, _Sectors, _Boot) ->
-    fail(not_its_volume).
+    Fat#fat{root = Root, clean = Clean, hard_error = HardError};
+admit(_Read, _Sectors, Boot) ->
+    case erx_fat_read:boot_sector(Boot) of
+        not_fat -> fail({not_its_volume, not_fat});
+        {fat, _Type} -> fail({not_its_volume, sector_size})
+    end.
 
-admitted(true) -> ok;
-admitted(false) -> fail(not_its_volume).
+%% The rules, each {Reason, Holds}, in order: the first that fails is the refusal.
+admitted(Rules) ->
+    case lists:keyfind(false, 2, Rules) of
+        false -> ok;
+        {Reason, false} -> fail({not_its_volume, Reason})
+    end.
 
 %% FAT16's tail holds its serial and label; FAT32's its FAT size, mirroring flags
 %% and root cluster before them. A FAT32 volume whose flags turn mirroring off

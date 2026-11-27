@@ -65,7 +65,7 @@ throw, `{erx_fat_alloc, Finding}`, caught at each exported entry, and leaves the
 allocator as it was.
 """.
 
--export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, volume_flags/2, entry_place/2,
+-export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, volume_flags/2, fsinfo/1, entry_place/2,
          writable/1, view/1]).
 -export_type([alloc/0, layout/0, plan/0, step/0, finding/0, cluster/0]).
 
@@ -137,6 +137,18 @@ allocator as it was.
 volume_flags(Type, Entry) ->
     {Clean, NoError} = flag_bits(Type),
     #{clean => Entry band Clean =/= 0, hard_error => Entry band NoError =:= 0}.
+
+-doc """
+FAT32's FSInfo sector Bytes (the FAT specification, section 5): its free count and
+next-free hint, each unknown as 16#ffffffff, or `unsigned` when one of its three
+signatures is wrong, so its hints mean nothing.
+""".
+-spec fsinfo(<<_:4096>>) -> {non_neg_integer(), non_neg_integer()} | unsigned.
+fsinfo(<<16#41615252:32/little, _:480/binary, 16#61417272:32/little, Free:32/little, Next:32/little, _:12/binary,
+         16#aa550000:32/little>>) ->
+    {Free, Next};
+fsinfo(<<_:512/binary>>) ->
+    unsigned.
 
 -doc """
 The writable rule's fourth condition (docs/design-drives.md, "The writable rule")

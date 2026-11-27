@@ -9,7 +9,7 @@
 {application, erx_fat,
  [{description, "erXos FAT"},
   {vsn, "1"},
-  {modules, [erx_fat, erx_fat_alloc, erx_fat_case, erx_fat_dir, erx_fat_entry, erx_fat_name, erx_fat_read]},
+  {modules, [erx_fat, erx_fat_alloc, erx_fat_case, erx_fat_check, erx_fat_dir, erx_fat_entry, erx_fat_name, erx_fat_read]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.
