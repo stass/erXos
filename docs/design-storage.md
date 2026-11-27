@@ -2554,7 +2554,8 @@ a file closed and opened again may get a new qid path
 ## Failure handling, diagnostics and debuggability
 
 Recovery from a block device's errors and silences follows the ladder,
-the generation on every answer and the paced driver restart of
+the window that ends when a break finds it holding an unflushed write,
+and the paced driver restart of
 [design-recovery.md](design-recovery.md#storage); where the rows below
 for the block device, the SD card and the block driver's domain differ
 from it, that document is the design.

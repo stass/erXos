@@ -1419,20 +1419,22 @@ waits on a device or a peer holds, in its pure core, a ladder: an
 ordered list of rungs from one closed set (cancel, protocol reset, device
 reset keeping identity, controller reset, driver restart, domain
 restart), each with its deadline in state and the number of consecutive
-failures it absorbs; a failure climbs one rung and any success returns
-to the bottom. A fault tries its own request's, pipe's and device's
-rungs before a rung that ends a neighbour. A driver that ran and then
-failed restarts at most once per its hold, for ever, as the network
-stack's links do, so a device's faults never end its domain. Only an
-operation its stack marks safe to repeat is retried, inside its caller's
-one deadline. Clients hold the service a driver runs under, never the
+failures it absorbs; a failure climbs one rung and a client's operation
+that succeeds returns to the bottom. A fault tries its own request's,
+pipe's and device's rungs before a rung that ends a neighbour. Every
+reset is admitted at a bounded rate that no success clears, a driver's
+start never touches its device, and a driver restarts at most once per
+its hold, for ever, as the network stack's links do, so a device's
+faults never end its domain. Only an operation its stack marks safe to
+repeat is retried, within its attempt limit and its caller's one
+deadline. Clients hold the service a driver runs under, never the
 driver, and across domains follow a facet's successor through the
-capability registry. A reset that may have dropped answered writes makes
-the next answer `{error, reset}`, which a file system takes as a power
-cut; nothing is replayed above the process that held it. Each stack's
-failure table names its ladder and what each rung keeps, and every
-rung, deadline and retry limit has a test that injects its fault and a
-seeded fault that removes the rung
+capability registry. A reset that may have dropped writes a window had
+answered ends that window, which its holders take as a removal and
+mount again from the medium; nothing is replayed above the process that
+held it. Each stack's failure table names its ladder and what each rung
+keeps, and every rung, deadline and retry limit has a test that injects
+its fault and a seeded fault that removes the rung
 ([design-recovery.md](design-recovery.md)).
 
 Every piece of native driver code other than the device NIF is a native

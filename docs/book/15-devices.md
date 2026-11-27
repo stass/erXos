@@ -5,15 +5,17 @@
 > framebuffer on the Raspberry Pi 4); the device NIF with the virtio
 > and GENET descriptor forms and the check of every DMA plan; the
 > device tree reader's DMA facts, the unit rule, the driver-control
-> facet and both drivers' restarts. Built, and unexercised because no
-> PCIe domain runs: the give of a PCIe function. Built as pure code
-> with host tests, driving no device: the PCIe enumerator's parts,
-> USB's cores and decoders, the TRB descriptor form, and the check of
-> the Pi 4's header map. Built: the root's setting of the Pi 4's
-> on-board pins at boot. Designed: the running PCIe and USB domains,
-> MSI delivery, virtio over PCIe, the SD controller's ADMA2 form, the
-> pin driver, which takes over the root's setting of pins, the Pi 4's
-> header drivers and `/proc/sensors`.
+> facet and both drivers' restarts. Built: the PCIe domain and a USB
+> domain behind it, running an xHCI driver in Erlang on QEMU `virt`
+> and on the Raspberry Pi 4, where a USB keyboard's keys reach the
+> display domain; the give of a PCIe function; USB's cores and
+> decoders and the TRB descriptor form. Built as pure code with host
+> tests: the check of the Pi 4's header map. Built: the root's setting
+> of the Pi 4's on-board pins at boot. Designed: MSI delivery, virtio
+> over PCIe, the SD controller's ADMA2 form, the pin driver, which
+> takes over the root's setting of pins, the Pi 4's header drivers,
+> `/proc/sensors`, and recovery ladders in every driver's core, with
+> paced resets and restarts and fault injection at every layer.
 
 **Background needed.** [Chapter 1](01-operating-systems.md), section
 1.5: registers, interrupts, DMA, caches and the device tree.
@@ -92,13 +94,15 @@ The recovery design ([design-recovery.md](../design-recovery.md))
 gives every device stack the network's arrangement and keeps littlefs's
 reason. Each driver's pure core holds a ladder of recovery steps, from
 cancelling one request up to resetting the controller, climbed one step
-per consecutive failure and cleared by any success; past its top the
-driver restarts at most once per hold, and the block service, which
-holds every window, outlives it. Every answer from a medium carries a
-generation that a reset raises, so a window whose answered writes a
-reset may have dropped answers `{error, reset}`, and the file system
-above remounts as of its last flush, as after a power cut, while a
-volume with nothing unflushed notices nothing. This is **Designed**.
+per consecutive failure and cleared by a client's request that
+succeeds; resets are admitted at a bounded rate that no success clears,
+and past the top the driver restarts at most once per hold, while the
+block service, which holds every window, outlives it. A driver tells
+each window of every reset in the same stream as its answers, and a
+window holding a write it answered but no flush has covered ends
+there: every file system on it sees the end as a removal and mounts
+again from what the medium holds, while a window with nothing
+unflushed notices nothing. This is **Designed**.
 
 ### 15.1.2 Why drivers are Erlang
 

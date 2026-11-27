@@ -20,7 +20,8 @@
 > FAT and EROFS volumes the media domain serves at `/media`, checking
 > and repairing a drive's FAT volume with `fsck_fat` over its raw sectors,
 > erXos's F2FS as a mounted file system with its power-cut harness,
-> and the SD driver's discard.
+> the SD driver's discard, and block drivers that reset their devices and
+> restart without ending their domain.
 
 **Background needed.** [Chapter 1](01-operating-systems.md) (block
 devices, file systems, journals), [chapter 10](10-domains.md)
@@ -151,9 +152,12 @@ restart intensity of zero (chapter 3, section
 the supervisor, the application, and with it the whole storage domain.
 The domain service then restarts the domain, at most five times in
 600 seconds, as the manifest's row for it says. The recovery design
-narrows this to a failed request: a block driver that resets its device
-or restarts while nothing of a volume is outstanding is not seen by the
-volume at all (chapter 15, section
+proposes to narrow this, and whether littlefs's contract takes it is
+still open: a block driver that resets its device or restarts while
+littlefs has nothing outstanding and has flushed every write the driver
+answered would not be seen by littlefs at all, while one that may have
+lost an answered write would still fail littlefs's next request and end
+the domain (chapter 15, section
 [15.1.1](15-devices.md#1511-what-a-drivers-end-reaches); **Designed**).
 
 Erlang's habit, the one chapter 3's supervisors teach, is to restart
