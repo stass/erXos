@@ -15,11 +15,13 @@ require_relative '../fixtures/erlang_build'
 # logs in with the login key or a key of its home copy and runs an expression, another
 # user name and another key are refused, a home line with options and a home file past
 # 16 KiB admit nothing, the daemon starts once the session's net and data facets are
-# both installed, through the registry wait, the import writes the medium's keys only into a missing home
+# both installed, through the registry wait, and when the net facet ends it is stopped and
+# listens again once the facet's successor is installed, the import writes the medium's keys only into a missing home
 # copy and never an empty one, the host key is made once, owner-only and whole, and
 # kept, and start/1 refuses stock's release, whose missing build facts name no
 # development build. The module as the build compiles it exports no function that names
-# a keys file. Each seeded fault must fail the cases: the wait for data dropped, a key callback that admits every
+# a keys file. Each seeded fault must fail the cases: the wait for data dropped, the net facet's
+# successor not listened through, a key callback that admits every
 # user name, a home copy imported again or written empty, the medium's blobs written
 # without being decoded, a medium file of any length
 # taken as blobs, keys files read by OTP's ssh_file, the default version banner (OTP's
@@ -42,6 +44,8 @@ class ErxSshDevTest < Minitest::Test
   FAULTS = [
     Fault.new(name: 'the wait for data dropped', source: DEV,
               from: 'installed([net, data], Deadline)', to: 'installed([net], Deadline)'),
+    Fault.new(name: "the net facet's successor not listened through", source: DEV,
+              from: 'follow(Port, Start, Net, stopped(Next));', to: 'stopped(Next), ok;'),
     Fault.new(name: 'a callback for every user name', source: DEV,
               from: 'is_auth_key(Key, ?USER, Options) ->', to: 'is_auth_key(Key, _, Options) ->'),
     Fault.new(name: 'the home copy imported again', source: DEV,

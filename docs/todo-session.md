@@ -559,6 +559,17 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   (`erlang/apps/erx_session/src/erx_ssh_dev.erl`, `daemon/2`): the daemon
   sets no `max_channels`, so one admitted connection can open a tty per
   channel without bound.
+* [Medium] SSH stage 1, a start that fails while the `net` facet lives
+  (`erlang/apps/erx_session/src/erx_ssh_dev.erl`, `follow/4`): the daemon
+  listens again at each end of the facet, but a start that fails while the
+  facet lives, such as one whose host key read through `data` fails while
+  the storage domain restarts, is tried again only at the facet's next end.
+  Following the storage facets (the host key, the login keys) as the `net`
+  facet is followed closes it.
+* [Low] SSH stage 1, no QEMU case restarts the network domain: the host
+  tests check the follow over a model registry; a QEMU case that kills the
+  network domain and logs in over SSH again, and checks that ntpd samples
+  again, needs a cell whose network domain restarts.
 * [Low] SSH stage 1, the card read untested
   (`erlang/apps/erx_session/src/erx_ssh_dev.erl`, `medium_file/0`): the
   host tests give the key callback a stand-in for the read of

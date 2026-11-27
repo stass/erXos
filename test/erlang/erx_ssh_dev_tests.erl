@@ -497,15 +497,105 @@ the_daemon_starts_once_net_and_data_are_installed_test_() ->
 
 the_daemon_starts_once_installed(Agent, First, Second) ->
     Test = self(),
-    ok = erx_ssh_dev:boot(2222, fun(Port) -> Test ! {daemon_started, Port}, {error, test} end),
+    ok = erx_ssh_dev:boot(2222, fun(Port) -> Test ! {daemon_started, Port, self()}, {error, test} end),
     ?assertEqual(none, daemon_started(200)),
-    model_install(Agent, First),
+    Facets = #{First => model_install(Agent, First)},
     ?assertEqual(none, daemon_started(200)),
-    model_install(Agent, Second),
-    ?assertEqual(2222, daemon_started(2000)).
+    #{net := Net} = Facets#{Second => model_install(Agent, Second)},
+    {2222, Follower} = daemon_started(2000),
+    follower_ended(Agent, Net, Follower).
 
 daemon_started(Ms) ->
-    receive {daemon_started, Port} -> Port after Ms -> none end.
+    receive {daemon_started, Port, Follower} -> {Port, Follower} after Ms -> none end.
+
+%% The network domain's restart ends the session's net facet and closes every socket of
+%% the grant, the daemon's listener among them (docs/design-ssh.md, "Failure handling"):
+%% the daemon is stopped, and once the registry holds the facet of the new incarnation a
+%% new one listens on the same port under the name erx_ssh_dev, within a bound; a second
+%% restart is followed the same way. Each daemon here is a gen_event manager with no
+%% handler, a process ssh:stop_daemon/1 stops as it stops a daemon's supervisor
+%% (proc_lib:stop/3).
+the_daemon_listens_again_through_the_net_facets_successor_test() ->
+    with_model_agent(fun the_daemon_listens_again/1).
+
+the_daemon_listens_again(Agent) ->
+    ok = erx_ssh_dev:boot(2222, listening_start(self())),
+    _ = model_install(Agent, data),
+    Net = model_install(Agent, net),
+    {Follower, Daemon} = daemon_listening(2000),
+    {Net2, Daemon2} = followed(Agent, Net, Daemon),
+    {Net3, _Daemon3} = followed(Agent, Net2, Daemon2),
+    follower_ended(Agent, Net3, Follower).
+
+%% A start that fails, as one through a grant that has just ended does, is followed as
+%% one that listens: the facet's successor starts a daemon.
+a_failed_start_is_followed_test() ->
+    with_model_agent(fun a_failed_start_is_followed/1).
+
+a_failed_start_is_followed(Agent) ->
+    Test = self(),
+    Listening = listening_start(Test),
+    %% The first start, in the follower, fails; each later one listens.
+    Start = fun(Port) ->
+                    case put(started, true) of
+                        undefined -> Test ! {daemon_started, Port, self()}, {error, closed};
+                        true -> Listening(Port)
+                    end
+            end,
+    ok = erx_ssh_dev:boot(2222, Start),
+    _ = model_install(Agent, data),
+    Net = model_install(Agent, net),
+    {2222, Follower} = daemon_started(2000),
+    exit(Net, kill),
+    Net2 = model_install(Agent, net),
+    {Follower, _Daemon} = daemon_listening(2000),
+    follower_ended(Agent, Net2, Follower).
+
+%% A Start that makes a daemon and tells Test which, and in which follower.
+listening_start(Test) ->
+    fun(Port) ->
+            {ok, Daemon} = gen_event:start(),
+            Test ! {daemon_listening, Port, self(), Daemon},
+            {ok, Daemon}
+    end.
+
+%% Ends the net facet Net and checks that Daemon stops, that no daemon starts before the
+%% successor is installed, and that one listens within the bound after; answers the
+%% successor and its daemon.
+followed(Agent, Net, Daemon) ->
+    Stopped = monitor(process, Daemon),
+    exit(Net, kill),
+    ?assertEqual(stopped, receive {'DOWN', Stopped, process, Daemon, _} -> stopped after 2000 -> running end),
+    ?assertEqual(none, receive {daemon_listening, _, _, _} = Early -> Early after 200 -> none end),
+    Successor = model_install(Agent, net),
+    {_Follower, Next} = daemon_listening(2000),
+    {Successor, Next}.
+
+%% The follower and the daemon Start answered within Ms. The follower registers the
+%% daemon only once Start has answered, so the name is polled for, within Ms.
+daemon_listening(Ms) ->
+    receive
+        {daemon_listening, 2222, Follower, Daemon} ->
+            ?assertEqual(Daemon, registered(Daemon, Ms div 10)),
+            {Follower, Daemon}
+    after Ms -> ?assert(false)
+    end.
+
+registered(Daemon, Tries) ->
+    case whereis(erx_ssh_dev) of
+        Daemon -> Daemon;
+        Other when Tries =:= 0 -> Other;
+        _ -> timer:sleep(10), registered(Daemon, Tries - 1)
+    end.
+
+%% Ends the follower before the next case's agent can take erx_connections: the agent
+%% first, then the net facet Net, whose end has the follower stop its daemon and find no
+%% agent to wait on.
+follower_ended(Agent, Net, Follower) ->
+    Ended = monitor(process, Follower),
+    exit(Agent, kill),
+    exit(Net, kill),
+    ?assertEqual(ended, receive {'DOWN', Ended, process, Follower, _} -> ended after 2000 -> running end).
 
 %% The erx_ssh_dev name lives exactly as long as the daemon, so a tool that sees it
 %% (tools/lib/erx/network_domain.rb) sees a running daemon: once the daemon ends
@@ -545,7 +635,8 @@ with_model_agent(Case) ->
     end.
 
 %% Installs a facet of a process of its own under Name, net or data, through the agent:
-%% net's as a message service's, its pid, and data's as a tree's, with its tree.
+%% net's as a message service's, its pid, and data's as a tree's, with its tree;
+%% answers the process.
 model_install(Agent, Name) ->
     Pid = spawn(fun() -> receive after infinity -> ok end end),
     Facet = case Name of
@@ -553,7 +644,7 @@ model_install(Agent, Name) ->
                 data -> {?ERX_SERVICE_FILES, {Pid, <<"data">>, rw}}
             end,
     Agent ! {install, #{Name => Facet}, self()},
-    receive {installed, Agent} -> ok end.
+    receive {installed, Agent} -> Pid end.
 
 model_agent(Waiting) ->
     receive

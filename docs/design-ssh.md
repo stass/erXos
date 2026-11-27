@@ -608,8 +608,8 @@ login carries. So the system domain gains no FAT reader, no base64
 decoder and no OpenSSH line parser, and what reaches it from the medium
 is what reaches it from the network: fixed-format key blobs (S3).
 
-**The import.** Root's session imports the keys once, in the process
-of `erx_ssh_dev:boot/1`, after its daemon listens and the session holds
+**The import.** Root's session imports the keys once, in a process of
+its own that `erx_ssh_dev:boot/1` starts when its daemon first listens, and the session holds
 its `home` facet. Only while `/root/.ssh/authorized_keys` is absent, it
 reads `login_keys`' `root`, at most 817 bytes, and when that answers at
 least one key it writes each as one canonical `ssh-ed25519` line, keeping
@@ -1178,7 +1178,12 @@ identifier.
    its own once the session holds its `net` and `data` facets, which
    their domains install after the session is ready, waiting for them
    with `erx_facets:await/3` within ten minutes, registers the
-   daemon as `erx_ssh_dev` and logs whether it listens. A session
+   daemon as `erx_ssh_dev` and logs whether it listens. The process
+   then follows the `net` facet, as the SSH domain does (Failure
+   handling): when the facet ends, the network domain's restart has
+   closed the daemon's listener, so it stops the daemon and starts a
+   new one on the same port once `erx_facets:await/3`, with the ended
+   facet as the one seen, answers the facet of the new incarnation. A session
    channel's callback, `erx_ssh_dev_channel`, is the master of a tty of
    root's session for a channel that asked for one, speaking the tty's
    seven messages

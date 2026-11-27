@@ -15,7 +15,12 @@ runtime's release name a development configuration
 release, a session domain's included, and facts it cannot read count as a
 release build's. Root's session runs boot/1 at boot, as the development manifest's
 `-eval` asks, which starts the daemon once the session holds the facets it
-needs, registers it as `erx_ssh_dev`, and then imports root's keys.
+needs, registers it as `erx_ssh_dev`, and then imports root's keys. The
+daemon listens through the `net` facet and follows its successor: when the
+network domain restarts, the facet's end stops the daemon, whose listener the
+restart has closed, and a new one listens on the same port once the session
+holds the facet the new incarnation mints (docs/design-ssh.md, "Failure
+handling").
 
 Who may log in is `root`, with a key of root's: a line of root's home copy,
 HOME_KEYS, FreeBSD's `.ssh/authorized_keys` in root's home, or the
@@ -109,6 +114,8 @@ narrowed by that: any code it runs may start OTP's daemon with keys of its choos
 %% What one import did: wrote N keys, found a home copy and kept it, found no key on
 %% the medium, or wrote nothing, for the reason it names.
 -type import() :: {imported, pos_integer()} | kept | no_keys | {retry, term()}.
+%% What starts a daemon on a port: start/1, or a host test's stand-in (boot/2).
+-type start() :: fun((inet:port_number()) -> {ok, ssh:daemon_ref()} | {error, term()}).
 %% A deadline as erx_facets:await/3 takes it, in erlang:monotonic_time(millisecond).
 -type deadline() :: {abs, integer()}.
 
@@ -121,9 +128,11 @@ session is ready (erx:cap/1), so the process waits for the two through the
 registry wait (erx_facets:await/3) for at most GRANT_WAIT_MS from the boot,
 and then calls start/1. A daemon that started is registered as `erx_ssh_dev`
 (named/1), so the name lives exactly as long as the daemon and a tool that sees
-it sees a running daemon, and the process then imports root's keys from
+it sees a running daemon; a process of its own then imports root's keys from
 the medium once the session holds its `home` and `login_keys` facets, within
-GRANT_WAIT_MS of the daemon's start; each step logs one line.
+GRANT_WAIT_MS of the daemon's start, and the first process follows the `net`
+facet for as long as the session runs, listening again through each successor
+(follow/4); each step logs one line.
 """.
 -spec boot(inet:port_number()) -> ok.
 boot(Port) ->
@@ -133,23 +142,69 @@ boot(Port) ->
 boot/1 with Start in place of start/1, so a host test sees when the daemon would
 start. Exported only to the host tests (TEST).
 """.
--spec boot(inet:port_number(), fun((inet:port_number()) -> {ok, pid()} | {error, term()})) -> ok.
+-spec boot(inet:port_number(), start()) -> ok.
 boot(Port, Start) ->
     Deadline = deadline(),
-    _ = spawn(fun() -> booted(Port, start_when_granted(Port, Start, Deadline)) end),
+    _ = spawn(fun() ->
+                      case installed([net, data], Deadline) of
+                          {ok, _Facets} -> follow(Port, Start, none, import);
+                          {error, Reason} -> not_listening(Port, Reason)
+                      end
+              end),
     ok.
 
-start_when_granted(Port, Start, Deadline) ->
-    case installed([net, data], Deadline) of
-        ok -> Start(Port);
-        {error, _} = Missing -> Missing
+%% Listens on Port through each net facet the registry holds, for as long as the
+%% session runs: the first, and each successor after its predecessor (Seen, none at
+%% first) has ended. The facet's end, of which the network domain's restart is the
+%% common case, has closed every socket of the grant, the daemon's listener among
+%% them, while OTP's acceptor would take the closed socket's answer again and again;
+%% so the daemon is stopped, and a new one listens on the same port through Start once
+%% the registry holds the facet the new incarnation mints (erx_facets:await/3, with
+%% the ended facet as the one seen). A start that fails is logged and the facet's end
+%% followed the same way. Import is `import` until a daemon first listens, which
+%% starts the import of root's keys in a process of its own, so it never runs where
+%% start/1 refused. The following ends only with the agent, and so with the runtime.
+-spec follow(inet:port_number(), start(), pid() | none, import | imported) -> ok.
+follow(Port, Start, Seen, Import) ->
+    case erx_facets:await(net, Seen, infinity) of
+        {ok, Net} ->
+            Monitor = monitor(process, Net),
+            Next = listened(listen(Port, Start), Import),
+            receive {'DOWN', Monitor, process, Net, _} -> ok end,
+            follow(Port, Start, Net, stopped(Next));
+        {error, noproc} ->
+            logger:notice("erx_ssh_dev: the daemon on port ~b stops following: the agent has ended", [Port])
     end.
 
-booted(Port, {ok, Daemon}) ->
-    true = named(Daemon),
-    logger:notice("erx_ssh_dev: the daemon listens on port ~b", [Port]),
-    imported(import_when_ready(deadline()));
-booted(Port, {error, Reason}) ->
+%% What a start leaves for the facet's end: the daemon to stop, if one listens, and
+%% whether the import is still to start.
+listened({ok, Daemon}, import) ->
+    _ = spawn(fun() -> imported(import_when_ready(deadline())) end),
+    {Daemon, imported};
+listened({ok, Daemon}, imported) ->
+    {Daemon, imported};
+listened({error, _}, Import) ->
+    {none, Import}.
+
+stopped({none, Import}) ->
+    Import;
+stopped({Daemon, Import}) ->
+    stop_daemon(Daemon),
+    Import.
+
+%% Starts a daemon on Port with Start and registers it, logging either outcome.
+listen(Port, Start) ->
+    case Start(Port) of
+        {ok, Daemon} = Listening ->
+            true = named(Daemon),
+            logger:notice("erx_ssh_dev: the daemon listens on port ~b", [Port]),
+            Listening;
+        {error, Reason} = Failed ->
+            not_listening(Port, Reason),
+            Failed
+    end.
+
+not_listening(Port, Reason) ->
     logger:notice("erx_ssh_dev: no daemon on port ~b: ~0p", [Port, Reason]).
 
 %% Registers Daemon as erx_ssh_dev. OTP's ssh declares ssh:daemon_ref() opaque over
@@ -160,19 +215,32 @@ booted(Port, {error, Reason}) ->
 named(Daemon) ->
     register(?MODULE, Daemon).
 
+%% Stops Daemon and every connection it started, and waits until it has ended, so its
+%% name is free for the next. proc_lib:stop/3 exits only once the daemon has ended, with
+%% noproc when it had ended already and with its reason when it ended otherwise than as
+%% asked, so every exit here also says it has ended.
+stop_daemon(Daemon) ->
+    try ssh:stop_daemon(Daemon)
+    catch exit:_Ended -> ok
+    end.
+
 %% GRANT_WAIT_MS from now, as erx_facets:await/3 takes a deadline.
 deadline() ->
     {abs, erlang:monotonic_time(millisecond) + ?GRANT_WAIT_MS}.
 
-%% ok once the registry holds a facet of each of Names, or the first name it holds none
-%% of when Deadline passes, or when the runtime is no node and no agent writes it.
--spec installed([atom()], deadline()) -> ok | {error, {no_grant, atom()}}.
-installed([], _Deadline) ->
-    ok;
-installed([Name | Names], Deadline) ->
+%% The facet of each of Names, in order, once the registry holds one of each; or the
+%% first name it holds none of when Deadline passes, or when the runtime is no node and
+%% no agent writes it.
+-spec installed([atom()], deadline()) -> {ok, [pid()]} | {error, {no_grant, atom()}}.
+installed(Names, Deadline) ->
+    try {ok, [installed_facet(Name, Deadline) || Name <- Names]}
+    catch throw:{no_grant, _} = Missing -> {error, Missing}
+    end.
+
+installed_facet(Name, Deadline) ->
     case erx_facets:await(Name, none, Deadline) of
-        {ok, _Facet} -> installed(Names, Deadline);
-        Missing when Missing =:= timeout; Missing =:= {error, noproc} -> {error, {no_grant, Name}}
+        {ok, Facet} -> Facet;
+        Missing when Missing =:= timeout; Missing =:= {error, noproc} -> throw({no_grant, Name})
     end.
 
 %% The home copy lies on the session's `home` facet, mounted at /root, and the medium's
@@ -181,7 +249,7 @@ installed([Name | Names], Deadline) ->
 -spec import_when_ready(deadline()) -> import().
 import_when_ready(Deadline) ->
     case installed([home, login_keys], Deadline) of
-        ok -> import_by(Deadline);
+        {ok, _Facets} -> import_by(Deadline);
         {error, Reason} -> {retry, Reason}
     end.
 
