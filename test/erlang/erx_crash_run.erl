@@ -13,9 +13,10 @@
 %% 3. `obligations`: the tree read through erx_fat meets the obligation at the
 %%    state's earliest moment and after each mark between it and the epoch's end.
 %% 4. `fsck`: `fsck_fat`'s checker, erx_fat_check:check/2, finds only what FAT's
-%%    write order lets a cut leave (cut_finding/2): the dirty flag, lost chains,
-%%    a chain longer than its file's size, an invalid long-name run, and FAT
-%%    copies that differ while the volume is dirty. Its repair is not run here.
+%%    write order lets a cut leave (cut_finding/2): on a clean volume nothing; on a
+%%    dirty one the dirty flag, lost chains, a chain longer than its file's size,
+%%    an invalid long-name run, entries after a directory's end, and FAT copies
+%%    that differ. Its repair is not run here.
 %%
 %% States are checked in parallel processes, at most one per scheduler, each under a
 %% deadline; one that crashes fails its state alone, and one past its deadline is
@@ -34,7 +35,7 @@
 -define(RECORDS_MAX, 4).
 
 %% The run: images [{Label, Base}], workloads [{Name, Ops}], bound and seed per
-%% epoch, the output directory, and the optional checker of step 4. It answers the
+%% epoch, and the output directory for failure records. It answers the
 %% report; it prints a line per cell to the user's terminal.
 -spec run(#{images := [{binary(), binary()}], workloads := [{term(), [erx_fs_model:op()]}],
             bound := pos_integer(), seed := integer(), out := file:filename()}) -> map().
@@ -90,6 +91,9 @@ recorded(Base, Ops) ->
                           ok = performed(Volume, Op),
                           ok = erx_ram_window:mark(Window, {answered, I})
                   end, lists:enumerate(Ops)),
+    %% The finish an eject sends, so the cut states of the last batches and the clean
+    %% bit are checked; it changes no file, so it adds no mark.
+    ok = erx_media_volume:finish(Volume),
     exit(Volume, kill),
     receive {'EXIT', Volume, _} -> ok end,
     #{trace := Trace} = erx_ram_window:final(Window),
@@ -180,23 +184,30 @@ mounted(Fat, Read, Sectors, Moments) ->
 fscked(Read, Sectors) ->
     case erx_fat_check:check(Read, Sectors) of
         {ok, Findings, _Repair} ->
-            case [F || F <- Findings, not cut_finding(F, lists:member(dirty, Findings))] of
-                [] -> pass;
-                Others -> {fail, fsck, {findings, Others}}
+            case lists:member(dirty, Findings) of
+                true ->
+                    case [F || F <- Findings, not cut_finding(F)] of
+                        [] -> pass;
+                        Others -> {fail, fsck, {findings, Others}}
+                    end;
+                false when Findings =:= [] -> pass;
+                false -> {fail, fsck, {findings, Findings}}
             end;
         Other ->
             {fail, fsck, Other}
     end.
 
-%% Whether Finding is one a cut may leave on a volume that is Dirty or not
-%% (design-crash-states, "The checks of one state", step 4).
-cut_finding(dirty, _Dirty) -> true;
-cut_finding({lost_chain, _Head, _Length, _Fate}, _Dirty) -> true;
-cut_finding({too_many_clusters, _Path}, _Dirty) -> true;
-cut_finding({invalid_long, _Path}, _Dirty) -> true;
-cut_finding({invalid_long_at_end, _Path}, _Dirty) -> true;
-cut_finding({fat_copy_differs, _Copy}, Dirty) -> Dirty;
-cut_finding(_Finding, _Dirty) -> false.
+%% Whether Finding is one a cut may leave on a dirty volume (design-crash-states,
+%% "The checks of one state", step 4); a clean volume has every batch committed,
+%% so a cut leaves it no finding at all.
+cut_finding(dirty) -> true;
+cut_finding({lost_chain, _Head, _Length, _Fate}) -> true;
+cut_finding({too_many_clusters, _Path}) -> true;
+cut_finding({invalid_long, _Path}) -> true;
+cut_finding({invalid_long_at_end, _Path}) -> true;
+cut_finding({entries_after_end, _Path}) -> true;
+cut_finding({fat_copy_differs, _Copy}) -> true;
+cut_finding(_Finding) -> false.
 
 %% The tree of the volume Read reads, or of a mounted Fat: each path with `dir` or
 %% its file's bytes. A directory or file the read path refuses is thrown.

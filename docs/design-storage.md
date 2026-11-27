@@ -2012,9 +2012,14 @@ designed. It maps the format onto the file protocol as follows:
   dirty flag's step writes both hints `0xFFFFFFFF`, the count stays so,
   and the finish's last batch, the one after which no chain waits for its
   release, writes in its release step a next-free hint
-  that is a cluster of the volume, the one after the last cluster the
+  that is a free cluster of the volume, the first one the allocator's
+  next-fit search would take from the cluster after the last one the
   mount allocated, wrapping past the volume's last cluster to its first,
-  or leaves it unknown if the mount allocated none. So every FSInfo sector the server leaves passes fsimg's check, which
+  which is free once that batch is written since the search counts no
+  cluster the batch names; or leaves it unknown if the mount allocated
+  none or no cluster is free. FreeBSD's `fsck_msdosfs` reports a hint
+  naming a cluster in use while any is free
+  (`sbin/fsck_msdosfs/fat.c:1318-1330`), and `fsck_fat` follows it. So every FSInfo sector the server leaves passes fsimg's check, which
   accepts a count that is unknown or exact and a hint that is unknown or
   names a cluster of the volume (`lib/formats/fat/verify.c:176-180` at
   fsimg `b6c1ea2`), and the next system to mount the volume counts the
@@ -2747,8 +2752,10 @@ are whole, missing or under their short name alone; a dirty image may
 also hold what the batch's write order lets a cut leave within a step,
 FAT copies whose entries differ from the FAT the server reads, each the
 entry's old or new value, since each entry goes to every copy in one
-step, and orphan long-name runs where the cut batch wrote or removed a
-long name, since a long name may cross a sector boundary, both of which
+step, and orphan long-name runs and entries after a directory's end
+marker where the cut batch wrote or removed a long name, since a long
+name may cross a sector boundary and the part past the old end marker
+may land without the part that overwrites it, all of which
 `Erx::FatVolume` accepts there; and a clean flag comes only with every
 batch committed, exactly the tree the run wrote, so a clean image holds
 neither. fsimg's verify, which compares no expected tree or contents
@@ -2804,7 +2811,7 @@ it:
   image mounts writable and a write to one name changes the other's
   bytes, or the move of a directory under its own child passes.
 * FSInfo after the dirty flag's step reads both hints unknown, and after
-  the finish the count unknown and the hint a cluster of the volume, the
+  the finish the count unknown and the hint a free cluster of the volume, the
   image passing fsimg's verify; seeded with a finish that writes the
   free count the mount found, which verify refuses once the mount has
   allocated.

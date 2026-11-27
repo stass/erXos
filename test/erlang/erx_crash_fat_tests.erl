@@ -4,7 +4,7 @@
 %% The landing gate's crash-state suite (docs/design-crash-states.md, "The
 %% generator", the landing row): every FAT seq-1 workload and a fixed sample of
 %% seq-2, over fsimg's FAT16 and FAT32 volumes, in `atomic` mode at 4,096 states an
-%% epoch, through erx_crash_run's checks 1 to 3. Each run prints its workloads'
+%% epoch, through erx_crash_run's checks 1 to 4. Each run prints its workloads'
 %% coverage, a line per cell with each epoch's, and its time. ERX_FAT_IMAGES as
 %% erx_media_volume_tests; ERX_CRASH_OUT the directory the host test prepared for
 %% failure records, holding `seq-1` and `seq-2`.

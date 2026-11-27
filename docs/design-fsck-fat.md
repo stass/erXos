@@ -350,7 +350,7 @@ ownership-check finding the repair removes.
 | a malformed boot sector or FAT geometry (signature, cluster size, reserved sectors, FAT count, sector counts, exFAT, version, FSInfo sector 0, data area, cluster count, root cluster, FAT size) | `boot.c:56-318` | none: fatal | |
 | `Invalid signature in fsinfo block` | `boot.c:206-236` | write the FSInfo sector's signatures, `RRaA` at 0, `rrAa` at `0x1e4`, `00 00 55 AA` at `0x1fc`, and both hints unknown, `FFFFFFFF` at `0x1e8` and `0x1ec` | |
 | `FAT starts with odd byte sequence (...)` | `fat.c:865-940` | entry 0 written whole, as FreeBSD's "Correct" writes it: the boot sector's media byte, then `FF` on FAT16, `FF FF 0F` on FAT32; entry 1 written whole at the end (step `clean`) | |
-| the first entries in the dirty form | `fat.c:873-886` | mark the volume clean at the end | |
+| the first entries in the dirty form | `fat.c:873-886`; on FAT32 the reserved top four bits of entries 0 and 1 are ignored, as in the clean form, since FAT32 keeps an entry's top bits on every write and the FAT server writes the dirty flag so | mark the volume clean at the end | |
 | `Cluster N continues with out of range cluster number M` | `fat.c:994-1001` | end the chain at N | a link that is no cluster |
 | `Cluster N crossed another chain at M` | `fat.c:1003-1012` | end the chain at N, the later of the two linking entries | a cluster linked to twice |
 | `Root directory doesn't start a cluster chain` | `dir.c:251-255` | none: fatal | |

@@ -328,7 +328,8 @@ header(16, Media, <<Media, 16#ff, 16#ff, 16#ff>>) -> clean;
 header(16, Media, <<Media, 16#ff, 16#ff, 16#7f>>) -> dirty;
 header(32, Media, <<Media, 16#ff, 16#ff, B3, 16#ff, 16#ff, 16#ff, B7>>)
   when B3 band 16#0f =:= 16#0f, B7 band 16#0f =:= 16#0f -> clean;
-header(32, Media, <<Media, 16#ff, 16#ff, 16#0f, 16#ff, 16#ff, 16#ff, 16#07>>) -> dirty;
+header(32, Media, <<Media, 16#ff, 16#ff, B3, 16#ff, 16#ff, 16#ff, B7>>)
+  when B3 band 16#0f =:= 16#0f, B7 band 16#0f =:= 16#07 -> dirty;
 header(_Type, _Media, _Head) -> odd.
 
 %% Entry 0 as FreeBSD's "Correct" writes it: the media byte, then ones.

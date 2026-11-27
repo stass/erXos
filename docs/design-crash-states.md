@@ -51,7 +51,8 @@ Decisions every reader needs:
 ### The problem
 
 The FAT server writes each batch as a plan of steps, each step's writes
-followed by a flush (`erx_media_volume.erl:690-700`), and its safety
+followed by a flush (`erx_fat_plan:apply/3`, through which
+`erx_media_volume` writes), and its safety
 across a cut rests on that order and on the device honouring the flush
 ([design-storage.md](design-storage.md#removable-media-fat)).
 `fsck_fat`'s repair claims that a cut after any step, or after any
@@ -162,7 +163,8 @@ log format is known only from GPL code. It is
   fake stick takes its faults from it; moving the window proxies onto
   it is a `docs/todo-build.md` item there.
 * The FAT server writes one sector per window write and a flush after
-  each step (`erx_media_volume.erl:690-705`), and ends the volume at the
+  each step (`erx_fat_plan:apply/3`, called from `erx_media_volume`'s
+  `applied/2`), and ends the volume at the
   first request answered with an error (`answered/1`, beside them);
   `erx_fat_dir:commit/1` answers the steps (`erx_fat_dir.erl`, module
   documentation, "Steps").
@@ -435,7 +437,9 @@ every workload, so each workload ends acknowledged. `seq-N` is every
 sequence of N operations over the file set, with every placement of
 persistence points between them. The driver runs one operation at a
 time, sending the recorder `{begin, I}` before each and `{answered, I}`
-after it.
+after it, and ends every workload with the finish an eject sends, so
+the cut states of the last batches and of the clean bit are checked;
+the finish changes no file and adds no mark.
 
 The enumeration is a pure Erlang module, `erx_crash_workloads`, whose
 count for each `seq-N` it prints with the run. It writes no workload to
@@ -558,12 +562,15 @@ In order, each a step whose failure names the state and the step:
 4. **`fsck_fat`'s checker.** In `atomic` mode, `erx_fat_check:check/2`
    finds only what the write order of
    [design-storage.md](design-storage.md#removable-media-fat) lets a
-   cut leave: the dirty flag; lost chains; a chain longer than its
-   file's size; FAT copies that differ, and only while the FAT the
-   server reads is dirty, since each FAT entry goes to every copy in
-   one step, first copy first, and the dirty flag covers that window;
-   and an invalid long-name run, since a long name can cross a sector
-   boundary and its sectors land independently. Its repair, written to
+   cut leave. Where the FAT the server reads is clean, that is nothing:
+   the clean bit comes back only after every batch is committed, last
+   in that FAT. Where it is dirty: the dirty flag; lost chains; a chain
+   longer than its file's size; FAT copies that differ, since each FAT
+   entry goes to every copy in one step, first copy first; and an
+   invalid long-name run, or entries after a directory's end marker,
+   since a long name can cross a sector boundary and its sectors land
+   independently, so a cut may land the part past the old end marker
+   without the part that overwrites it. Its repair, written to
    a copy, leaves a second check finding nothing but kept lost chains,
    and step 3 holds again on the repaired copy with the entries of
    `/LOST.DIR` left out of the comparison: the workloads never touch
@@ -680,9 +687,10 @@ Each passing case is paired with a seeded fault that must make it fail.
 
 | Case | Seeded fault that must fail it |
 | --- | --- |
-| a FAT `seq-1` run over FAT16 and FAT32 finds no failing state | the flush after `erx_fat_dir`'s `preparation` step dropped from `erx_media_volume`'s applied plan: a state with a published name whose chain reaches a free cluster fails step 2 |
+| a FAT `seq-1` run over FAT16 and FAT32 finds no failing state | the flush after `erx_fat_dir`'s `preparation` step dropped from `erx_fat_plan`'s step loop: a state with a published name whose chain reaches a free cluster fails step 2 |
 | the same run | a publication write sent before the preparation step's flush: a state holding the new name over a zeroed directory cluster fails step 3 |
 | a batch that grows a chain across both FAT copies and creates a long name across a sector boundary: states with differing copies under the dirty flag, and with an invalid long-name run, pass step 4 | the dirty flag cleared in the FAT the server reads before the other copies: a state whose copies differ while that FAT reads clean fails step 4 |
+| the same `seq-1` run, each workload ended by the finish | the release step dropped from every plan: a state that reads clean with a lost chain fails step 4 |
 | a `fsck_fat` repair of the cross-linked image leaves no failing state | the dirty mark merged into the first repair step: a state that reads clean with half a repair fails FK-R3's rule |
 | a repair that names a lost chain passes step 4's comparison on the repaired copy | the repair naming the chain in the root directory instead of `/LOST.DIR`: an unpromised root name fails the comparison |
 | a FAT file committed, then overwritten in a batch that is cut: states holding some of the overwrite's blocks pass step 3 | the model judging every path by its acknowledged value alone, ignoring operations begun since: those states fail |

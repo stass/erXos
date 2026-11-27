@@ -285,8 +285,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   it runs `erx_fat_check:check/2` and accepts only the findings design-crash-states' step 4 lists,
   but the rest of package 2 is not built: the repair written to a copy, the second check finding
   nothing but kept lost chains, step 3 again on the repaired copy with `/LOST.DIR` left out, the
-  repair traces of design-fsck-fat's damaged images, and the seeded faults for step 4 and the
-  repair.
+  repair traces of design-fsck-fat's damaged images, and the repair's seeded faults.
 * [Low] storage, `erx_ram_window:proxy/2` answers a write `eio` where the volume tests' old proxy
   crashed, so a read-only volume that writes by mistake fails no test that does not count writes;
   have the read-only tests assert that `final/1` counted no write.

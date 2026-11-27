@@ -46,9 +46,10 @@ and no chain reaches a free cluster.
   keeps the overlay within the batch's bound.
 * **The volume's flags and FSInfo.** dirty/1 clears the clean bit of the FAT's
   second entry and writes FAT32's FSInfo hints unknown; finish/1 commits batches
-  until no chain waits, writes in the last one's release step a next-free hint,
-  the cluster after the last one the mount allocated, when it allocated any, and
-  then sets the clean bit. The FAT the server reads is the first copy to lose the
+  until no chain waits, writes in the last one's release step a next-free hint
+  when the mount allocated any cluster, the first cluster the next-fit search
+  would allocate from there, which is free once the batch is written, or unknown
+  when none is, and then sets the clean bit. The FAT the server reads is the first copy to lose the
   clean bit and the last to get it back, each in a step of its own, so it reads
   dirty whenever its copies may disagree, and a cut between copies never leaves a
   clean volume whose FATs differ. The hard-error bit is written as it was read. An
@@ -323,6 +324,16 @@ find(Alloc = #alloc{next = Next, clusters = Clusters}, Count) ->
         #{} -> fail(no_space)
     end.
 
+%% The next-free hint: the cluster next-fit would allocate first, which is free once
+%% the batch is written, since the search counts no cluster the batch names as free;
+%% or unknown when none is.
+next_free(Alloc) ->
+    try find(Alloc, 1) of
+        [Cluster] -> Cluster
+    catch
+        throw:{?MODULE, no_space} -> ?UNKNOWN
+    end.
+
 %% A range of clusters scanned in order, one FAT sector read at a time. run is the
 %% current run of free clusters and met the first Count free ones, each with its
 %% length; the last cluster and the first are not adjacent, so a run does not
@@ -410,13 +421,13 @@ or `correct`, the entry written whole as FreeBSD's "Correct" writes it, every bi
 set, which a repair writes (docs/design-fsck-fat.md, "The repair order").
 """.
 -spec finish(alloc(), clean | correct) -> {ok, plan(), alloc() | finished} | {error, finding()}.
-finish(Alloc = #alloc{next = Next, allocated = Allocated}, Entry) ->
+finish(Alloc = #alloc{allocated = Allocated}, Entry) ->
     guarded(fun() ->
                     case batch_plan(Alloc) of
                         {Plan, [_ | _] = Waiting} ->
                             {Plan, Alloc#alloc{batch = #{}, waiting = Waiting}};
                         {Plan, []} ->
-                            Hint = case Allocated of true -> fsinfo_writes(Alloc, keep, Next); false -> [] end,
+                            Hint = case Allocated of true -> fsinfo_writes(Alloc, keep, next_free(Alloc)); false -> [] end,
                             Last = case Hint of
                                        [] -> Plan;
                                        _ -> lists:keystore(release, 1, Plan,

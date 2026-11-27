@@ -75,6 +75,8 @@ cases() ->
       fun(_) -> {ok, [{fat_header, <<16#f0, 16#ff, 16#ff, 16#ff>>}]} end},
      {"finding dirty", 32, fun(V) -> erx_fat_damage:fat(V, 1, 16#07ffffff) end,
       fun(_) -> {ok, [dirty]} end},
+     {"finding dirty under reserved top bits", 32, fun(V) -> erx_fat_damage:fat(V, 1, 16#f7ffffff) end,
+      fun(_) -> {ok, [dirty]} end},
      {"finding out_of_range_link", 16, fun(V) -> erx_fat_damage:fat(V, first(V, ?H) + 1, 16#fff0) end,
       fun(V) -> {ok, [{out_of_range_link, first(V, ?H) + 1, 16#fff0}]} end},
      {"finding crossed", 16, fun(V) -> erx_fat_damage:fat(V, first(V, <<"/X.TXT">>), first(V, ?H) + 1) end,

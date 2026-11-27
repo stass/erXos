@@ -460,13 +460,33 @@ a_finish_without_an_allocation_leaves_the_hint_unknown_test() ->
     ?assertMatch({ok, [{clean_mirrors, _}, {clean, _}], _}, erx_fat_alloc:finish(A)),
     ?assertEqual({?UNKNOWN, ?UNKNOWN}, hints()).
 
+%% The hint names a free cluster, as FreeBSD fsck_msdosfs fat.c:1318-1330 requires
+%% of it: an allocation into a one-cluster hole before a file leaves the hint at the
+%% first free cluster after that file, not at the file.
+the_hint_names_a_free_cluster_test() ->
+    L = synthetic(32, 300, 1, fun zero/1),
+    craft(L, links(L, [2, 3, 4]) ++ links(L, [6, 7])),
+    {ok, [5], A} = erx_fat_alloc:grow(erx_fat_alloc:new(L), none, 1),
+    {ok, Plan, _} = erx_fat_alloc:finish(A),
+    apply_plan(Plan),
+    ?assertEqual({4660, 8}, hints()).
+
 the_hint_wraps_past_the_last_cluster_test() ->
+    L = synthetic(32, 300, 1, fun zero/1),
+    craft(L, links(L, [2]) ++ links(L, lists:seq(3, 300))),
+    {ok, [301], A} = erx_fat_alloc:grow(erx_fat_alloc:new(L), none, 1),
+    {ok, A1} = erx_fat_alloc:free(A, 2),
+    {ok, Plan, _} = erx_fat_alloc:finish(committed(A1)),
+    apply_plan(Plan),
+    ?assertEqual({4660, 2}, hints()).
+
+a_full_volume_leaves_the_hint_unknown_test() ->
     L = synthetic(32, 300, 1, fun zero/1),
     craft(L, links(L, lists:seq(2, 300))),
     {ok, [301], A} = erx_fat_alloc:grow(erx_fat_alloc:new(L), none, 1),
     {ok, Plan, _} = erx_fat_alloc:finish(A),
     apply_plan(Plan),
-    ?assertEqual({4660, 2}, hints()).
+    ?assertEqual({4660, ?UNKNOWN}, hints()).
 
 a_hard_error_stays_recorded_test() ->
     L = synthetic(16, 300, 2, fun zero/1, hard_error),

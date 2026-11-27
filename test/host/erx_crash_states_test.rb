@@ -31,6 +31,7 @@ class ErxCrashStatesTest < Minitest::Test
   MODEL = 'test/erlang/erx_fs_model.erl'
   RUN = 'test/erlang/erx_crash_run.erl'
   PLAN = 'erlang/apps/erx_fat/src/erx_fat_plan.erl'
+  ALLOC = 'erlang/apps/erx_fat/src/erx_fat_alloc.erl'
   STEP_LOOP = "apply([{_Step, Images} | Rest], Write, Flush) ->\n" \
               "    case written(Images, Write) of\n" \
               "        ok ->\n" \
@@ -51,6 +52,14 @@ class ErxCrashStatesTest < Minitest::Test
               to: STEP_LOOP.sub('{_Step, Images}', '{Step, Images}')
                            .sub('case Flush() of', 'case if Step =:= preparation -> ok; true -> Flush() end of'),
               caught_by: 'fat_seq_1_test_', shows: /choice .*: ownership: /),
+    Fault.new(name: "the release step dropped from every plan, so a clean volume keeps a lost chain", path: PLAN,
+              from: "apply([], _Write, _Flush) ->\n    ok;\n",
+              to: "apply([], _Write, _Flush) ->\n    ok;\napply([{release, _} | Rest], Write, Flush) ->\n    apply(Rest, Write, Flush);\n",
+              caught_by: 'fat_seq_1_test_', shows: /choice .*: fsck: /),
+    Fault.new(name: "the dirty flag cleared in the FAT the server reads before the other copies", path: ALLOC,
+              from: "written_steps([{clean_mirrors, Mirrors}, {clean, Read}])",
+              to: "written_steps([{clean, Read}, {clean_mirrors, Mirrors}])",
+              caught_by: 'fat_seq_1_test_', shows: /choice .*: fsck: /),
     Fault.new(name: "a publication write sent before the preparation step's flush", path: VOLUME,
               from: "applied(Plan, \#{proxy := Proxy, volume := Volume}) ->\n",
               to: <<~'ERL',
