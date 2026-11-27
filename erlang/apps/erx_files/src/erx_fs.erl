@@ -50,12 +50,13 @@ reaches the client as `eio`.
 -export([start_link/3, start_link/4, start_mounted/4, start_mounted/5, reserve_words/2]).
 -export([init/2, loop/2, drain/1, format_status/1]).
 -export([handle_tree/1]).
--export([open_permitted/3]).
+-export([open_permitted/3, search_permitted/1]).
 
 -include("erx_fs_waits.hrl").
 
 -define(OWNER_READ, 8#400).
 -define(OWNER_WRITE, 8#200).
+-define(OWNER_SEARCH, 8#100).
 
 -export_type([qid/0, attr/0, statfs/0, dirent/0, what/0, wait/0, grant_handle/0]).
 
@@ -350,6 +351,19 @@ open_permitted(Mode, Access, Truncate) ->
     case Mode band Needed of
         Needed -> ok;
         _ -> {error, eacces}
+    end.
+
+-doc """
+Whether a directory of Mode may be searched, by a walk or any other lookup of
+a name in it: the rule erx_ramfs_core's and erx_f2fs's walks share. A
+search needs the owner's `x` bit, whoever searches; the domain is one user
+who is no superuser (docs/design-tmp.md, "Permissions").
+""".
+-spec search_permitted(Mode :: non_neg_integer()) -> ok | {error, eacces}.
+search_permitted(Mode) ->
+    case Mode band ?OWNER_SEARCH of
+        0 -> {error, eacces};
+        _ -> ok
     end.
 
 -doc """

@@ -1642,7 +1642,9 @@ nothing above the callback module changes.
   owner's permission bits for its access, by the rule erx_ramfs's opens
   follow too (`erx_fs:open_permitted/3`), and a handle answers
   only the access it was opened for (`eacces` and `ebadf`), as erx_ramfs's
-  opens and handles do.
+  opens and handles do. A walk through a directory needs its owner's `x`
+  bit and answers `eacces` without it, by erx_ramfs's rule too
+  (`erx_fs:search_permitted/1`).
 * **Nodes and identity.** A node is a nid. A qid's path is the nid in the
   low 32 bits and `i_generation` in the high 32
   ([design-storage.md](design-storage.md#read-write-storage)), unique

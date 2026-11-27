@@ -261,7 +261,7 @@ walk(Dir, Name, Tree) ->
     maybe
         ok ?= valid_name(Name),
         {ok, D} ?= directory(Dir, Tree),
-        ok ?= permitted(D, ?X),
+        ok ?= searchable(D),
         ok ?= not_a_removed_directory(D),
         {ok, Ino} ?= lookup(D, Name),
         {done, {ok, Ino, qid(Ino, Tree)}, hold(Ino, Tree)}
@@ -298,7 +298,7 @@ make(Dir, Name, What, Stamp, Now, Tree) ->
         ok ?= valid_what(What, Tree),
         ok ?= valid_name(Name),
         {ok, D} ?= directory(Dir, Tree),
-        ok ?= permitted(D, ?X),
+        ok ?= searchable(D),
         case maps:find(Name, entries(D)) of
             {ok, {Ino, _Seq}} -> make_existing(Ino, What, Stamp, Now, Tree);
             error -> make_new(Dir, D, Name, What, Stamp, Now, Tree)
@@ -455,7 +455,7 @@ unlink(Dir, Name, Kind, Stamp, Now, Tree) ->
         ok ?= valid_kind(Kind),
         ok ?= valid_name(Name),
         {ok, D} ?= directory(Dir, Tree),
-        ok ?= permitted(D, ?X),
+        ok ?= searchable(D),
         {ok, Ino} ?= lookup(D, Name),
         ok ?= still_names(Kind, Ino),
         ok ?= permitted(D, ?W bor ?X),
@@ -478,9 +478,9 @@ rename(Dir, Name, NewDir, NewName, Stamp, Now, Tree) ->
         ok ?= valid_name(Name),
         ok ?= valid_name(NewName),
         {ok, D} ?= directory(Dir, Tree),
-        ok ?= permitted(D, ?X),
+        ok ?= searchable(D),
         {ok, ND} ?= directory(NewDir, Tree),
-        ok ?= permitted(ND, ?X),
+        ok ?= searchable(ND),
         {ok, Ino} ?= lookup(D, Name),
         Moved = fetch(Ino, Tree),
         ok ?= not_below_itself(Ino, Moved, NewDir, Tree),
@@ -835,6 +835,11 @@ directory(Ino, Tree) ->
         {ok, #node{}} -> {error, enotdir};
         Error -> Error
     end.
+
+%% A search of a directory, by a walk or any lookup of a name in it: every
+%% file server's one rule, erx_fs:search_permitted/1.
+searchable(#node{mode = Mode}) ->
+    erx_fs:search_permitted(Mode).
 
 permitted(#node{mode = Mode}, Bits) ->
     case Mode band Bits of

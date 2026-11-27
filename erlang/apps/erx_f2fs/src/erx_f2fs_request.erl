@@ -189,10 +189,13 @@ name(Name) ->
         _ -> {error, einval}
     end.
 
-%% Name in directory Dir, then the child's inode, a step of its own.
-walk(Dir, Name, Volume, Blocks) ->
+%% Name in directory Dir, then the child's inode, a step of its own. The
+%% owner's x bit on Dir decides the search, by erx_fs:search_permitted/1,
+%% the rule erx_ramfs_core's walks follow too.
+walk(#{i_mode := Mode} = Dir, Name, Volume, Blocks) ->
     maybe
         ok ?= of_kind(Dir, directory, enotdir),
+        ok ?= searchable(Mode),
         {ok, #{ino := Child}} ?= erx_f2fs_core:lookup(Volume, Dir, Name, Blocks),
         {then, step(Child, fun(Inode, _, _) -> {reply, {ok, Child, qid(Inode)}} end)}
     else
@@ -291,6 +294,13 @@ old_block(Volume, Inode, Block, Blocks) ->
 readable(regular) -> ok;
 readable(directory) -> {reply, {error, eisdir}};
 readable(_Kind) -> {reply, {error, einval}}.
+
+%% ok when a directory of Mode may be searched, else the answer eacces.
+searchable(Mode) ->
+    case erx_fs:search_permitted(Mode) of
+        ok -> ok;
+        Refused -> {reply, Refused}
+    end.
 
 %% ok when Inode is of Kind, else the answer Errno.
 of_kind(Inode, Kind, Errno) ->

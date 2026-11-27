@@ -9,7 +9,7 @@
 -module(erx_f2fs_core_tests).
 -export([fixture_file/0, fixture_nodes/0, fixture_directory/0, fixture_names/0,
          fixture_node_directory/1, fixture_repeating_directory/1, fixture_unmapped_file/0,
-         fixture_inline_file/0, fixture_file_mode/1, summary/3]).
+         fixture_inline_file/0, fixture_file_mode/1, fixture_directory_mode/1, summary/3]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
@@ -592,7 +592,9 @@ dir_dentries() ->
 %% A directory of i_current_depth 3 and i_dir_level 0, 14 blocks, holding
 %% Dentries in its address array's blocks, each dentry block at
 %% ?DATA + 16 + its index and every other block a hole.
-directory(Dentries) ->
+directory(Dentries) -> directory(Dentries, 8#40755).
+
+directory(Dentries, Mode) ->
     ByBlock = maps:groups_from_list(fun(Dentry) -> element(1, Dentry) end,
                                     fun({_, Slot, Name, Ino, Hash}) -> {Slot, Name, Ino, Hash} end,
                                     Dentries),
@@ -604,7 +606,7 @@ directory(Dentries) ->
                      true -> ?DATA + 16 + Block;
                      false -> 0
                  end || Block <- lists:seq(0, ?SLOTS - 1)],
-    Fields = #{inode => (inode_fields_inode())#{i_mode := 8#40755, i_links := 2,
+    Fields = #{inode => (inode_fields_inode())#{i_mode := Mode, i_links := 2,
                                                 i_size := 14 * ?BLOCK, i_current_depth := 3,
                                                 i_dir_level := 0, i_blocks := 1 + map_size(ByBlock)},
                i_addr => Extra ++ Addresses, i_nid => [0, 0, 0, 0, 0]},
@@ -613,6 +615,11 @@ directory(Dentries) ->
           [{?DATA + 16 + Block, ?INO, Block} || Block <- maps:keys(ByBlock)]).
 
 directory() -> directory(dir_dentries()).
+
+%% erx_f2fs_volume_tests' walk checks: the test directory with i_mode
+%% Mode, and its inode nid.
+fixture_directory_mode(Mode) ->
+    {?INO, directory(dir_dentries(), Mode)}.
 
 %% erx_f2fs_fuzz's seeds: the test directory and the names a lookup asks.
 fixture_directory() -> directory().

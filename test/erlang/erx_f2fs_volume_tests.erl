@@ -745,6 +745,18 @@ an_open_to_read_needs_the_owners_read_bit_test() ->
     {Ino, Readable} = erx_f2fs_core_tests:fixture_file_mode(8#100400),
     ?assertEqual({ok, {Ino, read}}, requested(Readable, {open, Ino, 0})).
 
+%% A walk through a directory needs the owner's x bit, as erx_ramfs_core's
+%% does, whoever walks: a directory without it refuses every name, present
+%% or not, with eacces before its lookup, and one with x alone finds the
+%% name.
+a_walk_needs_the_directorys_search_bit_test() ->
+    {Dir, Shut} = erx_f2fs_core_tests:fixture_directory_mode(8#40644),
+    [?assertEqual({error, eacces}, requested(View, {walk, Dir, Name}))
+     || View <- [Shut, writable(Shut)], Name <- [<<"zero">>, <<"absent">>]],
+    {Dir, Searchable} = erx_f2fs_core_tests:fixture_directory_mode(8#40100),
+    ?assertEqual({error, enoent}, requested(Searchable, {walk, Dir, <<"absent">>})),
+    ?assertMatch({failed, 20, _}, requested(Searchable, {walk, Dir, <<"zero">>})).
+
 %% statfs counts the space the volume offers on a read-write mount, so its
 %% free blocks run out when writes answer enospc, and none are free once
 %% the volume is past it; a read-only mount counts the checkpoint's user
