@@ -10,6 +10,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   Reason}}` by resetting the device's port (design-usb.md, "Reattach"), and confirm the stick comes back
   with its function's runs carried over. QEMU's suite plants no fault that needs a port reset; the host tests over
   `erx_usb_fake_stick`'s `wedge` are the only check of the rung until then.
+* [Medium] USB, the reset recovery as a break (`erlang/apps/erx_usb/src/erx_usb_bot.erl`,
+  `erlang/apps/erx_blk/src/erx_blk_window.erl`): design-usb.md's Recovery says a reset recovery is a
+  break the transport tells the medium's window of, so a window holding an unflushed write ends
+  (design-recovery.md, "Promises across a break"); the code keeps the medium and every window across a
+  reset recovery that succeeds. Tell the window of the break in the stream of the transport's answers.
+* [Medium] USB, the bus's give-ups (`erlang/apps/erx_usb/src/erx_usb_bus_core.erl`, `ended/6` and
+  `fail_device/3`, the port's `disabled` state; `erlang/apps/erx_usb/src/erx_usb_bus_sup.erl`): the code
+  gives a device's port up past `usb_function_restarts_max` ends in the window and after a failed
+  enumeration until its connection changes, and the bus group ends for good past
+  `usb_bus_restarts_max`, so a stick that keeps failing is dead until replugged and a controller until
+  the domain restarts. design-usb.md follows design-recovery.md ("Restarts are paced"): every one of
+  these is held until the oldest counted event leaves its window and then tried again, for as long as
+  the device stays, and only a final verdict (an unusable device, an unsupported speed, an
+  over-current) keeps a port off. Hold instead of failing in `ended/6`, retry a failed enumeration at
+  the port's paced attempts, and make the bus group's restarts held rather than ending it.
 * [Low] USB, `erlang/apps/erx_usb/src/erx_usb_bot_core.erl`: a loose end of the recovery ladder,
   bounded and failing safe. A clear (`reset_pipe` after a failed data phase or CSW) that times out leaves its
   reset running in the controller, so reset recovery's own `reset_pipe in` is answered `{error, resetting}`

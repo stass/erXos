@@ -707,7 +707,6 @@ document is cited and not restated here:
 
 | Statement | What this design asks | Which is right |
 | --- | --- | --- |
-| [design-usb.md](design-usb.md)'s BOT engine: its `reset_1` to `reset_3` steps end the operation failed; where its Recovery section retries instead, the medium is kept across every reset recovery | an allow-listed command is retried after a reset recovery that succeeded, and the reset recovery is a break the transport tells the medium's window of, so a window holding an unflushed write ends | this design. design-usb.md's retry under a fresh tag within the issue bound is this design's retry; what it adds is the break told to the window (point 3 of [USB](#usb)) |
 | [design-usb.md](design-usb.md#media-and-drives): any UNIT ATTENTION, NOT READY, a failed sense, an issued request past its bound, the transport's or the function's end ends the medium; a port reset keeps no medium | a medium continues only where nothing can have changed it | design-usb.md; the identity comparison never keeps a medium past one of these ([Identity](#identity)) |
 | [design-drives.md](design-drives.md#failure-handling): a FAT volume removed while written stays read-only until repaired on another machine | its mount clears the dirty flag when `fsck_fat`'s first-finding check finds nothing else | [design-fsck-fat.md](design-fsck-fat.md#clearing-the-flag-at-mount), which amends design-drives.md's writable rule |
 

@@ -757,8 +757,8 @@ fixed before any device arrives:
 | transfers in flight | 1 on a control pipe, 4 on an interrupt pipe, 2 on a bulk pipe | the queue blocks' buffers |
 | commands | one in flight per controller; a device's teardown at most one Stop Endpoint per endpoint and one Disable Slot | the controller process |
 | hub notifications | one status transfer posted per hub, and the next posted only when the bus core has handled every port the last one named; per port at most one operation in flight | [Hubs](#hubs) |
-| enumeration | one port at a time between its reset and its device's address; one attempt per connection; an attempt starts when the port has settled, at most `usb_port_attempts_max` on a port in any `usb_port_attempt_window_ms`; past them a settled port is held in `settling` until its oldest attempt leaves that window; a hub attached again starts its ports' attempts afresh, which its own port's attempts bound | `usb_port_attempts_max`, `usb_port_attempt_window_ms` |
-| function restarts | a function's pipes are reset before each restart, and a function is restarted at most 3 times in any 60 s; an end past them detaches its device and disables its port until its connection changes; an end as unusable is neither restarted nor counted ([Failure handling](#failure-handling)) | `usb_function_restarts_max`, `usb_function_restart_window_ms` |
+| enumeration | one port at a time between its reset and its device's address; a failed attempt is followed by another, never by a disabled port except at a final verdict (an unusable device, an unsupported speed, an over-current); an attempt starts when the port has settled, at most `usb_port_attempts_max` on a port in any `usb_port_attempt_window_ms`; past them a settled port is held in `settling` until its oldest attempt leaves that window; a hub attached again starts its ports' attempts afresh, which its own port's attempts bound | `usb_port_attempts_max`, `usb_port_attempt_window_ms` |
+| function restarts | a function's pipes are reset before each restart, and a function is restarted at most 3 times in any 60 s; an end past them holds the next restart until the oldest end leaves the window, never disabling the port except at a final verdict (an unusable device, an unsupported speed, an over-current) ([design-recovery.md](design-recovery.md#restarts-are-paced)); an end as unusable is neither restarted nor counted ([Failure handling](#failure-handling)) | `usb_function_restarts_max`, `usb_function_restart_window_ms` |
 | diagnostics | a port's failure is logged once per connection and an over-current change once per enumeration attempt, so at most one line more than the port's attempts; repeats count in the inspection record | the bus core |
 | processes | one per claimed function, one per ready medium's transport, partition and windows | the claim table and the places |
 | input numbers, drives | 8 input numbers; the drives the manifest names, at most 4 | `usb_input_max`, `usb_drives_max` |
@@ -1420,10 +1420,10 @@ of its domain ([design-system.md](design-system.md#facets-a-configured-domain-se
 so places made again within one incarnation would serve no reader. The
 bus group restarts within itself at most `usb_bus_restarts_max` times
 in any `usb_bus_restart_window_ms` (`abi/formats/usb.txt`), and is
-`transient` under `erx_usb`: past its bound it ends with
-`shutdown`, which is not restarted, so a controller that fails again
-after every reset, a host controller error that returns, is given up
-while the places stay, until the domain restarts. A
+held past its bound: its next restart waits until the oldest restart
+leaves the window ([design-recovery.md](design-recovery.md#restarts-are-paced)), so a controller that fails again after
+every reset, a host controller error that returns, restarts at a
+bounded pace while the places stay. A
 function instance is killed when it is stopped. Every driver starts
 with `start_link/1` on one map: its claimed `function`, its device's EP0
 as `control`, its own claimed `pipes` and the `places`, with the bus
@@ -1486,7 +1486,7 @@ only the other ways out, and its times and counts are limits of
 | `enumerating` | the device is addressed, read and configured; the turn passes to its Address Device when that is sent, and is released at that command's answer | configured: `running`; any failure: `disabling` |
 | `disabling` | given up while its device may still be enabled: the occupant detached, the port being disabled at its hub; holding the turn if it, or a port below the hub on it, held it when given up | the hub's answer: `disabled` |
 | `running` | the device's functions run | the port reported disabled by its hub: detach, `disabled`; a hub whose control pipe fails: `disabling` |
-| `disabled` | given up; the port's last failure and its step are kept | none: only a connection change, whose settled port then waits for its attempts to allow another ([What a device can make the domain spend](#what-a-device-can-make-the-domain-spend)) |
+| `disabled` | the enumeration failed, or a final verdict (an unusable device, an unsupported speed, an over-current); the port's last failure and its step are kept | a connection change, or, short of a final verdict, the port's next attempt once its attempts allow another ([What a device can make the domain spend](#what-a-device-can-make-the-domain-spend)) |
 
 Every port is reset before its device is addressed, a USB 3 root port
 as much as any other, as FreeBSD resets every port in host mode
@@ -1661,7 +1661,7 @@ on, so a composite keyboard whose second interface carries only usages
 no role takes keeps its keyboard. Every other end, a crash or a failed
 transfer, is a failure, which the restarts bound ([Failure
 handling](#failure-handling)). The end that goes past the bound is
-named in the failure that gives the device's port up, which the port
+named in the failure that holds the device's next restart, which the port
 keeps and the bus logs, by name only
 ([design-log.md](design-log.md#reports-carry-no-term)), so no frame's
 arguments, report or buffer reaches the log:
@@ -3058,7 +3058,7 @@ completions and the queued requests, and whose actions are transfers:
 | `status` | the CSW on bulk-in | the CSW checked: status 1 on the operation's own command, `command` for its REQUEST SENSE; otherwise the operation done; a STALL: `clear_status` |
 | `clear_status` | `reset_pipe` on bulk-in | `status_again` |
 | `status_again` | the CSW on bulk-in, once more | as `status`; a STALL: reset |
-| `reset_1`, `reset_2`, `reset_3` | the Bulk-Only Mass Storage Reset, then `reset_pipe` on bulk-in, then on bulk-out | the operation done, failed; at the function's start (below), Get Max LUN |
+| `reset_1`, `reset_2`, `reset_3` | the Bulk-Only Mass Storage Reset, then `reset_pipe` on bulk-in, then on bulk-out | the operation sent again ([Recovery](#recovery), "Retry"), or done, failed, once its retries or its deadline are spent; at the function's start (below), Get Max LUN |
 
 The engine's unit of work is an **operation**: one request of the
 queue, its command and, when that command fails, its REQUEST SENSE. The
@@ -3143,9 +3143,8 @@ case. A step that fails ends the function, which the bus restarts within
 its bound before it detaches the device ([Failure
 handling](#failure-handling)). Detaching the device whenever a BOT
 function ends would restore the boundary too, but is not taken: a crash
-would cost the drive until it is plugged in again, since a detached
-port stays disabled until its connection changes, and the bus core
-would carry a rule for one class.
+would cost the drive a whole enumeration at the port's paced attempts,
+and the bus core would carry a rule for one class.
 
 Then the function sends Get Max LUN, a one-byte answer, decoded by
 `erx_usb_bot_core`; a STALL or any failure means one unit, as BOT
@@ -3168,7 +3167,7 @@ rests on another layer's timeout:
 | --- | --- | --- | --- |
 | 1, `cancel` | `reset_pipe` on the pipe whose transfer is still posted; the controller stops the endpoint and answers the posted transfer `stopped` | `usb_bot_recovery_step_ms`, 5 s | rung 3 |
 | 2, reset recovery | the Bulk-Only Mass Storage Reset, then `reset_pipe` on bulk-in, then on bulk-out (BOT 1.0, 5.3.4) | 5 s each step | rung 3 |
-| 3, the port | the function ends as `{shutdown, {reset_port, Rung, Reason}}` and logs the rung that failed, which ends its media; the bus resets the device's port and, when the device comes back the same, starts the function again on it ([Reattach](#reattach)) | the bus's restart bound: `usb_function_restarts_max` (3) ends in `usb_function_restart_window_ms` (60 s) | the device's port is given up until its connection changes |
+| 3, the port | the function ends as `{shutdown, {reset_port, Rung, Reason}}` and logs the rung that failed, which ends its media; the bus resets the device's port and, when the device comes back the same, starts the function again on it ([Reattach](#reattach)) | the bus's restart bound: `usb_function_restarts_max` (3) ends in `usb_function_restart_window_ms` (60 s) | the next port reset and restart wait until the oldest end leaves the window, paced for as long as the device stays ([design-recovery.md](design-recovery.md#restarts-are-paced)) |
 
 **Rung 1 comes only while a transfer is posted.** A command that hangs
 leaves its transfer queued on its endpoint, and a class reset sent
@@ -3220,6 +3219,12 @@ none. The caller sees an error only when the retries or the deadline
 are spent: `{device, reset}` keeps the medium, `{device, deadline}` ends
 it.
 
+A reset recovery is a break
+([design-recovery.md](design-recovery.md#promises-across-a-break)):
+the transport tells the medium's window of it in the stream of its
+answers, so a window holding an unflushed write ends there and the
+medium mounts afresh, while a clean window goes on.
+
 **What the BOT function needs from the bus.** One request, made by
 ending with `{shutdown, {reset_port, Rung, Reason}}`: reset this
 device's port and enumerate it again under a fresh reference, carrying
@@ -3229,11 +3234,12 @@ end by resetting the device's port and, through [Reattach](#reattach),
 starting the function again, counting the end toward
 `usb_function_restarts_max` (3 ends in 60 s), as it counts any other
 ([A function's end](#ports-hubs-and-devices-the-bus-core)), past which
-it gives the device's port up. The port's reset, its attempt bound and
-its throttle belong to the bus core
+its next restart waits until the oldest end leaves the window. The
+port's reset, its attempt bound and its throttle belong to the bus core
 ([Ports, hubs and devices](#ports-hubs-and-devices-the-bus-core)), and a
-device the port reset does not revive is given up within the same
-restart bound.
+device the port reset does not revive is reset again at that pace for
+as long as it stays, never given up short of a final verdict
+([design-recovery.md](design-recovery.md#restarts-are-paced)).
 
 #### Reattach
 
@@ -3630,10 +3636,10 @@ mounts, the same as if the medium had gone after the request.
 
 | Failure | Detected by | What ends | Recovery |
 | --- | --- | --- | --- |
-| a malformed or oversized descriptor, a STALL or a timeout during enumeration | `erx_usb_desc`, the pipe's answer | the enumeration; the device is detached | the port is disabled until its connection changes, within its attempts; the reason is in the port's inspection record |
+| a malformed or oversized descriptor, a STALL or a timeout during enumeration | `erx_usb_desc`, the pipe's answer | the enumeration; the device is detached | the port is enumerated again at its paced attempts; the reason is in the port's inspection record |
 | a device of no claimed class, or past a bound | the claim table, the bounds | nothing: configured with no function, or refused | the inspection record names the reason |
 | a malformed HID report | the fold | nothing: the report is dropped and counted | none needed |
-| a function process crashes, ends on a failed transfer of its HID or hub pipes, or, for HID, on a report descriptor read that timed out or met a controller error | its supervisor link, seen by the bus | the function; its place is freed, an input number with `release` | the bus resets the function's pipes, which answers what its predecessor left posted `stopped`, then restarts it, at most 3 times in 60 s; past that, or when a pipe's reset fails, the device is detached and its port disabled until its connection changes |
+| a function process crashes, ends on a failed transfer of its HID or hub pipes, or, for HID, on a report descriptor read that timed out or met a controller error | its supervisor link, seen by the bus | the function; its place is freed, an input number with `release` | the bus resets the function's pipes, which answers what its predecessor left posted `stopped`, then restarts it, at most 3 times in 60 s; past that, or when a pipe's reset fails, the device is detached and enumerated again at its port's paced attempts ([design-recovery.md](design-recovery.md#restarts-are-paced)) |
 | an interface its function cannot drive; for HID, no usable report, a descriptor read refused with a stall or otherwise failed than by a timeout or a controller error, with no boot fallback, or no free input number | the function, which ends or fails its start with `{shutdown, {unusable, Reason}}` | that function, for good while its device stays; nothing else | none: it is not restarted and counts toward no restart bound, the device's other functions run on, and the reason is in the device's inspection record |
 | a halted endpoint | the completion's code | the transfer; EP0 is reset by the controller, any other pipe stays halted | HID and hubs end the function, as above; BOT's own recovery through `reset_pipe` (its status flow or reset recovery) |
 | a step of `reset_pipe` fails | the command's or request's answer | the reset; the pipe is `halted` | the class's recovery; for BOT, as the rows below |
@@ -3648,7 +3654,7 @@ mounts, the same as if the medium had gone after the request.
 | a medium removed or changed | TEST UNIT READY, UNIT ATTENTION, the detach | the medium; its window ends | the media domain ends the medium's volumes; the next medium mounts at the next walk ([design-drives.md](design-drives.md#failure-handling)) |
 | a medium that cannot flush | the readiness SYNCHRONIZE CACHE | nothing: its flushes answer `no_flush` | none; the media domain mounts its volumes read-only, with `the medium cannot flush` on its `sN_ro_reason` |
 | a control transfer not answered in 5 s | the controller process's deadline | the transfer, answered `timeout` after Stop Endpoint and Set TR Dequeue Pointer past it | the caller's; EP0 is open again |
-| a command not answered in 5 s, an event that fails the form's checks, the controller's host system error, host controller error or halt while it runs, read from `USBSTS` on an interrupt or once a second, an all-ones read from a function that left the bus among them, a wait of the install past its deadline | the controller process | the controller process | the bus group restarts; `negotiate/2` resets the controller and returns every buffer; every device is enumerated again; places survive, so each input number carries `release` and each medium's windows end; past `usb_bus_restarts_max` restarts in `usb_bus_restart_window_ms` the controller is given up, the places still served ([The process tree](#the-process-tree)) |
+| a command not answered in 5 s, an event that fails the form's checks, the controller's host system error, host controller error or halt while it runs, read from `USBSTS` on an interrupt or once a second, an all-ones read from a function that left the bus among them, a wait of the install past its deadline | the controller process | the controller process | the bus group restarts; `negotiate/2` resets the controller and returns every buffer; every device is enumerated again; places survive, so each input number carries `release` and each medium's windows end; past `usb_bus_restarts_max` restarts in `usb_bus_restart_window_ms` the next restart waits until the oldest leaves the window, the places still served ([The process tree](#the-process-tree)) |
 | a stream, the input tree's mint or the places end | `erx_usb_places_sup`, then `erx_usb`'s top supervisor, each of intensity 0 | the places, the top supervisor, the permanent application and the domain | the domain service restarts the domain, which holds its units again and runs every controller afresh. The domain ends rather than restart its places within itself because the places serve its input files, whose grants the domain service mints only for a new incarnation of the domain ([design-system.md](design-system.md#facets-a-configured-domain-serves)): places made again in the same incarnation would serve no reader |
 | a register access that aborts (the controller fell off its bus) | the kernel, on erXos's kernel; on Fiasco an SError ends the task of the next thread to enter user mode on its CPU, which need not be the USB domain's, and the controller's next deadline fails it | the USB domain, by the fault, on erXos's kernel; the controller process on Fiasco | the domain service restarts the domain, which gets its unit again; the display's readers see their files end and start again when the tree is granted again, and each drive's facet is minted again for the media domain, as for a block drive's domain |
 | a configuration access below the root port with the link down | the bridge driver's link reads, before and after | the access, answered `link_down`; the function's position is reported gone | none of its own; an abort that does arrive ends the PCIe domain on erXos's kernel, as the next row |
