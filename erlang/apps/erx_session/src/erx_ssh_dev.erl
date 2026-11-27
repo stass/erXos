@@ -121,7 +121,7 @@ session is ready (erx:cap/1), so the process waits for the two through the
 registry wait (erx_facets:await/3) for at most GRANT_WAIT_MS from the boot,
 and then calls start/1. A daemon that started is registered as `erx_ssh_dev`
 (named/1), so the name lives exactly as long as the daemon and a tool that sees
-it sees a daemon that listens, and the process then imports root's keys from
+it sees a running daemon, and the process then imports root's keys from
 the medium once the session holds its `home` and `login_keys` facets, within
 GRANT_WAIT_MS of the daemon's start; each step logs one line.
 """.

@@ -108,7 +108,10 @@ class DialyzerTest < Minitest::Test
     checkout = File.join(@root, 'checkout')
     outside = File.join(@root, 'outside')
     kept = %w[ebin public_key].map { |name| File.join(outside, 'dialyzer', name, 'kept') }
-    kept.each { |file| FileUtils.mkdir_p(File.dirname(file)) && File.write(file, '') }
+    kept.each do |file|
+      FileUtils.mkdir_p(File.dirname(file))
+      File.write(file, '')
+    end
     FileUtils.mkdir_p(checkout)
     File.symlink(outside, File.join(checkout, 'build'))
     runner = Erx::Runner.new(owner_root: checkout, log_dir: File.join(checkout, 'logs'))

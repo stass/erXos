@@ -90,8 +90,9 @@ module Erx
       ebin = OutputDirectory.fresh(root: @root, path: File.join(OUTPUT, 'ebin'))
       compile(set, ebin: ebin)
       partial = "#{path}.partial"
+      FileUtils.rm_f(partial) # a link in its place would take Dialyzer's write elsewhere
       dialyze([*PLT_OPTIONS, '--output_plt', partial, ebin], name: 'dialyzer-plt')
-      FileUtils.rm_rf(ebin)
+      FileUtils.rm_rf(OutputDirectory.check(root: @root, path: ebin))
       Dir.glob(File.join(output, 'plt-*')).each { |stale| File.delete(stale) unless stale == partial }
       File.rename(partial, path)
       path
@@ -140,7 +141,7 @@ module Erx
       rules = Dir.mktmpdir('erx-dialyzer-') do |scratch|
         in_slices(set.files) do |files, index|
           path = File.join(scratch, "#{index}.mk")
-          run(@erlc, '-M', *set.flags, *files, name: "dialyzer-plt-depend-#{index}", chdir: @root, stdout: path)
+          run(@erlc, '-M', *COMPILE_OPTIONS, *set.flags, *files, name: "dialyzer-plt-depend-#{index}", chdir: @root, stdout: path)
           File.read(path)
         end
       end
@@ -196,7 +197,9 @@ module Erx
     SERVING_STAND_IN = File.join(OUTPUT, "#{ServingSet::MODULE}.erl")
 
     def serving_stand_in
-      File.write(File.join(output, File.basename(SERVING_STAND_IN)), ServingSet.render(ServingSet::SEEDS))
+      stand_in = File.join(output, File.basename(SERVING_STAND_IN))
+      FileUtils.rm_f(stand_in) # a link in its place would take the write elsewhere
+      File.write(stand_in, ServingSet.render(ServingSet::SEEDS))
     end
 
     # Writes the sources public_key's Makefiles generate into public_key_output, afresh

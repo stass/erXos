@@ -508,14 +508,14 @@ daemon_started(Ms) ->
     receive {daemon_started, Port} -> Port after Ms -> none end.
 
 %% The erx_ssh_dev name lives exactly as long as the daemon, so a tool that sees it
-%% (tools/lib/erx/network_domain.rb) sees a daemon that listens: once the daemon ends
+%% (tools/lib/erx/network_domain.rb) sees a running daemon: once the daemon ends
 %% the name is free.
 the_name_ends_with_the_daemon_test() ->
     with_model_agent(fun(Agent) ->
         Daemon = spawn(fun() -> receive after infinity -> ok end end),
         ok = erx_ssh_dev:boot(2222, fun(_Port) -> {ok, Daemon} end),
         [model_install(Agent, Name) || Name <- [net, data]],
-        ?assert(is_pid(registered_within(2000))),
+        ?assertEqual(Daemon, registered_within(2000)),
         Ended = monitor(process, Daemon),
         exit(Daemon, kill),
         receive {'DOWN', Ended, process, Daemon, _} -> ok end,

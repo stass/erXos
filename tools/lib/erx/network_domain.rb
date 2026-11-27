@@ -103,8 +103,8 @@ module Erx
     ].join(', ') + ".\r"
 
     # Typed at root's session's Erlang shell: waits for the daemon the session started at
-    # boot (erx_ssh_dev:boot/1), registered as erx_ssh_dev once it listens for as long as
-    # it does, and answers {ok, Daemon}; `timeout` after 240 polls 500 ms apart.
+    # boot (erx_ssh_dev:boot/1), registered as erx_ssh_dev once it listens, for as long as
+    # it runs, and answers {ok, Daemon}; `timeout` after 240 polls 500 ms apart.
     SSH_LINE = '(fun Wait(0) -> timeout; Wait(N) -> case whereis(erx_ssh_dev) of ' \
                "undefined -> timer:sleep(500), Wait(N - 1); Daemon -> {ok, Daemon} end end)(240).\r"
     # What root types at rc on the login's tty, ending each line with the CR a terminal
