@@ -81,9 +81,10 @@ table changed while it runs is not seen by it.
 %% directory, and how it ended.
 -type kind() :: directory | link | other.
 -type reply() :: {[kind()], ok | {error, posix()}}.
+%% read_link answers any term: follow/6 checks its link text as it reads it (below).
 -type callbacks() :: #{walk := fun((entry(), [name()]) -> reply()),
                        read_link := fun((entry(), [name()]) ->
-                                            {ok, binary()} | {error, posix()})}.
+                                            term())}.
 -type action() :: {target, entry(), [name()], resume()}
                 | {parent, entry(), [name()], name(), resume()}
                 | {top, entry()}
@@ -492,8 +493,10 @@ place(Path, Table) ->
     end.
 
 longest([Entry | Table], Path, Best) ->
-    case below(point(Entry), Path) of
-        {ok, Below} when Best =:= none; length(Below) < length(element(2, Best)) ->
+    case {below(point(Entry), Path), Best} of
+        {{ok, Below}, none} ->
+            longest(Table, Path, {Entry, Below});
+        {{ok, Below}, {_, Shortest}} when length(Below) < length(Shortest) ->
             longest(Table, Path, {Entry, Below});
         _ ->
             longest(Table, Path, Best)
