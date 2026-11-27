@@ -49,8 +49,8 @@
 
 %% The table is read after init/1 returns, so the boot does not wait on the device; a
 %% call made before then waits for it: at most the capacity and three reads, each bounded
-%% by erx_blk's own call timeout (30 s), and a margin.
--define(CALL_TIMEOUT, 150000).
+%% by erx_blk's own call timeout, and a margin.
+-define(CALL_TIMEOUT, (4 * ?ERX_BLK_CALL_TIMEOUT_MS + 30000)).
 
 %% served maps each role to its window; refused holds why the medium is not served.
 -type state() :: admitting | {served, #{erx_blk_table:role() => pid()}} | {refused, term()}.

@@ -95,8 +95,8 @@ only on a request that carries the reference.
 -define(BLOCK_SIZE, 4096).
 -define(SECTOR_SIZE, 512).
 -define(MIN_BLOCKS, 8).
-%% Longer than a window's own call timeout, so the window answers first.
--define(DEADLINE_MS, 60000).
+%% Longer than a window's own call timeout (erx_blk's and 5 s), so the window answers first.
+-define(DEADLINE_MS, (2 * ?ERX_BLK_CALL_TIMEOUT_MS)).
 -define(MAX_PATHS, 65536).
 -define(PATH_MAX, 1023).
 -define(NAME_MAX, 255).

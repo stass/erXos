@@ -12,6 +12,7 @@
 -module(erx_blk_write_sd_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(W, erx_blk_write).
 -define(BLOCK_CARD, #{addressing => block, sectors => 64, rca => 16#1234}).
@@ -96,11 +97,11 @@ read_test_() ->
                      blksizecnt => (3 bsl 16) bor 512, dat => true}, Three),
      ?_assertEqual(5 * 512, maps:get(argument, Bytes)),
      ?_assertEqual({error, bad_count}, ?W:sd_read_command(0, 0, ?BLOCK_CARD)),
-     ?_assertEqual({error, bad_count}, ?W:sd_read_command(0, 65, ?BLOCK_CARD)),
+     ?_assertEqual({error, bad_count}, ?W:sd_read_command(0, ?ERX_BLK_SD_MAX_SECTORS + 1, ?BLOCK_CARD)),
      ?_assertEqual({error, out_of_range}, ?W:sd_read_command(62, 3, ?BLOCK_CARD)),
      ?_assertEqual({error, out_of_range}, ?W:sd_read_command(-1, 1, ?BLOCK_CARD)),
      ?_assertMatch({ok, _}, ?W:sd_read_command(61, 3, ?BLOCK_CARD)),
-     ?_assertMatch({ok, _}, ?W:sd_read_command(0, 64, ?BLOCK_CARD))].
+     ?_assertMatch({ok, _}, ?W:sd_read_command(0, ?ERX_BLK_SD_MAX_SECTORS, ?BLOCK_CARD))].
 
 write_test_() ->
     {ok, One} = ?W:sd_write_command(5, <<0:4096>>, ?BYTE_CARD),

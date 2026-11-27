@@ -100,7 +100,10 @@ class ErxBlkSdTest < Minitest::Test
               cases: 'erx_blk_sd_issue_tests'),
     Fault.new(name: "the SD limit taken from virtio's", source: HOST,
               from: 'max_sectors() -> ?MAX_SECTORS.', to: 'max_sectors() -> erx_blk_request:max_sectors().',
-              cases: 'erx_blk_sd_issue_tests')
+              cases: 'erx_blk_sd_issue_tests'),
+    Fault.new(name: 'the SD limit past the wait limit', source: HOST,
+              from: 'max_sectors() -> ?MAX_SECTORS.', to: 'max_sectors() -> 64.',
+              cases: 'erx_blk_sd_host_tests')
   ].freeze
 
   def test_sd_cores_pass_under_eunit

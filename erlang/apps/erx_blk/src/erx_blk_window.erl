@@ -49,7 +49,7 @@
 -include("generated/erx_abi.hrl").
 
 %% Longer than erx_blk's own call timeout, so the window answers a device that did not.
--define(CALL_TIMEOUT, 35000).
+-define(CALL_TIMEOUT, (?ERX_BLK_CALL_TIMEOUT_MS + 5000)).
 
 %% The window's sectors, and the device process it is bound to: unbound until a request
 %% first reaches the device, {bound, Pid, Monitor} after, and ended once Pid has ended, for

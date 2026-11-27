@@ -1673,8 +1673,8 @@ mounts at `/media/raw`:
   past the end answers no bytes, so `dd` with any block size reads a
   medium to its last sector. Placement then confines `sN.data` to its
   volume. A request larger than the transport's largest window request,
-  the `max_sectors` the window's `info` answers (8 on virtio and SD, 64
-  on USB), is sent as consecutive pieces of that size, in order: a read answers
+  the `max_sectors` the window's `info` answers (8 on virtio, 32 on SD,
+  64 on USB), is sent as consecutive pieces of that size, in order: a read answers
   the bytes of the pieces up to the first that failed, or that failure
   if it was the first; a write answers its count when every piece
   succeeded and otherwise the first failure, which pieces landed being

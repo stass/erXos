@@ -43,11 +43,11 @@ device process ends. Times are monotonic milliseconds.
 -include("generated/erx_abi.hrl").
 -include("generated/erx_hw_sdhci.hrl").
 
-%% The transport contract (docs/design-storage.md, "Data model"): a request
-%% moves at most 64 sectors, 32 KiB, the most whose write a card within its
-%% specification finishes inside the in-flight bound; it is issued only within
-%% 10 s of its acceptance, and one issued must be complete 18 s after it was
-%% issued (abi/formats/blk.txt).
+%% The transport contract (docs/design-storage.md, "Data model"; the values are
+%% abi/formats/blk.txt's): a request moves at most blk_sd_max_sectors, whose
+%% write a card within its specification finishes inside both the wait limit
+%% and the in-flight bound; it is issued only within the wait limit of its
+%% acceptance, and one issued must be complete within the in-flight bound.
 -define(MAX_SECTORS, ?ERX_BLK_SD_MAX_SECTORS).
 -define(WAIT_LIMIT_MS, ?ERX_BLK_WAIT_LIMIT_MS).
 -define(IN_FLIGHT_MS, ?ERX_BLK_IN_FLIGHT_MS).

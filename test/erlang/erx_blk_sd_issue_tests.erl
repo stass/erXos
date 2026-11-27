@@ -10,6 +10,7 @@
 -module(erx_blk_sd_issue_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(W, erx_blk_write).
 -define(CARD, #{addressing => block, sectors => 64, rca => 16#1234}).
@@ -17,9 +18,8 @@
 %% SDHCI_DAT_INHIBIT, sdhci.h:148-149).
 -define(CMD_INHIBIT, 1).
 -define(DAT_INHIBIT, 2).
-%% The SD transport's request limit as the design states it, and the transfer mode of a
-%% multi-block write: block count enabled, Auto CMD12 and multiple blocks (sdhci.c:1730-1743).
--define(SD_MAX_SECTORS, 64).
+%% The transfer mode of a multi-block write: block count enabled, Auto CMD12 and multiple
+%% blocks (sdhci.c:1730-1743).
 -define(MULTI_WRITE_MODE, 16#26).
 
 issue(Plan, Reads) ->
@@ -93,18 +93,18 @@ step_feed_test() ->
     ok = ?W:sd_feed(erx_blk_sd_regs:new(dev), Plan, 0),
     ?assertEqual(Block, << <<W:32/little>> || {write, data, W} <- ops(erx_device:calls()) >>).
 
-%% The largest write the SD transport takes, 64 sectors, 32 KiB (docs/design-storage.md,
-%% "Data model"), is one command sequence: one CMD25 with a block count of 64 and Auto
-%% CMD12, each of the 64 blocks of the caller's data fed through `data` on its
+%% The largest write the SD transport takes, blk_sd_max_sectors (docs/design-storage.md,
+%% "Data model"), is one command sequence: one CMD25 with that block count and Auto
+%% CMD12, each block of the caller's data fed through `data` on its
 %% buffer-ready event, and CMD13 after transfer complete. One sector more is refused by the
 %% plan builder, which is pure, so before the device is touched.
 largest_write_test() ->
-    Data = << <<(I rem 251):8>> || I <- lists:seq(0, ?SD_MAX_SECTORS * 512 - 1) >>,
+    Data = << <<(I rem 251):8>> || I <- lists:seq(0, ?ERX_BLK_SD_MAX_SECTORS * 512 - 1) >>,
     {ok, Plan} = ?W:sd_write_plan(0, Data, ?CARD),
     {{ok, Regs}, Calls} = issue(Plan, #{}),
     [Word] = [W || {command, W} <- ops(Calls)],
     ?assertEqual({25, ?MULTI_WRITE_MODE}, {(Word bsr 24) band 16#3f, Word band 16#ffff}),
-    ?assertEqual([(?SD_MAX_SECTORS bsl 16) bor 512], [S || {write, blksizecnt, S} <- ops(Calls)]),
+    ?assertEqual([(?ERX_BLK_SD_MAX_SECTORS bsl 16) bor 512], [S || {write, blksizecnt, S} <- ops(Calls)]),
     ?assertEqual(Data, fed(Plan, Regs)),
     ?assertEqual({error, bad_count}, ?W:sd_write_plan(0, <<Data/binary, 0:4096>>, ?CARD)).
 

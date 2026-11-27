@@ -34,7 +34,11 @@
 
 -export_type([reason/0, info/0]).
 
--define(CALL_TIMEOUT, 30000).
+-include("generated/erx_abi.hrl").
+
+%% How long a call waits for its transport, above the transport's own deadlines
+%% (abi/formats/blk.txt).
+-define(CALL_TIMEOUT, ?ERX_BLK_CALL_TIMEOUT_MS).
 
 -type reason() :: bad_count | out_of_range | erofs | busy | no_device | no_flush | {device, term()}.
 -type info() :: #{transport := virtio_mmio | sdhci | usb_bot, capacity := non_neg_integer(),

@@ -294,10 +294,10 @@ medium's capacity, so its `out_of_range` reaches a window only when the
 window itself lies past the medium's end, and the window answers that
 `eio`, as a device error. The maximum request is the
 transport's: 8 sectors on virtio, the sectors one pool buffer holds
-beside its header and status byte; 64 sectors on the SD controller,
-32 KiB (`blk_sd_max_sectors` of `abi/formats/blk.txt`, beside its
-deadlines), the most whose write a card within its specification
-finishes inside the in-flight bound below. The
+beside its header and status byte; 32 sectors on the SD controller,
+16 KiB (`blk_sd_max_sectors` of `abi/formats/blk.txt`, beside its
+deadlines), whose write a card within its specification finishes
+inside both the wait limit and the in-flight bound below. The
 block service reads it from `info/0` when it starts a window, and the
 window refuses a larger request with `einval`; the window's own `info`
 names it as `max_sectors`, beside its role and length, so a file system
@@ -308,7 +308,8 @@ bounded backlog while the controller is busy.
 **Every request is answered within 28 s of its acceptance**, so a
 device process never writes for a caller that has given up. Every
 transport keeps the same two bounds, `blk_wait_limit_ms` and
-`blk_in_flight_ms` of `abi/formats/blk.txt`. The device
+`blk_in_flight_ms` of `abi/formats/blk.txt`, and `erx_blk` waits
+`blk_call_timeout_ms` of the same file for each call. The device
 process stamps each request with the time it accepted it. It issues a
 request only within 10 s of that stamp, the wait limit, and answers one
 still in the backlog after it `{error, {device, deadline}}` without
@@ -319,13 +320,20 @@ in-flight bound, is a failure: the device process ends
 ([Failure](#the-sd-host-controller)) and issues nothing more, and the
 request's sectors are unknown, as for any failed write. The callers' deadlines sit above that sum, each
 longer than the one below it, so each layer answers before its caller
-gives up: `erx_blk`'s calls wait 30 s (`CALL_TIMEOUT` in `erx_blk.erl`), a window
+gives up: `erx_blk`'s calls wait 30 s (`blk_call_timeout_ms`), a window
 35 s (`CALL_TIMEOUT` in `erx_blk_window.erl`) and littlefs's port 60 s
-(`DEADLINE_MS` in `erx_lfs.erl`). The SD controller's in-flight bound covers its
-largest request at the specification's own limits: 64 blocks written at
-250 ms of busy each, the last up to 500 ms (Physical Layer 4.6.2.2,
-p.95), is 16.25 s, and a read of 64 blocks at 100 ms each (4.6.2.1,
-p.95) 6.4 s.
+(`DEADLINE_MS` in `erx_lfs.erl`), the last two derived from the first.
+The SD controller's largest request
+takes at most 8.25 s at the specification's own limits: 32 blocks
+written at 250 ms of busy each, the last up to 500 ms (Physical Layer
+4.6.2.2, p.95), is 31 x 250 ms + 500 ms = 8.25 s, and a read of 32
+blocks at 100 ms each (4.6.2.1, p.95) 3.2 s. The in-flight bound covers
+it, and so does the wait limit: a request with one request ahead of
+it, accepted just as that one was issued, waits at most 8.25 s, within
+its 10 s, and is issued rather than answered `deadline`; one with two
+or more ahead of it may still be answered `deadline`. Wait limit and
+in-flight bound together, 10 s + 18 s = 28 s, stay below the 30 s call
+timeout.
 
 **Choosing the transport.** `erx_blk:start_link/0` starts the device
 process of the domain's one device record whose role is `block`, chosen
@@ -2523,7 +2531,7 @@ deadline decision (a request past its wait limit answered with no
 register touched, an issued one past its in-flight bound ending the
 process), seeded by timing the wait from the issue rather than the
 acceptance, and a check that the bounds stay below `erx_blk`'s timeout,
-that below the window's and that below littlefs's port's. A QEMU test
+from which the window's and littlefs's port's are derived. A QEMU test
 that a trial boot's driver refuses every write but the record's (U4). The
 same storage service passes unchanged against a local window and one
 exported from a driver domain of its own. A controller that returns a
@@ -2550,6 +2558,7 @@ runs the driver whole. Each check and the seeded fault it must catch:
 | the CSD, SCR, SD status, General Information and Performance Enhancement parsers give known values, CSD capacities equal to the model's for 2 and 4 GiB images | the R2 parser's one-byte shift dropped |
 | the cache step skips a card without bit 330, refuses one without CMD48, flushes and clears an enabled cache, and refuses one that still reads enabled | the read-back skipped |
 | the divider's clock is at most the target and the next smaller divisor exceeds it | `<` in place of `=<` |
+| the largest request's worst case at the specification's limits fits the in-flight bound, and a request with it ahead is still issued within the wait limit | the limit at 64 sectors |
 | no two register writes but `data`'s are less than 6 us apart, the command's included | the spacing set to zero |
 | a set 1.8 V signalling enable refuses the start before any reset or command | the check dropped |
 | the command's wait takes command complete and the data track in either order, ignores a data end on a command with neither data nor busy, and fails an out-of-order event | the data track held until command complete |

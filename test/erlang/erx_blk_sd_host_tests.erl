@@ -10,6 +10,7 @@
 
 -module(erx_blk_sd_host_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(H, erx_blk_sd_host).
 -define(RCA, 16#B368).
@@ -121,17 +122,26 @@ in_flight_bound_test() ->
     ?assertMatch({_, []}, ?H:step(T, {tick, 26999})),
     ?assertMatch({_, [{fail, in_flight_bound}]}, ?H:step(T, {tick, 27000})).
 
-%% Each layer answers before its caller gives up: erx_blk:call/1 waits 30 s.
+%% Each layer answers before its caller gives up: erx_blk's calls wait
+%% blk_call_timeout_ms.
 deadlines_below_the_callers_test() ->
-    ?assert(?H:wait_limit_ms() + ?H:in_flight_ms() < 30000).
+    ?assert(?H:wait_limit_ms() + ?H:in_flight_ms() < ?ERX_BLK_CALL_TIMEOUT_MS).
 
-%% The in-flight bound covers the largest request at the specification's own limits
+%% The longest a card within its specification takes over the largest request
 %% (docs/design-storage.md, "Data model"; Physical Layer 4.6.2, p.95): each block written
-%% at 250 ms of busy, the last at up to 500 ms, and each block read at 100 ms.
-in_flight_bound_covers_the_largest_request_test() ->
+%% at 250 ms of busy, the last at up to 500 ms, or each block read at 100 ms.
+largest_request_ms() ->
     Max = ?H:max_sectors(),
-    ?assert((Max - 1) * 250 + 500 =< ?H:in_flight_ms()),
-    ?assert(Max * 100 =< ?H:in_flight_ms()).
+    max((Max - 1) * 250 + 500, Max * 100).
+
+in_flight_bound_covers_the_largest_request_test() ->
+    ?assert(largest_request_ms() =< ?H:in_flight_ms()).
+
+%% A request with the largest request ahead of it, accepted as that one was issued, starts
+%% once that one's worst case has passed, and is issued, not answered deadline.
+issued_after_the_largest_requests_worst_case_test() ->
+    T = request(read, 0, 1),
+    ?assertMatch({_, [{issue, transfer}]}, ?H:step(T, {start, largest_request_ms()})).
 
 %%% The transfer, exhaustively
 
