@@ -494,14 +494,17 @@ module Erx
         ERLANG
       end
 
+      # The list kinds whose sorter (see sorters) rebuilds a value through sort_list/5.
+      def sorted_lists = @kinds.select { |name, kind| kind.fetch(:form) == 'list' && sorts?(name) }
+
       # Builders only: sort_list/5 when a list kind sorts, with an end clause for each
       # Ascending value a sorter passes and no other, since Dialyzer flags a clause no
       # caller reaches.
       def sort_list
-        orders = @kinds.filter_map { |name, kind| kind[:ascending] if kind.fetch(:form) == 'list' && sorts?(name) }.uniq
+        orders = sorted_lists.map { |_, kind| kind.fetch(:ascending) }
         return [] if orders.empty?
 
-        ends = { true => 'lists:sort(Done)', false => 'lists:reverse(Done)' }.slice(*orders.sort_by { |order| order ? 0 : 1 })
+        ends = { true => 'lists:sort(Done)', false => 'lists:reverse(Done)' }.slice(*([true, false] & orders))
         [<<~ERLANG.chomp]
           %% Builders only: each element of a proper list sorted within, and the list sorted
           %% when Ascending; any other term unchanged.
