@@ -168,9 +168,7 @@ log format is known only from GPL code. It is
   documentation, "Steps").
 * `erx_fat:check/1` is the ownership check a writable mount runs
   (`erx_fat.erl:42-52`); `erx_fat_check:check/2` is `fsck_fat`'s
-  checker, on the `fsck-fat-check` branch, and
-  [design-fsck-fat.md](design-fsck-fat.md) is on the
-  `design-fsck-msdosfs` branch.
+  checker, which [design-fsck-fat.md](design-fsck-fat.md) designs.
 * The window serves `read`, `write` and `flush`, with no write that is
   durable on its own; it answers one request at a time, in order, and a
   flush is the whole medium's (`erx_blk_window.erl:13-19`). The

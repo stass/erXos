@@ -30,9 +30,11 @@ class ErxCrashStatesTest < Minitest::Test
   STATES = 'test/erlang/erx_crash_states.erl'
   MODEL = 'test/erlang/erx_fs_model.erl'
   RUN = 'test/erlang/erx_crash_run.erl'
-  STEP_LOOP = "    lists:foreach(fun({_Step, Writes}) ->\n" \
-              "                          lists:foreach(fun({Sector, Bytes}) -> placed_write(Proxy, Volume, Sector, Bytes) end, Writes),\n" \
-              "                          answered(erx_media_medium:window(Proxy, flush))\n"
+  PLAN = 'erlang/apps/erx_fat/src/erx_fat_plan.erl'
+  STEP_LOOP = "apply([{_Step, Images} | Rest], Write, Flush) ->\n" \
+              "    case written(Images, Write) of\n" \
+              "        ok ->\n" \
+              "            case Flush() of\n"
 
   # shows, when set, is the failing step the run must print, so a fault that breaks the
   # recording or crashes a check does not pass for the one it seeds.
@@ -45,10 +47,9 @@ class ErxCrashStatesTest < Minitest::Test
     Fault.new(name: 'an fsync answered without committing its batch', path: VOLUME,
               from: "request(fsync, State) ->\n    {ok, committed(State)};", to: "request(fsync, State) ->\n    {ok, State};",
               caught_by: 'fat_seq_1_test_', shows: /choice .*: obligations: /),
-    Fault.new(name: "the flush after erx_fat_dir's preparation step dropped", path: VOLUME, from: STEP_LOOP,
-              to: STEP_LOOP.sub('{_Step, Writes}', '{Step, Writes}')
-                           .sub('answered(erx_media_medium:window(Proxy, flush))',
-                                'Step =:= preparation orelse answered(erx_media_medium:window(Proxy, flush))'),
+    Fault.new(name: "the flush after erx_fat_dir's preparation step dropped", path: PLAN, from: STEP_LOOP,
+              to: STEP_LOOP.sub('{_Step, Images}', '{Step, Images}')
+                           .sub('case Flush() of', 'case if Step =:= preparation -> ok; true -> Flush() end of'),
               caught_by: 'fat_seq_1_test_', shows: /choice .*: ownership: /),
     Fault.new(name: "a publication write sent before the preparation step's flush", path: VOLUME,
               from: "applied(Plan, \#{proxy := Proxy, volume := Volume}) ->\n",

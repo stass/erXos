@@ -12,9 +12,10 @@
 %% 2. `ownership`: erx_fat:check/1 answers ok; a state refused at step 1 fails here.
 %% 3. `obligations`: the tree read through erx_fat meets the obligation at the
 %%    state's earliest moment and after each mark between it and the epoch's end.
-%% 4. `fsck`: the checker the run is handed as `fsck`, a fun of the state's read
-%%    function and its count of sectors answering ok or {error, Why}; none until
-%%    `fsck_fat`'s checker, erx_fat_check, joins (design-crash-states, "Packages").
+%% 4. `fsck`: `fsck_fat`'s checker, erx_fat_check:check/2, finds only what FAT's
+%%    write order lets a cut leave (cut_finding/2): the dirty flag, lost chains,
+%%    a chain longer than its file's size, an invalid long-name run, and FAT
+%%    copies that differ while the volume is dirty. Its repair is not run here.
 %%
 %% States are checked in parallel processes, at most one per scheduler, each under a
 %% deadline; one that crashes fails its state alone, and one past its deadline is
@@ -36,7 +37,7 @@
 %% epoch, the output directory, and the optional checker of step 4. It answers the
 %% report; it prints a line per cell to the user's terminal.
 -spec run(#{images := [{binary(), binary()}], workloads := [{term(), [erx_fs_model:op()]}],
-            bound := pos_integer(), seed := integer(), out := file:filename(), fsck => none | fun()}) -> map().
+            bound := pos_integer(), seed := integer(), out := file:filename()}) -> map().
 run(#{images := Images, workloads := Workloads, out := Out} = Options) ->
     Cells = [cell(ImageIndex, Image, Workload, Options)
              || {ImageIndex, Image} <- lists:enumerate(Images), Workload <- Workloads],
@@ -45,14 +46,13 @@ run(#{images := Images, workloads := Workloads, out := Out} = Options) ->
     #{cells => Cells, states => lists:sum([N || #{checked := N} <- Cells]),
       timed_out => lists:sum([N || #{timed_out := N} <- Cells]), failures => Failures, records => Recorded}.
 
-cell(ImageIndex, {Label, Base}, {Name, Ops}, #{bound := Bound, seed := Seed} = Options) ->
+cell(ImageIndex, {Label, Base}, {Name, Ops}, #{bound := Bound, seed := Seed}) ->
     Trace = record(Base, Ops),
     Obligations = obligations(Trace, Ops, tree(Base, fun(L) -> {ok, binary:part(Base, L * ?SECTOR, ?SECTOR)} end)),
     Epochs = erx_crash_states:epochs(Trace, Base),
     Generated = [{E, erx_crash_states:states(E, #{mode => atomic, bound => Bound, seed => Seed})} || E <- Epochs],
     Jobs = [{E, S} || {E, #{states := States}} <- Generated, S <- States],
-    Fsck = maps:get(fsck, Options, none),
-    Results = parallel(fun({E, S}) -> checked(Base, E, S, Obligations, Fsck) end, Jobs),
+    Results = parallel(fun({E, S}) -> checked(Base, E, S, Obligations) end, Jobs),
     Failures = [#{image => Label, image_index => ImageIndex, workload => Name, base => Base, trace => Trace,
                   epoch => I, choice => C, step => Step, reason => Why}
                 || {{#{index := I}, #{choice := C}}, {fail, Step, Why}} <- lists:zip(Jobs, Results)],
@@ -154,21 +154,21 @@ judged([{Pos, Obligation} | Rest], Actual) ->
         {error, Why} -> {error, {Pos, Why}}
     end.
 
-checked(Base, #{'end' := End} = Epoch, #{choice := Choice, t := T}, Obligations, Fsck) ->
+checked(Base, #{'end' := End} = Epoch, #{choice := Choice, t := T}, Obligations) ->
     Read = erx_crash_states:read_fun(Base, Epoch, Choice),
     Sectors = byte_size(Base) div ?SECTOR,
     try erx_fat:mount(Read, Sectors) of
         {error, Why} -> {fail, ownership, {not_mounted, Why}};
-        {ok, Fat} -> mounted(Fat, Read, Sectors, moments(T, End, Obligations), Fsck)
+        {ok, Fat} -> mounted(Fat, Read, Sectors, moments(T, End, Obligations))
     catch
         Class:Reason -> {fail, mount, {Class, Reason}}
     end.
 
-mounted(Fat, Read, Sectors, Moments, Fsck) ->
+mounted(Fat, Read, Sectors, Moments) ->
     case erx_fat:check(Fat) of
         ok ->
             try judged(Moments, tree(Fat)) of
-                ok -> fscked(Fsck, Read, Sectors);
+                ok -> fscked(Read, Sectors);
                 {error, Why} -> {fail, obligations, Why}
             catch
                 throw:{unreadable, _Path, _Why} = Unreadable -> {fail, obligations, Unreadable}
@@ -177,12 +177,26 @@ mounted(Fat, Read, Sectors, Moments, Fsck) ->
             {fail, ownership, Other}
     end.
 
-fscked(none, _Read, _Sectors) -> pass;
-fscked(Fsck, Read, Sectors) ->
-    case Fsck(Read, Sectors) of
-        ok -> pass;
-        {error, Why} -> {fail, fsck, Why}
+fscked(Read, Sectors) ->
+    case erx_fat_check:check(Read, Sectors) of
+        {ok, Findings, _Repair} ->
+            case [F || F <- Findings, not cut_finding(F, lists:member(dirty, Findings))] of
+                [] -> pass;
+                Others -> {fail, fsck, {findings, Others}}
+            end;
+        Other ->
+            {fail, fsck, Other}
     end.
+
+%% Whether Finding is one a cut may leave on a volume that is Dirty or not
+%% (design-crash-states, "The checks of one state", step 4).
+cut_finding(dirty, _Dirty) -> true;
+cut_finding({lost_chain, _Head, _Length, _Fate}, _Dirty) -> true;
+cut_finding({too_many_clusters, _Path}, _Dirty) -> true;
+cut_finding({invalid_long, _Path}, _Dirty) -> true;
+cut_finding({invalid_long_at_end, _Path}, _Dirty) -> true;
+cut_finding({fat_copy_differs, _Copy}, Dirty) -> Dirty;
+cut_finding(_Finding, _Dirty) -> false.
 
 %% The tree of the volume Read reads, or of a mounted Fat: each path with `dir` or
 %% its file's bytes. A directory or file the read path refuses is thrown.
