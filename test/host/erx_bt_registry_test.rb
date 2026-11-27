@@ -63,15 +63,15 @@ class ErxBtRegistryTest < Minitest::Test
     Seed.new(fault: 'a set not passed on to the joined links',
              path: CORE, anchor: '{to_link, Link, {set, Key, Value}} || Link := _',
              replacement: '{to_link, Link, {set, Key, Value}} || false, Link := _',
-             catching_case: 'a join racing sets misses none'),
+             catching_case: 'every_sequence_of_four_keeps_the_model'),
     Seed.new(fault: "a notification whose link ended left unanswered, so its caller waits",
              path: SRV, anchor: '            gen_server:reply(From, {error, gone}),',
              replacement: '            _ = From,',
-         catching_case: 'a link ending mid-notification answers gone'),
-Seed.new(fault: 'every declaration served again, whatever the ble rows name',
-         path: SUP, anchor: 'served({ok, Names}) when is_list(Names) -> [erx_gatt_decl:service(Name) || Name <- Names];',
-         replacement: 'served({ok, Names}) when is_list(Names) -> [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()];',
-         catching_case: 'served_from_the_key')
+             catching_case: 'a link ending mid-notification answers gone'),
+    Seed.new(fault: 'every declaration served again, whatever the ble rows name',
+             path: SUP, anchor: 'served({ok, Names}) when is_list(Names) -> [erx_gatt_decl:service(Name) || Name <- Names];',
+             replacement: 'served({ok, Names}) when is_list(Names) -> [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()];',
+             catching_case: 'served_from_the_key')
   ].freeze
 
   def test_registry_cases_pass_under_eunit
