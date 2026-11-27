@@ -891,17 +891,19 @@ lands in the volatile part, an answered flush moves the volatile part to
 the durable one, and a break drops the volatile part. The cases'
 "nothing answered lost" check compares what reads back with what was
 answered and flushed. Dropping the whole volatile part is one crash
-state of many; every image a crash could leave of a recorded run, any
-subset of the writes answered since the last flush, is enumerated and
-checked by [design-crash-states.md](design-crash-states.md), whose
-window recorder is the block window stand-in below.
+state of many; every image a crash could leave of a recorded run, each
+sector written since the last flush at its durable value or at any
+value written to it since, is enumerated and checked by
+[design-crash-states.md](design-crash-states.md), whose window recorder
+is the block window stand-in below, recording only in runs with no
+fault plan.
 
 | Stand-in | Exists as | Gains |
 | --- | --- | --- |
 | xHCI | `test/erlang/erx_usb_fake_xhci.erl` | a command or endpoint stop never answered, a port reset that times out, a transfer error, a device gone from its port |
 | a USB stick over BOT | `test/erlang/erx_usb_fake_stick.erl`, which asks the plan at each `cbw`, `data_out`, `data_in` and `csw` transfer | a STALL, a NAK for ever (`silent`), a late CSW, a CSW with a bad signature or tag, a phase error, the stick gone in the middle of a command |
 | an SD card | `test/erlang/erx_blk_sd_card_model.erl` | a CRC error on a read or a write, a command timeout, an R1 error bit, the card gone |
-| a block window, for the volumes above | the fake window proxy of `test/erlang/erx_media_volume_tests.erl`, moved into its own module, serving two volumes of one medium | a request dropped or delayed, `eio`, the window's end |
+| a block window, for the volumes above | the RAM medium `ram/2` of `test/erlang/erx_media_volume_write_tests.erl`, which answers writes and flushes and cuts after a count of writes, with the read-only proxy of `erx_media_volume_tests.erl` folded into it, moved into its own module, `erx_ram_window`, serving two volumes of one medium | a request dropped or delayed, `eio`, the window's end |
 | the Bluetooth line | `test/erlang/erx_bt_line_model.erl` | the controller silent, late, garbage bytes, a reset that is not answered |
 | a network medium | `erx_net_pipe` over a test process, the transport the network stack's tests already use ([design-network-stack.md](design-network-stack.md)) | frames dropped or delayed, the far end silent, the link down, a transmit that never completes, a bring-up that fails |
 | the display's devices | to write, over the device NIF's stand-in | a frame never answered, an input device whose bring-up fails at every attempt |
