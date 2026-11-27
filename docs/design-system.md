@@ -2563,7 +2563,8 @@ that is no decimal number fails the caller's start with
 does not start rather than mint by guess. A server reads it when it
 starts its mints, and starts a mint only for a service it declares:
 the storage domain's littlefs starts the mint of each of its trees,
-`data`, `packages` and `home`, only where its row declares that tree as
+`data`, `packages`, `home` and the development state trees `bt_state`
+and `ssh_state`, only where its row declares that tree as
 a `files` service and the volume it lies on is present, while
 `storage_ctl`, `system` and `login_keys` keep their own starts. The
 declaration grants nothing and is no evidence to the domain service,

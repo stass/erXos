@@ -1729,6 +1729,46 @@ class ManifestCheckTest < Minitest::Test
             message: /record_volume window/)
   end
 
+  # The development state services (docs/design-bluetooth.md, "The Bluetooth domain";
+  # docs/design-ssh.md, "Host keys"): a manifest that serves bt_state holds the build's
+  # one derived row of it, read-write to the domain named bt, and none other; ssh_state's
+  # holder is the domain named ssh. Seeded: a derived row to the system domain, or
+  # source :any, fails these.
+  def state_service(name) = "service #{name}\n  server @domain.storage\n  interface files\n"
+
+  # Each facet row as [grantee kind, grantee, service name, parameter scalars].
+  def granted_rows(view)
+    services = view.each('services').map { |row| view.string(row.fetch('name')) }
+    parameters = view.each('facet_parameters').to_a
+    first = view.header.fetch('facet_parameters').fetch('offset')
+    view.each('facets').map do |facet|
+      span = facet.fetch('parameters')
+      [facet.fetch('grantee_kind'), facet.fetch('grantee'), services.fetch(facet.fetch('service')),
+       parameters[(span.fetch('offset') - first) / 32, span.fetch('count')].map { |row| row.fetch('scalar') }]
+    end
+  end
+
+  def test_the_build_derives_the_bt_state_row_to_the_bt_domain_alone
+    view = @codec.open('manifest', admit(pi_shipped + state_service('bt_state'), pi_context).bytes)
+    bt = view.each('domains').map { |row| view.string(row.fetch('name')) }.index('bt')
+    rw = @codec.member('files_rights', 'rw')
+    assert_equal [[@codec.member('mf_grantee', 'domain'), bt, 'bt_state', [rw]]],
+                 granted_rows(view).select { |row| row[2] == 'bt_state' }
+  end
+
+  def test_a_bt_state_row_the_manifest_writes_is_refused
+    facet = login_keys_facet(grantee: '@domain.bt', rights: "  parameter rights rw\n").gsub('login_keys', 'bt_state')
+    refused(Erx::Manifest::Invalid, 'facet.service', pi_shipped + state_service('bt_state') + facet, pi_context,
+            message: /only the derived bt_state rows do/)
+  end
+
+  def test_a_state_service_without_its_holder_domain_is_refused
+    { 'bt_state' => 'bt', 'ssh_state' => 'ssh' }.each do |name, holder|
+      refused(Erx::Manifest::Invalid, 'service.name', @source + state_service(name),
+              message: /a #{name} service holds a domain named #{holder}/)
+    end
+  end
+
   # A second record_volume window lies on the system window's block device, as the
   # first does, so it names the first's role and partition, and fails as such.
   def test_a_second_record_volume_window_is_refused

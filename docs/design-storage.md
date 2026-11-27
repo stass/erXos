@@ -1645,7 +1645,8 @@ when it first meets a file and at every change to it
 keeps qid paths unique within a tree and never gives a path to a second
 file while its domain lives, and a tree is the numbering, not a grant's
 root: every grant of one volume names the volume's tree, so the data
-volume's `data`, `packages` and `home` grants all name `data`
+volume's `data`, `packages`, `home`, `bt_state` and `ssh_state` grants all
+name `data`
 ([design-files.md](design-files.md#building-binding-and-mounting), "The
 tree beneath an entry"). The path depends on what the format offers:
 
@@ -2323,6 +2324,13 @@ reported as a durable checkpoint.
   WiFi domain's grant and read-write to the grants of the session
   templates that hold the WiFi domain's `wifi` tree
   ([design-wifi.md](design-wifi.md#the-wifi-domain)).
+  In a development build it also serves the state trees `bt_state` and
+  `ssh_state`, each a service directory of its own, `bt/` and `ssh/`,
+  read-write to the grant of the one domain that keeps its state there,
+  the Bluetooth domain's bond store and the SSH domain's host key
+  ([design-bluetooth.md](design-bluetooth.md#the-bluetooth-domain),
+  [design-ssh.md](design-ssh.md#host-keys)); a manifest serves each only
+  where it holds that domain.
 * **The `system` tree**, `system_service`, which the storage domain that
   serves `system` serves over the booted slot's system partition's
   `apps/`, read-only to its two grants, the system domain's and the app

@@ -736,10 +736,22 @@ the release otherwise only loads, declared per script
   ([design-pcie.md](design-pcie.md#processes));
 * at stage 4, the store's grant: in a release build the vault's state
   facet `{state, "bt"}` ([design-system.md](design-system.md#state-slots)),
-  and in a development build a files service of its own that the storage
-  domain roots at the data volume's `bt/` directory and grants to the
-  Bluetooth domain alone, as it serves SSH's `ssh_state`
-  ([design-ssh.md](design-ssh.md#host-keys));
+  and in a development build `bt_state`, a files service of its own
+  that the storage domain roots at the data volume's `bt/` directory,
+  named in `abi/manifest.txt` by `bt_state_service`, whose one row the
+  build derives, read-write to the domain named `bt` alone, in every
+  manifest that serves it, as it serves SSH's `ssh_state`
+  ([design-ssh.md](design-ssh.md#host-keys)); the domain mounts it at
+  its place, `/data/bt`, the path of the volume's `bt/` in a namespace
+  that mounts the volume at `/data`, so failing to list `/data/bt` is
+  an unavailable store and an empty listing is one without bonds. The
+  grant confines the Bluetooth domain to `bt/`, not the files to the
+  Bluetooth domain: a `data` grant roots at the volume's top, and
+  littlefs keeps no modes to refuse it, so the holders of `data`, the
+  system domain and root's session, read and write `/data/bt` and
+  `/data/ssh` as well, in development builds only. The storage domain
+  starts the `bt_state` mint only where the manifest declares the
+  service;
 
 It serves three things: the `ble` facet to apps, as the service `ble`
 that the manifest declares beside the domain's row ([The `ble`
@@ -3293,8 +3305,7 @@ stores behind the seam answer with exactly these results:
   on the medium before the put answers and before any deletion, then deletes every
   name of a lower generation; `get`
   answers `bonds.N` of the highest `N` and the highest `N` any name
-  carries, `.new` included, `none` when no `bonds.N` exists and the
-  directory or the volume it lies in does, an empty blob, which does not
+  carries, `.new` included, `none` when the directory lists and holds no `bonds.N`, an empty blob, which does not
   decode, when the newest file cannot be read, so `forget all` still
   learns the generation, and `unavailable` when the directory cannot be
   listed; a put answers

@@ -159,7 +159,17 @@ class ErxBtStoreTest < Minitest::Test
              module_path: STORE,
              anchor: '    case lists:any(fun(#{identity := Kept}) -> Kept =:= Identity end, Bonds) of',
              replacement: '    case lists:any(fun(#{identity := {_, Kept}}) -> Kept =:= element(2, Identity) end, Bonds) of',
-             catching_case: 'two_identities_of_one_address_test')
+             catching_case: 'two_identities_of_one_address_test'),
+    Seed.new(fault: 'a grant root that cannot be listed read as a store without bonds',
+             module_path: STATE_FILE,
+             anchor: "        {error, _} ->\n            {error, unavailable}\n    end.",
+             replacement: "        {error, _} ->\n            {ok, 0, none}\n    end.",
+             catching_case: 'state_file_test'),
+    Seed.new(fault: 'a put that makes the grant root it should find',
+             module_path: STATE_FILE,
+             anchor: "owner_only_dir(Dir) ->\n",
+             replacement: "owner_only_dir(Dir) ->\n    _ = file:make_dir(Dir),\n",
+             catching_case: 'state_file_test')
   ].freeze
 
   def test_store_cases_pass_under_eunit

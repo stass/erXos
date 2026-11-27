@@ -43,7 +43,7 @@ class ErxLittlefsTest < Minitest::Test
              worker_end_ends_the_owner window_end_ends_the_owner mount_failure_ends_the_owner
              corrupt_volume_never_formats blank_blocks_do_not_mount deadline_ends_a_request refuses_bad_arguments
              fsync_flushes_the_window failed_flush_fails_the_fsync a_tree_reaches_only_its_own
-             a_home_reaches_only_its_own].freeze
+             a_home_reaches_only_its_own a_state_tree_reaches_only_its_own].freeze
 
   def test_volume_cases_pass_under_one_dirty_io_scheduler
     skip 'stock OTP not built: make oracle-bootstrap' unless File.directory?(OTP)

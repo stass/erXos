@@ -545,9 +545,9 @@ and two grants of one server domain name one tree exactly when their
 files' paths come from one numbering, so one file has one identity
 through every grant that reaches it
 ([Identity and version](#identity-and-version)). The storage domain's
-`data`, `packages` and `home` services are grants of one tree, its
-littlefs volume's, rooted at the volume's top, at `/packages` or below,
-and at one user's home ([Building, binding and
+`data`, `packages`, `home`, `bt_state` and `ssh_state` services are
+grants of one tree, its littlefs volume's, rooted at the volume's top,
+at `/packages` or below, at one user's home, and at `/bt` and `/ssh` ([Building, binding and
 mounting](#building-binding-and-mounting), "The tree beneath an
 entry"). `attach`'s `Aname` names the tree, and a grant answers an
 `attach` as 9P2000.L says, with a fid of its own on the grant's root

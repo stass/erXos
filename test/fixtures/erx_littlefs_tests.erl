@@ -14,7 +14,7 @@
          mount_failure_ends_the_owner/0, corrupt_volume_never_formats/0, blank_blocks_do_not_mount/0,
          deadline_ends_a_request/0, refuses_bad_arguments/0, fsync_flushes_the_window/0,
          failed_flush_fails_the_fsync/0, a_tree_reaches_only_its_own/0,
-         a_home_reaches_only_its_own/0, a_grant_without_its_root_is_not_started/0]).
+         a_home_reaches_only_its_own/0, a_state_tree_reaches_only_its_own/0, a_grant_without_its_root_is_not_started/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -31,7 +31,7 @@ main() ->
              worker_end_ends_the_owner, window_end_ends_the_owner,
              mount_failure_ends_the_owner, corrupt_volume_never_formats, blank_blocks_do_not_mount,
              deadline_ends_a_request, refuses_bad_arguments, fsync_flushes_the_window,
-             failed_flush_fails_the_fsync, a_tree_reaches_only_its_own, a_home_reaches_only_its_own,
+             failed_flush_fails_the_fsync, a_tree_reaches_only_its_own, a_home_reaches_only_its_own, a_state_tree_reaches_only_its_own,
              a_grant_without_its_root_is_not_started],
     Results = [run(Case) || Case <- Cases],
     erlang:halt(case lists:all(fun(R) -> R end, Results) of true -> 0; false -> 1 end).
@@ -264,6 +264,41 @@ a_tree_reaches_only_its_own() ->
     [{error, einval}] = lists:usort([erx_lfs:subtree({lfs_trees, data}, installed, #{client => 5, principal => <<"clock">>}),
                                      erx_lfs:subtree({lfs_trees, packages}, apps, #{client => 5, principal => <<"clock">>}),
                                      erx_lfs:subtree({lfs_trees, packages}, packages, #{client => 5, principal => <<"clock">>})]),
+    stop_volume(Volume).
+
+%% A grant of a development state tree, bt_state or ssh_state, reaches the volume's bt/
+%% or ssh/ directory, which the mount made, and nothing beside or above it: neither the
+%% other state tree's files nor the data tree's, and no name walks, makes, removes or
+%% renames out of it. The data tree, as root's session holds it at /data, sees what the
+%% grant wrote. No row's tree roots a state grant anywhere else.
+a_state_tree_reaches_only_its_own() ->
+    Volume = {_, _, Data} = start_volume(fresh_disk(), lfs_state),
+    {ok, <<"data">>, Top, _} = erx_lfs:root(Data),
+    {ok, _, _, Secret} = erx_lfs:make(Top, <<"secret">>, {file, 8#644, ?ERX_P9_O_RDWR}, Data),
+    ok = erx_lfs:clunk(Secret, Data),
+    Trees = [{bt_state, <<"bt">>, <<"bonds.1">>}, {ssh_state, <<"ssh">>, <<"ssh_host_ed25519_key">>}],
+    Grants = [begin
+                  {ok, Grant} = erx_lfs:init({lfs_state, Tree}),
+                  {ok, <<"data">>, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Grant),
+                  {ok, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:walk(Top, Dir, Data),
+                  {ok, RootH} = erx_lfs:open(Root, 0, Grant),
+                  {ok, []} = erx_lfs:readdir(RootH, 0, 16, Grant),
+                  ok = erx_lfs:clunk(RootH, Grant),
+                  {ok, _, _, Made} = erx_lfs:make(Root, Name, {file, 8#600, ?ERX_P9_O_RDWR}, Grant),
+                  ok = erx_lfs:clunk(Made, Grant),
+                  {ok, _, {0, _, _}} = erx_lfs:walk(Root, Name, Data),
+                  Escapes = [erx_lfs:walk(Root, <<"..">>, Grant),
+                             erx_lfs:make(Root, <<"..">>, {directory, 8#755, self()}, Grant),
+                             erx_lfs:unlink(Root, <<"..">>, directory, Grant),
+                             erx_lfs:rename(Root, Name, Root, <<"..">>, Grant)],
+                  [{error, einval}] = lists:usort(Escapes),
+                  [{error, einval}] = lists:usort([erx_lfs:subtree({lfs_state, Tree}, Sub, #{client => 5, principal => <<"root">>})
+                                                   || Sub <- [installed, home, bt_state, ssh_state]]),
+                  {Grant, Root, Name}
+              end || {Tree, Dir, Name} <- Trees],
+    [{BtGrant, BtRoot, BtName}, {SshGrant, SshRoot, SshName}] = Grants,
+    [{error, enoent}] = lists:usort([erx_lfs:walk(BtRoot, Other, BtGrant) || Other <- [SshName, <<"secret">>, <<"ssh">>]] ++
+                                    [erx_lfs:walk(SshRoot, Other, SshGrant) || Other <- [BtName, <<"secret">>, <<"bt">>]]),
     stop_volume(Volume).
 
 %% A home grant (docs/design-files.md, "A user's home") is rooted at its user's home

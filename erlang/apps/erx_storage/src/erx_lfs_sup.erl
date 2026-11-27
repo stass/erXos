@@ -10,10 +10,11 @@ the volume (erx_lfs:trees/0) that this domain's declaration names a files
 service (erx_serves, docs/design-system.md, "The declaration"), the mint of
 the files service of the tree's name, which hands other domains grants of
 that tree alone (erx_fs_mint): `data`, `packages`, the installed app
-packages (docs/design-packaging.md, "Where a package lies"), and `home`. A
-tree the declaration does not name gets no mint, since the domain service
-refuses a ready report that names more mints than the row declares
-services. The owner starts once
+packages (docs/design-packaging.md, "Where a package lies"), `home`, and the
+development state trees `bt_state` and `ssh_state`. A tree the declaration
+does not name gets no mint, since the domain service refuses a ready report
+that names more mints than the row declares services, so a manifest that
+serves no state tree starts no state mint. The owner starts once
 the volume has mounted, so a mount that fails fails the domain's boot before
 it reports ready, and each mint names itself its service's mint before that
 report. Every child is permanent and the restart intensity is 0: when any

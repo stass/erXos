@@ -485,13 +485,19 @@ module Erx
         end
       end
 
+      # The configured domain of a name, the one holder of a development state service
+      # (docs/design-bluetooth.md, "The Bluetooth domain"; docs/design-ssh.md, "Host
+      # keys"): a manifest that serves the service holds a domain of that name, which the
+      # build grants it.
+      HolderDomain = Data.define(:name)
+
       # A row the build derives of a well-known service: its grantee, :system (the system
-      # domain), :app_template or :user_templates (every session template but the app
-      # template), and its parameter values.
+      # domain), :app_template, :user_templates (every session template but the app
+      # template) or a HolderDomain, and its parameter values.
       Derived = Data.define(:grantee, :values) do
         def initialize(grantee:, values:)
           raise Erx::Error, "Derived grantee #{grantee.inspect} is not one derived_grantees names" unless
-            %i[system app_template user_templates].include?(grantee)
+            %i[system app_template user_templates].include?(grantee) || grantee.is_a?(HolderDomain)
 
           super
         end
@@ -566,6 +572,18 @@ module Erx
         # "Invariants", H8).
         WellKnown.new(constant: 'login_keys_service', needs: nil, window: 'record_volume', derived: [],
                       source: SourceGrants.new(root: :always, read_only: true, why: 'tree holds root\'s login keys')),
+        # The development state services, each rooted at a directory of the data volume
+        # of its own: the build grants each read-write to the one domain that keeps its
+        # state there and to no other, so the domain that parses the radio, or the
+        # network, reaches that directory and no principal's files
+        # (docs/design-bluetooth.md, "The Bluetooth domain"; docs/design-ssh.md, "Host
+        # keys").
+        WellKnown.new(constant: 'bt_state_service', needs: :served, window: nil,
+                      derived: [Derived.new(grantee: HolderDomain.new(name: 'bt'), values: { 'rights' => 'rw' })],
+                      source: :none),
+        WellKnown.new(constant: 'ssh_state_service', needs: :served, window: nil,
+                      derived: [Derived.new(grantee: HolderDomain.new(name: 'ssh'), values: { 'rights' => 'rw' })],
+                      source: :none),
         # Property 8's drive clauses (docs/design-drives.md, "Manifest rows" and "Links and
         # rights"): the media domain, the server of every drive window, serves every
         # drive's volumes. Any grantee may hold a row of it, and none runs what a drive
@@ -2074,7 +2092,8 @@ module Erx
           required_by = known.needs == :apps ? 'an apps row' : "a #{name_of(known)} service"
           service = fetch_well_known(service_rows, known, required_by: required_by)
           known.derived.flat_map do |grant|
-            derived_grantees(grant.grantee, tables).map { |grantee| derived_facet(service_rows, grantee, service, grant.values) }
+            derived_grantees(grant.grantee, tables, required_by: required_by)
+              .map { |grantee| derived_facet(service_rows, grantee, service, grant.values) }
           end
         end
       end
@@ -2106,10 +2125,15 @@ module Erx
         end
       end
 
-      # The grantees, each [kind, index], that a derived row's grantee names.
-      def derived_grantees(grantee, tables)
+      # The grantees, each [kind, index], that a derived row's grantee names; a
+      # HolderDomain names the domain of its name, which a manifest with required_by holds.
+      def derived_grantees(grantee, tables, required_by:)
         sessions = tables.fetch('sessions')
         case grantee
+        in HolderDomain(name:)
+          index = @indices.fetch('domain')[name]
+          invalid("a manifest with #{required_by} holds a domain named #{name}", 'service.name') unless index
+          [[grantee_kind('domain'), index]]
         in :system then [[grantee_kind('system'), 0]]
         in :app_template then [[grantee_kind('session'), app_template_index(tables)]]
         in :user_templates

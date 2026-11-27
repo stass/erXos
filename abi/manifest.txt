@@ -200,6 +200,14 @@ bytes principal_key 9 value 7072696e636970616c
 # (docs/design-packaging.md, "The apps row"): "packages". The app
 # template's row of it is the one every app's session keeps.
 bytes packages_service 8 value 7061636b61676573
+# The names of the development state services, each a files service of the storage
+# domain rooted at a directory of the data volume of its own, whose one row the build
+# derives, read-write to the one domain that keeps its state there: "bt_state", the
+# volume's bt/, to the domain named bt (docs/design-bluetooth.md, "The Bluetooth
+# domain"), and "ssh_state", its ssh/, to the domain named ssh (docs/design-ssh.md,
+# "Host keys").
+bytes bt_state_service 8 value 62745f7374617465
+bytes ssh_state_service 9 value 7373685f7374617465
 # The name of the service that serves the `system` tree (docs/design-storage.md,
 # "The `system` tree"): "system", an instance of files whose server holds the
 # manifest's `system` window (property 19). The app template's row of it is the one

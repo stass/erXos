@@ -5,7 +5,10 @@
 -moduledoc """
 The development builds' store behind the store's seam (docs/design-bluetooth.md, "Bonds
 and the store"): files in the Bluetooth domain's directory on the data partition, one
-per generation, so a put that completes late never replaces a newer state.
+per generation, so a put that completes late never replaces a newer state. The
+directory is the root of the domain's `bt_state` grant, which the storage domain makes at
+the data volume's `bt/` and grants to the Bluetooth domain alone, and which the domain
+mounts at `/data/bt` (erx_ns:place/1); `backend/1` is the store's seam over it.
 
 **A file per generation.** `put/3` writes `bonds.N.new` for the generation `N` the store
 names, created exclusively, synced, and renamed to `bonds.N`, as the SSH domain keeps its
@@ -21,29 +24,36 @@ The answers are the seam's:
 
 - `get/1`: `{ok, Generation, Blob}`, at most one octet past `bt_state_max` read, so an
   oversized file reaches `erx_bt_state` as a blob it refuses; `{ok, Generation, none}`
-  when no `bonds.N` exists and the directory or the volume it lies in does; `{ok,
-  Generation, <<>>}`, which does not decode, when the newest file cannot be read;
-  `{error, unavailable}` otherwise, so a volume not mounted is never read as a store
-  without bonds;
+  when the directory lists and holds no `bonds.N`; `{ok, Generation, <<>>}`, which does
+  not decode, when the newest file cannot be read; `{error, unavailable}` when the
+  directory cannot be listed, so a grant not mounted is never read as a store without
+  bonds;
 - `put/3`: `ok` once `bonds.N` is in place and the directory synced; `{error,
   unavailable}` when any step fails, any `.new` file of its generation then deleted.
 
 A name that is not `bonds.N` or `bonds.N.new`, with `N` a positive decimal of at most 18
-digits without a leading zero, is not the store's and is left alone (`generation/1`). The directory is
-made 0700 and each file 0600 before any byte is written, where the file system keeps
-modes.
+digits without a leading zero, is not the store's and is left alone (`generation/1`). A put
+narrows the directory to 0700 and each file to 0600 before any byte is written, where the
+file system keeps modes, and never makes the directory: a put into one that is not there
+fails.
 """.
 
 -include("generated/erx_abi.hrl").
 
--export([get/1, put/3, generation/1]).
+-export([backend/1, get/1, put/3, generation/1]).
 -export_type([generation/0]).
 
 -doc "A put's generation; `0` is the store before its first put.".
 -type generation() :: non_neg_integer().
 
+-doc "The store's seam (erx_bt_store:backend/0) over the files in `Dir`.".
+-spec backend(file:name_all()) -> erx_bt_store:backend().
+backend(Dir) ->
+    #{get => fun() -> ?MODULE:get(Dir) end,
+      put => fun(Generation, Blob) -> ?MODULE:put(Dir, Generation, Blob) end}.
+
 -doc "The newest blob kept in `Dir` and the highest generation named there.".
--spec get(file:filename()) -> {ok, generation(), binary() | none} | {error, unavailable}.
+-spec get(file:name_all()) -> {ok, generation(), binary() | none} | {error, unavailable}.
 get(Dir) ->
     case file:list_dir(Dir) of
         {ok, Names} ->
@@ -52,11 +62,6 @@ get(Dir) ->
             case [N || {state, N} <- Named] of
                 [] -> {ok, Highest, none};
                 Kept -> newest(filename:join(Dir, name(state, lists:max(Kept))), Highest)
-            end;
-        {error, enoent} ->
-            case filelib:is_dir(filename:dirname(Dir)) of
-                true -> {ok, 0, none};
-                false -> {error, unavailable}
             end;
         {error, _} ->
             {error, unavailable}
@@ -79,7 +84,7 @@ newest(Path, Highest) ->
     end.
 
 -doc "Keeps `Blob` in `Dir` as generation `Generation`, above every lower one.".
--spec put(file:filename(), pos_integer(), binary()) -> ok | {error, unavailable}.
+-spec put(file:name_all(), pos_integer(), binary()) -> ok | {error, unavailable}.
 put(Dir, Generation, Blob) ->
     New = filename:join(Dir, name(new, Generation)),
     maybe
@@ -142,10 +147,7 @@ name(state, N) -> "bonds." ++ integer_to_list(N);
 name(new, N) -> name(state, N) ++ ".new".
 
 owner_only_dir(Dir) ->
-    case file:make_dir(Dir) of
-        Made when Made =:= ok; Made =:= {error, eexist} -> kept_modes(file:change_mode(Dir, 8#700));
-        {error, _} = Error -> Error
-    end.
+    kept_modes(file:change_mode(Dir, 8#700)).
 
 %% Created exclusively, so no other put's file is written into; closed whatever happens,
 %% and the first error is the answer.

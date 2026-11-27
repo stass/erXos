@@ -176,7 +176,10 @@ mount_own(Name, Grant) ->
 %% "/apps"), the start service's tree, start, at /etc/start, the domain service's
 %% machine at /machine, and the line service's tree, line, at /line
 %% (docs/design-apps.md, "Interfaces"; docs/design-system.md, "A session's request";
-%% docs/design-bluetooth.md, "The controller's line"). /data and /media are also empty
+%% docs/design-bluetooth.md, "The controller's line"); and the storage domain's bt_state
+%% tree, the Bluetooth domain's development store, at /data/bt, the path of the data
+%% volume's bt/ in a namespace that mounts data at /data (docs/design-bluetooth.md,
+%% "Bonds and the store"). /data and /media are also empty
 %% directories of every release, so a domain granted neither lists each as empty
 %% (ReleaseFiles::MOUNT_POINTS, tools/lib/erx/release_files.rb); a domain that holds no
 %% apps, start, machine or line facet has no such path, enoent.
@@ -193,6 +196,7 @@ place(apps) -> {<<"/apps">>, [rw]};
 place(start) -> {<<"/etc/start">>, [rw]};
 place(machine) -> {<<"/machine">>, [rw]};
 place(line) -> {<<"/line">>, [rw]};
+place(bt_state) -> {<<"/data/bt">>, [rw]};
 place(_Name) -> none.
 
 %% Where the storage domain's packages tree lies in the system domain alone, with the

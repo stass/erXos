@@ -26,6 +26,10 @@ class ErxServesTest < Minitest::Test
     Fault.new(name: 'littlefs mints every tree again', source: STORAGE,
               from: 'lists:member({atom_to_binary(Tree), ?ERX_SERVICE_FILES}, Declaration)', to: 'is_list(Declaration)',
               caught_by: 'a_storage_row_lacking_home_keeps_its_other_providers_test'),
+    Fault.new(name: 'littlefs mints a state tree undeclared', source: STORAGE,
+              from: 'lists:member({atom_to_binary(Tree), ?ERX_SERVICE_FILES}, Declaration)',
+              to: 'lists:member({atom_to_binary(Tree), ?ERX_SERVICE_FILES}, Declaration) orelse Tree =:= bt_state',
+              caught_by: 'a_state_tree_is_minted_only_where_declared_test'),
     Fault.new(name: 'the first of several occurrences taken', source: READER,
               from: 'parse({ok, [Words]}) -> pairs(Words);', to: 'parse({ok, [Words | _]}) -> pairs(Words);',
               caught_by: 'anything_but_one_occurrence_fails_the_start_test')

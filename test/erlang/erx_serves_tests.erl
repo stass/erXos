@@ -57,14 +57,32 @@ littlefs_mints_only_the_declared_trees_test() ->
 a_storage_row_lacking_home_keeps_its_other_providers_test() ->
     Declaration = [{<<"data">>, ?ERX_SERVICE_FILES}, {<<"packages">>, ?ERX_SERVICE_FILES}],
     Mints = maps:from_list([{Tree, mint(5)} || Tree <- erx_lfs_sup:minted(Declaration)]),
-    ?assertEqual([], refusals(Mints)),
-    ?assertMatch([{refused, oversized, _}], refusals(Mints#{home => mint(5)})).
+    ?assertEqual([], refusals([data, packages], Mints)),
+    ?assertMatch([{refused, oversized, _}], refusals([data, packages], Mints#{home => mint(5)})).
+
+%% A development state tree is minted only where the storage row declares it: a row
+%% declaring bt_state, or ssh_state, gets that mint and its ready report is accepted
+%% whole; a row declaring neither gets no state mint, so a manifest without Bluetooth or
+%% SSH keeps its other storage grants, where a bt_state mint started anyway is refused
+%% whole as oversized.
+a_state_tree_is_minted_only_where_declared_test() ->
+    Files = ?ERX_SERVICE_FILES,
+    Base = [{<<"data">>, Files}, {<<"packages">>, Files}],
+    ?assertEqual([data, packages, bt_state], erx_lfs_sup:minted(Base ++ [{<<"bt_state">>, Files}])),
+    ?assertEqual([data, packages, ssh_state], erx_lfs_sup:minted([{<<"ssh_state">>, Files} | Base])),
+    ?assertEqual([data, packages], erx_lfs_sup:minted(Base)),
+    ?assertEqual([data], erx_lfs_sup:minted([{<<"data">>, Files}, {<<"bt_state">>, ?ERX_SERVICE_DRIVER_CONTROL}])),
+    Declared = maps:from_list([{Tree, mint(5)} || Tree <- erx_lfs_sup:minted(Base ++ [{<<"bt_state">>, Files}])]),
+    ?assertEqual([], refusals([data, packages, bt_state], Declared)),
+    Undeclared = maps:from_list([{Tree, mint(5)} || Tree <- erx_lfs_sup:minted(Base)]),
+    ?assertEqual([], refusals([data, packages], Undeclared)),
+    ?assertMatch([{refused, oversized, _}], refusals([data, packages], Undeclared#{bt_state => mint(5)})).
 
 %% The refusals of the storage row's ready report providing Mints, under a manifest whose
-%% storage row declares data and packages.
-refusals(Mints) ->
-    Config = #{services => [{?STORAGE, data}, {?STORAGE, packages}], grants => [],
-               interfaces => #{{?STORAGE, data} => ?ERX_SERVICE_FILES, {?STORAGE, packages} => ?ERX_SERVICE_FILES},
+%% storage row declares each of Trees a files service.
+refusals(Trees, Mints) ->
+    Config = #{services => [{?STORAGE, Tree} || Tree <- Trees], grants => [],
+               interfaces => maps:from_list([{{?STORAGE, Tree}, ?ERX_SERVICE_FILES} || Tree <- Trees]),
                owner => fun ?MODULE:owner/1, deadline => 10000},
     {_State, Actions} = erx_domain_mints:step({ready, ?STORAGE, 5, node_of(5), Mints}, erx_domain_mints:new(Config)),
     [Action || {refused, _, _} = Action <- Actions].

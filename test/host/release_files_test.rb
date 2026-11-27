@@ -275,14 +275,15 @@ class ReleaseFilesTest < Minitest::Test
 
   # The mount points a release holds are where erx_ns mounts a tree: every point of
   # erx_ns:place/1 is a release's mount point but those of the system domain's files
-  # services, /apps, /etc/start, /machine and /line, which a domain that holds no such
-  # facet lacks (erx_ns.erl, place/1), and nothing else is. So a new place fails this test
+  # services, /apps, /etc/start, /machine and /line, and the storage domain's bt_state,
+  # /data/bt beneath /data, which a domain that holds no such facet lacks (erx_ns.erl,
+  # place/1), and nothing else is. So a new place fails this test
   # until it is either a release directory or one of those. NsPlaces raises on a place/1 clause
   # it cannot read, so a place written in another shape is never skipped.
   def test_the_mount_points_are_where_erx_ns_mounts_facets
     places = Erx::NsPlaces.points(File.read(File.join(ROOT, Erx::NsPlaces::SOURCE)))
     released = Erx::ReleaseFiles::MOUNT_POINTS.map { |name| "/#{name}" }
-    assert_equal [*released, '/apps', '/etc/start', '/machine', '/line'].sort, places.values.sort
+    assert_equal [*released, '/apps', '/etc/start', '/machine', '/line', '/data/bt'].sort, places.values.sort
   end
 
   # A place/1 clause in a shape NsPlaces does not read, here one split over two lines,

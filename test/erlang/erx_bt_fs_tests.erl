@@ -128,14 +128,15 @@ pair_answers_eio_while_the_store_is_unknown_test() ->
     stop(S).
 
 %% The store and the window under erx_bt_sup's own child specifications and strategy,
-%% the store's development file at Volume/bt: Prepare(Volume) runs before the store's
-%% start reads, then Case(Sup, Volume). The supervisor, the setting and the directory go
+%% the store's development files in Volume, the root its bt_state grant reaches, over the
+%% file backend injected in place of the mounted grant's (erx_bt_state_file:backend/1):
+%% Prepare(Volume) runs before the store's start reads, then Case(Sup, Volume). The
+%% supervisor and the directory go
 %% whatever the case's outcome, so a failure leaves no store or service registered for the
 %% cases after it; a case kills the grants it made.
 under_sup(Prepare, Case) ->
     Volume = filename:absname("bt-volume"),
     _ = file:del_dir_r(Volume),
-    ok = application:set_env(erx_bt, state_dir, filename:join(Volume, "bt")),
     ok = application:set_env(erx_bt, services, []),
     try
         Prepare(Volume),
@@ -144,7 +145,14 @@ under_sup(Prepare, Case) ->
         Window = [Spec || #{id := Id} = Spec <- Children, Id =:= erx_bt_store orelse Id =:= erx_bt_fs],
         ?assertMatch([#{id := erx_bt_store}, #{id := erx_bt_fs}], Window),
         ?assertMatch(#{strategy := rest_for_one}, Flags),
-        {ok, Sup} = supervisor:start_link(?MODULE, {Flags, Window}),
+        Backend = #{backend => erx_bt_state_file:backend(Volume)},
+        Injected = [case Spec of
+                        #{id := erx_bt_store, start := {erx_bt_store, start_link, []}} ->
+                            Spec#{start := {erx_bt_store, start_link, [Backend]}};
+                        #{} ->
+                            Spec
+                    end || Spec <- Window],
+        {ok, Sup} = supervisor:start_link(?MODULE, {Flags, Injected}),
         unlink(Sup),
         try
             Case(Sup, Volume)
@@ -154,7 +162,6 @@ under_sup(Prepare, Case) ->
             receive {'DOWN', Down, _, _, _} -> ok end
         end
     after
-        application:unset_env(erx_bt, state_dir),
         _ = file:del_dir_r(Volume)
     end.
 
@@ -176,7 +183,7 @@ two_bonds(Volume) ->
     Bonds = [Bond(?ID2, {random, <<16#C0, 0, 0, 0, 0, 2>>}, unauthenticated, 16#A5),
              Bond(?ID1, ?IDENTITY, authenticated, 16#3C)],
     {ok, Blob} = erx_bt_state:encode(#{address => <<2#11:2, 7:46>>, bonds => Bonds}),
-    ok = erx_bt_state_file:put(filename:join(Volume, "bt"), 1, Blob).
+    ok = erx_bt_state_file:put(Volume, 1, Blob).
 
 -define(KEYS, [<<16#A5>>, <<16#A6>>, <<16#3C>>, <<16#3D>>]).
 

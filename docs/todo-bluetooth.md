@@ -89,17 +89,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `forget all` after the new instance read `known()`, so `pair` answers `eio` until another `forget` or a store restart
   (safe: a refusal). Closing it by construction: the store sends the window the confirmed `forget`, as it sends
   `{outcome, ...}`, and the window reads `known()` in `init/1` after registering.
-* [Medium] bluetooth, the store's development file has no grant (`erx_bt_store:start_link/0`,
-  `erx_bt_state_file`; docs/design-bluetooth.md "The Bluetooth domain", the store's grant): the design gives the store a
-  files service of its own that the storage domain roots at the data volume's `bt/` and grants to the Bluetooth
-  domain alone, as it serves SSH's `ssh_state`, but neither service is built: `abi/manifest.txt` names no
-  `bt_state_service` (nor `ssh_state_service`, which design-ssh.md cites), no manifest grants either, and the manifest check does not hold the `bt` row to it. So the store reads the
-  application's `state_dir`, by default `/data/bt`, and a domain whose namespace lacks it runs
-  `store_unavailable`, without bonds; `get` answers `none` when `/data` exists, so an unmounted volume presented as
-  an empty `/data` would read as no bonds. Build both services as one package: the files services, their two `abi/manifest.txt` names, the grants, the check, and the store mounting its grant.
+* [Medium] bluetooth, no Bluetooth manifest serves the store's grant (`config/manifest/raspi4b-development.txt`,
+  the bluetooth suite's rows in `tools/lib/erx/bt_domain.rb`; docs/design-bluetooth.md "The Bluetooth domain", the
+  store's grant): the storage domain serves `bt_state` and `ssh_state` (`erx_lfs` trees, roots `bt/` and `ssh/`),
+  the build derives each one's row read-write to the domain named `bt` or `ssh` alone (`bt_state_service`,
+  `ssh_state_service`, `Manifest::WELL_KNOWN`), and the store reads the grant's place, `/data/bt`; but no manifest
+  declares `service bt_state`, so the `bt` row holds no store and runs `store_unavailable`, and the manifest check
+  neither holds the `bt` row to its grants nor refuses a `bluetooth` grant in a manifest whose `bt` row has no
+  store. The storage domain starts either tree's mint only where its row declares the service
+  (`erx_lfs_sup:minted/1`). The build grants `bt_state` to the domain named `bt` (`Manifest::HolderDomain`), not to
+  the server of `ble`, so a manifest whose Bluetooth domain has another name gives the bonds to the wrong domain;
+  derive the holder from that role. Add the service to the Bluetooth images and the suite, and the `bt` row's
+  allow-list check.
 * [Low] bluetooth, a forgotten bond's keys can stay on the development store's medium (`erx_bt_state_file`):
   until the next successful put, a late put that landed below the newest, or a lower file a deletion missed,
-  keeps a forgotten bond's keys on the medium (0600, in a 0700 directory), though never read.
+  keeps a forgotten bond's keys on the medium (the store asks 0600 in a 0700 directory, which littlefs does not keep), though never read.
 * [High] bluetooth, security residual that blocks the release store: the vault's state slot takes no generation
   (docs/design-system.md "State slots"; docs/design-bluetooth.md "Bonds and the store"): the store's seam is
   `put(Generation, Blob)` and `get() -> {ok, Generation, Blob | none}`, so a put cut off by its deadline that

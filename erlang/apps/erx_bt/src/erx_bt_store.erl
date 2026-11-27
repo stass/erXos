@@ -11,11 +11,11 @@ group.
 **One seam, every call under a deadline.** It keeps the whole state, encoded by
 `erx_bt_state`, through a backend of two calls, `get() -> {ok, Generation, Blob | none}
 | {error, unavailable}` and `put(Generation, Blob) -> ok | {error, too_large |
-unavailable}`: in development builds `erx_bt_state_file` over the directory the
-application's `state_dir` names. Each call runs in a short-lived process the store
-monitors and kills at `bt_store_timeout_ms`; a `get` not answered by then is
-`unavailable` and a `put` unconfirmed. The store waits on nothing else, so it answers
-every request it takes within a read and a put.
+unavailable}`: in development builds `erx_bt_state_file` over the root of the domain's
+`bt_state` grant, mounted at its place, `/data/bt` (erx_ns:place/1). Each call runs in a
+short-lived process the store monitors and kills at `bt_store_timeout_ms`; a `get` not
+answered by then is `unavailable` and a `put` unconfirmed. The store waits on nothing
+else, so it answers every request it takes within a read and a put.
 
 **A late put never wins.** A put killed at its deadline may still complete inside the
 storage domain, after a later put. So every put names a generation one above the highest
@@ -90,14 +90,15 @@ all`; or `unknown` since a put it could not confirm, which reads before the next
 }).
 
 -doc """
-Starts the store, registered as `erx_bt_store`, over the development file in the
-application's `state_dir` (default `/data/bt`), and reads it.
+Starts the store, registered as `erx_bt_store`, over the development files at the
+place of the domain's `bt_state` grant, which erx_bt_top mounts with the domain's other
+facets, and reads them. A domain the manifest grants no `bt_state` has nothing there to
+list, so its store reads `unavailable`, never a store without bonds.
 """.
 -spec start_link() -> gen_server:start_ret().
 start_link() ->
-    Dir = application:get_env(erx_bt, state_dir, "/data/bt"),
-    start_link(#{backend => #{get => fun() -> erx_bt_state_file:get(Dir) end,
-                              put => fun(Generation, Blob) -> erx_bt_state_file:put(Dir, Generation, Blob) end}}).
+    {Dir, _Options} = erx_ns:place(bt_state),
+    start_link(#{backend => erx_bt_state_file:backend(Dir)}).
 
 -doc """
 Starts the store over `backend`; `timeout` is `bt_store_timeout_ms` unless given, and

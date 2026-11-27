@@ -119,8 +119,16 @@ state_largest_fits_test() ->
 
 state_file_test() ->
     Root = string:trim(os:cmd("mktemp -d")),
-    Dir = filename:join(Root, "bt"),
+    Dir = Root,
     ?assertEqual({error, unavailable}, erx_bt_state_file:get(filename:join([Root, "absent", "bt"]))),
+    %% The root is the mounted grant's, which the storage domain made: a root that cannot
+    %% be listed is unavailable, though the directory above it exists, and a put neither
+    %% makes it nor writes, so a grant not mounted is never read as a store without bonds.
+    Unmounted = filename:join(Root, "bt"),
+    ?assertEqual({error, unavailable}, erx_bt_state_file:get(Unmounted)),
+    ?assertEqual({error, unavailable}, erx_bt_state_file:put(Unmounted, 1, <<"one">>)),
+    ?assertNot(filelib:is_file(Unmounted)),
+    %% An empty listing is a store without bonds.
     ?assertEqual({ok, 0, none}, erx_bt_state_file:get(Dir)),
     ?assertEqual(ok, erx_bt_state_file:put(Dir, 1, <<"one">>)),
     ?assertEqual({ok, 1, <<"one">>}, erx_bt_state_file:get(Dir)),
@@ -157,7 +165,7 @@ state_file_test() ->
 %% is opened with `directory` and synced, and only then is `bonds.1` deleted.
 state_file_syncs_directory_after_rename_test() ->
     Root = string:trim(os:cmd("mktemp -d")),
-    Dir = filename:join(Root, "bt"),
+    Dir = Root,
     ok = erx_bt_state_file:put(Dir, 1, <<"one">>),
     Tracer = spawn_link(fun() -> traced_calls([]) end),
     erlang:trace_pattern({file, '_', '_'}, true, [local]),
@@ -696,7 +704,7 @@ kept_bonds_resolve_after_an_unconfirmed_put_test() ->
 late_put_never_brings_back_a_forgotten_bond_test_() ->
     {timeout, 30, fun() ->
         Root = string:trim(os:cmd("mktemp -d")),
-        Dir = filename:join(Root, "bt"),
+        Dir = Root,
         ok = erx_bt_state_file:put(Dir, 1, blob([bond(1)])),
         Storage = slow_storage(Dir, [held]),
         Backend = #{get => fun() -> erx_bt_state_file:get(Dir) end,
@@ -725,7 +733,7 @@ late_put_never_brings_back_a_forgotten_bond_test_() ->
 %% which succeeds once the rename can.
 state_file_step_failing_under_the_store_test() ->
     Root = string:trim(os:cmd("mktemp -d")),
-    Dir = filename:join(Root, "bt"),
+    Dir = Root,
     ok = erx_bt_state_file:put(Dir, 1, blob([bond(1)])),
     Backend = #{get => fun() -> erx_bt_state_file:get(Dir) end,
                 put => fun(Generation, Blob) -> erx_bt_state_file:put(Dir, Generation, Blob) end},

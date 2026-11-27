@@ -40,9 +40,14 @@ volume afresh, so no write of the failed volume can race a later one.
 (docs/design-files.md, "A user's home"), and `packages`, the volume's `packages/` directory
 of installed app packages (docs/design-packaging.md, "Where a package
 lies"), which holds `installed/`, the packages whose checks passed, apart
-from any upload in progress. A grant of a tree roots at the tree's root, or,
-when its facet row states the files interface's `tree` (erx_fs_grants,
-subtree/3), at the root that `tree` names within it: `installed`, the
+from any upload in progress; and the development state trees, `bt_state`, the
+volume's `bt/`, the Bluetooth domain's store (docs/design-bluetooth.md, "Bonds and the
+store"), and `ssh_state`, its `ssh/`, the SSH domain's host key (docs/design-ssh.md,
+"Host keys"), each a root of its own that the mount makes, so the one domain the build
+grants it reaches that directory and no principal's files.
+
+A grant of a tree roots at the tree's root, or, when its facet row states the files
+interface's `tree` (erx_fs_grants, subtree/3), at the root that `tree` names within it: `installed`, the
 packages tree's `installed/`, where the app template's grant roots, and `home`,
 the grantee's user's home, made by the grant's start when the volume lacks it;
 the home tree has no root of its own, so a home grant whose row states no tree
@@ -637,7 +642,7 @@ call({Pid, Secret, _Tree}, Request) ->
 
 -doc "The trees of the volume, each served as the files service of its name.".
 -spec trees() -> [atom()].
-trees() -> [data, packages, home].
+trees() -> [data, packages, home, bt_state, ssh_state].
 
 -doc """
 The arguments of a grant of the tree that Args name, rooted at the root that
@@ -660,12 +665,14 @@ subtree({_Name, _Tree}, _Subtree, _Grantee) -> {error, einval}.
 
 %% Every root the mount makes, each after the one it lies within: a home is made by its
 %% grant's start (init/1), and the home tree has no root of its own.
-roots() -> [data, packages, installed].
+roots() -> [data, packages, installed, bt_state, ssh_state].
 
 %% Where each root of roots/0, and a home, lies in the volume.
 root_path(data) -> ?ROOT;
 root_path(packages) -> <<"/packages">>;
 root_path(installed) -> <<"/packages/installed">>;
+root_path(bt_state) -> <<"/bt">>;
+root_path(ssh_state) -> <<"/ssh">>;
 root_path({home, Home}) -> Home.
 
 -doc false.
