@@ -5,15 +5,15 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [High] USB, `erlang/apps/erx_usb/src/erx_usb_bus_core.erl`: the bus side of the ladder's rung 3
-  and reattach (design-usb.md, "Recovery" and "Reattach"): a function end as
-  `{shutdown, {reset_port, Rung, Reason}}` resets the device's port and enumerates it again within
+* [High] USB, `erlang/apps/erx_usb/src/erx_usb_bus_core.erl`: the bus's port reset rung, the top rung of
+  the BOT recovery ladder (design-usb.md, "Recovery", rung 3, and "Reattach"), is not built. A function end
+  as `{shutdown, {reset_port, Rung, Reason}}` must reset the device's port and enumerate it again within
   `usb_port_attempts_max`, keeping the device and its reference when its device and configuration
-  descriptors and serial string come back unchanged, then starts the function again. The bus
-  answers that end as any other (`ended/6` resets the function's pipes and restarts it, 3 ends in
-  60 s), so a stick that only a port reset revives stays wedged until it is replugged. Once it
-  lands, re-run on the Pi 4 the stick that ended mid-write and then timed out in `reset_pipe` 31 s
-  later, with the BOT engine's step trace.
+  descriptors and serial string come back unchanged, then start the function again. The bus answers that
+  end as any other (`ended/6` resets the function's pipes and restarts it, 3 ends in 60 s), so a stick
+  that only a port reset revives stays wedged until it is replugged. Once it lands, re-run on the Pi 4
+  the stick that ended mid-write and then timed out in `reset_pipe` 31 s later, with the BOT engine's
+  step trace.
 * [Low] USB, `erlang/apps/erx_usb/src/erx_usb_bot_core.erl`: a loose end of the recovery ladder,
   bounded and failing safe. A clear (`reset_pipe` after a failed data phase or CSW) that times out leaves its
   reset running in the controller, so reset recovery's own `reset_pipe in` is answered `{error, resetting}`

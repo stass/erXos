@@ -1625,7 +1625,11 @@ pipes at start, so no class has to remember to. What a pipe reset
 cannot restore is a class's own protocol state in the device: a BOT
 device keeps the command its predecessor started, and every BOT
 instance starts with its class's reset recovery for that reason
-([The BOT engine](#the-bot-engine)).
+([The BOT engine](#the-bot-engine)). A BOT function's end as
+`{shutdown, {reset_port, Rung, Reason}}`, the top rung of its
+[Recovery](#recovery), asks for more than its pipes: the bus core resets
+the device's port and starts the function again on a device that comes
+back the same ([Reattach](#reattach)).
 
 Each instance of a function has a run number, which the bus core keeps
 per function: 1 at the device's configuration, one more at each start
@@ -3161,7 +3165,7 @@ rests on another layer's timeout:
 | --- | --- | --- | --- |
 | 1, `cancel` | `reset_pipe` on the pipe whose transfer is still posted; the controller stops the endpoint and answers the posted transfer `stopped` | `usb_bot_recovery_step_ms`, 5 s | rung 3 |
 | 2, reset recovery | the Bulk-Only Mass Storage Reset, then `reset_pipe` on bulk-in, then on bulk-out (BOT 1.0, 5.3.4) | 5 s each step | rung 3 |
-| 3, the port | the function ends as `{shutdown, {reset_port, Rung, Reason}}` and logs the rung that failed; the bus resets the function's pipes and starts it again, as for any end, which ends its media; the reset of the device's port that the end asks for, then [Reattach](#reattach), is the bus's planned rung ([todo-usb.md](todo-usb.md)) | the bus's restart bound: `usb_function_restarts_max` (3) ends in `usb_function_restart_window_ms` (60 s) | the device's port is given up until its connection changes |
+| 3, the port | the function ends as `{shutdown, {reset_port, Rung, Reason}}` and logs the rung that failed, which ends its media; the bus resets the device's port and, when the device comes back the same, starts the function again on it ([Reattach](#reattach)) | the bus's restart bound: `usb_function_restarts_max` (3) ends in `usb_function_restart_window_ms` (60 s) | the device's port is given up until its connection changes |
 
 **Rung 1 comes only while a transfer is posted.** A command that hangs
 leaves its transfer queued on its endpoint, and a class reset sent
@@ -3218,13 +3222,11 @@ ending with `{shutdown, {reset_port, Rung, Reason}}`: reset this
 device's port and enumerate it again, keeping its place when it comes
 back the same. The BOT core owns only the decision to ask, and the
 function logs the rung that failed as it ends. The bus answers such an
-end as it answers any other
-([A function's end](#ports-hubs-and-devices-the-bus-core)): it resets
-the function's pipes and starts the function again, counting the end
-toward `usb_function_restarts_max` (3 ends in 60 s), past which it gives
-the device's port up. Resetting the port for a `reset_port` end, then
-[Reattach](#reattach), is the bus's planned rung
-([todo-usb.md](todo-usb.md)); the port's reset, its attempt bound and
+end by resetting the device's port and, through [Reattach](#reattach),
+starting the function again, counting the end toward
+`usb_function_restarts_max` (3 ends in 60 s), as it counts any other
+([A function's end](#ports-hubs-and-devices-the-bus-core)), past which
+it gives the device's port up. The port's reset, its attempt bound and
 its throttle belong to the bus core
 ([Ports, hubs and devices](#ports-hubs-and-devices-the-bus-core)), and a
 device the port reset does not revive is given up within the same
@@ -3547,7 +3549,7 @@ mounts, the same as if the medium had gone after the request.
 | an invalid CSW, a phase error, a stalled CBW, or a CSW that stays stalled after its clear | `erx_usb_bot_core` | the attempt | reset recovery, then the command sent again under a fresh tag, at most 4 times within the 18 s issue bound; with no retry left, the operation answered `{device, reset}`, the medium kept ([Recovery](#recovery)) |
 | a bulk transfer still posted 8 s after its attempt's CBW: a device that stopped answering | the BOT core, on its tick | the attempt | the transfer cancelled by `reset_pipe` on its pipe, then reset recovery and a retry as the row above |
 | a sense of MEDIUM ERROR, HARDWARE ERROR or ABORTED COMMAND | `erx_usb_bot_core` | the attempt | the command sent again, at most 4 times within the 18 s issue bound; with no retry left, the sense is the answer |
-| a second recovery of one operation, or a rung of the ladder (the cancel, or a step of reset recovery) that fails or is not answered in 5 s | the BOT core | the function, ending `{shutdown, {reset_port, Rung, Reason}}` with the rung in its log line; every operation and medium of the function | the bus resets the function's pipes and starts it again, as for any end, within the function's restart bound as above; the port reset the end asks for, keeping a device that comes back the same, is the bus's planned rung ([Reattach](#reattach), [todo-usb.md](todo-usb.md)) |
+| a second recovery of one operation, or a rung of the ladder (the cancel, or a step of reset recovery) that fails or is not answered in 5 s | the BOT core | the function, ending `{shutdown, {reset_port, Rung, Reason}}` with the rung in its log line; every operation and medium of the function | the bus resets the device's port and starts the function again, keeping a device that comes back the same ([Reattach](#reattach)), within the function's restart bound as above |
 | an issued request past its 18 s bound | the BOT core, at the first event that finds the bound past, a tick or a late answer, before that event does anything else | the request, answered `{device, deadline}`; the medium; its windows end; queued requests of the medium answered `gone` | a transfer still posted is cancelled, then reset recovery readies the device before the next command; a rung already under way runs on; the medium is found again by TEST UNIT READY |
 | a medium's transport ends | the function's monitor of it | the medium; its windows end; queued requests of the medium answered `gone`; an operation already issued runs on as any operation, but its command is never sent again, a retry being answered `gone`, and its answer reaches a caller that is gone, or the unit's course | the unit's readiness sequence finds the medium again under a fresh reference, at most once a poll period however often its transport ends; the function and its other units run on |
 | a medium removed or changed | TEST UNIT READY, UNIT ATTENTION, the detach | the medium; its window ends | the media domain ends the medium's volumes; the next medium mounts at the next walk ([design-drives.md](design-drives.md#failure-handling)) |
