@@ -316,6 +316,13 @@ of each slot's system partition
                                            % name the root of a service's
                                            % tree (design-app-trees.md),
                                            % mounted at /svc
+                  | {own, atom(), interface(), pid(), Tree :: name()}
+                                           % a tree the domain serves
+                                           % itself, by its service's
+                                           % name, the interface its
+                                           % declaration gives it, which
+                                           % marks it, and its grant
+                                           % (design-app-trees.md)
                   | ended.                 % a grant that has ended: every
                                            % request answers eio, unsent
 

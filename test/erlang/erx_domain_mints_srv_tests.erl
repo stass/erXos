@@ -164,6 +164,7 @@ setup(Interface, Opts, Provides) ->
                           grants => [{0, echo, 1, #{max_request => 512}}, {system, echo, 1, #{}},
                                      {{template, 0}, echo, 1, #{max_request => 64}}]}),
     provide_a(Provides),
+    ok = erx_domain_fake_lib:start_ns(),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(Opts#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                       exports => erx_domain_fake_lib, principals => ?PRINCIPALS, introduce_timeout => ?DEADLINE,
@@ -174,6 +175,7 @@ setup(Interface, Opts, Provides) ->
 
 cleanup({Log, Service}) ->
     erx_domain_fake_lib:kill_and_await([Service, Log]),
+    ok = erx_domain_fake_lib:stop_ns(),
     _ = [persistent_term:erase(Key) || Key <- [{erx_domain_fake_lib, boot}, {erx_domain_fake_lib, provides},
                                                {erx, facets}]],
     ok.
@@ -227,7 +229,7 @@ installs() ->
     SystemFacet = pid('a@erxos', 5, 3),
     PidA ! {erx_origin, 5, {erx_facet_minted, SystemTag, {ok, SystemFacet}}},
     wait(fun(#{{system, echo} := {installed, {5, 4}, F}}) -> F =:= SystemFacet end),
-    {_Generation, SystemRegistry} = persistent_term:get({erx, facets}),
+    {_Generation, SystemRegistry, _Svc} = persistent_term:get({erx, facets}),
     ?assertEqual(#{echo => {1, SystemFacet}}, SystemRegistry),
     erlang:trace(PidA, false, ['receive']),
     erlang:trace(PidB, false, ['receive']).
@@ -402,12 +404,14 @@ served_setup() ->
     ok = erx_facet:serve(log, Log),
     Self = self(),
     erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
+    ok = erx_domain_fake_lib:start_ns(),
     Fake = erx_domain_fake_lib:start_log(),
     {Fake, start_service(#{}), Log}.
 
 served_cleanup({Fake, Service, Log}) ->
     erlang:trace(new_processes, false, ['receive']),
     erx_domain_fake_lib:kill_and_await([Service, Fake, Log]),
+    ok = erx_domain_fake_lib:stop_ns(),
     _ = [persistent_term:erase(Key) || Key <- [{erx_domain_fake_lib, boot}, {erx, serves}]],
     ok.
 
@@ -445,6 +449,7 @@ row(Row, Place, Name, Drives) ->
 drive_grants(Domains, Services) ->
     persistent_term:put({erx_domain_fake_lib, boot}, #{domains => Domains, services => Services, grants => []}),
     provide_a(fun(_Id) -> #{} end),
+    ok = erx_domain_fake_lib:start_ns(),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                  exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
@@ -501,24 +506,27 @@ granted_answers(Pids, Answers) ->
             error({no_answer, Pids})
     end.
 
+%% The /svc entry every booted domain's namespace holds (erx_ns:mount_facets/1).
+-define(SVC_ENTRY, #{point => [<<"svc">>], provider => {facets, svc}, root => [], rights => rw}).
+
 %% The system domain mounts /data once the domain service has read the manifest, and
 %% only when the manifest grants it data: then /data is the facet's mount, which answers
 %% eio until the grant is installed; with no grant there is no mount, so /data is the
 %% root's own entry, as FreeBSD shows a mount point with nothing mounted on it.
 system_data_mount_test_() ->
-    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"data">>], provider := {facet, data}, rights := rw}],
+    [{"granted", fun() -> ?assertMatch([_, #{provider := {facets, svc}}, #{point := [<<"data">>], provider := {facet, data}, rights := rw}],
                                        system_mounts([{system, data, 1, #{}}, {0, data, 1, #{}}])) end},
-     {"not granted", fun() -> ?assertEqual([#{point => [], provider => release, root => [], rights => ro}],
+     {"not granted", fun() -> ?assertEqual([#{point => [], provider => release, root => [], rights => ro}, ?SVC_ENTRY],
                                            system_mounts([{0, data, 1, #{}}])) end}].
 
 %% The packages tree, which no session mounts, the system domain mounts at its system
 %% place, /packages (erx_ns:packages_place/0), where erx_pkg_medium reads the installed
 %% packages, and only when the manifest grants it packages.
 system_packages_mount_test_() ->
-    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"packages">>], provider := {facet, packages},
+    [{"granted", fun() -> ?assertMatch([_, #{provider := {facets, svc}}, #{point := [<<"packages">>], provider := {facet, packages},
                                              rights := rw}],
                                        system_mounts([{system, packages, 1, #{}}, {0, packages, 1, #{}}])) end},
-     {"not granted", fun() -> ?assertEqual([#{point => [], provider => release, root => [], rights => ro}],
+     {"not granted", fun() -> ?assertEqual([#{point => [], provider => release, root => [], rights => ro}, ?SVC_ENTRY],
                                            system_mounts([{0, packages, 1, #{}}])) end}].
 
 %% The system domain's mounts once the service has booted from a manifest whose data and
@@ -530,9 +538,7 @@ system_mounts(Grants) ->
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
                           services => [{1, data, 5}, {1, packages, 5}], grants => Grants}),
-    persistent_term:erase(erx_ns),
-    {ok, Ns} = erx_ns:start_link(erx_ns_prim_stub),
-    unlink(Ns),
+    ok = erx_domain_fake_lib:start_ns(),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                  exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
@@ -542,8 +548,9 @@ system_mounts(Grants) ->
     try
         erx_ns_prim_stub:erx_mounts()
     after
-        erx_domain_fake_lib:kill_and_await([Service, Log, Ns]),
-        _ = [persistent_term:erase(Key) || Key <- [{erx_domain_fake_lib, boot}, erx_ns, {erx, facets}]]
+        erx_domain_fake_lib:kill_and_await([Service, Log]),
+        ok = erx_domain_fake_lib:stop_ns(),
+        _ = [persistent_term:erase(Key) || Key <- [{erx_domain_fake_lib, boot}, {erx, facets}]]
     end.
 
 %% The ready answer each of Pids received, from the trace of its receives.
@@ -601,6 +608,7 @@ inspect_setup(Grants) ->
     Inspect = spawn(fun() -> receive stop -> ok end end),
     ok = erx_facet:serve(inspect, Inspect),
     erlang:trace(new_processes, true, ['receive', {tracer, self()}]),
+    ok = erx_domain_fake_lib:start_ns(),
     Fake = erx_domain_fake_lib:start_log(),
     {Fake, start_service(#{inspect_policy => #{roots => [1], development => false}}), Inspect}.
 
@@ -704,6 +712,7 @@ tree_setup(Name, Interface, Grants, Start) ->
     unlink(Tree),
     ok = erx_facet:serve(Name, Tree),
     erlang:trace(new_processes, true, ['receive', {tracer, self()}]),
+    ok = erx_domain_fake_lib:start_ns(),
     Fake = erx_domain_fake_lib:start_log(),
     {Fake, start_service(#{}), Tree}.
 
@@ -910,6 +919,7 @@ display_setup(Services, Grants) ->
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"late">>)],
                           services => Services, grants => Grants}),
+    ok = erx_domain_fake_lib:start_ns(),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                  exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
@@ -1003,6 +1013,7 @@ app_setup() ->
                           grants => [{{template, 2}, screen, 1, #{max_request => 64}},
                                      {{template, 2}, clip, 1, #{max_request => 32}}]}),
     provide_a(fun(Id) -> #{<<"screen">> => pid('a@erxos', Id, 1), <<"clip">> => pid('a@erxos', Id, 4)} end),
+    ok = erx_domain_fake_lib:start_ns(),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,

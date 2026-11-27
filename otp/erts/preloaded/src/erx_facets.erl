@@ -43,14 +43,15 @@ It is preloaded beside prim_file and erx_path, since every resolution of a
 path reads it, the code loader's included.
 """.
 
--export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_name/1, is_interface/1, is_facet/2,
+-export([find/1, pids/0, install/1, value/2, generation/0, await/3, changed/1, is_name/1, is_interface/1, is_facet/2,
          files/3, table/1, program/1, program_table/1, file_grant/2]).
 -export_type([name/0, interface/0, facet/0, program/0]).
 
 -include("generated/erx_abi.hrl").
 
-%% The registry's persistent term, which no other module names: {Generation, Facets},
-%% the count of installations and each facet by name as {Interface, Facet}.
+%% The registry's persistent term, which no other module names: {Generation, Facets, Svc},
+%% the count of installations, each facet by name as {Interface, Facet}, and the name of
+%% each facet of the svc interface as svc/1 lists them.
 -define(REGISTRY, {erx, facets}).
 
 %% A program's table as program/1 wraps it; only program_table/1 takes it apart.
@@ -114,8 +115,30 @@ to another write that read the registry before it.
 """.
 -spec install(#{name() => {interface(), facet()}}) -> ok.
 install(Facets) ->
-    {Generation, Held} = value(),
-    persistent_term:put(?REGISTRY, {Generation + 1, maps:merge(Held, Facets)}).
+    {Generation, Held, _Svc} = current(),
+    persistent_term:put(?REGISTRY, value(Generation + 1, maps:merge(Held, Facets))).
+
+-doc """
+The registry's value for `Facets` at `Generation`, as install/1 writes it: what a test
+that sets the registry whole puts, since the value carries more than the facets. It
+makes the value only; install/1 alone writes it.
+""".
+-spec value(non_neg_integer(), #{name() => {interface(), facet()}}) -> term().
+value(Generation, Facets) ->
+    {Generation, Facets, svc(Facets)}.
+
+%% The name of each facet of the svc interface in Registry, with its text, sorted by the
+%% text: what the /svc entry lists and a place below it is looked up in (svc_entries/4,
+%% svc_entry/3), made once at each installation so no resolution scans or sorts the
+%% registry. By insertion, since lists:sort/1 is no BIF and the registry is small.
+svc(Registry) ->
+    sorted([{atom_to_binary(Name), Name} || Name := {?ERX_SERVICE_SVC, _Facet} <- Registry, is_atom(Name)]).
+
+sorted([]) -> [];
+sorted([Item | Rest]) -> inserted(Item, sorted(Rest)).
+
+inserted(Item, [Least | Rest]) when Least < Item -> [Least | inserted(Item, Rest)];
+inserted(Item, Sorted) -> [Item | Sorted].
 
 -doc """
 The registry's generation: how many installations it has taken, 0 before the
@@ -124,7 +147,7 @@ facets), and names it in changed/1, so no installation after its read is missed.
 """.
 -spec generation() -> non_neg_integer().
 generation() ->
-    element(1, value()).
+    element(1, current()).
 
 -doc """
 The pid of the facet the registry holds under `Name`, once it holds one whose pid
@@ -231,17 +254,32 @@ each entry whose provider is `{facet, Name}`, binds of one included:
 So a facet entry's rights never exceed its grant's, as an EROFS entry's and a
 grant pid's do, and its tree is always its grant's. A facet's mount names the
 facet, never a pid or a tree, so a re-grant serves the next lookup and nothing
-has to follow the registry. Every other
-entry is as `Mounts` holds it, except that
+has to follow the registry. Two more providers are resolved here
+(docs/design-app-trees.md, "The namespace entry"):
+
+* `{facets, svc}`, the `/svc` entry, becomes one entry for each facet of the
+  `svc` interface the registry holds, at the entry's point and the facet's
+  name, each on its facet's grant as above, sorted by name, less a name at
+  whose point `Mounts` holds an entry of its own, which is then the one entry
+  there, as it is for a bind; a bind of a place
+  below it, whose root starts with a name, is on that name's facet, or
+  `ended` when the registry holds none;
+* `{own, Name, Interface, Pid, Tree}`, a tree the domain serves for itself
+  (erx_ns:mount_own/2), is on its grant `{grant, Pid, Tree}`, of the
+  interface the entry keeps, which the mount took from the domain's
+  declaration (erx_serves), so it needs no registry.
+
+Every other entry is as `Mounts` holds it, except that
 
 * every entry on a facet the registry holds as one of an interface whose
   row in abi/services says `links none` (`?ERX_LINKS_NONE_SERVICES`) carries
   the `nofollow` mark, whatever the facet is named and whatever tree the entry asks. So a
   mount of the facet, a bind of one and a program's table taken from one
   alike carry it once the registry holds the facet; before that the entry
-  is `ended`. The mark
+  is `ended`. An own service's entry, and a bind of one, carry it from the
+  interface the entry keeps. The mark
   is derived here at each resolution, from the interface number the system
-  domain set with the facet, and is stored in no table and taken from no
+  domain set with the facet or its declaration gave an own entry, and is stored in no table and taken from no
   name, so no writer of a table has to keep it, and the resolver follows no
   link a stranger's stick or a service's tree holds (erx_path;
   docs/design-drives.md, "Links and rights"; docs/design-app-trees.md,
@@ -250,8 +288,7 @@ entry is as `Mounts` holds it, except that
 """.
 -spec table(erx_path:table()) -> erx_path:table().
 table(Mounts) when is_list(Mounts) ->
-    Registry = registry(),
-    [marked(interface(Provider, Registry), resolved(Entry, Registry)) || #{provider := Provider} = Entry <- Mounts].
+    [marked(Interface, Entry) || {Interface, Entry} <- resolved(Mounts)].
 
 -doc """
 A table a program's path resolves over, `Mounts`, as the one value
@@ -276,30 +313,54 @@ or a tree's name.
 """.
 -spec program_table(program()) -> erx_path:table().
 program_table(#program{mounts = Mounts}) ->
-    Registry = registry(),
-    [marked(Interface, resolved(Entry, Registry))
-     || #{provider := Provider} = Entry <- Mounts, Interface <- [interface(Provider, Registry)],
-        Interface =/= ?ERX_SERVICE_WINDOWS].
+    [marked(Interface, Entry) || {Interface, Entry} <- resolved(Mounts),
+                                 Interface =/= ?ERX_SERVICE_WINDOWS].
 
-%% The interface number of the facet Provider names as the registry holds it, or none
-%% for a provider that names no facet the registry holds.
-interface({facet, Name}, Registry) ->
-    case Registry of
-        #{Name := {Interface, _Facet}} -> Interface;
-        #{} -> none
-    end;
-interface(_Provider, _Registry) ->
-    none.
+%% Each entry of Mounts as a resolution walks it, by the rules table/1's doc states, with
+%% the interface number of what it reaches, none for an entry that reaches no service's
+%% grant, in the table's order. The module is preloaded and resolves the boot's own
+%% reads, before lists and maps are loaded, so it calls only BIFs (the runtime build's
+%% PreloadCalls check).
+resolved(Mounts) ->
+    {_Generation, Registry, Svc} = current(),
+    Taken = [Point || #{point := Point} <- Mounts],
+    [Resolved || Entry <- Mounts, Resolved <- entries(Entry, Registry, Svc, Taken)].
 
-resolved(#{provider := {facet, Name}, rights := Asked} = Entry, Registry) ->
+%% The entries one entry of a table resolves to, each with its interface number.
+entries(#{provider := {facet, Name}} = Entry, Registry, _Svc, _Taken) ->
     case Registry of
-        #{Name := {_Interface, {Pid, Tree, Rights}}} ->
-            on_grant(Entry, Pid, Tree, erx_path:lesser(Asked, Rights));
-        _ ->
-            Entry#{provider := ended}
+        #{Name := {Interface, Facet}} -> [{Interface, on_facet(Entry, Facet)}];
+        #{} -> [{none, Entry#{provider := ended}}]
     end;
-resolved(Entry, _Registry) ->
-    Entry.
+entries(#{provider := {facets, svc}, root := []} = Entry, Registry, Svc, Taken) ->
+    svc_entries(Entry, Registry, Svc, Taken);
+entries(#{provider := {facets, svc}, root := [Text | Root]} = Entry, Registry, Svc, _Taken) ->
+    case lists:keyfind(Text, 1, Svc) of
+        {Text, Name} -> [svc_entry(Entry#{root := Root}, Registry, Name)];
+        false -> [{?ERX_SERVICE_SVC, Entry#{provider := ended}}]
+    end;
+entries(#{provider := {own, _Name, Interface, Pid, Tree}} = Entry, _Registry, _Svc, _Taken) ->
+    [{Interface, Entry#{provider := {grant, Pid, Tree}}}];
+entries(Entry, _Registry, _Svc, _Taken) ->
+    [{none, Entry}].
+
+%% The /svc entry's expansion: one entry for each svc facet, in Svc's order, at the
+%% entry's point and the facet's name, less a point the table holds an entry at.
+svc_entries(#{point := Point} = Entry, Registry, Svc, Taken) ->
+    [svc_entry(Entry#{point := At}, Registry, Name)
+     || {Text, Name} <- Svc, At <- [Point ++ [Text]], not lists:member(At, Taken)].
+
+%% Entry on the grant of the svc facet Name, which Svc lists, so the registry holds it.
+svc_entry(Entry, Registry, Name) ->
+    {?ERX_SERVICE_SVC, Facet} = map_get(Name, Registry),
+    {?ERX_SERVICE_SVC, on_facet(Entry, Facet)}.
+
+%% An entry on Facet as the registry holds it: on its grant for a facet of a tree,
+%% ended for a bare pid, which serves no tree.
+on_facet(#{rights := Asked} = Entry, {Pid, Tree, Rights}) ->
+    on_grant(Entry, Pid, Tree, erx_path:lesser(Asked, Rights));
+on_facet(Entry, _Pid) ->
+    Entry#{provider := ended}.
 
 %% A facet's entry on the grant Pid with Rights, or ended for rights erx_path:lesser/2
 %% does not order.
@@ -337,10 +398,10 @@ file_grant(Name, Rights) ->
 
 %% The facets, by name.
 registry() ->
-    element(2, value()).
+    element(2, current()).
 
-value() ->
-    persistent_term:get(?REGISTRY, {0, #{}}).
+current() ->
+    persistent_term:get(?REGISTRY, value(0, #{})).
 
 -spec pid(facet()) -> pid().
 pid({Pid, _Tree, _Rights}) -> Pid;

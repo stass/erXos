@@ -251,9 +251,9 @@ service_end_shuts_the_supervisor_down_test_() ->
 service_end_shuts_down(End) ->
     load_no_library(),
     %% The namespace the machine tree mounts its own grant in.
-    persistent_term:erase(erx_ns),
-    {ok, Ns} = erx_ns:start_link(erx_ns_prim_stub),
-    unlink(Ns),
+    ok = erx_domain_fake_lib:start_ns(),
+    %% The system domain's declaration, which names the machine tree.
+    persistent_term:put(erx_serves, [{<<"machine">>, ?ERX_SERVICE_SVC}]),
     {ok, Sup} = erx_domain_sup:start_link(),
     unlink(Sup),
     SupDown = monitor(process, Sup),
@@ -263,8 +263,9 @@ service_end_shuts_down(End) ->
     Why = receive {'DOWN', SupDown, process, Sup, Reason} -> Reason after 2000 -> still_up end,
     %% A restarted service is registered again. Clean up before asserting.
     Restarted = whereis(erx_domain_srv),
-    erx_domain_fake_lib:kill_and_await([Pid || Pid <- [Sup, Restarted, Ns], is_pid(Pid)]),
-    persistent_term:erase(erx_ns),
+    erx_domain_fake_lib:kill_and_await([Pid || Pid <- [Sup, Restarted], is_pid(Pid)]),
+    ok = erx_domain_fake_lib:stop_ns(),
+    persistent_term:erase(erx_serves),
     ?assertEqual({shutdown, undefined}, {Why, Restarted}).
 
 load_no_library() ->
@@ -292,6 +293,7 @@ configured_boot_timeout_test_() ->
                                  #{boot_timeout_s => 1,
                                    domains => [#{row => 0, place => 0, name => <<"silent">>, principal => 1,
                                                  kind => service, restarts => 0, restart_period_s => 60, drives => []}]}),
+             ok = erx_domain_fake_lib:start_ns(),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -316,6 +318,7 @@ hung_row_left_down_test_() ->
                                  #{boot_timeout_s => 1,
                                    domains => [#{row => 0, place => 0, name => <<"silent">>, principal => 1,
                                                  kind => service, restarts => 5, restart_period_s => 1, drives => []}]}),
+             ok = erx_domain_fake_lib:start_ns(),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -353,6 +356,7 @@ ready_boot_ends_the_timeouts_test_() ->
                                  #{boot_timeout_s => 1,
                                    domains => [#{row => 0, place => 0, name => <<"slow">>, principal => 1,
                                                  kind => service, restarts => 1, restart_period_s => 600, drives => []}]}),
+             ok = erx_domain_fake_lib:start_ns(),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -491,6 +495,7 @@ hold_fixture(PcieName, Held, Test) ->
                                    domains => [Row(0, PcieName), Row(1, <<"usb">>), Row(2, <<"net">>)],
                                    services => [{1, screen, ?ERX_SERVICE_WINDOWS}, {0, binary_to_atom(PcieName), ?ERX_SERVICE_PCIE}]}),
              persistent_term:put({erx_domain_fake_lib, held}, Held),
+             ok = erx_domain_fake_lib:start_ns(),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                          exports => erx_domain_fake_lib,
@@ -559,6 +564,7 @@ session_names_test_() ->
              persistent_term:put({erx_domain_fake_lib, templates},
                                  [#{template => 0, principal => 1}, #{template => 1, principal => 2},
                                   #{template => 2, principal => 3}]),
+             ok = erx_domain_fake_lib:start_ns(),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -597,6 +603,7 @@ system_principal_test_() ->
     {setup,
      fun() ->
              persistent_term:put({erx_domain_fake_lib, boot}, #{domains => []}),
+             ok = erx_domain_fake_lib:start_ns(),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -641,6 +648,7 @@ session_named(Principal, Template, Name) ->
 service_test_() ->
     {setup,
      fun() ->
+             ok = erx_domain_fake_lib:start_ns(),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -661,7 +669,8 @@ service_test_() ->
 
 %% Ends a fixture's service and its call log, each registered by name.
 stop_service({Log, Service}) ->
-    erx_domain_fake_lib:kill_and_await([Service, Log]).
+    erx_domain_fake_lib:kill_and_await([Service, Log]),
+    erx_domain_fake_lib:stop_ns().
 
 %% A service whose domain library is loaded but which cannot read the system manifest's
 %% principals fails its start, naming the manifest and why, rather than run on with no
@@ -686,6 +695,7 @@ unreadable_manifest_fails_the_start_test() ->
 %% A fixture's cleanup has ended the service and the call log by the time it returns,
 %% so the fixture after it can register erx_domain_srv and erx_domain_fake_log again.
 stop_service_frees_the_names_test() ->
+    ok = erx_domain_fake_lib:start_ns(),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                  exports => erx_domain_fake_lib, principals => ?PRINCIPALS}),

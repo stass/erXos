@@ -50,7 +50,7 @@ sequence(Tally) ->
     try
         {Model, Dropped, Done} = lists:foldl(fun(_, Acc) -> message(Agent, Acc) end, {{0, #{}}, 0, Tally},
                                              lists:seq(1, ?STEPS)),
-        Model =:= persistent_term:get({erx, facets}, {0, #{}}) orelse fail(registry_differs, Model),
+        registered(Model) =:= persistent_term:get({erx, facets}, erx_facets:value(0, #{})) orelse fail(registry_differs, Model),
         Done#{dropped => maps:get(dropped, Done, 0) + Dropped}
     after
         stop(Agent)
@@ -73,12 +73,12 @@ message(Agent, {Model, Dropped, Tally}) ->
             {Generation, Facets} = Model,
             Next = {Generation + 1, Facets#{Name => Entry}},
             Count =:= Dropped orelse fail(counted_an_installation, Message),
-            Next =:= persistent_term:get({erx, facets}, {0, #{}}) orelse fail(registry_differs, Message),
+            registered(Next) =:= persistent_term:get({erx, facets}, erx_facets:value(0, #{})) orelse fail(registry_differs, Message),
             nothing_else(),
             {Next, Dropped, Tally#{installed => maps:get(installed, Tally, 0) + 1}};
         no ->
             Count =:= Dropped + 1 orelse fail(not_counted, Message),
-            Model =:= persistent_term:get({erx, facets}, {0, #{}}) orelse fail(installed_a_dropped_message, Message),
+            registered(Model) =:= persistent_term:get({erx, facets}, erx_facets:value(0, #{})) orelse fail(installed_a_dropped_message, Message),
             nothing_else(),
             {Model, Dropped + 1, Tally}
     end.
@@ -174,3 +174,6 @@ fail(What, Detail) ->
 
 pick(List) ->
     lists:nth(rand:uniform(length(List)), List).
+
+%% The registry's value a model of {Generation, Facets} stands for, as install/1 writes it.
+registered({Generation, Facets}) -> erx_facets:value(Generation, Facets).

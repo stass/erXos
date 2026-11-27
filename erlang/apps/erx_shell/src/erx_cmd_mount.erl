@@ -85,7 +85,7 @@ The name of a file system type: a local provider's own, and for a number a
 server answered, its member's name in the `p9_magic` enum, which the ABI file
 gives as FreeBSD's name where FreeBSD has the file system (`tmpfs`, `procfs`,
 `devfs`), else the name its own project gives it, and `ramfs` for the made
-trees with no type of their own (the start service's tree, `/machine` and a
+trees with no type of their own (the start service's tree, `/svc/machine` and a
 display's window tree).
 """.
 -spec type_name(fs_type()) -> binary().

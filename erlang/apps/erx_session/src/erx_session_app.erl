@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 -module(erx_session_app).
--moduledoc "The session application: the session's /data, /apps, /etc/start and /machine and its supervisor (erx_session_sup).".
+-moduledoc "The session application: the session's /data, /apps and /svc and its supervisor (erx_session_sup).".
 -behaviour(application).
 
 -export([start/2, stop/1]).
@@ -22,11 +22,11 @@
 %% without the grant has no /data mount and finds the root's empty /data directory
 %% (docs/design-files.md, "A facet's mount").
 %%
-%% /etc/start, the start service's tree (docs/design-apps.md, "Interfaces"), and
-%% /machine, the domain service's machine tree (docs/design-system.md, "A session's
-%% request"), only for a session whose template the manifest grants them: their grants
-%% are in the ready answer, before the application starts (erx:caps/0), and a session
-%% without one has no such path at all.
+%% /svc, which shows the start service's tree (docs/design-apps.md, "Interfaces") and
+%% the domain service's machine tree (docs/design-system.md, "A session's request") to
+%% a session whose template the manifest grants them: their grants are in the ready
+%% answer, before the application starts (erx:caps/0), and a session without one finds
+%% no such name under /svc (docs/design-app-trees.md, "The namespace entry").
 start(_Type, _Args) ->
     ok = erx_ns:mount_facets(lists:usort(erx:granted() ++ maps:keys(erx:caps()))),
     ok = mount_home(erx_session_sup:home()),

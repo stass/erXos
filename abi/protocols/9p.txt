@@ -107,7 +107,7 @@ limit p9_dt_lnk u8 10
 # The type each of erXos's file servers answers in statfs, a different one
 # for each kind of tree, which 9P2000.L leaves to the server: Linux's
 # RAMFS_MAGIC (the made trees with no type of their own: the start service's
-# tree, /machine and a display's window tree), TMPFS_MAGIC (/tmp), PROC_SUPER_MAGIC
+# tree, /svc/machine and a display's window tree), TMPFS_MAGIC (/tmp), PROC_SUPER_MAGIC
 # and DEVFS_SUPER_MAGIC, EROFS_SUPER_MAGIC_V1 (the `system` tree), and for
 # littlefs "lefs", the last four bytes of its superblock magic "littlefs",
 # read as a little-endian word, and for the media tree, one tree over every

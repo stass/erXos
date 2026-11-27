@@ -69,7 +69,7 @@ goes to the document of the subsystem its component pointer names.
 ## Bugs by subsystem
 
 * [Runtime](docs/todo-runtime.md#bugs-by-subsystem): ERTS and OTP, musl and the C library seam, the device NIF, time, tracing, crypto and the runtime build.
-  186 items (2 High, 91 Medium, 93 Low).
+  187 items (2 High, 91 Medium, 94 Low).
 * [erXos's kernel](docs/todo-kernel.md#bugs-by-subsystem): erXos's own kernel (Phase 2, Track K): the C17 cores, the chokepoint checks, the scheduler and the kernel ABI generator.
   55 items (1 Critical, 1 High, 42 Medium, 11 Low).
 * [Fiasco](docs/todo-fiasco.md#bugs-by-subsystem): Fiasco, the release kernel, and `liberx`'s Fiasco backend: 0.2's work, the patches, the boot and the build.

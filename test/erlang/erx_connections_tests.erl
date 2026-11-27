@@ -385,12 +385,12 @@ installs(Agent) ->
         record(Agent, {erx_facets_install, 4, data, ?ERX_SERVICE_FILES, {Old, <<"data">>, rw}}),
         ?assertEqual({erx_facets_installed, 4}, answer()),
         ?assertEqual(8, erx_connections:dropped()),
-        ?assertEqual({2, #{echo => {?ERX_SERVICE_CONSOLE, Answer}, data => {?ERX_SERVICE_FILES, {Old, <<"data">>, rw}}}},
+        ?assertEqual(erx_facets:value(2, #{echo => {?ERX_SERVICE_CONSOLE, Answer}, data => {?ERX_SERVICE_FILES, {Old, <<"data">>, rw}}}),
                      persistent_term:get({erx, facets})),
         ?assertEqual(Old, erx:cap(data)),
         record(Agent, {erx_facets_install, 5, data, ?ERX_SERVICE_FILES, {New, <<"data">>, ro}}),
         ?assertEqual({erx_facets_installed, 5}, answer()),
-        ?assertEqual({3, #{echo => {?ERX_SERVICE_CONSOLE, Answer}, data => {?ERX_SERVICE_FILES, {New, <<"data">>, ro}}}},
+        ?assertEqual(erx_facets:value(3, #{echo => {?ERX_SERVICE_CONSOLE, Answer}, data => {?ERX_SERVICE_FILES, {New, <<"data">>, ro}}}),
                      persistent_term:get({erx, facets}))
     after
         persistent_term:erase({erx, facets}),
@@ -415,7 +415,7 @@ untyped_facets_are_dropped(Agent) ->
         record(Agent, {erx_facets_install, 4, echo, ?ERX_SERVICE_FILES, {Facet, <<"echo">>, rw}}),
         ?assertEqual({erx_facets_installed, 4}, answer()),
         ?assertEqual(3, erx_connections:dropped()),
-        ?assertEqual({2, #{echo => {?ERX_SERVICE_FILES, {Facet, <<"echo">>, rw}}}}, persistent_term:get({erx, facets}))
+        ?assertEqual(erx_facets:value(2, #{echo => {?ERX_SERVICE_FILES, {Facet, <<"echo">>, rw}}}), persistent_term:get({erx, facets}))
     after
         persistent_term:erase({erx, facets}),
         Facet ! stop
@@ -434,7 +434,7 @@ drive_installs(Agent) ->
         record(Agent, {erx_facets_install, 2, {drive, 3}, ?ERX_SERVICE_DRIVE, Facet}),
         ?assertEqual({erx_facets_installed, 2}, answer()),
         ?assertEqual(6, erx_connections:dropped()),
-        ?assertEqual({2, #{{drive, 3} => {?ERX_SERVICE_DRIVE, Facet}}}, persistent_term:get({erx, facets})),
+        ?assertEqual(erx_facets:value(2, #{{drive, 3} => {?ERX_SERVICE_DRIVE, Facet}}), persistent_term:get({erx, facets})),
         ?assertEqual(Facet, erx:cap({drive, 3})),
         ?assertEqual(undefined, erx:cap({drive, 4}))
     after

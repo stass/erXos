@@ -5,7 +5,7 @@
 -moduledoc """
 What the made trees share: trees of the erx_fs behaviour whose nodes their
 servers make from state they read rather than keep on a medium, `/proc`,
-`/dev`, `/apps`, `/machine`, a display's window tree and the fixed tree of
+`/dev`, `/apps`, `/svc/machine`, a display's window tree and the fixed tree of
 a session's export
 (docs/design-files.md#serving-the-erx_fs-behaviour).
 

@@ -16,7 +16,7 @@ require_relative '../fixtures/erlang_build'
 # which make check supplies). A stand-in takes init's stop, so no case ends the emulator.
 class ErxMachineTest < Minitest::Test
   APPLICATIONS = %w[erx erx_files erx_domain].freeze
-  # erx_ns_prim_stub stands in for prim_file under the tree's own mount at /machine.
+  # erx_ns_prim_stub stands in for prim_file under the tree's own mount at /svc/machine.
   TESTS = %w[test/erlang/erx_ns_prim_stub.erl
              test/erlang/erx_machine_tests.erl].freeze
 

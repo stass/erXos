@@ -265,9 +265,9 @@ class ReleaseFilesTest < Minitest::Test
                                    codec: Codec.new, oracle: FakeOracle.new, release: Erx::ReleaseFiles.domain([base_boot]))
     system = Erx::ReleaseFiles.new(root: ROOT, otp: @otp, directory: File.join(@scratch, 'release'), runner: BootRunner.new,
                                    codec: Codec.new, oracle: FakeOracle.new)
-    assert_equal(%w[data media].map { |name| { 'path' => "system/#{name}", 'kind' => 'directory', 'flags' => 'system' } },
+    assert_equal(%w[data media svc].map { |name| { 'path' => "system/#{name}", 'kind' => 'directory', 'flags' => 'system' } },
                  system.directories)
-    assert_equal(%w[data media].map { |name| { 'path' => "domains/erxos/#{name}", 'kind' => 'directory', 'flags' => 0 } },
+    assert_equal(%w[data media svc].map { |name| { 'path' => "domains/erxos/#{name}", 'kind' => 'directory', 'flags' => 0 } },
                  domain.directories)
     [system, domain].each do |release|
       points = release.directories.map { |entry| "#{entry.fetch('path')}/" }
@@ -277,15 +277,16 @@ class ReleaseFilesTest < Minitest::Test
 
   # The mount points a release holds are where erx_ns mounts a tree: every point of
   # erx_ns:place/1 is a release's mount point but those of the system domain's files
-  # services, /apps, /etc/start, /machine and /line, and the storage domain's bt_state,
-  # /data/bt beneath /data, which a domain that holds no such facet lacks (erx_ns.erl,
-  # place/1), and nothing else is. So a new place fails this test
+  # services, /apps and /line, and the storage domain's bt_state, /data/bt beneath
+  # /data, which a domain that holds no such facet lacks (erx_ns.erl, place/1), and
+  # nothing else is, but /svc, where every domain's /svc entry lies
+  # (erx_ns:mount_facets/1). So a new place fails this test
   # until it is either a release directory or one of those. NsPlaces raises on a place/1 clause
   # it cannot read, so a place written in another shape is never skipped.
   def test_the_mount_points_are_where_erx_ns_mounts_facets
     places = Erx::NsPlaces.points(File.read(File.join(ROOT, Erx::NsPlaces::SOURCE)))
     released = Erx::ReleaseFiles::MOUNT_POINTS.map { |name| "/#{name}" }
-    assert_equal [*released, '/apps', '/etc/start', '/machine', '/line', '/data/bt'].sort, places.values.sort
+    assert_equal [*released, '/apps', '/line', '/data/bt'].sort, [*places.values, '/svc'].sort
   end
 
   # A place/1 clause in a shape NsPlaces does not read, here one split over two lines,

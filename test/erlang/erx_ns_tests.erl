@@ -12,6 +12,8 @@
 -include("generated/erx_abi.hrl").
 
 -define(RELEASE, #{point => [], provider => release, root => [], rights => ro}).
+%% Every domain's /svc entry as mount_facets/1 mounts it.
+-define(SVC_ENTRY, #{point => [<<"svc">>], provider => {facets, svc}, root => [], rights => rw}).
 
 %% Each case starts from the boot table, with a fresh process.
 ns_test_() ->
@@ -38,7 +40,10 @@ ns_test_() ->
       fun a_facet_grant_that_ends_leaves_the_table_and_survives_a_restart/0,
       fun facets_mount_only_where_granted/0,
       fun the_system_domain_trees_mount_at_their_places/0,
+      fun the_svc_entry_shows_each_svc_facet_by_name/0,
       fun an_own_tree_mounts_its_grant_at_its_place/0,
+      fun an_own_service_tree_is_marked/0,
+      fun a_mount_below_svc_shadows_the_facet_of_its_name/0,
       fun the_packages_place_is_the_system_domains_alone/0,
       fun facet_mount_refusals/0,
       fun a_media_facet_entry_follows_no_link/0,
@@ -56,6 +61,7 @@ stop(_Ns) ->
     wait_down(Ns),
     persistent_term:erase(erx_ns),
     persistent_term:erase({erx, facets}),
+    persistent_term:erase(erx_serves),
     persistent_term:erase(erx_connections_app),
     flush().
 
@@ -218,7 +224,7 @@ app_package(Bytes) ->
     unlink(Grant),
     %% The grant's start asks the tree's root once, before it answers.
     [root] = tree_calls(),
-    persistent_term:put({erx, facets}, {1, #{packages => {?ERX_SERVICE_FILES, {Grant, <<"data">>, rx}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{packages => {?ERX_SERVICE_FILES, {Grant, <<"data">>, rx}}})),
     {_, Layout} = package(),
     persistent_term:put(erx_connections_app, {ok, #{place => {packages, [<<"clock.app">>]}, layout => Layout,
                                                    start => {applications, [<<"clock">>]}}}),
@@ -262,7 +268,7 @@ an_rx_app_mount_needs_an_rx_grant() ->
     {Bytes, _} = package(),
     Grant = app_package(Bytes),
     [begin
-         persistent_term:put({erx, facets}, {1, #{packages => {?ERX_SERVICE_FILES, {Grant, <<"data">>, Rights}}}}),
+         persistent_term:put({erx, facets}, erx_facets:value(1, #{packages => {?ERX_SERVICE_FILES, {Grant, <<"data">>, Rights}}})),
          ?assertEqual({error, eacces}, erx_ns:mount({erofs, app}, <<"/app">>, [rx])),
          ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)),
          ?assertEqual([], tree_calls())
@@ -335,19 +341,19 @@ a_facet_mount_reads_the_registry_at_use() ->
                  table()),
     ?assertMatch([_, #{provider := ended}, #{provider := ended}], at_use()),
     [First, Second] = [grant(), grant()],
-    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {First, <<"data">>, rw}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{data => {?ERX_SERVICE_FILES, {First, <<"data">>, rw}}})),
     ?assertMatch([_, #{provider := {grant, First, <<"data">>}, rights := rw},
                   #{provider := {grant, First, <<"data">>}, root := [<<"sub">>], rights := ro}], at_use()),
-    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {Second, <<"data">>, rw}},
-                                             other => {?ERX_SERVICE_FILES, {First, <<"data">>, rw}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{data => {?ERX_SERVICE_FILES, {Second, <<"data">>, rw}},
+                                             other => {?ERX_SERVICE_FILES, {First, <<"data">>, rw}}})),
     ?assertMatch([_, #{provider := {grant, Second, _}}, #{provider := {grant, Second, _}}], at_use()),
     Remote = remote_pid(),
-    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {Remote, <<"data">>, rw}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{data => {?ERX_SERVICE_FILES, {Remote, <<"data">>, rw}}})),
     ?assertMatch([_, #{provider := {grant, Remote, _}}, #{provider := {grant, Remote, _}}], at_use()),
-    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {First, <<"volume">>, rw}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{data => {?ERX_SERVICE_FILES, {First, <<"volume">>, rw}}})),
     ?assertMatch([_, #{provider := {grant, First, <<"volume">>}}, #{provider := {grant, First, <<"volume">>}}],
                  at_use()),
-    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, First}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{data => {?ERX_SERVICE_FILES, First}})),
     ?assertMatch([_, #{provider := ended}, #{provider := ended}], at_use()),
     ?assertEqual(#{}, maps:get(monitors, sys:get_state(erx_ns))).
 
@@ -362,13 +368,13 @@ a_facet_entry_takes_the_lesser_of_its_rights_and_its_grants() ->
     ok = erx_ns:bind(<<"/x">>, <<"/b">>),
     Grant = grant(),
     Rights = fun(GrantRights) ->
-                     persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {Grant, <<"data">>, GrantRights}}}}),
+                     persistent_term:put({erx, facets}, erx_facets:value(1, #{data => {?ERX_SERVICE_FILES, {Grant, <<"data">>, GrantRights}}})),
                      [Of || #{provider := {grant, Pid, <<"data">>}, rights := Of} <- at_use(), Pid =:= Grant]
              end,
     ?assertEqual([rw, ro, ro, ro], Rights(rw)),
     ?assertEqual([ro, ro, ro, ro], Rights(ro)),
     ?assertEqual([ro, rx, ro, rx], Rights(rx)),
-    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, Grant}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{data => {?ERX_SERVICE_FILES, Grant}})),
     ?assertMatch([_, #{provider := ended}, #{provider := ended}, #{provider := ended}, #{provider := ended}],
                  at_use()).
 
@@ -378,7 +384,7 @@ a_facet_entry_takes_the_lesser_of_its_rights_and_its_grants() ->
 a_facet_grant_that_ends_leaves_the_table_and_survives_a_restart() ->
     ok = erx_ns:mount({facet, data}, <<"/data">>, [rw]),
     Grant = grant(),
-    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {Grant, <<"data">>, rw}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{data => {?ERX_SERVICE_FILES, {Grant, <<"data">>, rw}}})),
     Grant ! stop,
     wait_down(Grant),
     Before = settled(),
@@ -391,51 +397,141 @@ a_facet_grant_that_ends_leaves_the_table_and_survives_a_restart() ->
     unlink(Again),
     ?assertEqual(Before, settled()).
 
-%% A domain mounts a facet only where the manifest grants it (erx:granted/0, as the
-%% system domain's service and a session's application pass it): with no data facet
-%% granted there is no mount, so /data is the root's own entry, which a FreeBSD mount
-%% point with nothing mounted on it also shows; a name with no mount point mounts
-%% nothing: so an app's session, which holds packages and system for its own package,
-%% mounts neither (docs/design-packaging.md, "An app's session"). With data granted
-%% and its grant not yet installed, /data is the facet's mount, which answers eio, and
-%% never falls through to the root beneath it; the media entry carries no nofollow mark
-%% until a facet of the media interface is installed, since the mark comes with it.
+%% Every domain's mount_facets/1 mounts the /svc entry first, whatever it is granted,
+%% and then each granted facet that has a place. Where nothing is granted there is no
+%% mount, so /data is the root's own entry, which a FreeBSD mount point with nothing
+%% mounted on it also shows; a name with no mount point mounts nothing: so an app's
+%% session, which holds packages and system for its own package, mounts neither
+%% (docs/design-packaging.md, "An app's session"). With data granted and its grant not
+%% yet installed, /data is the facet's mount, which answers eio, and never falls
+%% through to the root beneath it; the media entry carries no nofollow mark until a
+%% facet of the media interface is installed, since the mark comes with it. The /svc
+%% entry shows nothing while the registry holds no facet of the svc interface.
 facets_mount_only_where_granted() ->
-    ?assertEqual(ok, erx_ns:mount_facets([])),
     ?assertEqual(ok, erx_ns:mount_facets([echo, packages, system])),
+    ?assertEqual([?RELEASE, ?SVC_ENTRY], settled()),
     ?assertEqual([?RELEASE], at_use()),
+    ?assertEqual({error, eexist}, erx_ns:mount_facets([])),
+    ?assertEqual(ok, erx_ns:unmount(<<"/svc">>)),
     ?assertEqual(ok, erx_ns:mount_facets([echo, data, media])),
     ?assertEqual([?RELEASE, #{point => [<<"data">>], provider => ended, root => [], rights => rw},
                   #{point => [<<"media">>], provider => ended, root => [], rights => rw}],
                  at_use()).
 
-%% The system domain's trees, apps, start and machine, have their places too:
-%% a session that holds their facets mounts each where the system domain mounts its own
-%% grant of it (docs/design-shell.md, "Interfaces"). The apps tree mounts at /apps, read
-%% and written as /data is (docs/design-packaging.md, "/apps"), and the start service's
-%% tree at /etc/start, so that /apps holds apps alone.
+%% The system domain's trees of the files interface, apps and line, have their places
+%% too: a session that holds their facets mounts each where the system domain mounts its
+%% own grant of it (docs/design-shell.md, "Interfaces"). A tree of the svc interface,
+%% start and machine among them, has none: a domain that holds it reaches it through
+%% /svc (docs/design-app-trees.md, "The namespace entry"), and neither /etc/start nor
+%% /machine is mounted.
 the_system_domain_trees_mount_at_their_places() ->
-    ?assertEqual(ok, erx_ns:mount_facets([apps, inspect, machine, start])),
-    ?assertEqual([?RELEASE, #{point => [<<"apps">>], provider => ended, root => [], rights => rw},
-                  #{point => [<<"machine">>], provider => ended, root => [], rights => rw},
-                  #{point => [<<"etc">>, <<"start">>], provider => ended, root => [], rights => rw}],
-                 at_use()).
+    ?assertEqual(ok, erx_ns:mount_facets([apps, inspect, machine, start, line])),
+    ?assertEqual([?RELEASE, ?SVC_ENTRY,
+                  #{point => [<<"apps">>], provider => {facet, apps}, root => [], rights => rw},
+                  #{point => [<<"line">>], provider => {facet, line}, root => [], rights => rw}],
+                 settled()).
 
-%% A tree the domain serves itself mounts its own grant at the place of the facet of its
-%% name, and a second mount, an instance restarted after the first one's grant ended,
-%% replaces the entry the first left there; each entry is on the tree its grant's handle
-%% carries, not on one the place names. A name with no place is refused.
+%% The /svc entry shows, at each resolution, one entry for each facet of the svc
+%% interface the registry holds, at /svc/NAME, sorted by name, on its grant with the
+%% grant's rights, marked nofollow; a facet of another interface is not shown, whatever
+%% its name. A bind of /svc/NAME, and a program's table taken from one, follow the facet
+%% of that name, and one of a name the registry no longer holds answers eio
+%% (docs/design-app-trees.md, "Mounting and resolving /svc").
+the_svc_entry_shows_each_svc_facet_by_name() ->
+    ?assertEqual(ok, erx_ns:mount_facets([])),
+    ok = erx_ns:bind(<<"/svc/start">>, <<"/mnt">>, [ro]),
+    {ok, Program} = erx_ns:change({bind, <<"/svc/start/x">>, <<"/p">>, []}, table()),
+    Bt = grant(),
+    Start = grant(),
+    persistent_term:put({erx, facets},
+                        erx_facets:value(1, #{bluetooth => {?ERX_SERVICE_SVC, {Bt, <<"bt">>, ro}},
+                              data => {?ERX_SERVICE_FILES, {grant(), <<"data">>, rw}},
+                              start => {?ERX_SERVICE_SVC, {Start, <<"start">>, rw}}})),
+    Svc = fun(Name, Grant, Tree, Rights) ->
+                  #{point => [<<"svc">>, Name], provider => {grant, Grant, Tree}, root => [], rights => Rights,
+                    nofollow => true}
+          end,
+    ?assertEqual([?RELEASE, Svc(<<"bluetooth">>, Bt, <<"bt">>, ro), Svc(<<"start">>, Start, <<"start">>, rw),
+                  #{point => [<<"mnt">>], provider => {grant, Start, <<"start">>}, root => [], rights => ro,
+                    nofollow => true}],
+                 at_use()),
+    ?assertEqual([#{point => [<<"p">>], provider => {grant, Start, <<"start">>}, root => [<<"x">>], rights => rw,
+                    nofollow => true}],
+                 [Entry || #{point := [<<"p">>]} = Entry <- erx_facets:program_table(erx_facets:program(Program))]),
+    persistent_term:put({erx, facets}, erx_facets:value(2, #{bluetooth => {?ERX_SERVICE_SVC, {Bt, <<"bt">>, ro}}})),
+    ?assertEqual([#{point => [<<"mnt">>], provider => ended, root => [<<"start">>], rights => ro, nofollow => true}],
+                 [Entry || #{point := [<<"mnt">>]} = Entry <- at_use()]).
+
+%% A tree the domain serves itself mounts its own grant where a domain that holds the
+%% facet of its name reaches it, from the interface the domain's declaration gives the
+%% name (erx_serves:declared/0): one of the svc interface at /svc/NAME, one of another
+%% interface at its place. A second mount, an instance restarted after the first one's
+%% grant ended, replaces the entry the first left there; each entry is on the tree its
+%% grant's handle carries, not on one the place names, and keeps the service's name and
+%% interface as its provider. A name the declaration lacks is refused with enoent and
+%% mounts nothing, by mount_own/2 and by a request that names it directly, and one of
+%% another interface with no place is refused with enoent too.
 an_own_tree_mounts_its_grant_at_its_place() ->
+    declare([{machine, ?ERX_SERVICE_SVC}, {apps, ?ERX_SERVICE_FILES}, {inspect, ?ERX_SERVICE_FILES}]),
     First = grant(),
     ?assertEqual(ok, erx_ns:mount_own(machine, {First, <<"machine">>, rw})),
-    ?assertEqual([?RELEASE, #{point => [<<"machine">>], provider => {grant, First, <<"machine">>}, root => [],
-                              rights => rw}], settled()),
+    ?assertEqual([?RELEASE, #{point => [<<"svc">>, <<"machine">>],
+                              provider => {own, machine, ?ERX_SERVICE_SVC, First, <<"machine">>},
+                              root => [], rights => rw}], settled()),
     First ! stop,
     Second = grant(),
-    ?assertEqual(ok, erx_ns:mount_own(machine, {Second, <<"volume">>, rw})),
-    ?assertEqual([?RELEASE, #{point => [<<"machine">>], provider => {grant, Second, <<"volume">>}, root => [],
-                              rights => rw}], settled()),
-    ?assertError({badmatch, none}, erx_ns:mount_own(echo, {Second, <<"echo">>, rw})).
+    ?assertEqual(ok, erx_ns:mount_own(machine, {Second, <<"volume">>, ro})),
+    ?assertEqual([?RELEASE, #{point => [<<"svc">>, <<"machine">>],
+                              provider => {own, machine, ?ERX_SERVICE_SVC, Second, <<"volume">>},
+                              root => [], rights => ro}], settled()),
+    ?assertEqual(ok, erx_ns:mount_own(apps, {Second, <<"apps">>, rw})),
+    ?assertEqual([[<<"svc">>, <<"machine">>], [<<"apps">>]], [Point || #{point := Point} <- tl(settled())]),
+    ?assertEqual({error, enoent}, erx_ns:mount_own(echo, {Second, <<"echo">>, rw})),
+    ?assertEqual({error, enoent}, erx_ns:mount({own, echo, {Second, <<"echo">>, rw}}, <<"/echo">>, [rw])),
+    ?assertEqual([[<<"svc">>, <<"machine">>], [<<"apps">>]], [Point || #{point := Point} <- tl(settled())]),
+    ?assertEqual({error, enoent}, erx_ns:mount_own(inspect, {Second, <<"inspect">>, rw})),
+    Second ! stop,
+    wait_down(Second),
+    ?assertEqual([ended, ended], [Provider || #{provider := Provider} <- tl(settled())]).
+
+%% An own tree's entry is marked from the interface its provider keeps, as a facet's
+%% entry is from the registry's, with no registry at all: the machine tree's, of the svc
+%% interface, and a bind of it are marked, and the apps tree's, of the files interface,
+%% is not (docs/design-app-trees.md, AT4 and "Links").
+an_own_service_tree_is_marked() ->
+    declare([{machine, ?ERX_SERVICE_SVC}, {apps, ?ERX_SERVICE_FILES}]),
+    Machine = grant(),
+    Apps = grant(),
+    ok = erx_ns:mount_own(machine, {Machine, <<"machine">>, rw}),
+    ok = erx_ns:mount_own(apps, {Apps, <<"apps">>, rw}),
+    ok = erx_ns:bind(<<"/svc/machine">>, <<"/mnt">>, [ro]),
+    ?assertEqual([#{point => [<<"svc">>, <<"machine">>], provider => {grant, Machine, <<"machine">>}, root => [],
+                    rights => rw, nofollow => true},
+                  #{point => [<<"apps">>], provider => {grant, Apps, <<"apps">>}, root => [], rights => rw},
+                  #{point => [<<"mnt">>], provider => {grant, Machine, <<"machine">>}, root => [], rights => ro,
+                    nofollow => true}],
+                 tl(at_use())).
+
+%% A mount below /svc at a facet's name is the one entry there: the /svc entry leaves
+%% that name to it, so a resolution and a bind both reach the mount, and the facet
+%% shows again once the mount goes (docs/design-app-trees.md, "The namespace entry").
+a_mount_below_svc_shadows_the_facet_of_its_name() ->
+    ok = erx_ns:mount_facets([]),
+    Bt = grant(),
+    Own = grant(),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{bluetooth => {?ERX_SERVICE_SVC, {Bt, <<"bt">>, ro}}})),
+    ok = erx_ns:mount({Own, <<"mine">>, rw}, <<"/svc/bluetooth">>, [rw]),
+    ok = erx_ns:bind(<<"/svc/bluetooth">>, <<"/mnt">>, [ro]),
+    ?assertEqual([{[<<"svc">>, <<"bluetooth">>], {grant, Own, <<"mine">>}}, {[<<"mnt">>], {grant, Own, <<"mine">>}}],
+                 [{Point, Provider} || #{point := Point, provider := Provider} <- tl(at_use())]),
+    ok = erx_ns:unmount(<<"/svc/bluetooth">>),
+    ?assertEqual([{[<<"svc">>, <<"bluetooth">>], {grant, Bt, <<"bt">>}}],
+                 [{Point, Provider} || #{point := [<<"svc">> | _] = Point, provider := Provider} <- at_use()]).
+
+%% The domain's declaration as erx_serves:declared/0 keeps it once read, each name a
+%% binary, which stop/1 erases.
+declare(Pairs) ->
+    persistent_term:put(erx_serves, [{atom_to_binary(Name), Interface} || {Name, Interface} <- Pairs]).
 
 %% The packages tree has a place only in the system domain (packages_place/0), at
 %% /packages, where the system domain alone mounts its grant (erx_domain_srv): a session
@@ -499,12 +595,12 @@ a_media_facet_entry_follows_no_link() ->
     {ok, Program} = erx_ns:change({bind, <<"/media/disk0">>, <<"/p">>, [ro]}, table()),
     Marked = fun(Table) -> [Point || #{point := Point, nofollow := true} <- Table] end,
     ?assertEqual({[], [], []}, {Marked(table()), Marked(Program), Marked(at_use())}),
-    persistent_term:put({erx, facets}, {1, #{media => {?ERX_SERVICE_FILES, {Granted, <<"media">>, rw}},
-                                             usb => {?ERX_SERVICE_FILES, {grant(), <<"media">>, rw}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{media => {?ERX_SERVICE_FILES, {Granted, <<"media">>, rw}},
+                                             usb => {?ERX_SERVICE_FILES, {grant(), <<"media">>, rw}}})),
     ?assertEqual([], Marked(at_use())),
-    persistent_term:put({erx, facets}, {2, #{media => {?ERX_SERVICE_MEDIA, {Granted, <<"media">>, rw}},
+    persistent_term:put({erx, facets}, erx_facets:value(2, #{media => {?ERX_SERVICE_MEDIA, {Granted, <<"media">>, rw}},
                                              usb => {?ERX_SERVICE_MEDIA, {grant(), <<"media">>, ro}},
-                                             data => {?ERX_SERVICE_FILES, {grant(), <<"data">>, rw}}}}),
+                                             data => {?ERX_SERVICE_FILES, {grant(), <<"data">>, rw}}})),
     Expected = [[<<"media">>], [<<"elsewhere">>], [<<"stick">>], [<<"m">>], [<<"usb">>]],
     ?assertEqual(Expected, Marked(at_use())),
     ?assertMatch([#{provider := {grant, Granted, <<"media">>}, nofollow := true}],
@@ -523,9 +619,9 @@ a_service_tree_entry_follows_no_link() ->
     ok = erx_ns:bind(<<"/ntp">>, <<"/n">>, [ro]),
     {ok, Program} = erx_ns:change({bind, <<"/ntp">>, <<"/p">>, [ro]}, table()),
     Marked = fun(Table) -> [Point || #{point := Point, nofollow := true} <- Table] end,
-    persistent_term:put({erx, facets}, {1, #{ntp => {?ERX_SERVICE_FILES, {grant(), <<"ntp">>, rw}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{ntp => {?ERX_SERVICE_FILES, {grant(), <<"ntp">>, rw}}})),
     ?assertEqual([], Marked(at_use())),
-    persistent_term:put({erx, facets}, {2, #{ntp => {?ERX_SERVICE_SVC, {grant(), <<"ntp">>, rw}}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(2, #{ntp => {?ERX_SERVICE_SVC, {grant(), <<"ntp">>, rw}}})),
     ?assertEqual([[<<"ntp">>], [<<"n">>]], Marked(at_use())),
     ?assertEqual([[<<"ntp">>], [<<"n">>], [<<"p">>]],
                  Marked(erx_facets:program_table(erx_facets:program(Program)))).
@@ -537,7 +633,7 @@ at_use() ->
 %% The table erx_facets:table/1 makes of Table over the registry Registry, which the
 %% case leaves holding nothing.
 with_registry(Table, Registry) ->
-    persistent_term:put({erx, facets}, {1, Registry}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, Registry)),
     try erx_facets:table(Table) after persistent_term:erase({erx, facets}) end.
 
 %% A pid of another node, which this node is not connected to.

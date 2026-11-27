@@ -378,8 +378,10 @@ module Erx
     # directory of every release, so where nothing is mounted the path is the release's
     # own empty directory, as FreeBSD shows a mount point with nothing mounted on it.
     # Each is the place of its name in erx_ns:place/1 (erlang/apps/erx/src/erx_ns.erl),
-    # and release_files_test compares the two.
-    MOUNT_POINTS = %w[data media].freeze
+    # but svc, where mount_facets/1 mounts every domain's /svc entry, an empty directory
+    # where the domain holds no service tree (docs/design-app-trees.md, "Mounting and
+    # resolving /svc"); release_files_test compares the two.
+    MOUNT_POINTS = %w[data media svc].freeze
 
     # Each mount point as an empty directory entry for Pack#build: no artifact, no receipt.
     def directories

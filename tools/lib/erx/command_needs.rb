@@ -27,8 +27,12 @@ module Erx
   # backend"), and inet's functions that resolve names or read the interfaces. A
   # service whose tree erx_ns mounts (erx_ns:place/1, read through NsPlaces) is reached
   # by path too: a string literal that is the tree's mount point or a path beneath it,
-  # as reboot's "/machine/ctl" is, counts as a name of the service; prose is never
-  # exactly a path. Comments, other strings and quoted atoms are left out, so
+  # as "/data/x" is of data's, counts as a name of the service; prose is never exactly
+  # a path. A service of the svc interface, start and machine, is reached through
+  # erx_svc_client, the one route to /svc (docs/design-app-trees.md, AT6): a call of its
+  # read, command or open whose first argument is a string literal naming the service,
+  # as reboot's erx_svc_client:command(<<"machine">>, ...) is, counts as a name of it.
+  # Comments, other strings and quoted atoms are left out, so
   # 'erx_net':f(), an OTP function named through apply, and a path built from pieces
   # or written as a quoted atom, a triple-quoted string or another sigil form get past
   # it, as
@@ -64,6 +68,10 @@ module Erx
     # A plain string literal, or one of the sigils ~, ~b and ~s with double quotes,
     # that holds an absolute path.
     PATH_LITERAL = %r{\A(?:~[bs]?)?"(?<path>/[^"\\]*)"\z}
+    # A call of erx_svc_client that names a tree, in the skeleton, and the literal of
+    # the tree's name that starts its arguments, in the code at the same offset.
+    SVC_CALL = /(?<![A-Za-z0-9_@?])erx_svc_client\s*:\s*(?:read|command|open)\s*\(/
+    SVC_NAME = /\G\s*(?:<<\s*)?(?:~[bs]?)?"(?<name>[^"\\]*)"/
 
     Violation = Data.define(:path, :line, :detail) do
       def to_s = "chokepoint command-needs: #{path}:#{line}: #{detail}"
@@ -123,8 +131,8 @@ module Erx
       end
     end
 
-    # Every place the code names a service, in line order: by a name in the skeleton, or
-    # by a path in one of the code's string literals.
+    # Every place the code names a service, in line order: by a name in the skeleton, by
+    # a path in one of the code's string literals, or by a tree erx_svc_client reaches.
     def reaches(code, skeleton, names)
       atoms = matches(skeleton, ATOM).filter_map do |found, line|
         facet = names.atoms[found[:atom]]
@@ -145,7 +153,13 @@ module Erx
 
         Reach.new(facet: facet, line: line, name: path)
       end
-      (atoms + calls + paths).sort_by(&:line)
+      trees = matches(skeleton, SVC_CALL).filter_map do |found, line|
+        name = SVC_NAME.match(code, found.end(0))&.[](:name)
+        next unless SERVICES.key?(name)
+
+        Reach.new(facet: name, line: line, name: "/svc/#{name}")
+      end
+      (atoms + calls + paths + trees).sort_by(&:line)
     end
 
     # The facet whose tree's mount point, among points, is path or a directory above it,

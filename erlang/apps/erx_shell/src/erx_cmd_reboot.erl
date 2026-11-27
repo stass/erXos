@@ -29,16 +29,23 @@ buffer cache for the command to sync. Each is a usage error.
 Authority. Both commands need the `machine` facet, so a session whose
 template holds no `machine` grant refuses them with the shell's
 `no_facet` before they start. Every shell writes `reset\n` or `off\n` to
-`/machine/ctl`: in a session the path reaches the session's grant, and
-in the system domain's command shell the system domain's own grant, made
-with the system principal (docs/design-shell.md, "Interfaces"). In a
+the `ctl` of the `machine` tree under `/svc` through erx_svc_client,
+which waits for the answer at most `svc_wait_max` milliseconds
+(docs/design-app-trees.md, AT6): in a session the tree is the session's
+grant, and in the system domain's command shell the system domain's own
+grant, made with the system principal (docs/design-shell.md,
+"Interfaces"). In a
 session the command exits 0 once the end has begun; in the system shell,
 which the end ends too, it waits for the end once the coordinator
 accepted it, as FreeBSD's reboot waits for init, so the shell prints no
 prompt over the end's last line. A refusal prints the errno's text, as
-reboot(8)'s `err(1, NULL)` does, and exits 1.
+reboot(8)'s `err(1, NULL)` does, and exits 1: `enoent` where no `machine`
+tree is at `/svc`, and `etimedout` where the answer is not known, at the
+deadline or because the tree's handler or server ended before answering
+(the transport's `eio`, which erx_svc_client answers as `unknown`), when
+the end may have begun.
 
-The decisions are pure, parse/2, line/1 and accepted/1, and run/2 does
+The decisions are pure, parse/2, line/1, accepted/1 and reason/1, and run/2 does
 the effects.
 """.
 -behaviour(erx_cmd).
@@ -47,20 +54,21 @@ the effects.
 -erx_usage("reboot [-lpq]").
 -erx_needs([machine]).
 
+-include("generated/erx_abi.hrl").
+
 -export([run/2]).
--export([parse/2, line/1, accepted/1]).
+-export([parse/2, line/1, accepted/1, reason/1]).
 -export_type(['end'/0]).
 
 -doc "The machine's end a command asks for: a reset or a power-off.".
 -type 'end'() :: reset | off.
 
--define(CTL, <<"/machine/ctl">>).
 
 -doc false.
 run(Args, #{name := Name} = Ctx) ->
     case parse(Name, Args) of
         {ok, End} ->
-            answer(write_ctl(erx_cmd:path(Ctx, ?CTL), line(End)), Ctx);
+            answer(erx_svc_client:command(<<"machine">>, line(End), ?ERX_SVC_WAIT_MAX), Ctx);
         {error, usage} = Usage ->
             Usage
     end.
@@ -81,7 +89,7 @@ end_of(<<"halt">>, _PowerOff) -> off;
 end_of(_Reboot, true) -> off;
 end_of(_Reboot, false) -> reset.
 
--doc "The line a write to `/machine/ctl` asks for End with.".
+-doc "The line a write to the machine tree's `ctl` asks for End with.".
 -spec line('end'()) -> binary().
 line(End) -> <<(atom_to_binary(End))/binary, $\n>>.
 
@@ -96,20 +104,21 @@ session's command exits 0.
 accepted(true) -> wait;
 accepted(false) -> exit.
 
-%% The effect: one write of Line to the ctl file.
-write_ctl(Path, Line) ->
-    case file:open(Path, [write, raw, binary]) of
-        {ok, Fd} ->
-            try file:write(Fd, Line) after file:close(Fd) end;
-        {error, _} = Error ->
-            Error
-    end.
+-doc """
+The errno a write that did not succeed prints: `enoent` where no `machine`
+tree is at `/svc`, `etimedout` where its answer is not known, and the
+write's own errno otherwise.
+""".
+-spec reason(not_serving | unknown | {error, file:posix()}) -> file:posix().
+reason(not_serving) -> enoent;
+reason(unknown) -> etimedout;
+reason({error, Reason}) -> Reason.
 
 answer(ok, _Ctx) ->
     case accepted(erx_inspector:is_system_runtime()) of
         wait -> receive after infinity -> ok end;
         exit -> ok
     end;
-answer({error, Reason}, #{name := Name} = Ctx) ->
-    erx_cmd:say(Ctx, [Name, <<": ">>, erx_cmd:format_error(Reason), $\n]),
+answer(Failed, #{name := Name} = Ctx) ->
+    erx_cmd:say(Ctx, [Name, <<": ">>, erx_cmd:format_error(reason(Failed)), $\n]),
     {error, {reported, <<"1">>}}.

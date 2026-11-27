@@ -534,7 +534,7 @@ facet inspect
   reductions 100000
   period_ns 1000000000
   max_heap_size 65536
-# start: the start service's tree, /etc/start/ctl alone (docs/design-apps.md,
+# start: the start service's tree, /svc/start/ctl alone (docs/design-apps.md,
 # "Interfaces"), a service tree of the svc interface (docs/design-app-trees.md), for each
 # session made from root's template: one erx_fs grant served by
 # the system domain, bound to the session and ending with it, so it travels on the
@@ -554,7 +554,7 @@ facet start
   reductions 100000
   period_ns 1000000000
   max_heap_size 131072
-# machine: the domain service's tree, /machine/ctl, through which a session asks for the
+# machine: the domain service's tree, /svc/machine/ctl, through which a session asks for the
 # machine's end (docs/design-system.md, "A session's request"), a service tree of the svc
 # interface (docs/design-app-trees.md), for each session made
 # from root's template alone: one erx_fs grant served by the system domain, bound to the

@@ -9,11 +9,13 @@
 
 The command reads the table from the inspector, `[apps]` and `[apps,
 Name]` (`/proc/apps`), and changes it only by writing one line to
-`/etc/start/ctl` for each act, so it holds no authority of its own: the
+the `ctl` of the `start` tree under `/svc` for each act, through
+erx_svc_client, which waits at most `svc_wait_max` milliseconds for each
+(docs/design-app-trees.md, AT6), so it holds no authority of its own: the
 session's `start` grant is what lets it act, and the start service checks
-every line it writes. In the system domain's command shell the path
-reaches the system domain's own grant of the tree, which the start
-service mounts there (docs/design-shell.md, "Interfaces").
+every line it writes. In the system domain's command shell the tree is
+the system domain's own grant, which the start service mounts at the same
+place (docs/design-shell.md, "Interfaces").
 
 * `service -e` writes the configured domains in boot order, then each
   row that is enabled and not refused, one name a line. While rc.conf is
@@ -39,28 +41,31 @@ service mounts there (docs/design-shell.md, "Interfaces").
   since `service` neither changes one nor reads its state.
 
 A refused ctl write answers an errno (design-apps.md, "Interfaces"),
-which the command names in words, with status 1; the row's own reason is
+which the command names in words, with status 1, as it does a missing
+`start` tree and a write whose outcome is not known (erx_svc_client's `unknown`);
+the row's own reason is
 at `/proc/apps`. Every name and value written comes from the inspector or
 the command line and passes through the field escape
 (erx_text:escape_field/1).
 
 The decisions are a pure core, parse/1, listing/2 and plan/3, which the
 tests drive with records made up as data; run/2 reads the inspector,
-writes `/etc/start/ctl` and prints.
+writes the start tree's `ctl` and prints.
 """.
 
 -behaviour(erx_cmd).
 -erx_command(service).
 -erx_usage("service -e | service name command [display=D] [restarts=N] [period=S]").
-%% The start service's tree, `/etc/start`: a session whose template holds no start
+%% The start service's tree, `start` under `/svc`: a session whose template holds no start
 %% grant has none, and every act of the command is a line of its ctl file.
 -erx_needs([start]).
 
 -export([run/2]).
--export([parse/1, listing/2, plan/3]).
+-export([parse/1, listing/2, plan/3, refusal/1]).
 -export_type([request/0, step/0]).
 
--define(CTL, <<"/etc/start/ctl">>).
+-include("generated/erx_abi.hrl").
+
 %% Where the session finds rc.conf: the data partition's `etc` directory, which the
 %% start service reads and writes (erx_starter_rc:directory/0), under the session's
 %% `data` grant until the `etc` tree is mounted at /etc (TODO.md, "/etc/rc.conf").
@@ -75,7 +80,7 @@ command skips the enabled check, with its `key=value` settings.
                     One :: boolean(), Settings :: [binary()]}.
 -doc """
 One step of a plan, carried out in order: text to standard output or
-standard error, a line written to `/etc/start/ctl`, which ends the plan with
+standard error, a line written to the start tree's `ctl`, which ends the plan with
 status 1 when it is refused, or the status the command exits with.
 """.
 -type step() :: {out, iodata()} | {err, iodata()} | {ctl, binary()} | {status, ok | failed}.
@@ -124,11 +129,11 @@ carry_out([{err, Text} | Rest], Ctx) ->
     erx_cmd:say(Ctx, Text),
     carry_out(Rest, Ctx);
 carry_out([{ctl, Line} | Rest], Ctx) ->
-    case write_ctl(Ctx, Line) of
+    case erx_svc_client:command(<<"start">>, Line, ?ERX_SVC_WAIT_MAX) of
         ok ->
             carry_out(Rest, Ctx);
-        {error, Reason} ->
-            erx_cmd:say(Ctx, [<<"service: ">>, refusal(Reason), $\n]),
+        Refused ->
+            erx_cmd:say(Ctx, [<<"service: ">>, refusal(Refused), $\n]),
             {error, {reported, <<"1">>}}
     end;
 carry_out([{status, ok} | _], _Ctx) ->
@@ -136,24 +141,20 @@ carry_out([{status, ok} | _], _Ctx) ->
 carry_out([{status, failed} | _], _Ctx) ->
     {error, {reported, <<"1">>}}.
 
-%% One write of Line to the ctl file: its answer is the command's. The path reaches
-%% the session's grant, or in the system domain's command shell the system domain's
-%% own (docs/design-shell.md, "Interfaces").
-write_ctl(Ctx, Line) ->
-    case file:open(erx_cmd:path(Ctx, ?CTL), [write, raw, binary]) of
-        {ok, Fd} ->
-            try file:write(Fd, Line) after file:close(Fd) end;
-        {error, _} = Error ->
-            Error
-    end.
-
-%% A ctl write's errno in words (docs/design-apps.md, "Interfaces").
-refusal(einval) -> <<"the start service refused the request; the log says why">>;
-refusal(ebusy) -> <<"the display is held by another enabled row">>;
-refusal(eperm) -> <<"the display is not granted to the row's template">>;
-refusal(eagain) -> <<"rc.conf has not been read yet; try again">>;
-refusal(eio) -> <<"rc.conf could not be written or the row could not be started">>;
-refusal(Reason) -> [?CTL, <<": ">>, erx_cmd:format_error(Reason)].
+-doc """
+A ctl write's answer in words (docs/design-apps.md, "Interfaces"): its errno, each
+a refusal, no start tree in the session, or `unknown`, an answer lost at the
+deadline or by a handler that ended (the transport's `eio`, which erx_svc_client
+answers so), when the request may have been carried out.
+""".
+-spec refusal({error, file:posix()} | not_serving | unknown) -> iodata().
+refusal({error, einval}) -> <<"the start service refused the request; the log says why">>;
+refusal({error, ebusy}) -> <<"the display is held by another enabled row">>;
+refusal({error, eperm}) -> <<"the display is not granted to the row's template">>;
+refusal({error, eagain}) -> <<"rc.conf has not been read yet; try again">>;
+refusal({error, Reason}) -> [<<"start: ">>, erx_cmd:format_error(Reason)];
+refusal(not_serving) -> <<"start: no start service in this session">>;
+refusal(unknown) -> <<"the start service did not confirm the request, which may have been carried out; the log may say why">>.
 
 %%% The core
 

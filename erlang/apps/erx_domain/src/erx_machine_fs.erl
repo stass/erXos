@@ -4,9 +4,9 @@
 -module(erx_machine_fs).
 -moduledoc """
 The `machine` tree (docs/design-system.md, "A session's request"): the
-`erx_fs` callback module the domain service serves `/machine/ctl` with,
-which a session whose template holds the `machine` grant mounts at
-`/machine`, and the system domain mounts there its own grant of it.
+`erx_fs` callback module the domain service serves `/svc/machine/ctl` with,
+which a session whose template holds the `machine` grant finds at
+`/svc/machine`, and the system domain mounts there its own grant of it.
 
 * **Serving.** start_link/0 starts the tree's grants (erx_fs_grants) and
   names them the process behind the system domain's `machine` service
@@ -15,7 +15,7 @@ which a session whose template holds the `machine` grant mounts at
   and starts the grant with the grantee's user name as the grant's own
   argument, which it computes at the mint. One more grant, for the system
   domain itself and with the system principal's user name, root, is mounted at
-  `/machine` in the system domain's namespace (erx_ns:mount_own/2), so
+  `/svc/machine` in the system domain's namespace (erx_ns:mount_own/2), so
   the system shell's `reboot` and `halt` write the path a session's do
   (docs/design-shell.md, "Interfaces").
 * **ctl.** Write-only, mode `0200`; an open for reading is refused with
@@ -53,7 +53,7 @@ coordinator, which a test stands in for.
 -doc """
 Starts the tree's grants, linked to the caller, erx_domain_sup, names them
 the process behind the `machine` service, and mounts the system domain's
-own grant at `/machine`.
+own grant at `/svc/machine`.
 """.
 -spec start_link() -> {ok, pid()}.
 start_link() ->

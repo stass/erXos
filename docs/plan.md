@@ -1369,7 +1369,7 @@ intensity the row is `down` at `/proc/apps`;
 reboot, and an edit of the file changes nothing at a command for
 another row, only at the row's own `service` command or the next
 boot; a session whose template holds no `start` grant
-cannot reach `/etc/start`, `/etc/start.conf` or `/apps`;
+cannot reach `/svc/start`, `/etc/start.conf` or `/apps`;
 `start.conf`'s and `ctl`'s fuzz targets run their budgets clean; each seeded violation of property
 17 fails the manifest check; each chokepoint check catches its seeded
 violation. The kiosk tests, the display domain restarted giving the

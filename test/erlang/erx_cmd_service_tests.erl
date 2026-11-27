@@ -7,7 +7,7 @@ EUnit cases of the command shell's `service` (erx_cmd_service,
 docs/design-apps.md, "Interfaces"): its plans from inspector answers made
 up as data, as FreeBSD's service(8) and rc.subr(8) answer. A command on a
 row that is not enabled names its `one` form and acts on nothing;
-`onestart` writes `start` to /etc/start/ctl; `service -e` lists the configured
+`onestart` writes `start` to the start tree's ctl under /svc; `service -e` lists the configured
 domains in boot order and then the enabled rows, and says so when
 rc.conf is unread or a row's state is unknown; each state `status`
 shows comes from the row's record, never made up.
@@ -97,6 +97,15 @@ status_shows_each_state_test_() ->
 onestatus_of_a_disabled_row_does_not_claim_it_is_down_test() ->
     ?assertEqual([{out, <<"kiosk is not enabled; a session started with onestart is not shown.\n">>}, {status, failed}],
                  plan(<<"kiosk onestatus">>, row(false, disabled))).
+
+%% eio never reaches the command as a refusal: erx_svc_client answers it, as the
+%% deadline, unknown, which may have been carried out; a refusal is its errno.
+a_refusal_is_told_apart_from_no_answer_test() ->
+    ?assertEqual(<<"rc.conf has not been read yet; try again">>,
+                 erx_cmd_service:refusal({error, eagain})),
+    ?assertEqual(<<"the start service did not confirm the request, which may have been carried out; "
+                   "the log may say why">>,
+                 erx_cmd_service:refusal(unknown)).
 
 an_unknown_state_is_not_made_up_test() ->
     Unknown = {ok, #{kind => app, attrs => #{enabled => {service, unknown}, state => {service, unknown}}}},

@@ -296,7 +296,7 @@ echo_answers_each_link_alone() ->
 %% followed its read.
 start_waits_for_the_facet() ->
     Facet = erx_facets:find(ble),
-    persistent_term:put({erx, facets}, {erx_facets:generation(), #{}}),
+    persistent_term:put({erx, facets}, erx_facets:value(erx_facets:generation(), #{})),
     Agent = spawn(fun connection_agent/0),
     register(erx_connections, Agent),
     Test = self(),

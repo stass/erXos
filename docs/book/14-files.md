@@ -693,10 +693,16 @@ all its holders
 ([design-app-trees.md, Granting](../design-app-trees.md#granting)).
 So one question finds a `ctl`: a device's is under `/dev`, any other
 service's under `/svc/NAME`. No link in a tree of the `svc` interface is
-followed, so a tree cannot point a reader at another's. When ntpd's
+followed, so a tree cannot point a reader at another's. The system
+domain holds no `svc` facet; it mounts its own `start` and `machine`
+trees at the same paths, each entry keeping the interface the domain's
+declaration of what it serves gives the tree, so the entry is marked
+as a facet's is, and a tree the declaration lacks is never mounted
+([design-app-trees.md, The namespace entry](../design-app-trees.md#the-namespace-entry)).
+When ntpd's
 session ends, its facets end and `/svc/ntpd` disappears. The whole of
-`/svc` is designed and not built; `/etc/start` and `/machine` are where
-the built code mounts the start and machine trees.
+`/svc` is built with the start and machine trees; the trees of apps and
+of Bluetooth are designed and not built.
 
 ## 14.6 Familiar only where true
 

@@ -508,7 +508,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the storage freeze (the durability facet's checkpoint and freeze, which `erx_lfs` does not serve), with
   the end chosen from their outcomes. The coordinator's one entry,
   `erx_machine:request/2`, takes `reboot` and `halt` from the system shell and from a
-  session's `/machine/ctl`, writes the one log line and answers a second request `busy`, but
+  session's `/svc/machine/ctl`, writes the one log line and answers a second request `busy`, but
   it keeps the accepted request in its own state in place of the ending record and then asks
   `init:reboot/0` or `init:stop/0`, which run stock OTP's application stop before
   `erx_dom_lib_end_commit`. `init:stop/0`, `init:reboot/0`, a numeric `erlang:halt/0,1` and

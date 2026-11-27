@@ -28,7 +28,7 @@ tree's grants supervisor ends every grant to the tree, and rest_for_one
 restarts the keepers' branch, the rc.conf process and the table after
 it, so every session the keepers kept ends, and those
 started again receive new grants. A session no keeper kept, root's
-console session among them, keeps running with no `/etc/start` until it
+console session among them, keeps running with no `/svc/start` until it
 restarts (TODO.md). One grant's end ends that grant alone: grants are
 temporary children.
 

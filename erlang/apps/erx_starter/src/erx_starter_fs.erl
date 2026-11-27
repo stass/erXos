@@ -5,7 +5,7 @@
 -moduledoc """
 The start service's tree, `start` (docs/design-apps.md, "Interfaces"): the
 `erx_fs` callback module the start service serves `ctl` with, which a session
-whose template holds the `start` grant mounts at `/etc/start`, and the system
+whose template holds the `start` grant finds at `/svc/start`, and the system
 domain mounts there its own grant of it. It holds `ctl` alone: `rc.conf` is an
 ordinary file of the data partition's `etc` tree, not of this one.
 
@@ -15,7 +15,7 @@ ordinary file of the data partition's `etc` tree, not of this one.
   answer, for one erx_fs grant bound to that domain and ending with it, so a
   session reaches the tree only through a grant the manifest gave its template
   (docs/design-system.md, "Facets of the system domain's services"). One more
-  grant, for the system domain itself, is mounted at `/etc/start` in the
+  grant, for the system domain itself, is mounted at `/svc/start` in the
   system domain's namespace (erx_ns:mount_own/2), so the system shell's
   `service` writes the path a session's does (docs/design-shell.md,
   "Interfaces").
@@ -53,7 +53,7 @@ test stands in for, and the log line of a refused write.
 -doc """
 Starts the tree's grants, linked to the caller, erx_starter_sup, names them the
 process behind the `start` service, and mounts the system domain's own grant at
-`/etc/start`.
+`/svc/start`.
 """.
 -spec start_link() -> {ok, pid()}.
 start_link() ->
@@ -74,10 +74,14 @@ start_link(Args) when is_map(Args) ->
 -doc """
 The errno a ctl write answers for the start service's Answer
 (docs/design-apps.md, "Interfaces"): `einval` for a line that does not
-parse, `eagain` while rc.conf is unread, `eio` for a command the start
-service admitted but could not carry out (rc.conf's write or a start
-failed, or the service exited), and for every refusal of the table the
-errno erx_start_table:ctl_errno/1 gives it.
+parse, `eagain` while rc.conf is unread, for every refusal of the table
+the errno erx_start_table:ctl_errno/1 gives it, and `eio`, as the file
+protocol answers for a handler that ended, for a command whose outcome is
+not known: rc.conf's write failed and may have renamed its text over the
+file, the row's start failed after its stopped mark was cleared, so the
+table starts it when it is next made, or the service exited during the
+call. No refusal is `eio` (docs/design-app-trees.md, "Reading with a
+deadline").
 """.
 -spec errno(erx_starter:answer() | {error, {bad_line, atom()}}) -> ok | {error, errno()}.
 errno(ok) -> ok;

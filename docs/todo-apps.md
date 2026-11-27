@@ -6,13 +6,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 ## Major initiatives
 
 * [Medium] apps, service trees at `/svc` ([design-app-trees.md](design-app-trees.md#order-of-work)): every
-  service's control tree is at `/svc/NAME`, and the code still mounts the start table's at `/etc/start`, the
-  machine's at `/machine` and the controller's line at `/line` (`erx_ns:place/1`), and reports the start table
-  at `/proc/apps`. In the design's order of work, each path moving in the same step as its readers and writers:
-  in one step the `/svc` entry in every domain, `{facets, svc}` selecting by interface, `place/1` without `start` and
-  `machine`, `mount_own/2` placing an `svc` service at `/svc/NAME` with its name kept as the entry's provider,
-  and `reboot`, `halt` and `service` writing through the client, with the guide and README; then in one step
-  the inspection path `[apps]` renamed `[svc]` in `abi/inspection.txt` with every reader (`service`, the
+  service's control tree is at `/svc/NAME`, as the start table's and the machine's are, and the code still mounts
+  the controller's line at `/line` (`erx_ns:place/1`), and reports the start table at `/proc/apps`. In the
+  design's order of work, each path moving in the same step as its readers and writers: in one step the
+  inspection path `[apps]` renamed `[svc]` in `abi/inspection.txt` with every reader (`service`, the
   find-and-act palette, the tests); `service` without its blanket `-erx_needs([start])`, resolving system
   names first, its own mounts included, refusing run verbs for system and domain names, taking `purge` as its
   own verb, and offering `-l` with each name's kind; `erx_domain:grant/4` and a create spec refusing an `svc`
@@ -111,7 +108,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `{packages,4,#{packages => #{},scan => {ok,0}}}`. What remains: a listing that still fails after the wait
   leaves the scan `unknown`, and nothing lists the installed packages again before the next lifetime (the later
   set design-packaging.md names, with no record, which `rc.conf` does not enable until the next boot); the
-  `installed` state and the boot mark of a later set, which wait for the table's records (the `/etc/start/ctl`
+  `installed` state and the boot mark of a later set, which wait for the table's records (the `/svc/start/ctl`
   item below), so until then every make of the table applies `rc.conf` to the set's rows too; the
   `apps` tree serving `system/NAME.app` and `NAME.app` through erx_pkg_io; `/proc/packages` (`[packages]`
   and `[packages, Name]` in `abi/inspection.txt`) from `erx_pkg:packages/0`, the `room` attribute
@@ -188,7 +185,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `erx_start_table` (`merge/3`, `rc.conf`'s and `ctl`'s parsers with their fuzz targets, `set/3`, the command check
   `apply_ctl/4`); `erx_starter` with its table, a supervisor and keeper per enabled row, and `rc.conf` read and
   written at `/data/etc/rc.conf`; the start service's tree, `start` (`erx_starter_fs`), holding `ctl` alone,
-  which a session mounts at `/etc/start`;
+  which a session reaches at `/svc/start`;
   `erx_domain:start_session/2` with `display` and `default_display`, and the session mark; a row that names a
   written under `/data`; the `apps` tree (`erx_starter_fs`), which a session mounts at `/apps`;
   `erx_domain:start_session/2` with `display` and `default_display`, and the session mark; the session's default
@@ -202,7 +199,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `erx_domain:start_session/2`'s `Start` and `ERX_START_FLAGS` in the session's environment; and the boot view's
   refusal of a session template whose environment sets the key, with the variable at its longest in its strings
   reserve (`boot_strings_fit` in `liberx/system/dom_boot_view.c`).
-* [Medium] apps, `/etc/start.conf` and the commands of `/etc/start/ctl`
+* [Medium] apps, `/etc/start.conf` and the commands of `/svc/start/ctl`
   ([design-apps.md](design-apps.md#the-start-table)). The built settings file is `/data/etc/rc.conf`
   (`erlang/apps/erx_shell/src/erx_cmd_service.erl`, `erlang/apps/erx_starter/src/erx_starter_rc.erl`), and the
   built `service NAME enable` also starts the row, which the design and FreeBSD do not. The settings move to
@@ -229,9 +226,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     [display=D] [restarts=N] [restart_period_s=S]` and `disable NAME` edit the file and start nothing; `erx_starter` reads the file before every
     command, and `erx_start_table:command/3` judges every command after the read (design-apps.md, "How a command
     is judged"), returning the answer, the action and the row's new record, replacing `apply_ctl/4`, with the
-    errnos `enoent`, `enotsup`, `ealready` and `esrch`; `enable` and `disable` are carried out by the start
+    errnos `enoent`, `enotsup`, `ealready` and `esrch`, the last two added to the 9P errors table (`abi/protocols/9p.txt`) first, since an errno outside it reaches the client as `eio`, which `erx_svc_client` reports as unknown; `enable` and `disable` are carried out by the start
     service one at a time from a fresh read, with `erx_start_settings:set/3` and `erx_starter_rc`'s write
-    (temporary file, sync, rename, sync again), without the `superseded` rule, and answer `eio` when the read
+    (temporary file, sync, rename, sync again), without the `superseded` rule, and answer `eagain` when the read
     fails; `erx_cmd_service` writes them to `ctl`, drops its decisions from `/proc/apps` (`plan/3` and `act/4`,
     `erlang/apps/erx_shell/src/erx_cmd_service.erl:236-290`) and answers from the write's errno, and its
     `service -e` judges `/etc/start.conf` itself with the rows' `declared_enable`;
@@ -240,7 +237,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     settings changed, the comparison `erx_starter:kept/1` serves go;
     the records process holds each row's applied record and the boot mark; the display rule judges a row
     against the rows kept, so `merge/3` becomes `merge/4`; a failed read at boot starts the rows at their published
-    defaults and leaves the boot mark unset until a later read applies the file, while at a command `start`, `restart`, `onestart` and `onerestart` answer `eio` and `stop` and
+    defaults and leaves the boot mark unset until a later read applies the file, while at a command `start`, `restart`, `onestart` and `onerestart` answer `eagain` and `stop` and
     `onestop` are judged on the row as last applied; the boot applies the file to the rows of the boot's
     package set when it arrives, and a later publication records the rows it adds `installed` and starts
     nothing; a restarted table reads the file only to finish a boot the mark says is not done; the keeper waits
@@ -448,6 +445,17 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 
 ## Security residuals
+
+* [Medium] files, the `links none` mark on a tree a domain serves for itself (`erlang/apps/erx/src/erx_ns.erl`,
+  `mount_own/2`; `otp/erts/preloaded/src/erx_facets.erl`, `table/1`;
+  [design-app-trees.md](design-app-trees.md#links)): an own entry carries the interface its declaration gives
+  the service only because `mount_own/2` mounts it as `{own, Name, Grant}` and looks the name up; the same grant
+  handle mounted through `erx_ns:mount/3` is a plain `{grant, Pid, Tree}` entry with no interface, so its
+  resolution follows links. No caller mounts an own handle that way, so the mark holds by enumeration of
+  callers. The fix makes it hold by construction: the handle `erx_fs_grants:own/1,2` returns (or its grant's
+  server) carries the interface the declaration gives its service, every entry on that grant is marked from
+  it, and the `{own, Name, Grant}` request form and the name it keeps go. It changes the opaque
+  `erx_fs:grant_handle()` and the `{grant, Pid, Tree}` provider every reader of a table matches.
 
 * [Medium] apps, an app's directory ([design-packaging.md](design-packaging.md#invariants), PK4): until
   the storage service roots an app's `data` grant at `apps/NAME/SIGNER/` (`tree apps`), apps hold no `data`

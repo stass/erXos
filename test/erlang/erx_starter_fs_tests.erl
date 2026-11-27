@@ -138,22 +138,26 @@ errno_test() ->
                             {{error, {failed, enospc}}, {error, eio}},
                             {{error, {failed, {exit, noproc}}}, {error, eio}}]].
 
-%% The system shell's `service` writes /etc/start/ctl as a session's does: serving the
+%% The system shell's `service` writes /svc/start/ctl as a session's does: serving the
 %% tree names its grants the start service and mounts one grant of them, bound to the
-%% system domain, at /etc/start in the domain's own namespace (docs/design-shell.md,
+%% system domain, at /svc/start in the domain's own namespace, from the interface the
+%% domain's declaration gives its name (docs/design-shell.md,
 %% "Interfaces"), and nothing at /apps, which holds apps alone. The grant is a child of
 %% the grants, so it ends with them.
 serving_mounts_the_own_grant_test() ->
     persistent_term:erase(erx_ns),
     {ok, Ns} = erx_ns:start_link(erx_ns_prim_stub),
+    persistent_term:put(erx_serves, [{<<"start">>, ?ERX_SERVICE_SVC}]),
     {ok, Grants} = erx_starter_fs:start_link(#{command => fun(_) -> ok end}),
     try
         ?assert(lists:member(start, erx_facet:served())),
-        [#{point := [<<"etc">>, <<"start">>], provider := {grant, Own, <<"start">>}, rights := rw}] =
+        [#{point := [<<"svc">>, <<"start">>], provider := {own, start, ?ERX_SERVICE_SVC, Own, <<"start">>},
+           rights := rw}] =
             [Entry || #{point := [_ | _]} = Entry <- erx_ns_prim_stub:erx_mounts()],
         ?assertEqual([Own], [Pid || {_, Pid, _, _} <- supervisor:which_children(Grants)])
     after
         [begin unlink(Pid), exit(Pid, kill) end || Pid <- [Grants, Ns]],
         persistent_term:erase(erx_ns),
-        persistent_term:erase({erx, serves})
+        persistent_term:erase({erx, serves}),
+        persistent_term:erase(erx_serves)
     end.

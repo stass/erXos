@@ -52,7 +52,7 @@ module Erx
   # way, and root, logged in over ssh, pings slirp's gateway past the daemon's first
   # rekeying check (REKEY_CHECK_PINGS) and then ends the machine (check_ssh_reboot): the
   # login's rc runs on a tty of root_1's session, which holds the machine grant, and its reboot
-  # writes the reset line to the /machine/ctl the session mounts (docs/design-system.md,
+  # writes the reset line to the /svc/machine/ctl the session's /svc shows (docs/design-system.md,
   # "A session's request"). QEMU's exit under -no-reboot shows the reset, after
   # `rebooted by root` on the console and with no crash frame.
   module NetworkDomain

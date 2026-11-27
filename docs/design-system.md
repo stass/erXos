@@ -2567,6 +2567,10 @@ the storage domain's littlefs starts the mint of each of its trees,
 and `ssh_state`, only where its row declares that tree as
 a `files` service and the volume it lies on is present, while
 `storage_ctl`, `system` and `login_keys` keep their own starts. The
+system domain's namespace reads it too: `erx_ns:mount_own/2` takes the
+interface of each tree the domain serves itself from it, and refuses a
+tree it does not declare
+([design-app-trees.md](design-app-trees.md#the-namespace-entry)). The
 declaration grants nothing and is no evidence to the domain service,
 which checks each `provides` map against the manifest itself, as above;
 a domain that ignores its declaration only gets its report refused.

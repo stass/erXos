@@ -14,7 +14,7 @@ the domain service mounts at /data where the manifest grants it (with no
 grant the path is the root's and the file absent). The grant reaches it
 because every `data` grant covers the whole volume (docs/design-apps.md,
 "An app"); the design replaces it with `/etc/start.conf` on the `etc`
-grant (docs/todo-apps.md, "/etc/start.conf and the commands of /etc/start/ctl").
+grant (docs/todo-apps.md, "/etc/start.conf and the commands of /svc/start/ctl").
 
 The table asks with read/1 and write/2, which return at once, and takes
 each answer as the reply to its request (gen_server:check_response/2),

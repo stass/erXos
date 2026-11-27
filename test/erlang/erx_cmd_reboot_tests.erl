@@ -8,8 +8,8 @@ the request each name and flag set parses to, the line each end writes,
 what an accepted end does in each runtime, the usage errors FreeBSD's
 command gives, each under its own name's usage line, the shell's
 no_facet for a session without the machine grant, and a refused write's
-diagnostic. No case ends anything: the host has no /machine, so every
-write is refused.
+diagnostic. No case ends anything: the host's /svc holds no machine tree,
+so every write finds none (erx_svc_client's not_serving).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -55,7 +55,7 @@ parse_test_() ->
      ?_assertEqual({error, usage}, erx_cmd_reboot:parse(<<"halt">>, [<<"now">>])),
      ?_assertEqual({error, usage}, erx_cmd_reboot:parse(<<"reboot">>, [<<"-q">>, <<"now">>]))].
 
-%% Every shell writes the end's line to /machine/ctl; once the end is accepted only the
+%% Every shell writes the end's line to the machine tree's ctl under /svc; once the end is accepted only the
 %% system domain's shell, which the end ends too, waits for it.
 line_test_() ->
     [?_assertEqual(<<"reset\n">>, erx_cmd_reboot:line(reset)),
@@ -70,9 +70,19 @@ no_facet_test_() ->
     [?_assertEqual({<<"no_facet">>, <<>>, <<"reboot: no_facet\n">>}, run_line(<<"reboot">>, #{})),
      ?_assertEqual({<<"no_facet">>, <<>>, <<"halt: no_facet\n">>}, run_line(<<"halt -p">>, #{}))].
 
-%% A refused write prints the errno's text under the command's name and exits 1.
-refused_test() ->
-    ?assertMatch({<<"1">>, <<>>, <<"halt: ", _/binary>>}, run_line(<<"halt">>)).
+%% A write that finds no machine tree under /svc prints enoent's text under the
+%% command's name and exits 1, as a refused write prints its errno's.
+refused_test_() ->
+    [?_assertEqual({<<"1">>, <<>>, <<"halt: no such file or directory\n">>}, run_line(<<"halt">>)),
+     ?_assertEqual({<<"1">>, <<>>, <<"reboot: no such file or directory\n">>}, run_line(<<"reboot -q">>))].
+
+%% A write whose answer is not known, at the deadline or because the machine
+%% tree's handler ended (eio, which erx_svc_client answers as unknown), prints
+%% etimedout's text: the end may have begun.
+reason_test_() ->
+    [?_assertEqual(etimedout, erx_cmd_reboot:reason(unknown)),
+     ?_assertEqual(enoent, erx_cmd_reboot:reason(not_serving)),
+     ?_assertEqual(ebusy, erx_cmd_reboot:reason({error, ebusy}))].
 
 usage_test_() ->
     [?_assertEqual({<<"usage">>, <<>>, <<"usage: reboot [-lpq]\n">>}, run_line(<<"reboot -c">>)),

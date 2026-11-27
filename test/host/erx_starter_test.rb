@@ -21,7 +21,7 @@ class ErxStarterTest < Minitest::Test
   # erx_domain holds erx_ident (the core reads names with it) and the keeper's client of
   # the domain service; erx_files holds erx_fs, the behaviour of erx_starter_fs.
   APPLICATIONS = %w[erx erx_files erx_domain erx_starter].freeze
-  # erx_ns_prim_stub stands in for prim_file under the start tree's own mount at /etc/start,
+  # erx_ns_prim_stub stands in for prim_file under the start tree's own mount at /svc/start,
   # and erx_path, preloaded and so outside the applications, orders the mount's rights.
   TESTS = %w[test/erlang/erx_ns_prim_stub.erl otp/erts/preloaded/src/erx_path.erl test/erlang/erx_starter_tests.erl
              test/erlang/erx_starter_fs_tests.erl].freeze

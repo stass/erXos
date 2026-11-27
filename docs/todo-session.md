@@ -263,7 +263,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   without its clause crashes the handler on the first such frame. Have the grammar generator export
   the cases from the program, and an EUnit case feed the core one accepted frame of each.
 * [Low] session start, `erlang/apps/erx_session/src/erx_session_app.erl` (`start/2`): a
-  facet mount that fails, of `/data`, `/apps` or `/machine`, fails the `ok =` match and ends
+  facet mount that fails, of `/data`, `/apps` or `/svc`, fails the `ok =` match and ends
   the session's start, where the session could start without that path and refuse the
   commands that need it with `enoent`.
 * [Medium] session start, the session templates' `-eval` (`config/manifest/development.txt`,

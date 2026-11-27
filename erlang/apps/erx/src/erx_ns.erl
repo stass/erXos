@@ -57,7 +57,8 @@
 %% Each call answers ok or {error, Reason}: einval for a malformed path, place,
 %% source or option, a mount point holding . or .., or an unmount where no entry is; enametoolong
 %% beyond the bounds of a place; enoent for a source no entry holds, and for an app mount
-%% in a domain with no app's record, no grant of its facet or no file at its names; eacces
+%% in a domain with no app's record, no grant of its facet or no file at its names, and for an
+%% own mount of a name the domain's declaration lacks; eacces
 %% for an rx app mount through a grant that is not rx; eexist for a point
 %% that already has an entry; ebusy for unmounting /; system_limit beyond the table's
 %% 64 entries; and for an image whose mount fails, the reader's error: eio for a
@@ -76,10 +77,15 @@
 
 -include("generated/erx_abi.hrl").
 
+%% Where every domain's /svc entry lies (mount_facets/1).
+-define(SVC, <<"/svc">>).
+
 -type name() :: binary().
 -type rights() :: erx_abi_enums:files_rights().
 -type provider() :: release | {erofs, erx_erofs:fs()} | {grant, pid(), Tree :: name()}
-                  | {facet, Name :: atom()} | ended.
+                  | {facet, Name :: atom()} | {facets, svc}
+                  | {own, Name :: atom(), erx_facets:interface(), pid(), Tree :: name()}
+                  | ended.
 %% An image's entry also holds the grant and fid the image is read through.
 -type entry() :: #{point := [name()], provider := provider(), root := [name()], rights := rights(),
                    fid => file()}.
@@ -90,7 +96,8 @@
 %% A change as the process receives it, from this module's functions or from any other
 %% process, so every field is checked before it changes anything. A bind's source is
 %% the place it reached, an absolute path of plain names.
--type request() :: {mount, To :: binary(), erx_fs:grant_handle() | {erofs, app} | {facet, atom()}, [option()]}
+-type request() :: {mount, To :: binary(), erx_fs:grant_handle() | {erofs, app} | {facet, atom()} | {facets, svc}
+                                             | {own, atom(), erx_fs:grant_handle()}, [option()]}
                  | {bind, From :: binary(), To :: binary(), [] | [ro]}
                  | {unmount, To :: binary()}.
 %% A change once checked against the table, with its paths as plain names.
@@ -130,23 +137,32 @@ start_link(Prim) ->
 %%
 %% Or mounts at To the session's own package, {erofs, app}, the image of the file the
 %% app's record names, read-only with no option or ro, or read and execute with rx.
--spec mount(erx_fs:grant_handle() | {facet, atom()} | {erofs, app}, file:name_all(), [option()]) ->
+-spec mount(erx_fs:grant_handle() | {facet, atom()} | {facets, svc} | {own, atom(), erx_fs:grant_handle()} | {erofs, app},
+            file:name_all(), [option()]) ->
           ok | {error, reason()}.
 mount(Source, To, Options) ->
     request(fun() -> {mount, text(To), Source, Options} end).
 
-%% Mounts each facet of Names, the facets the domain holds or the manifest grants it
-%% (erx:caps/0 and erx:granted/0, or the manifest itself in the system domain), at its
-%% place (place/1). A name with no place mounts nothing, and a facet the domain neither
-%% holds nor is granted is never mounted, so its path falls through to the root's own
-%% entry (docs/design-files.md, "A facet's mount"). Stops at the first refusal and
-%% returns it.
+%% Mounts the /svc entry, {facets, svc}, which shows at each resolution every facet of
+%% the svc interface the domain's registry holds by its name, whatever the domain holds
+%% now (docs/design-app-trees.md, "Mounting and resolving /svc"), and then each facet of
+%% Names, the facets the domain holds or the manifest grants it (erx:caps/0 and
+%% erx:granted/0, or the manifest itself in the system domain), at its place
+%% (place/1). A name with no place mounts nothing, and a facet the domain neither holds
+%% nor is granted is never mounted, so its path falls through to the root's own entry
+%% (docs/design-files.md, "A facet's mount"). Stops at the first refusal and returns it.
 -spec mount_facets([atom()]) -> ok | {error, reason()}.
-mount_facets([]) ->
+mount_facets(Names) ->
+    maybe
+        ok ?= mount({facets, svc}, ?SVC, [rw]),
+        mount_places(Names)
+    end.
+
+mount_places([]) ->
     ok;
-mount_facets([Name | Rest]) ->
+mount_places([Name | Rest]) ->
     case mount_facet(place(Name), Name) of
-        ok -> mount_facets(Rest);
+        ok -> mount_places(Rest);
         Refused -> Refused
     end.
 
@@ -154,35 +170,60 @@ mount_facet(none, _Name) -> ok;
 mount_facet({Point, Options}, Name) -> mount({facet, Name}, Point, Options).
 
 %% Mounts Grant, {Pid, Tree, Rights}, a grant of the service Name that this domain serves
-%% for its own domain (erx_fs_grants:own/1,2), on the tree its handle carries, at Name's
-%% place, where a domain that holds the facet Name mounts it, with the place's rights
-%% lowered to Rights (mount/3). It first removes any entry an earlier instance of the
-%% tree left there
-%% (docs/design-shell.md, "Interfaces"). So the system domain reaches each files service
-%% it serves by the path its sessions do. A Name with no place fails to match: a tree
-%% that serves itself has one.
+%% for its own domain (erx_fs_grants:own/1,2), on the tree its handle carries, where a
+%% domain that holds the facet Name reaches it: a service of the svc interface at
+%% /svc/Name, every other at Name's place (place/1), with rw lowered to Rights (mount/3).
+%% The interface is the one the domain's declaration gives Name (declared/1), and the
+%% entry's provider keeps it, {own, Name, Interface, Pid, Tree}, so erx_facets:table/1
+%% marks the entry from it as it marks a facet's (docs/design-app-trees.md, "The
+%% namespace entry" and "Links"). It first removes any entry an earlier instance of the
+%% tree left there (docs/design-shell.md, "Interfaces"). So the system domain reaches
+%% each tree it serves by the path its sessions do. enoent for a Name its declaration
+%% lacks or of another interface with no place, each a configuration error its
+%% caller's start fails on.
 -spec mount_own(atom(), erx_fs:grant_handle()) -> ok | {error, reason()}.
 mount_own(Name, Grant) ->
-    {Point, Options} = place(Name),
+    case declared(Name) of
+        {ok, ?ERX_SERVICE_SVC} ->
+            own_at(Name, Grant, <<?SVC/binary, "/", (atom_to_binary(Name))/binary>>);
+        {ok, _Interface} ->
+            case place(Name) of
+                {Point, [rw]} -> own_at(Name, Grant, Point);
+                none -> {error, enoent}
+            end;
+        {error, enoent} = Refused ->
+            Refused
+    end.
+
+own_at(Name, Grant, Point) ->
     _ = unmount(Point),
-    mount(Grant, Point, Options).
+    mount({own, Name, Grant}, Point, [rw]).
+
+%% The interface number the domain's declaration gives the service Name
+%% (erx_serves:find/1), the one source of an own entry's interface; none in a domain
+%% with no declaration, a session's included.
+declared(Name) ->
+    case erx_serves:find(atom_to_binary(Name)) of
+        {ok, Interface} -> {ok, Interface};
+        error -> {error, enoent}
+    end.
 
 %% Where the tree of each service Name mounts, with rw as the entry's own rights, which
 %% a resolution lowers to the rights the facet's grant
 %% carries (erx_facets:table/1), so a domain writes there only through an rw grant:
 %% data, the storage domain's tree, at /data; media, the media domain's tree of every
-%% drive, at /media (docs/design-drives.md, "Mounting it"); the system domain's trees,
-%% each of the files or the svc interface: the package application's apps tree at /apps (docs/design-packaging.md,
-%% "/apps"), the start service's tree, start, at /etc/start, the domain service's
-%% machine at /machine, and the line service's tree, line, at /line
-%% (docs/design-apps.md, "Interfaces"; docs/design-system.md, "A session's request";
-%% docs/design-bluetooth.md, "The controller's line"); and the storage domain's bt_state
+%% drive, at /media (docs/design-drives.md, "Mounting it"); the system domain's trees
+%% of the files interface: the package application's apps tree at /apps
+%% (docs/design-packaging.md, "/apps"), and the line service's tree, line, at /line
+%% (docs/design-bluetooth.md, "The controller's line"); and the storage domain's bt_state
 %% tree, the Bluetooth domain's development store, at /data/bt, the path of the data
 %% volume's bt/ in a namespace that mounts data at /data (docs/design-bluetooth.md,
 %% "Bonds and the store"). /data and /media are also empty
 %% directories of every release, so a domain granted neither lists each as empty
 %% (ReleaseFiles::MOUNT_POINTS, tools/lib/erx/release_files.rb); a domain that holds no
-%% apps, start, machine or line facet has no such path, enoent.
+%% apps or line facet has no such path, enoent. A tree of the svc interface, start and
+%% machine among them, has no place: a domain that holds one reaches it through /svc
+%% (mount_facets/1; docs/design-app-trees.md, "The namespace entry").
 %%
 %% The packages and system facets have no place, so no domain's mount_facets/1, a
 %% session's included, mounts either: an app's session reaches them by erx:cap/1, its
@@ -193,8 +234,6 @@ mount_own(Name, Grant) ->
 place(data) -> {<<"/data">>, [rw]};
 place(media) -> {<<"/media">>, [rw]};
 place(apps) -> {<<"/apps">>, [rw]};
-place(start) -> {<<"/etc/start">>, [rw]};
-place(machine) -> {<<"/machine">>, [rw]};
 place(line) -> {<<"/line">>, [rw]};
 place(bt_state) -> {<<"/data/bt">>, [rw]};
 place(_Name) -> none.
@@ -309,7 +348,7 @@ held(Table) ->
 
 %% The monitors the table calls for: one for each grant pid it holds, none for any other.
 watched(Table, Monitors) ->
-    Pids = lists:usort([Pid || #{provider := {grant, Pid, _}} <- Table]),
+    Pids = lists:usort([Pid || #{provider := Provider} <- Table, Pid <- [grant_pid(Provider)], is_pid(Pid)]),
     Kept = maps:with(Pids, Monitors),
     maps:foreach(fun(_Pid, Monitor) -> demonitor(Monitor, [flush]) end, maps:without(Pids, Monitors)),
     maps:merge(maps:from_list([{Pid, monitor(process, Pid)} || Pid <- Pids, not is_map_key(Pid, Kept)]), Kept).
@@ -333,6 +372,20 @@ checked({mount, To, {facet, Name}, Options}, Table) when is_atom(Name) ->
         {ok, Rights} ?= asked(Options),
         {ok, Point} ?= new_point(To, Table),
         {ok, {mount, Point, {facet, Name}, Rights}}
+    end;
+checked({mount, To, {facets, svc}, [rw]}, Table) ->
+    maybe
+        {ok, Point} ?= new_point(To, Table),
+        {ok, {mount, Point, {facets, svc}, rw}}
+    end;
+checked({mount, To, {own, Name, {Pid, Tree, Granted}}, [rw]}, Table)
+  when is_atom(Name), is_pid(Pid), node(Pid) =:= node(), is_binary(Tree) ->
+    maybe
+        {ok, Rights} ?= lowered(rw, Granted),
+        {ok, Point} ?= new_point(To, Table),
+        ok ?= tree(Tree),
+        {ok, Interface} ?= declared(Name),
+        {ok, {mount, Point, {own, Name, Interface, Pid, Tree}, Rights}}
     end;
 checked({mount, To, {erofs, app}, Options}, Table) ->
     maybe
@@ -461,10 +514,15 @@ applied({unmount, Point}, Table) ->
 
 %% The table once the grant Pid has ended: each of its entries answers eio.
 ended(Pid, Table) ->
-    [case Entry of
-         #{provider := {grant, Pid, _}} -> Entry#{provider := ended};
-         #{} -> Entry
-     end || Entry <- Table].
+    [case grant_pid(Provider) of
+         Pid -> Entry#{provider := ended};
+         _ -> Entry
+     end || #{provider := Provider} = Entry <- Table].
+
+%% The grant pid an entry's provider holds, a grant's or an own service's, or none.
+grant_pid({grant, Pid, _Tree}) -> Pid;
+grant_pid({own, _Name, _Interface, Pid, _Tree}) -> Pid;
+grant_pid(_Provider) -> none.
 
 %% Mounting an image ---------------------------------------------------------------
 

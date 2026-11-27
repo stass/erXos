@@ -33,7 +33,7 @@
 %% rings of a size of its own. The service makes every call here in its own process,
 %% so the process dictionary keeps each domain's pid and node and each connection.
 -module(erx_domain_fake_lib).
--export([start_log/0, next_call/0, kill_and_await/1]).
+-export([start_log/0, start_ns/0, stop_ns/0, next_call/0, kill_and_await/1]).
 -export([register/0, configured/0, configured/3, templates/0, apps/0, devices/0, session/5, app_session/6, create/1, start/1, stop/2, retire/1, crash/1,
          connect/6, disconnect/1]).
 -export([open_side/2, close_side/2, become_installer/0, grant/1, export/3]).
@@ -49,6 +49,20 @@ start_log() ->
     Pid = spawn(fun() -> queue([], []) end),
     register(erx_domain_fake_log, Pid),
     Pid.
+
+%% Starts the system domain's namespace over erx_ns_prim_stub, unlinked, as the service's
+%% boot needs it: a booted service mounts /svc and its granted facets there
+%% (erx_ns:mount_facets/1). stop_ns/0 ends it, so the next fixture starts a fresh one.
+start_ns() ->
+    ok = stop_ns(),
+    {ok, Ns} = erx_ns:start_link(erx_ns_prim_stub),
+    unlink(Ns),
+    ok.
+
+stop_ns() ->
+    kill_and_await([Ns || Ns <- [whereis(erx_ns)], is_pid(Ns)]),
+    persistent_term:erase(erx_ns),
+    ok.
 
 %% Kills each of Pids and returns once every one has ended. exit/2 only sends the
 %% signal; a process's registered name is gone before its monitors get 'DOWN'. So a

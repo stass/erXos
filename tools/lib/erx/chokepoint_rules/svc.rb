@@ -6,6 +6,8 @@ module Erx
   module ChokepointRules
     APP_TREES = 'docs/design-app-trees.md'
     SVC_CLIENT = 'erlang/apps/erx/src/erx_svc_client.erl'
+    # The namespace's owner, which mounts /svc in every domain and each own tree below it.
+    NS_OWNER = 'erlang/apps/erx/src/erx_ns.erl'
     # A doc attribute and its string, which may name /svc in prose: the attribute at
     # a line's start, optionally parenthesised, and a plain, triple-quoted or sigil
     # string.
@@ -23,10 +25,11 @@ module Erx
     declare_group(
       rules: [
         Chokepoints::ErlangForbidden.new(
-          name: 'svc-paths', rule: 'only erx_svc_client names /svc among the modules of erlang/apps; they reach a ' \
+          name: 'svc-paths', rule: 'only erx_svc_client, and erx_ns, which mounts it, name /svc among the modules of ' \
+                                   'erlang/apps; they reach a ' \
                                    "service's tree through erx_svc_client:read/4, command/3 and open/3",
           design: "#{APP_TREES}#invariants",
-          scope: ['erlang/apps/**/*'], sites: [SVC_CLIENT],
+          scope: ['erlang/apps/**/*'], sites: [SVC_CLIENT, NS_OWNER],
           allowed: DOC_STRING,
           pattern: %r{"/?svc(?=[/"])|'/svc(?=[/'])},
           seed: { 'erlang/apps/erx_shell/src/erx_cmd_reboot.erl' =>

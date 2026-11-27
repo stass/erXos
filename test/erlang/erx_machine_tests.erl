@@ -80,19 +80,23 @@ next() ->
 
 %% The system domain reaches its own tree by the path a session does: serving the tree
 %% names its grants the machine service and mounts one grant of them, bound to the
-%% system domain, at /machine in the domain's own namespace (docs/design-shell.md,
+%% system domain, at /svc/machine in the domain's own namespace, from the interface the
+%% domain's declaration gives its name (docs/design-shell.md,
 %% "Interfaces"). The grant is a child of the grants, so it ends with them.
 serving_mounts_the_own_grant_test() ->
     persistent_term:erase(erx_ns),
     {ok, Ns} = erx_ns:start_link(erx_ns_prim_stub),
+    persistent_term:put(erx_serves, [{<<"machine">>, ?ERX_SERVICE_SVC}]),
     {ok, Grants} = erx_machine_fs:start_link(),
     try
         ?assert(lists:member(machine, erx_facet:served())),
-        [#{point := [<<"machine">>], provider := {grant, Own, <<"machine">>}, rights := rw}] =
-            [Entry || #{point := [<<"machine">>]} = Entry <- erx_ns_prim_stub:erx_mounts()],
+        [#{point := [<<"svc">>, <<"machine">>], provider := {own, machine, ?ERX_SERVICE_SVC, Own, <<"machine">>},
+           rights := rw}] =
+            [Entry || #{point := [<<"svc">>, <<"machine">>]} = Entry <- erx_ns_prim_stub:erx_mounts()],
         ?assertEqual([Own], [Pid || {_, Pid, _, _} <- supervisor:which_children(Grants)])
     after
         [begin unlink(Pid), exit(Pid, kill) end || Pid <- [Grants, Ns]],
         persistent_term:erase(erx_ns),
-        persistent_term:erase({erx, serves})
+        persistent_term:erase({erx, serves}),
+        persistent_term:erase(erx_serves)
     end.

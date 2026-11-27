@@ -32,7 +32,7 @@ module Erx
   # * kept: the row enabled with an intensity of one end in ten minutes. clock_1 boots
   #   with no login and erx_clock_test logs what its session holds (CLOCK_REPORT): its
   #   template's one grant, `home`, and nothing of root's, no `start` among them, so
-  #   erx:cap(start) is undefined and /etc/start does not exist where /home/clock lists. At
+  #   erx:cap(start) is undefined and /svc/start does not exist where /home/clock lists. At
   #   the system's Erlang shell the row is running; clock's session is killed, a
   #   new one takes its place, that one is killed too, and the row is then down
   #   (KILL_CLOCK).
@@ -242,7 +242,7 @@ module Erx
     SERVICE_E = "service -e && echo service-listed\r"
     # What every report line of clock's sessions says (erx_clock_test:report/0): a
     # session of clock holding the code_objects facet every session gets and its home grant,
-    # erx:cap(start) undefined, no /etc/start, and its home, /home/clock, listed.
+    # erx:cap(start) undefined, no /svc/start, and its home, /home/clock, listed.
     # Each anchored at the kernel log record's own prefix, which no echo of a typed line has.
     CLOCK_REPORT = /space [0-9]+: notice: erx_clock_test: \{clock_report,#{PRINCIPAL}_[0-9]+@erxos,\[code_objects,home\],true,\{error,enoent\},ok\}/n
     ANY_REPORT = /space [0-9]+: notice: erx_clock_test: \{clock_report,/n

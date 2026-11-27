@@ -217,6 +217,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Low] Preloaded modules' calls after the boot (`tools/lib/erx/preload_calls.rb`,
+  `AFTER_BOOT`): erx_facets's await/3 and changed/1 call `gen`, erx_program calls
+  `lists` and `maps`, and erx_prog_grammar's builders call `lists:sort/1`, each
+  reviewed as running only after the boot loaded stdlib. Empty the list: move the
+  waiting API to erx_connections, whose agent answers it; keep erx_program and the
+  grammar's builders out of the preload list if nothing preloaded needs them, or
+  make their calls BIFs.
+
 * [Medium] Import inventories from the earlier notice reader, `otp/ORIGIN.md`,
   `musl/ORIGIN.md`, `openssl/ORIGIN.md`: they were derived when a pattern rule came before a
   file's own notice and a permissive notice was recognised by its wording, not by a row of

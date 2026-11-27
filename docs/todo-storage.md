@@ -412,7 +412,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] the system domain's own grants, `erlang/apps/erx_files/src/erx_fs_grants.erl`
   (`own/1,2`), `erx_machine_fs:start_link/0` and `erx_starter_fs:start_link/1`: the own grant
   is a temporary child of the grants supervisor, so one that ends alone, at its heap bound for
-  instance, leaves the system shell's `/machine` or `/apps` answering `eio` until the grants
+  instance, leaves the system shell's `/svc/machine` or `/svc/start` answering `eio` until the grants
   supervisor itself restarts, where docs/design-system.md ("A session's request", Failure)
   has it started again and remounted, as `erx_devfs` and `erx_lfs_sup` keep theirs. Each
   service also repeats the four serving steps (start the grants, `erx_facet:serve/2`, the own

@@ -81,6 +81,10 @@ class ErxNsTest < Minitest::Test
   FACETS = 'otp/erts/preloaded/src/erx_facets.erl'
   MARK = "        true -> Entry\#{nofollow => true};\n"
   UNMARKED = "        true -> Entry;\n"
+  # An own entry resolved on its grant with the interface it keeps, and the seed that
+  # drops that interface.
+  OWN_RESOLVED = "    [{Interface, Entry\#{provider := {grant, Pid, Tree}}}];\n"
+  OWN_UNMARKED = "    [{none, Entry\#{provider := {grant, Pid, Tree}}} || Interface =/= none];\n"
   BY_WORD = "    case lists:member(Interface, ?ERX_LINKS_NONE_SERVICES) of\n"
   BY_MEDIA = "    case Interface =:= ?ERX_SERVICE_MEDIA of\n"
   # A seeded erx_ns whose app mount also takes a {layout, Place, Layout} source, the
@@ -118,14 +122,18 @@ class ErxNsTest < Minitest::Test
     refute status.success?, output
     assert_match(/a_media_facet_entry_follows_no_link\.\.\.\*failed\*/, output)
     assert_match(/a_service_tree_entry_follows_no_link\.\.\.\*failed\*/, output)
-    assert_match(/Failed: 2\./, output)
+    assert_match(/the_svc_entry_shows_each_svc_facet_by_name\.\.\.\*failed\*/, output)
+    assert_match(/an_own_service_tree_is_marked\.\.\.\*failed\*/, output)
+    assert_match(/Failed: 4\./, output)
   end
 
   def test_a_resolution_that_marks_only_the_media_interface_is_caught
     output, status = eunit(FACETS => seeded_facets(BY_WORD, BY_MEDIA))
     refute status.success?, output
     assert_match(/a_service_tree_entry_follows_no_link\.\.\.\*failed\*/, output)
-    assert_match(/Failed: 1\./, output)
+    assert_match(/the_svc_entry_shows_each_svc_facet_by_name\.\.\.\*failed\*/, output)
+    assert_match(/an_own_service_tree_is_marked\.\.\.\*failed\*/, output)
+    assert_match(/Failed: 3\./, output)
   end
 
   # erx_facets with its one occurrence of from replaced by to.
@@ -133,6 +141,25 @@ class ErxNsTest < Minitest::Test
     facets = File.read(File.join(ROOT, FACETS))
     assert_equal 1, facets.scan(from).size, "erx_facets has no #{from.strip} to seed"
     facets.sub(from) { to }
+  end
+
+  # The design's seeds of AT4 for an own tree (docs/design-app-trees.md, "An own service
+  # tree is marked"): the own entry resolved with no interface, so the machine tree's
+  # entry and its bind come out unmarked; and erx_ns's check of an own mount request
+  # skipping the declaration, so the undeclared request mounts.
+  def test_an_own_entry_resolved_with_no_interface_is_caught
+    output, status = eunit(FACETS => seeded_facets(OWN_RESOLVED, OWN_UNMARKED))
+    refute status.success?, output
+    assert_match(/an_own_service_tree_is_marked\.\.\.\*failed\*/, output)
+  end
+
+  def test_an_own_request_that_skips_the_declaration_is_caught
+    text = File.read(File.join(ROOT, NS))
+    check = "        {ok, Interface} ?= declared(Name),\n"
+    assert_equal 1, text.scan(check).size, "erx_ns has no #{check.strip} to seed"
+    output, status = eunit(NS => text.sub(check) { "        Interface = ?ERX_SERVICE_SVC,\n" })
+    refute status.success?, output
+    assert_match(/an_own_tree_mounts_its_grant_at_its_place\.\.\.\*failed\*/, output)
   end
 
   def test_an_app_mount_taking_the_callers_layout_is_caught

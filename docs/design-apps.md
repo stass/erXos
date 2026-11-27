@@ -544,10 +544,10 @@ failed read: it is a machine with no settings of its own, and so is a
 machine whose manifest grants the system domain no `data` facet, where
 the build proved that no file can exist and the boot reads none. A
 command likewise: one that needs the file to know what to start,
-`start`, `restart`, `onestart` or `onerestart`, answers `eio` and
+`start`, `restart`, `onestart` or `onerestart`, answers `eagain` and
 changes nothing, since the declared defaults could start a row the
 administrator disabled or put it on a display the file moved it from,
-and `enable` and `disable` answer `eio` and write nothing, since they
+and `enable` and `disable` answer `eagain` and write nothing, since they
 would write over a file they could not read; `stop` and `onestop` need
 no setting, so they are judged on the row as
 it was last applied and on what runs, and an administrator can always
@@ -575,7 +575,8 @@ a reader finds the old text or the new one whole, as `sysrc` writes a
 temporary file and moves it over the file. A rename becomes durable
 only later, so it then syncs the file again, under its new name and
 through the descriptor it wrote, and answers only once that sync has
-answered; a failed sync answers `eio`, and the file holds the old text
+answered; a failed sync answers `eio`, since the command's outcome is
+not known, and the file holds the old text
 or the new one, whole. The data partition's storage services make the
 rename durable at that sync: erXos's F2FS waits for a checkpoint for a
 sync of a file renamed since the last one
@@ -834,10 +835,10 @@ is down runs nothing.
 
 | Command | On a row the read finds enabled | On a row the read finds not enabled | When the read cannot read the file |
 | --- | --- | --- | --- |
-| `start` | `ealready` if the row runs; otherwise the row is admitted ([The start table](#the-start-table)) and its supervisor starts, whether the row was stopped, down, disabled, refused or installed; a refused admission answers `ebusy` or `eperm` | `enotsup`, whether or not the row runs, and nothing changes, as rc.subr answers "Cannot 'start'" whatever runs (`rc.subr:1335-1342`) | `eio`, whether or not the row runs, and nothing changes |
+| `start` | `ealready` if the row runs; otherwise the row is admitted ([The start table](#the-start-table)) and its supervisor starts, whether the row was stopped, down, disabled, refused or installed; a refused admission answers `ebusy` or `eperm` | `enotsup`, whether or not the row runs, and nothing changes, as rc.subr answers "Cannot 'start'" whatever runs (`rc.subr:1335-1342`) | `eagain`, whether or not the row runs, and nothing changes |
 | `stop` | ends the session that runs, and the row is stopped; `esrch` if it runs nothing | ends the session that runs, kept or started once, since rc.subr judges a stop's rcvar only for a service that is not running (`rc.subr:1329-1333`), and the row is disabled; `enotsup` if it runs nothing | judged on the row as it was last applied, its record, in place of the read's: by the first column for a row applied enabled and by the second for one applied not enabled; the row keeps the settings it was applied with |
-| `restart` | the row is admitted against the other rows kept; then the session that runs, if one does, ends, and the row's supervisor starts, as rc.subr's `restart` is a `stop` and then a `start` (`rc.subr:1617-1632`); a refused admission ends nothing | `enotsup`, and nothing changes | `eio`, and nothing changes |
-| `onestart`, `onestop`, `onerestart` | as `start`, `stop` and `restart`, since rc.subr's `one` prefix sets the rcvar to `YES` (`rc.subr:1109-1114`) | `onestart` starts one session that no supervisor keeps, `ealready` if the row runs; `onestop` ends the session that runs, kept or started once, `esrch` if it runs nothing; `onerestart` ends the session that runs, if one does, and starts one that no supervisor keeps; each leaves the row disabled | `onestart` and `onerestart` answer `eio` and change nothing; `onestop` is judged on the row as it was last applied, as `stop` is |
+| `restart` | the row is admitted against the other rows kept; then the session that runs, if one does, ends, and the row's supervisor starts, as rc.subr's `restart` is a `stop` and then a `start` (`rc.subr:1617-1632`); a refused admission ends nothing | `enotsup`, and nothing changes | `eagain`, and nothing changes |
+| `onestart`, `onestop`, `onerestart` | as `start`, `stop` and `restart`, since rc.subr's `one` prefix sets the rcvar to `YES` (`rc.subr:1109-1114`) | `onestart` starts one session that no supervisor keeps, `ealready` if the row runs; `onestop` ends the session that runs, kept or started once, `esrch` if it runs nothing; `onerestart` ends the session that runs, if one does, and starts one that no supervisor keeps; each leaves the row disabled | `onestart` and `onerestart` answer `eagain` and change nothing; `onestop` is judged on the row as it was last applied, as `stop` is |
 
 Since the judgement follows the read and reaches one row, after a
 manual edit from `NO` to `YES` an ordinary `start` starts a kept row,
@@ -937,7 +938,7 @@ for the actions that are not settings; the settings are `/etc/start.conf`:
 
 | File | Read | Write |
 | --- | --- | --- |
-| `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `start NAME`, `stop NAME`, `restart NAME`, `onestart NAME [display=D]`, `onestop NAME` and `onerestart NAME`, which the start service judges after its read of `start.conf`; `enable NAME [display=D] [restarts=N] [restart_period_s=S]` and `disable NAME`, which it carries out on the file as [Who writes it](#the-start-table) says, one at a time ([How a command is judged](#how-a-command-is-judged)), and `purge NAME`, which the package process carries out ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)): the write's callback, in the writer's grant, hands it to the package process and awaits the answer itself, and the table never takes it ([Concurrency](#concurrency)). The line carries the caller's intent and nothing the caller judged: an ordinary `start` or `restart` acts on a row the read finds enabled, an ordinary `stop` on a row that runs or that the read finds enabled, and a `one` form on any row; each acts on the row it names alone. The write succeeds when the command does; a 9P write carries no text back, so a refusal answers an errno: `einval` for a line that does not parse, a value an `enable` gives that the judgement would skip, or a `display=` on a `onestart` of a row the read finds enabled; `enoent` for a name with no row; `efbig` for an `enable` or `disable` whose new text would be longer than `start_conf_max`, which leaves the file as it was; `enotsup` for an ordinary `start` or `restart` of a row the read finds not enabled, or an ordinary `stop` of one that runs nothing; `ealready` for a start of a row that runs; `esrch` for a stop of a row that runs nothing; `ebusy` for a display a kept row holds; `eperm` for a display the template is not granted; `eagain` until the boot has made the table; and `eio` for a failed start, for a `start`, `restart`, `onestart`, `onerestart`, `enable` or `disable` whose read cannot read `start.conf`, for an edit whose write or sync fails, or for a start service that ended during the command; a purge answers the package process's errno ([design-packaging.md](design-packaging.md#interfaces)). The reason goes to the log; a refused command changes nothing, so `/proc/svc` shows the row as it was |
+| `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `start NAME`, `stop NAME`, `restart NAME`, `onestart NAME [display=D]`, `onestop NAME` and `onerestart NAME`, which the start service judges after its read of `start.conf`; `enable NAME [display=D] [restarts=N] [restart_period_s=S]` and `disable NAME`, which it carries out on the file as [Who writes it](#the-start-table) says, one at a time ([How a command is judged](#how-a-command-is-judged)), and `purge NAME`, which the package process carries out ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)): the write's callback, in the writer's grant, hands it to the package process and awaits the answer itself, and the table never takes it ([Concurrency](#concurrency)). The line carries the caller's intent and nothing the caller judged: an ordinary `start` or `restart` acts on a row the read finds enabled, an ordinary `stop` on a row that runs or that the read finds enabled, and a `one` form on any row; each acts on the row it names alone. The write succeeds when the command does; a 9P write carries no text back, so a refusal answers an errno: `einval` for a line that does not parse, a value an `enable` gives that the judgement would skip, or a `display=` on a `onestart` of a row the read finds enabled; `enoent` for a name with no row; `efbig` for an `enable` or `disable` whose new text would be longer than `start_conf_max`, which leaves the file as it was; `enotsup` for an ordinary `start` or `restart` of a row the read finds not enabled, or an ordinary `stop` of one that runs nothing; `ealready` for a start of a row that runs; `esrch` for a stop of a row that runs nothing; `ebusy` for a display a kept row holds; `eperm` for a display the template is not granted; `eagain` until the boot has made the table, and for a `start`, `restart`, `onestart`, `onerestart`, `enable` or `disable` whose read cannot read `start.conf`, since the table reads it again until it can; and `eio`, the file protocol's answer for a handler that ended, only where the command's outcome is not known: an edit whose write or sync fails, which may have renamed its new text over the file, a start whose supervisor fails after the row's stopped mark was cleared, so the table starts the row when it is next made, or a start service that ended during the command, which `service` reports as unknown ([design-app-trees.md](design-app-trees.md#reading-with-a-deadline)), so no refusal is `eio`; a purge answers the package process's errno ([design-packaging.md](design-packaging.md#interfaces)). The reason goes to the log; a refused command changes nothing, so `/proc/svc` shows the row as it was |
 
 Which templates hold the `start` grant is the manifest's: `root`'s in a
 development build, an administrator's in a release build; the build
@@ -1138,7 +1139,7 @@ and starts a row of an install or an update only by its own command.
 | `start.conf` is damaged, holds `sh` the reader does not take, or names a row the table does not hold | the settings judgement, at every read | each problem line is skipped and shown at `/proc/svc` with its line, and the rest stands; `service -c` prints them |
 | `start.conf` is longer than 64 KiB | the table's reader | reported at `/proc/svc` as `too_long` and handled as a read that fails: at boot each row it was for, the boot's package set's rows included, starts at its published default, as in the first row, and as in the next row at a command |
 | an `enable` or `disable` whose new text would be longer than `start_conf_max` | the start service, before it writes | `efbig`; the file is left as it was, so no edit of the start service ever makes a file every later read takes as `too_long` |
-| a read of `start.conf` fails at a command | `erx_starter_rc`'s answer | `start`, `restart`, `onestart` and `onerestart` answer `eio` and change nothing; `stop` and `onestop` are judged on the row as it was last applied and end the session that runs ([How a command is judged](#how-a-command-is-judged)); no other row changes, and the failure is logged and shown at `/proc/svc` |
+| a read of `start.conf` fails at a command | `erx_starter_rc`'s answer | `start`, `restart`, `onestart` and `onerestart` answer `eagain` and change nothing; `stop` and `onestop` are judged on the row as it was last applied and end the session that runs ([How a command is judged](#how-a-command-is-judged)); no other row changes, and the failure is logged and shown at `/proc/svc` |
 | a purge arrives while the package process carries out an install, update or removal | nothing: it is the order the package process takes them in | the `ctl` write's callback waits in the writer's grant for the purge's answer while the table takes the operation's publication; the purge is carried out after it, and a later `ctl` write of the same client waits for the purge |
 | an edit is lost to a concurrent one | nothing: the last writer wins | the next read takes the last writer's text whole; `/proc/svc` shows which of each row's settings came from the file when it was applied |
 | the display domain restarts under a display's session | the domain service's grant record | the grant is minted again on the new incarnation, with the session mark |
@@ -1270,7 +1271,7 @@ durability runs over the storage power-cut harness's simulated medium
   refuses its `restart`; holders taken from the rows recorded enabled
   rather than the rows kept, which refuses a start on a stopped row's
   display; an unreadable file judged as a file with no settings, which
-  starts a row declared `enable YES` whose record is disabled; the `eio`
+  starts a row declared `enable YES` whose record is disabled; the `eagain`
   refusal applied to every command, which refuses the `stop` of a kept
   row;
 * a read that fails at boot: a table made from the manifest's `enable`,
@@ -1278,7 +1279,7 @@ durability runs over the storage power-cut harness's simulated medium
   published defaults that keep each row's `enable`, the same;
 * a read that fails at a command: a command that reads the failure as a
   file with no settings, which starts a row the file disabled; a start
-  service that answers `eio` to every command whose read fails, which
+  service that answers `eagain` to every command whose read fails, which
   cannot stop a running row;
 * a purge while an update approaches its publication: a table that
   takes `purge` among its commands and calls the package process, which
@@ -1459,8 +1460,8 @@ Decisions:
    display ([When the file is read](#the-start-table),
    [Concurrency](#concurrency)).
 10. **A command whose read cannot read `start.conf` starts nothing**:
-    `start`, `restart`, `onestart` and `onerestart` answer `eio`, while
-    `enable` and `disable` answer `eio` and write nothing, and `stop` and
+    `start`, `restart`, `onestart` and `onerestart` answer `eagain`, while
+    `enable` and `disable` answer `eagain` and write nothing, and `stop` and
     `onestop` are judged on the row as it was last applied, so an
     administrator can always stop a running row; a boot whose read
     fails starts each row the read was for at its published default,

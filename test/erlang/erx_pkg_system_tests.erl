@@ -69,10 +69,10 @@ installed_lies_beneath_the_packages_place_test() ->
 %% come through it, and a name the tree does not hold answers enoent.
 reads_through_the_system_grant_test() ->
     Dashboard = file("dashboard"),
-    persistent_term:put({erx, facets}, {0, #{}}),
+    persistent_term:put({erx, facets}, erx_facets:value(0, #{})),
     ?assertEqual({error, enoent}, erx_pkg_medium:size(system, <<"dashboard.app">>)),
     ?assertEqual({error, enoent}, erx_pkg_medium:pread(system, <<"dashboard.app">>, 0, 16)),
-    persistent_term:put({erx, facets}, {1, #{system => {?ERX_SERVICE_FILES, system_grant(Dashboard)}}}),
+    persistent_term:put({erx, facets}, erx_facets:value(1, #{system => {?ERX_SERVICE_FILES, system_grant(Dashboard)}})),
     Size = byte_size(Dashboard),
     ?assertEqual({ok, Size}, erx_pkg_medium:size(system, <<"dashboard.app">>)),
     ?assertEqual({ok, binary:part(Dashboard, 100, 4096)},
@@ -90,7 +90,7 @@ image_packages_wait_for_the_namespace_test() ->
     ok = erx_fs_version:init(),
     ok = stubs_log(),
     Dashboard = file("dashboard"),
-    persistent_term:put({erx, facets}, {0, #{}}),
+    persistent_term:put({erx, facets}, erx_facets:value(0, #{})),
     Test = self(),
     Holder = spawn_link(fun() ->
                                 register(erx_pkg_namespace, self()),
@@ -98,8 +98,8 @@ image_packages_wait_for_the_namespace_test() ->
                                 receive {'$gen_call', From, {settled, namespace}} ->
                                         receive release ->
                                                 persistent_term:put({erx, facets},
-                                                                    {1, #{system => {?ERX_SERVICE_FILES,
-                                                                                     system_grant(Dashboard)}}}),
+                                                                    erx_facets:value(1, #{system => {?ERX_SERVICE_FILES,
+                                                                                     system_grant(Dashboard)}})),
                                                 gen:reply(From, ok)
                                         end
                                 end

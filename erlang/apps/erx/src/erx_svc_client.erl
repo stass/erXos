@@ -31,7 +31,9 @@ the foreground job, which `Ctrl-C` ends.
 fails `enoent` is followed by a look at `/svc/Name` itself, and only its
 `enoent` is `not_serving`. A command whose write may have reached the
 server with its answer lost, at the deadline or on `eio`, answers
-`unknown`, and is never written again.
+`unknown`, and is never written again. So `eio` on a `ctl` always
+means an outcome that is not known, and a service's definite refusals
+are other errnos (docs/design-app-trees.md, "Reading with a deadline").
 """.
 
 -include("generated/erx_abi.hrl").

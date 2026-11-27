@@ -328,9 +328,11 @@ Eshell V17.1.1 (type help(). for help)
 **Files and storage**
 
 * Per-domain namespaces, file servers across domains and `/tmp` on a RAM
-  file system in Erlang. The storage, apps and machine services mount
-  their own trees at `/data`, `/apps` and `/machine`, so one path reaches
-  each in every session, the system shell's included.
+  file system in Erlang. The storage and apps services mount their own
+  trees at `/data` and `/apps`, and every service's control tree, the
+  start table's and the machine's among them, is at `/svc/NAME`
+  (`/svc/start`, `/svc/machine`), so one path reaches each in every
+  session, the system shell's included.
 * A stream file is one whose read waits for an event: a key, a mouse event
   or bytes. The file's grant hands such a read to a keeper process, which
   holds the waiting requests, so a program waiting on `/dev/kbd` does not

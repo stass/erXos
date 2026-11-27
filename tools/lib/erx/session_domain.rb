@@ -215,11 +215,11 @@ module Erx
     PROC_STATUS = "cat /proc/status\r"
     PROC_UPTIME = /\Auptime\t[0-9]+\tkernel\r*\n\z/n
     # The start service's tree at root_1's command shell (docs/design-apps.md,
-    # "Interfaces"): root's template holds the start grant, so /etc/start lists its one
+    # "Interfaces"): root's template holds the start grant, so /svc/start lists its one
     # file, ctl, and a ctl write naming no manifest row is refused with einval, which the
     # shell's $status names as the machine tree's refusal below does.
-    START_LISTED = "ls /etc/start && echo start-listed\r"
-    START_CTL_REFUSED = "echo enable ghost > /etc/start/ctl || echo start-ctl-refused-$status\r"
+    START_LISTED = "ls /svc/start && echo start-listed\r"
+    START_CTL_REFUSED = "echo enable ghost > /svc/start/ctl || echo start-ctl-refused-$status\r"
     # `service -e` there: the configured domains in boot order and the enabled rows, read
     # from /proc/apps through the session's inspect facet, with status 0.
     SERVICE_E = "service -e && echo service-listed\r"
@@ -330,12 +330,12 @@ module Erx
     # the kind of end asked for, a reset or a power-off, after the one log line that names
     # the end and the principal, root (docs/design-system.md, "A session's request").
     # `reboot` runs in root_1's own session, which holds the machine grant: a malformed
-    # line written to /machine/ctl is refused first, with einval, whose text is echo's status,
+    # line written to /svc/machine/ctl is refused first, with einval, whose text is echo's status,
     # and then `reboot` ends the machine through the tree. `halt` runs in the system's command
     # shell, whose machine entry is local. points must end at the command shell.
     MACHINE_ENDS = { 'reboot' => 'reset', 'halt' => 'off' }.freeze
     MACHINE_END_LOG = { 'reboot' => /rebooted by root/n, 'halt' => /powered off by root/n }.freeze
-    MACHINE_CTL_REFUSED = "echo trial > /machine/ctl || echo machine-ctl-refused-$status\r"
+    MACHINE_CTL_REFUSED = "echo trial > /svc/machine/ctl || echo machine-ctl-refused-$status\r"
 
     def machine_end_checkpoints(points, command:)
       [*points, *machine_end_route(command), machine_end_point(command)]

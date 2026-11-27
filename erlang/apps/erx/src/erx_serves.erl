@@ -25,7 +25,7 @@ ready report names against the manifest itself, so a domain that ignores
 its declaration only has its report refused.
 """.
 
--export([declared/0, parse/1]).
+-export([declared/0, find/1, parse/1]).
 
 -export_type([declaration/0]).
 
@@ -41,6 +41,21 @@ declared() ->
             Declaration;
         Declaration ->
             Declaration
+    end.
+
+-doc """
+The interface number the declaration gives the service `Name`, a binary, or
+`error` when it gives none. A domain started with no declaration, a session
+or a domain created at run time, declares nothing, so it finds no name; a
+malformed declaration raises as declared/0 does.
+""".
+-spec find(binary()) -> {ok, non_neg_integer()} | error.
+find(Name) when is_binary(Name) ->
+    try lists:keyfind(Name, 1, declared()) of
+        {Name, Interface} -> {ok, Interface};
+        false -> error
+    catch
+        error:{bad_serves, missing} -> error
     end.
 
 -doc """

@@ -282,9 +282,9 @@ domain service's `machine` reach root's sessions the same way, at
 | **AT1.** `/proc` holds no service's own words | a kind whose reporter is `runtime` is declared only at paths under a domain id or a process id, which the schema generator checks for every row of `abi/inspection.txt`, so a runtime can report only about its own domain, which [design-live.md](design-live.md#the-proc-tree) already enforces at the inspector ("What a runtime reports"); no other reporter is an app | a runtime-reported kind at a machine path, as `ntp` at `[ntp]` | the generator's check, with a seeded `kind` row reported by `runtime` at a machine path that fails the build |
 | **AT2.** `/svc/NAME` is a tree of NAME's server and of no other | the registry name is set by the domain service: `{svc, Name}` from the providing session's principal, never from anything the session sends, and only for a session a keeper's start of NAME's row made, whose plan serves `svc`; a manifest grant under its service row's name; and no `svc` facet is re-granted, since `erx_domain:grant/4` and a create spec refuse one. NAME's app provider is the row's current session, and a row runs at most one; names are disjoint (AT9) | a report whose `provides` names the tree's name; a provide accepted from a session no keeper of the row started; a re-grant of an `svc` facet, which installs a facet of the system domain under a name the caller chose | the domain service's host tests of the provider rule and of `grant/4`, each refusal seeded; the QEMU tests below |
 | **AT3.** No grant outlives its server or reaches a later one | every `svc` facet is a process of the serving domain, minted there, so it ends with that session or that incarnation; the registry removes a facet at its end; a descriptor keeps the grant it was opened on, which answers `eio` once ended (F10) | a facet hosted outside its server's domain, or a registry entry kept across the facet's end | the restart test of [Verification](#verification-and-testing) |
-| **AT4.** No link in a service tree is followed | `erx_facets:table/1` marks every entry whose interface's row says `links none`, at each resolution, from the interface number of the facet the registry holds, or, for an own service's mount, from the generated service table's row for its name; `svc` says it, so the mark follows no name, no mount point and no option, and every entry that reaches a service tree (the `/svc` entry, a facet's mount, an own service's mount, a bind, a program's table) carries it ([Links](#links)) | a resolver that ignores the mark; an `svc` facet installed with another interface's number, such as an app's tree as `files`; an own service's mount that keeps no name | the link test and its seeded faults below; the resolver's fuzz target with marked entries |
+| **AT4.** No link in a service tree is followed | `erx_facets:table/1` marks every entry whose interface's row says `links none`, at each resolution, from the interface number of the facet the registry holds, or, for an own service's mount, from the interface its entry keeps, which the mount took from the system domain's declaration; `svc` says it, so the mark follows no name, no mount point and no option, and every entry that reaches a service tree (the `/svc` entry, a facet's mount, an own service's mount, a bind, a program's table) carries it ([Links](#links)) | a resolver that ignores the mark; an `svc` facet installed with another interface's number, such as an app's tree as `files`; an own service's mount that keeps no interface, or takes one from anywhere but the declaration | the link test and its seeded faults below; the resolver's fuzz target with marked entries |
 | **AT5.** Nothing in a service tree runs | the interface's rights are `ro` or `rw`, with no `rx`; an app's grant takes its grantee's `start` grant's rights with anything but `rw` as `ro` ([The grant](#the-grant)); and no grant both writes and runs ([design-files.md](design-files.md#invariants), F6) | an `rx` member of `svc`'s rights; an app's grant copying an `rx` grant of `start` | `svc_rights` has no `rx`, so no row can state one; the grant's rights test |
-| **AT6.** No system command waits on a service tree beyond the deadline it gives | every command reads, writes and opens under `/svc` only through `erx_svc_client`, whose `read/4` and `command/3` make the call in a process they end at the deadline their caller gives, ending its fids ([design-files.md](design-files.md#fid-owners)), and whose `open/3` opens in the caller's own process, a process of the foreground job, which `Ctrl-C` ends | a command that calls `file` on `/svc` in its own process; a non-interactive caller passing `infinity` | a chokepoint source check that only `erx_svc_client` names `/svc` among the modules of `erlang/apps`, its sites an allow-list, with a seeded direct read; the hung-server test |
+| **AT6.** No system command waits on a service tree beyond the deadline it gives | every command reads, writes and opens under `/svc` only through `erx_svc_client`, whose `read/4` and `command/3` make the call in a process they end at the deadline their caller gives, ending its fids ([design-files.md](design-files.md#fid-owners)), and whose `open/3` opens in the caller's own process, a process of the foreground job, which `Ctrl-C` ends | a command that calls `file` on `/svc` in its own process; a non-interactive caller passing `infinity` | a chokepoint source check that only `erx_svc_client`, and `erx_ns`, which mounts `/svc`, name `/svc` among the modules of `erlang/apps`, its sites an allow-list, with a seeded direct read; the hung-server test |
 | **AT7.** A line shown under a service's name holds no control | `service` and `ntpctl` show a status line only after `erx_svc_status:parse/1` accepts it, an identifier, a tab and a field the field escape writes, which holds no character the line escape changes ([design-live.md](design-live.md#attributed-text)); any other line shows as `[invalid]` | a reader that prints a line it did not parse, or unescapes a value for display | the parser's fuzz target and properties; the escape test below |
 | **AT8.** An app's tree is held only by sessions whose template holds `start`, with that grant's rights; a manifest service's tree only by its facet rows' grantees; the system domain holds no `svc` grant | the domain service derives an app tree's grantees and rights from the manifest's `start` grants, and an app's tree has no `service` row, so no facet row names it; the manifest check refuses a facet row that grants a service of interface `svc` to the system domain | an app tree granted to every session; an `rw` grant to a session whose `start` is read-only; a facet row granting `bluetooth` to the system domain | the domain service's host test; the manifest check with a seeded row; the rights test below |
 | **AT9.** No two service trees share a name | the manifest check refuses a service of interface `svc` named like another such service or like a principal, which every start row's name is; admission refuses an app named like any principal, domain, service or facet row of the manifest ([design-packaging.md](design-packaging.md#admission)); the domain service refuses a session's provide of `svc` whose name is a service of interface `svc` of the running manifest, which a system update can add after the app was admitted | a manifest with two `svc` services of one name on two servers; an admitted app whose name a later manifest gives a service | the manifest check's seeded rows; the admission test; the provide test below |
@@ -508,14 +508,32 @@ own grant of each at `/svc/start` and `/svc/machine` with
 `erx_ns:mount_own/2`, so its command shell reaches each by the path a
 session does, and its `ls /svc` shows the two as the mount points below
 the directory. `mount_own/2` places a service of interface `svc` at
-`/svc/NAME`, from the interface the generated service table gives the
-name, and every other service at `place/1`'s point; `place/1` has no row
-for a service tree, since a domain that holds one reaches it through
-`/svc`. The entry `mount_own/2` makes keeps the service's name beside
-its grant, as its provider `{own, Name}`, so the entry has an interface
-as a facet's entry has one: `erx_facets:table/1` takes it from the
-generated service table's row for `Name`, as it takes a facet's from the
-registry ([Links](#links)).
+`/svc/NAME`, from the interface the system domain's declaration gives
+the name ([design-system.md](design-system.md#facets-a-configured-domain-serves), "The declaration":
+`erx_serves:declared/0`, the manifest's rows of the services the domain
+serves, which the packer writes into its start arguments), and every
+other service at `place/1`'s point; `place/1` has no row for a service
+tree, since a domain that holds one reaches it through `/svc`. The
+entry `mount_own/2` makes keeps the service's name and that interface
+beside its grant, as its provider `{own, Name, Interface, Pid, Tree}`,
+so the entry has an interface as a facet's entry has one:
+`erx_facets:table/1` resolves it to its grant and marks it from the
+interface it keeps, as it marks a facet's from the registry's
+([Links](#links)). The declaration is fixed before the runtime starts,
+so the interface is in place before any tree mounts. A tree the system
+domain
+serves itself must be declared: `mount_own/2` answers `enoent` for a
+name the declaration lacks, and the tree's start fails on it, a
+configuration error the boot shows rather than an unmarked entry.
+
+A mount below `/svc` is an entry of the domain's table like any other,
+as the system domain's own trees are. Where it lies at a facet's name,
+the `/svc` entry leaves that name to it (`erx_facets:table/1`), so it is
+the one entry there and a resolution and a bind reach the same tree;
+once it goes, the facet shows again. Only the domain's own code mounts,
+so such a mount changes only that domain's view, and the session that
+makes it already holds whatever it mounts; `erx_ns` reserves no point
+below `/svc`.
 
 ### What /proc keeps
 
@@ -673,7 +691,7 @@ changes with no tree's coming or going.
 A resolution that reaches `/svc`'s directory lists, after the release
 slice's empty directory, one entry of kind `directory` for each facet of
 interface `svc` the registry holds then, sorted by name, and then the
-mount points below it, which only the system domain has. A walk of
+mount points below it, the system domain's own trees among them. A walk of
 `NAME` below it finds the facet of interface `svc` whose name's text is
 NAME: one there gives its grant, and the walk goes on at that grant's
 root; none answers `enoent`, which the reader's own registry gives
@@ -688,8 +706,8 @@ The resolver follows no link that lies in a tree reached through an
 entry the resolution marked, and `erx_facets:table/1` marks every entry
 whose interface has a row that says `links none`, `svc` among them: the
 interface of the facet the registry holds under the entry's name, or,
-for a domain's own service tree, the one the generated service table
-gives its name. Where it would follow one (a link before
+for a domain's own service tree, the one its entry keeps from the
+system domain's declaration. Where it would follow one (a link before
 the last name, a last link the operation's row of the table in
 [design-files.md](design-files.md#resolving-a-path) follows, or a
 trailing `/`), it answers `eacces`, as FreeBSD's `vfs_lookup` does on a
@@ -709,10 +727,11 @@ every entry that reaches a service tree, whoever made the entry:
   `/mnt` is marked;
 * a facet's mount, `erx_ns:mount({facet, Name}, To, Options)`, reaches
   the facet the registry holds under `Name` with its interface number;
-* an own service's mount, `erx_ns:mount_own(Name, Grant)`, keeps `Name`,
-  whose interface the generated service table gives, so the system
-  domain's `/svc/start` and `/svc/machine`, and a bind of either, are
-  marked;
+* an own service's mount, `erx_ns:mount_own(Name, Grant)`, keeps `Name`
+  and the interface the system domain's declaration gives it, so the
+  system domain's `/svc/start` and `/svc/machine`, and a bind of
+  either, are marked, and a name the declaration lacks is never
+  mounted;
 * a grant's mount, `erx_ns:mount({Pid, Tree, Rights}, To, Options)`,
   takes only a process of the domain's own runtime and refuses any other
   pid with `einval`, and every service tree a domain does not serve is a
@@ -762,7 +781,11 @@ states how long it may wait:
   The command may have taken effect, may yet, or may not. An `eio` for
   a write that never left the reader is reported the same way, which is
   never wrong. The caller reports it as unknown and never writes again
-  on its own.
+  on its own. So `eio` on a `ctl` always means an outcome that is not
+  known, and no service gives it as a definite refusal: each refusal is
+  an errno the file protocol never answers for a handler that ended
+  (the start table's, [design-apps.md](design-apps.md#interfaces)).
+  Every other answer is the write's own.
 * `open(Name, File, Modes)` opens the file in the calling process and returns
   its descriptor, for a command that holds a file open with a person,
   such as `btpair`'s pairing window. It sets no deadline: the caller is
@@ -800,7 +823,8 @@ the order the writes arrive, and the write waits for the answer:
   ([design-files.md](design-files.md#errors)), fails the write with it;
 * any other answer, or the handler's end, fails it with `eio`, the file
   protocol's answer for an effect that is not known: the handler may
-  have acted before it ended.
+  have acted before it ended. A handler that answers `{error, eio}`
+  itself says the same, and `erx_svc_client` reports it as unknown.
 
 A 9P write carries no text back, so a command's refusal is its errno,
 and its reason goes to the server's log. The line is untrusted input to
@@ -831,8 +855,8 @@ that order, the system's names first:
 1. the trees of a manifest service that the domain's `/svc` lists: the
    facets of interface `svc` its registry holds under a service row's
    name, and, in the system domain, which holds none (AT8), the trees it
-   serves itself and mounts there with `mount_own/2` from the generated
-   service table, `start` and `machine`. A tree is `system` when the
+   serves itself and mounts there with `mount_own/2` from its
+   declaration, `start` and `machine`. A tree is `system` when the
    process serving it is of the system domain's node, as an own mount's
    always is, and `domain` otherwise; the node is its server's, since no
    `svc` facet is a facet in front of another ([Granting](#granting));
@@ -1137,9 +1161,13 @@ Each test is paired with the fault that proves the code ran.
   pid; the mount case follows the link.
 * **An own service tree is marked.** A host test of `erx_facets:table/1`:
   an entry `mount_own/2` made for `machine`, and a bind of it at `/mnt`,
-  are marked, and one made for `apps`, of interface `files`, is not. Seeded: `mount_own/2`
-  mounting the grant as a plain `{Pid, Tree, Rights}` entry; the
-  `machine` entry and its bind come out unmarked.
+  are marked, and one made for `apps`, of interface `files`, is not; a
+  name the declaration lacks is refused with `enoent` and mounts
+  nothing, by `mount_own/2` and by a mount request that names it
+  directly. Seeded: the own entry resolved with no interface; the
+  `machine` entry and its bind come out unmarked. Seeded: the
+  namespace's check of an own mount request skipping the declaration;
+  the undeclared request mounts.
 * **The listing shows what is held.** A session template granted
   `bluetooth` by a facet row and not `start` lists exactly `bluetooth`
   under `/svc`; one granted neither `machine` nor `bluetooth` finds
@@ -1318,7 +1346,8 @@ steps.
    `{facets, svc}` selecting by interface in every domain, in
    `erx_ns:mount_facets/1`; `place/1` loses its `start` and `machine`
    rows; `mount_own/2` places a service of interface `svc` at
-   `/svc/NAME` and keeps its name as the entry's provider, and
+   `/svc/NAME` and keeps its name, and the interface its declaration
+   gives, as the entry's provider, and
    `erx_starter_fs` and `erx_machine_fs` keep calling it; and every
    writer of the old paths moves with them: `reboot` and `halt` write
    the machine's `ctl` through the client, `service` writes the start

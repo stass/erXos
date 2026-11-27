@@ -14,6 +14,7 @@ require_relative 'file_lock'
 require_relative 'generated'
 require_relative 'hosted_sources'
 require_relative 'oracle'
+require_relative 'preload_calls'
 require_relative 'output_directory'
 require_relative 'runner'
 
@@ -349,7 +350,9 @@ module Erx
     # The emulator embeds the preloaded modules, so they are compiled first, by
     # erts/preloaded/src's own opt target, into erts/ebin, where the emulator's
     # PRELOAD_BEAM names them and make_preload strips each one as it embeds it. The copy
-    # takes nothing from erts/ebin (BUILD_OUTPUTS).
+    # takes nothing from erts/ebin (BUILD_OUTPUTS). Before the emulator embeds them, the
+    # beams' calls are checked against what the boot holds before it loads any module
+    # (PreloadCalls).
     #
     # Every build empties erts/ebin first, so what is embedded is compiled by this build
     # from the copy's sources, the generated grammar among them, and from the generated
@@ -366,6 +369,7 @@ module Erx
       @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/preloaded/src', 'opt', "TARGET=#{self.class::TARGET}"],
                   name: 'runtime-preloaded', deadline: DEADLINES.fetch(:libs), chdir: @output.root,
                   env: build_environment)
+      PreloadCalls.enforce!(otp: @output.root, ebin: in_copy('erts/ebin'))
       # The archive comes in through LIBS, which is no make dependency, so each build
       # links again. Both executables go: beam.smp is copied from beam.emu, and the
       # makefile's empty .SECONDARY makes a missing beam.emu no reason to link while
