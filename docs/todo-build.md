@@ -273,6 +273,43 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `Dependencies::DOCKER_ENVIRONMENT` itself while `OracleContainer#prepare_context` keeps a third local-socket
   check, so one connection value should run every docker command; `Dependencies#stale` and `#pinned` name
   deps.lock and `build/third_party` for L4Re's lock too; `local_docker_connection` refuses a context name with `+`.
+* [Medium] gates: Dialyzer over erXos's Erlang in `make check`, strict, so a misuse of a
+  generated type (an `erx_abi_enums` reason, a layout map) or a broken contract fails the
+  build instead of surfacing at run time on a tested path. It waits on the 232 warnings below.
+  * Measured on an M3 Max MacBook Pro (16 CPUs, 128 GB) with stock OTP 29.1.2's Dialyzer
+    (the oracle's) and a PLT from the beams of erXos's native runtime build, default warnings, over erlang/apps, test/erlang/apps, erXos's
+    eight `erx_*` preloaded modules and the generated modules of build/gen (545 modules),
+    from source with `ErlangApps.include_flags`: the PLT (erts, kernel, stdlib, crypto,
+    compiler, public_key, ssh, asn1) takes 14 s and 1.2 GB once; the full analysis takes
+    6 s wall and 0.84 GB. With every layout's decoder a clause of one recursive
+    `record/2` (`LayoutEmitter`), `erx_abi_layout` alone took 101 s and 9.8 GB of a
+    142 s, 10.2 GB run. In `--incremental` mode an unchanged tree took 2.4 s and a
+    changed leaf module 4.6 s, so the full run is cheap enough that the gate needs no
+    incremental state. `erx_abi_packed` (`PackedEmitter`) still decodes a nested layout
+    through its recursive `decode/2`, cheap at its few layouts, but it grows the same way.
+  * The PLT is built from erXos's OTP, not the stock oracle's: against a stock PLT, 20 more
+    warnings are erXos's own additions (`prim_file:erx_*` calls, the `erx_untraced` spawn
+    option). The runtime build's beams (`build/runtime/native/otp`, compiled with
+    `debug_info`) are what ships; `make check` builds no runtime, so either the gate runs
+    where a runtime is built, or `make check` compiles erts', kernel's and stdlib's beams
+    from the tree for the PLT. The PLT is cached under build/ by the digest of the beams
+    it reads.
+  * The 232 warnings by kind: a pattern that can never match 78, an unused function 36, no
+    local return 27, a call with the wrong argument types 25 (most are the opaque
+    `erx_device:device()` passed through a generic `step/2` helper in the virtio
+    drivers), a record field's type 16, an improper list 11, a callback's type 9
+    (`erx_ramfs` against `erx_fs`), breaking an opaque type 6, an invalid contract 6, a
+    call breaking a contract 4, an unknown function 4 (the unbuilt `erx_net_vclock` and the
+    derived `erx_ramfs_serving`), a guard that can never succeed 3, a call that never
+    returns 2, a variable that can never match 2, a fun with no local return 2, a
+    contract's types 1; by
+    application, erx_net 36, erx 35, erx_blk 21, the preloaded modules 19, erx_files 19,
+    erx_uart 16, erx_shell 15, the rest under 13 each. About 20 are in generated modules
+    (`erx_pkg_reader`, `erx_manifest`, `erx_ui_wire`), fixed in their generators.
+  * Each warning is fixed in the code or its spec, not suppressed; where Dialyzer is
+    imprecise, as with `band` and a negative mask in `erx_cmd_ls:columns/2`, the code is
+    written plainly. Then a Ruby step under tools/ runs it from `tools/erx check`, with a
+    seeded type error that must fail it, and a line in docs/guide/testing.md.
 
 ## Stopgap replacements
 
