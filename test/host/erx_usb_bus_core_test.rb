@@ -23,6 +23,16 @@ class ErxUsbBusCoreTest < Minitest::Test
 
   Seed = Data.define(:fault, :anchor, :replacement, :catching)
 
+  # A port's enumeration under the core's next fresh reference, and the fault that names
+  # instead, after a port reset, the reference handed out just before it: in a trace of
+  # one device, the one its port reset retired.
+  REATTACH_FRESH = "enumerate(Id, N, Speed, State0 = \#{next := Ref = {device, Next}}) ->\n"
+  REATTACH_REUSED = "enumerate(Id, N, Speed, State0 = \#{next := {device, Next}}) ->\n" \
+                    "    Ref = case history(Id, N, State0) of\n" \
+                    "              \#{kept := none} -> {device, Next};\n" \
+                    "              \#{} -> {device, Next - 1}\n" \
+                    "          end,\n"
+
   SEEDS = [
     Seed.new(fault: 'a connection change with the port still connected not detaching the occupant',
              anchor: 'true -> {settling, Now + ?ERX_USB_POWER_UP_DELAY_MS};',
@@ -144,7 +154,49 @@ class ErxUsbBusCoreTest < Minitest::Test
                     'their clear is lost',
              anchor: 'Hub#{pending := queued([Target], P -- [Target]),',
              replacement: 'Hub#{pending := P -- [Target],',
-             catching: [2, 0, 0])
+             catching: [2, 0, 0]),
+    Seed.new(fault: 'a request for a port reset answered by pipe resets alone, so a stick only a port reset ' \
+                    'revives stays wedged',
+             anchor: "{shutdown, {reset_port, _Rung, _Why}} ->\n                    reset_port(",
+             replacement: "{shutdown, {reset_port_never, _Rung, _Why}} ->\n                    reset_port(",
+             catching: 'a_port_reset_carries_the_runs_to_a_fresh_reference_test'),
+    Seed.new(fault: 'a function kept across a port reset starting again as a first instance',
+             anchor: 'next_run(Run = #{number := Number}) -> Run#{state := running, number := Number + 1}.',
+             replacement: 'next_run(Run = #{number := _Number}) -> Run#{state := running, number := 1}.',
+             catching: 'a_port_reset_carries_the_runs_to_a_fresh_reference_test'),
+    Seed.new(fault: 'a request for a port reset not counted toward the restarts',
+             anchor: 'reset_port(Ref, Now, put_run(Ref, Interface, Current#{ends := Admitted}, State));',
+             replacement: 'reset_port(Ref, Now, put_run(Ref, Interface, Current, State));',
+             catching: 'a_port_reset_carries_the_runs_to_a_fresh_reference_test'),
+    Seed.new(fault: 'a request for a port reset past the restarts resetting the port again',
+             anchor: '{refused, _Until} ->' + "\n" + '            fail_device(Ref, {function, Interface, {restarts, end_name(End)}}, State)',
+             replacement: '{refused, _Until} when element(1, element(2, End)) =:= reset_port ->' + "\n" +
+                          '            reset_port(Ref, Now, State);' + "\n" + '        {refused, _Until} ->' + "\n" +
+                          '            fail_device(Ref, {function, Interface, {restarts, end_name(End)}}, State)',
+             catching: 'a_port_reset_past_the_restarts_gives_the_port_up_test'),
+    Seed.new(fault: 'a device that answers its port reset as another taking the runs the port kept',
+             anchor: '#{identity := Identity, runs := KeptRuns} -> KeptRuns;',
+             replacement: '#{runs := KeptRuns} -> KeptRuns;',
+             catching: 'a_port_reset_finds_another_device_new_test'),
+    Seed.new(fault: 'a reattach enumerated under the reference its device had before the port reset',
+             anchor: REATTACH_FRESH,
+             replacement: REATTACH_REUSED,
+             catching: 'a_port_reset_carries_the_runs_to_a_fresh_reference_test'),
+    Seed.new(fault: 'a reattach enumerated under the reference its device had before the port reset, ' \
+                    'in the exploration',
+             anchor: REATTACH_FRESH,
+             replacement: REATTACH_REUSED,
+             catching: [1, 0, 1]),
+    Seed.new(fault: 'a connection change keeping what the port kept for a reattach',
+             anchor: 'set_port(Id, N, Arrival, forget_kept(Id, N, State));',
+             replacement: 'set_port(Id, N, Arrival, State);',
+             catching: 'a_replug_before_the_port_reset_forgets_the_kept_device_test'),
+    Seed.new(fault: "a port's reset left waiting past its deadline",
+             anchor: "expire_port(Id, N, {resetting, At, _Phase}, Now, State) when At =< Now ->\n" \
+                     '    give_up(Id, N, reset_timeout, State);',
+             replacement: "expire_port(_Id, _N, {resetting, At, _Phase}, Now, State) when At =< Now ->\n" \
+                          '    {[], State};',
+             catching: 'a_port_reset_past_its_deadline_gives_the_port_up_test')
   ].freeze
 
   def test_bus_core_cases_pass_under_eunit

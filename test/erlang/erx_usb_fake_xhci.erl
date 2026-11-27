@@ -25,14 +25,19 @@ its device's references, so what a function wrote survives the function.
 Its bulk transfers and class requests go to the model; a transfer the
 model holds is answered `{error, gone}` when the stick is unplugged.
 
+A port reset resets the stick at its place (erx_usb_fake_stick:port_reset/1),
+and puts there the thing the test asked to come back in its place, if any,
+with no connection change: a device that answers its reset as another.
+
 The test plugs and unplugs things, fails a hub's next status transfer,
-plants a fault in a stick, or makes a request kind fail, with the calls
-below.
+plants a fault in a stick, has a thing come back as another at its next
+port reset, or makes a request kind fail, with the calls below.
 """.
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/1, init/3, plug/3, unplug/2, replace/3, fail_status_transfer/2, stick_fault/3, log/1, bus/1]).
+-export([start_link/1, init/3, plug/3, unplug/2, replace/3, fail_status_transfer/2, stick_fault/3, swap_on_reset/3, log/1,
+         bus/1]).
 
 %% The controller start erx_usb_bus_sup takes. The fake registers as Name before its
 %% start returns, so the test reaches each start by it as soon as the start is done, and
@@ -49,6 +54,7 @@ unplug(Name, Place) -> call(Name, {unplug, Place}).
 replace(Name, Place, Thing) -> call(Name, {replace, Place, Thing}).
 fail_status_transfer(Name, Hub) -> call(Name, {fail_status_transfer, Hub}).
 stick_fault(Name, Place, Fault) -> call(Name, {stick_fault, Place, Fault}).
+swap_on_reset(Name, Place, Thing) -> call(Name, {swap_on_reset, Place, Thing}).
 log(Name) -> call(Name, log).
 bus(Name) -> call(Name, bus).
 
@@ -77,7 +83,7 @@ init(Name, RootPorts, World) ->
         Tests -> Tests ! {fake_started, self()}
     end,
     loop(#{bus => none, root_ports => RootPorts, world => World, ports => #{}, refs => #{}, posted => #{},
-           failing => [], sticks => #{}, held => [], log => []}).
+           failing => [], sticks => #{}, held => [], swaps => #{}, log => []}).
 
 loop(S) ->
     receive
@@ -107,6 +113,8 @@ test({fail_status_transfer, Hub}, S = #{failing := Failing}) ->
     {ok, deliver(Hub, S#{failing := [Hub | Failing]})};
 test({stick_fault, Place, Fault}, S) ->
     {ok, put_stick(Place, erx_usb_fake_stick:fault(stick(Place, S), Fault), S)};
+test({swap_on_reset, Place, Thing}, S = #{swaps := Swaps}) ->
+    {ok, S#{swaps := Swaps#{Place => Thing}}};
 test(log, S = #{log := Log}) ->
     {lists:reverse(Log), S};
 test(bus, S = #{bus := Bus}) ->
@@ -171,7 +179,7 @@ request({detach, Ref}, S = #{refs := Refs, posted := Posted}) ->
 port_op(Place, power_on, S) -> {ok, put_port(Place, powered, true, S)};
 port_op(Place, reset, S) ->
     case maps:is_key(Place, maps:get(world, S)) of
-        true -> {ok, add_change(Place, reset, put_port(Place, enabled, true, S))};
+        true -> {ok, add_change(Place, reset, put_port(Place, enabled, true, reset_thing(Place, S)))};
         false -> {ok, S}
     end;
 port_op(Place, disable, S) -> {ok, put_port(Place, enabled, false, S)};
@@ -185,6 +193,19 @@ port_op(Place, get_status, S = #{world := World}) ->
         bor bit(Powered, ?ERX_USB_PORT_STATUS_POWER) bor bit(Connected, ?ERX_USB_PORT_STATUS_HIGH_SPEED),
     Change = lists:sum([change_bit(C) || C <- Changes]),
     {{ok, <<Status:16/little, Change:16/little>>}, S}.
+
+%% What a port reset does to the thing at Place: it comes back as the thing the test
+%% asked for, with no stick of its own yet, or else a stick is reset.
+reset_thing(Place, S = #{swaps := Swaps, world := World, sticks := Sticks}) ->
+    case Swaps of
+        #{Place := Thing} ->
+            S#{swaps := maps:remove(Place, Swaps), world := World#{Place := Thing},
+               sticks := maps:remove(Place, Sticks)};
+        #{} when is_map_key(Place, Sticks) ->
+            put_stick(Place, erx_usb_fake_stick:port_reset(maps:get(Place, Sticks)), S);
+        #{} ->
+            S
+    end.
 
 put_port(Place, Key, Value, S = #{ports := Ports}) ->
     S#{ports := Ports#{Place => (port(Place, S))#{Key => Value}}}.

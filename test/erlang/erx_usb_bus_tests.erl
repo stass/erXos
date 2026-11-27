@@ -246,6 +246,50 @@ a_short_or_malformed_csw_is_refused_with_a_reset_test() ->
         ?assertEqual([Transport], transports())
     end).
 
+%% A stick that only a port reset revives (docs/design-usb.md, "Recovery", rung 3, and
+%% "Reattach"): every bulk transfer stalls whatever its class reset and its clears do, so
+%% its function ends asking for a port reset; the bus resets its port, retiring the
+%% stick's reference, the stick comes back the same under a fresh one, and the function,
+%% started again on it, serves its medium under a new transport, which reads what the
+%% old one wrote.
+a_stick_only_a_port_reset_revives_is_reattached_test() ->
+    with_bus(#{[1] => stick}, fun() ->
+        Ref = configured([1]),
+        Transport = transport(),
+        Data = binary:copy(<<7>>, 512),
+        ok = erx_blk:write(Transport, 3, Data),
+        Resets = count({port, root, 1, reset}),
+        ok = erx_usb_fake_xhci:stick_fault(?FAKE, [1], wedge),
+        ?assertNotMatch({ok, _}, read_or_exit(Transport)),
+        wait(fun() -> count({port, root, 1, reset}) =:= Resets + 1 end),
+        wait(fun() -> [T || T <- transports(), T =/= Transport] =/= [] end),
+        [New] = transports(),
+        ?assertEqual({ok, Data}, erx_blk:read(New, 3, 1)),
+        [Ref, Fresh] = references([1], log()),
+        ?assert(Fresh > Ref),
+        ?assert(lists:member({detach, Ref}, log())),
+        ?assertEqual(Resets + 1, count({port, root, 1, reset}))
+    end).
+
+%% A device that answers its port's reset as another, with no connection change, is a
+%% new device: the reference the stick had is detached, and the keyboard now on the port
+%% is enumerated under a fresh one and its function starts as a first instance, so it
+%% takes nothing the stick held.
+a_device_back_as_another_after_its_port_reset_is_new_test() ->
+    with_bus(#{[1] => stick}, fun() ->
+        Old = configured([1]),
+        Transport = transport(),
+        ok = erx_usb_fake_xhci:swap_on_reset(?FAKE, [1], keyboard),
+        ok = erx_usb_fake_xhci:stick_fault(?FAKE, [1], wedge),
+        _ = read_or_exit(Transport),
+        wait(fun() -> length(lists:usort(references([1], log()))) =:= 2 end),
+        [Old, New] = references([1], log()),
+        ?assertNotEqual(Old, New),
+        {hid_started, _, #{device := New, run := 1}} = next_hid(),
+        ?assert(lists:member({detach, Old}, log())),
+        ?assertEqual([], transports())
+    end).
+
 %% A stick unplugged while a read's data phase is posted: the read fails, never answering
 %% data, and the function and its medium's transport end; the bus runs on.
 a_stick_unplugged_mid_transfer_ends_its_function_test() ->
@@ -639,6 +683,11 @@ parent(Pid) ->
         undefined ->
             none
     end.
+
+%% A read of block 0 through a transport that may end under it: its answer, or the exit
+%% that ended it.
+read_or_exit(Transport) ->
+    try erx_blk:read(Transport, 0, 1) catch exit:Reason -> {exit, Reason} end.
 
 %% The one transport, once its medium is ready.
 transport() ->

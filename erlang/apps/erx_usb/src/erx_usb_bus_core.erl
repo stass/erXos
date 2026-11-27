@@ -99,7 +99,8 @@ head; and one `{configure_endpoints, Ref, Step, ...}` adding every claimed
 pipe, with the hub fields for a hub. Control transfers go out as
 `{control, Ref, Step, Setup, Data}`. On the last answer the port is
 `running`, `{start, Ref, Functions}` starts the device's functions, each
-paired with its run number, 1, and a hub enters with its ports `off`.
+paired with its run number, 1 for a new device and the next for a function
+its port's reset carried over, and a hub enters with its ports `off`.
 
 Every request names its device's reference and the step it was sent at,
 and its answer echoes both: `{Kind, Ref, Step, Result}`. request/4 is the
@@ -120,8 +121,18 @@ of the `{error, Reason}` its start answered. An end as `{shutdown, {unusable, Wh
 drive its interface, is final, as a FreeBSD probe that answers ENXIO: the
 run keeps Why for the device's inspection record, nothing is reset or
 started again, and the end counts toward no bound, so the device's other
-functions run on. Any other end resets the function's pipes other than
-EP0 one at a time,
+functions run on. An end as `{shutdown, {reset_port, Rung, Reason}}`, a BOT
+function's top rung, resets the device's port: the port keeps the device's
+identity (its speed and the bytes of its device and configuration
+descriptors) and its runs, its occupant is detached, retiring its
+reference, and the port settles and takes its turn as a connected port
+does. Its next enumeration is a new device's, under a fresh reference; at
+its configuration, a device whose identity is, whole, the one kept is
+configured with the runs carried over, each usable function starting as
+its next instance, while any other is configured with first runs, as any
+new device. A connection change forgets what the port kept. Any other end
+resets the function's pipes
+other than EP0 one at a time,
 `{reset_pipe, Ref, Interface, Address}` each, the next sent only on the
 last one's `ok`, and `{start, Ref, [{Function, Run + 1}]}` starts the
 function again once every one has answered, so its new instance never
@@ -171,7 +182,10 @@ request's answer comes back as the operation's by hub_answer/2.
 
 -include("generated/erx_abi.hrl").
 
--doc "A device's reference: fresh for every device the bus ever enumerates.".
+-doc """
+A device's reference: fresh for every device the bus enumerates, and never reused
+within one bus process's life.
+""".
 -type ref() :: {device, pos_integer()}.
 
 -doc "A hub: the root hub, or an external hub by its device's reference.".
@@ -201,11 +215,27 @@ whether it holds the address-zero turn meanwhile.
 -doc """
 What a port keeps across its states: the start times of its enumeration
 attempts within the last `usb_port_attempt_window_ms`, oldest first, at most
-`usb_port_attempts_max` of them; its over-current changes counted; and whether
-one has been logged since its last attempt started.
+`usb_port_attempts_max` of them; its over-current changes counted; whether
+one has been logged since its last attempt started; and, from a function's
+request for a port reset until the port's next enumeration starts or its
+connection changes, what it keeps of the device for that enumeration.
 """.
 -type port_history() :: #{attempts := [ms()], over_current_changes := non_neg_integer(),
-                          over_current_logged := boolean()}.
+                          over_current_logged := boolean(), kept := none | kept()}.
+
+-doc """
+What a device is, for its reattach (docs/design-usb.md, "Reattach"): the speed
+its port's reset gave it and the bytes of its device descriptor and active
+configuration descriptor as it answered them, each added at its step.
+""".
+-type identity() :: #{speed := speed(), device => binary(), configuration => binary()}.
+
+-doc """
+What a port's reset keeps of its device: its identity and its functions' runs,
+the end that asked for the reset counted among them; never its reference, which
+the device's detach retires.
+""".
+-type kept() :: #{identity := identity(), runs := #{Interface :: byte() => run()}}.
 
 -type op() :: power_on | get_status | reset | disable | {clear, atom()}.
 
@@ -272,8 +302,9 @@ hub's.
 -doc """
 A device: its place, speed, slot and translator, and what its enumeration
 has read so far: its device descriptor, its claimed functions and, for a
-hub, its hub descriptor; and, once configured, its functions' runs by
-interface.
+hub, its hub descriptor; its identity as read so far; what its port's reset
+kept of the device before it, until it is configured; and, once configured,
+its functions' runs by interface.
 """.
 -type device() :: #{port := {hub_id(), port_no()}, route := [port_no(), ...], speed := speed(),
                     slot := none | pos_integer(),
@@ -281,7 +312,8 @@ interface.
                     descriptor := none | erx_usb_desc:device(),
                     functions := [erx_usb_claim:function_()],
                     runs := #{Interface :: byte() => run()},
-                    hub := none | erx_usb_desc:hub()}.
+                    hub := none | erx_usb_desc:hub(),
+                    identity := identity(), kept := none | kept()}.
 
 -doc """
 A claimed function's run: `running`; ended and with the addresses of its
@@ -480,20 +512,22 @@ enumerated(ep0_packet, Ref, _Device, Result, _Now, State) ->
     ok = value(Result),
     read_device(Ref, State);
 enumerated(device, Ref, Device = #{speed := Speed}, Result, _Now, State) ->
-    Descriptor = value(erx_usb_desc:device(value(Result))),
+    Bytes = value(Result),
+    Descriptor = value(erx_usb_desc:device(Bytes)),
     no_superspeed_hub(Descriptor, Speed),
     request(Ref, config_head, get_descriptor(?ERX_USB_DESCRIPTOR_TYPE_CONFIGURATION,
                                              ?ERX_USB_CONFIGURATION_DESCRIPTOR_SIZE),
-            put_device(Ref, Device#{descriptor := Descriptor}, State));
+            put_device(Ref, identified(device, Bytes, Device#{descriptor := Descriptor}), State));
 enumerated(config_head, Ref, _Device, Result, _Now, State) ->
     Total = value(erx_usb_desc:configuration_length(value(Result))),
     request(Ref, configuration, get_descriptor(?ERX_USB_DESCRIPTOR_TYPE_CONFIGURATION, Total), State);
 enumerated(configuration, Ref, Device = #{speed := Speed, descriptor := Descriptor}, Result, _Now, State) ->
-    Configuration = #{value := Value} = value(erx_usb_desc:configuration(value(Result))),
+    Bytes = value(Result),
+    Configuration = #{value := Value} = value(erx_usb_desc:configuration(Bytes)),
     Functions = value(erx_usb_claim:functions(Speed, Descriptor, Configuration)),
     request(Ref, set_configuration, control(?ERX_USB_REQUEST_TYPE_STANDARD, ?ERX_USB_RECIPIENT_DEVICE,
                                             ?ERX_USB_REQUEST_SET_CONFIGURATION, Value, 0),
-            put_device(Ref, Device#{functions := Functions}, State));
+            put_device(Ref, identified(configuration, Bytes, Device#{functions := Functions}), State));
 enumerated(set_configuration, Ref, #{functions := Functions}, Result, _Now, State) ->
     _ = value(Result),
     case hub_function(Functions) of
@@ -523,6 +557,12 @@ value({error, Reason}) -> refuse(Reason).
 %% The one throw device_answered/6 catches, for a step that refuses.
 -spec refuse(term()) -> no_return().
 refuse(Reason) -> throw({?MODULE, refused, Reason}).
+
+%% Device with Part of its identity, Bytes, as it answered them, for configured/2 to
+%% compare whole with the identity its port's reset kept (docs/design-usb.md,
+%% "Reattach").
+identified(Part, Bytes, Device = #{identity := Identity}) ->
+    Device#{identity := Identity#{Part => Bytes}}.
 
 %% A full-speed EP0's packet size from bMaxPacketSize0: a power of two from 8 to
 %% usb_ep0_packet_full_max, the sizes FreeBSD's fallback tries
@@ -585,12 +625,21 @@ multi_tt(Functions) ->
     Alternate =:= ?ERX_USB_HUB_MULTI_TT_ALTERNATE.
 
 %% The device configured: its port `running`, its functions started and running,
-%% and a hub's ports added `off`.
-configured(Ref, Device = #{port := {Id, N}, speed := Speed, route := Route, functions := Functions, hub := Hub},
+%% and a hub's ports added `off`. A device whose identity is, whole, the one its
+%% port's reset kept takes the runs carried over, each function not already unusable
+%% starting again as its next instance, with the ends it had counted; any other,
+%% a part answered otherwise or missing on either side, starts each function as
+%% instance 1, as any new device.
+configured(Ref, Device = #{port := {Id, N}, speed := Speed, route := Route, functions := Functions, hub := Hub,
+                           identity := Identity, kept := Kept},
            State0 = #{hubs := Hubs}) ->
-    Runs = maps:from_list([{Interface, #{state => running, number => 1, ends => []}}
+    Before = case Kept of
+                 #{identity := Identity, runs := KeptRuns} -> KeptRuns;
+                 _Other -> #{}
+             end,
+    Runs = maps:from_list([{Interface, next_run(maps:get(Interface, Before, none))}
                            || #{interface := Interface} <- Functions]),
-    State1 = put_device(Ref, Device#{runs := Runs}, State0),
+    State1 = put_device(Ref, Device#{runs := Runs, kept := none}, State0),
     State = case Hub of
                 none ->
                     State1;
@@ -599,8 +648,15 @@ configured(Ref, Device = #{port := {Id, N}, speed := Speed, route := Route, func
                     State1#{hubs := Hubs#{Ref => Added}}
             end,
     Started = [{Function, Number} || Function = #{interface := Interface} <- Functions,
-                                     #{number := Number} <- [maps:get(Interface, Runs)]],
+                                     #{state := running, number := Number} <- [maps:get(Interface, Runs)]],
     then([{start, Ref, Started}], set_port(Id, N, {running, Ref}, State)).
+
+%% A claimed function's run at its device's configuration, from the run its port kept
+%% for it, if any: a new function's first instance; a kept function, unless unusable,
+%% as its next instance, its counted ends kept.
+next_run(none) -> #{state => running, number => 1, ends => []};
+next_run(Run = #{state := {unusable, _Why}}) -> Run;
+next_run(Run = #{number := Number}) -> Run#{state := running, number := Number + 1}.
 
 %% A function's end (docs/design-usb.md, "A function's end" and "Failure handling").
 
@@ -619,23 +675,44 @@ function_ended(Ref, Interface, Run, Reason, Now, State) ->
 %% run keeps the reason, nothing is reset or started, and the end counts toward no
 %% bound, as a FreeBSD probe that answers ENXIO leaves its interface unattached.
 %% Any other end, a crash, a failed transfer or a BOT function's request for a port
-%% reset ({shutdown, {reset_port, Rung, Reason}}, whose port reset is the bus's
-%% planned rung: docs/todo-usb.md), resets the function's pipes and
-%% starts it again, when fewer than usb_function_restarts_max of its ends fell in
-%% the last usb_function_restart_window_ms; past them its device's port is given up,
-%% the failure naming the end that went past them by end_name/1, since a function
-%% that ends on a failed transfer leaves no crash report of its own.
+%% reset, starts the function again when fewer than usb_function_restarts_max of its
+%% ends fell in the last usb_function_restart_window_ms: a request for a port reset,
+%% {shutdown, {reset_port, Rung, Reason}}, by its device's port's reset, and every
+%% other end by its pipes' resets. Past them its device's port is given up, the
+%% failure naming the end that went past them by end_name/1, since a function that
+%% ends on a failed transfer leaves no crash report of its own.
 ended(Ref, Interface, {shutdown, {unusable, Why}}, Current, _Now, State) ->
     {[], put_run(Ref, Interface, Current#{state := {unusable, Why}}, State)};
 ended(Ref, Interface, End, Current = #{ends := Ends}, Now, State) ->
     case admit(Ends, Now, ?ERX_USB_FUNCTION_RESTARTS_MAX, ?ERX_USB_FUNCTION_RESTART_WINDOW_MS) of
         {admitted, Admitted} ->
-            #{pipes := Pipes} = claimed(Ref, Interface, State),
-            reset_next_or_start(Ref, Interface, [Address || #{address := Address} <- Pipes],
-                                Current#{ends := Admitted}, State);
+            case End of
+                {shutdown, {reset_port, _Rung, _Why}} ->
+                    reset_port(Ref, Now, put_run(Ref, Interface, Current#{ends := Admitted}, State));
+                _Other ->
+                    #{pipes := Pipes} = claimed(Ref, Interface, State),
+                    reset_next_or_start(Ref, Interface, [Address || #{address := Address} <- Pipes],
+                                        Current#{ends := Admitted}, State)
+            end;
         {refused, _Until} ->
             fail_device(Ref, {function, Interface, {restarts, end_name(End)}}, State)
     end.
+
+%% The bus's answer to a request for a port reset, the top rung of a BOT function's
+%% recovery (docs/design-usb.md, "Recovery" and "Reattach"), as FreeBSD's
+%% usbd_req_re_enumerate resets the device's port and addresses it again
+%% (sys/dev/usb/usb_request.c:2063-2160, release/15.1.0). The port keeps the device's
+%% identity and its functions' runs, and its occupant is detached, which stops the
+%% device's other functions, has the controller unbind the reference and tear its slot
+%% down, and retires the reference for good; then the port settles, FreeBSD's power-up
+%% delay, and waits for the address-zero turn as a connected port does, within its
+%% attempts, so its reset, its deadline and its failures are every port's. The
+%% enumeration that follows is a new device's, under a fresh reference.
+reset_port(Ref, Now, State = #{devices := Devices}) ->
+    #{port := {Id, N}, identity := Identity, runs := Runs} = maps:get(Ref, Devices),
+    History = history(Id, N, State),
+    Keeping = put_history(Id, N, History#{kept := #{identity => Identity, runs => Runs}}, State),
+    set_port(Id, N, {settling, Now + ?ERX_USB_POWER_UP_DELAY_MS}, Keeping).
 
 %% A function's end as the port's failure keeps it and the log shows it: names only
 %% (docs/design-log.md, "Reports carry no term"). A shutdown made of atoms and
@@ -758,7 +835,7 @@ hub(Parent, Ports, PowerGoodUnits, MultiTT, Power) ->
       power => Power, multi_tt => MultiTT,
       ports => maps:from_keys(lists:seq(1, Ports), off),
       histories => maps:from_keys(lists:seq(1, Ports), #{attempts => [], over_current_changes => 0,
-                                                        over_current_logged => false}),
+                                                        over_current_logged => false, kept => none}),
       pending => lists:seq(1, Ports),
       op => none, clears => [], reporter => none}.
 
@@ -827,11 +904,16 @@ read(Id, N, Status = #{connected := Connected}, Now, State) ->
                                              true -> {settling, Now + ?ERX_USB_POWER_UP_DELAY_MS};
                                              false -> empty
                                          end,
-                               set_port(Id, N, Arrival, State);
+                               set_port(Id, N, Arrival, forget_kept(Id, N, State));
                            false ->
                                follow(Id, N, Port, Status, Now, State)
                        end,
     then(Actions, over_current(Id, N, Status, Moved)).
+
+%% A connection change ends whatever the port kept for a reattach: what is connected
+%% now is a new device, never the one that asked for the reset.
+forget_kept(Id, N, State) ->
+    put_history(Id, N, (history(Id, N, State))#{kept := none}, State).
 
 %% A connection change, or a status that disagrees with whether the port holds
 %% something: nothing on an `empty` port, something on every other read port.
@@ -938,11 +1020,15 @@ admit(Times, Now, Max, Window) ->
         false -> {refused, hd(Recent) + Window}
     end.
 
-%% A device for the port at the end of its reset recovery.
-enumerate(Id, N, Speed, State = #{devices := Devices, next := Ref = {device, Next}}) ->
+%% A device for the port at the end of its reset recovery, under a fresh reference.
+%% The port hands what its reset kept of the device before it, if anything, to this
+%% one enumeration, and keeps nothing after.
+enumerate(Id, N, Speed, State0 = #{next := Ref = {device, Next}}) ->
+    History = #{kept := Kept} = history(Id, N, State0),
+    State = #{devices := Devices} = put_history(Id, N, History#{kept := none}, State0),
     Device = #{port => {Id, N}, route => route(Id, State) ++ [N], speed => Speed, slot => none,
                tt => translator(Id, N, Speed, State), descriptor => none, functions => [], runs => #{},
-               hub => none},
+               hub => none, identity => #{speed => Speed}, kept => Kept},
     request(Ref, enabling_slot, enable_slot, State#{devices := Devices#{Ref => Device}, next := {device, Next + 1}}).
 
 route(root, _State) -> [];

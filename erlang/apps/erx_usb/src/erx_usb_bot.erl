@@ -41,8 +41,9 @@ engine's.
 needs recovery twice, ends the function with
 `{shutdown, {reset_port, Rung, Reason}}`, logged with its rung, which
 asks the bus for a port reset (docs/design-usb.md, "Recovery"); the bus
-answers it as any end, resetting the function's pipes and starting it
-again, the port reset being its planned rung (docs/todo-usb.md). A Get
+resets the device's port and starts the function again on a device that
+comes back the same, within the function's restart bound
+(erx_usb_bus_core, "A function's end"). A Get
 Max LUN answer above usb_bot_lun_max ends it unusable. The device's
 detach has the bus stop the function; a transfer answered `gone` before
 that climbs the ladder as any failure does. Each transport monitors the

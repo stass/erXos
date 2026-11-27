@@ -5,15 +5,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [High] USB, `erlang/apps/erx_usb/src/erx_usb_bus_core.erl`: the bus's port reset rung, the top rung of
-  the BOT recovery ladder (design-usb.md, "Recovery", rung 3, and "Reattach"), is not built. A function end
-  as `{shutdown, {reset_port, Rung, Reason}}` must reset the device's port and enumerate it again within
-  `usb_port_attempts_max`, keeping the device and its reference when its device and configuration
-  descriptors and serial string come back unchanged, then start the function again. The bus answers that
-  end as any other (`ended/6` resets the function's pipes and restarts it, 3 ends in 60 s), so a stick
-  that only a port reset revives stays wedged until it is replugged. Once it lands, re-run on the Pi 4
-  the stick that ended mid-write and then timed out in `reset_pipe` 31 s later, with the BOT engine's
-  step trace.
+* [Medium] USB, the Pi 4 stick that ended mid-write and then timed out in `reset_pipe` 31 s later: re-run it
+  on the board with the BOT engine's step trace, the bus answering `{shutdown, {reset_port, Rung,
+  Reason}}` by resetting the device's port (design-usb.md, "Reattach"), and confirm the stick comes back
+  with its function's runs carried over. QEMU's suite plants no fault that needs a port reset; the host tests over
+  `erx_usb_fake_stick`'s `wedge` are the only check of the rung until then.
 * [Low] USB, `erlang/apps/erx_usb/src/erx_usb_bot_core.erl`: a loose end of the recovery ladder,
   bounded and failing safe. A clear (`reset_pipe` after a failed data phase or CSW) that times out leaves its
   reset running in the controller, so reset recovery's own `reset_pipe in` is answered `{error, resetting}`
@@ -125,10 +121,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   answer `handled` once every target the report named has been read once since it, re-reads going on in the queue;
   or, as FreeBSD bounds it (`usb_hub.c:616-637`, one clear and one fresh read), leave the changes a re-read sees
   latched at an external hub for its next report.
-* [Low] USB, the bus core's enumeration (`erx_usb_bus_core`, [design-usb.md](design-usb.md#ports-hubs-and-devices-the-bus-core)):
+* [Medium] USB, the bus core's enumeration (`erx_usb_bus_core`, [design-usb.md](design-usb.md#ports-hubs-and-devices-the-bus-core)):
   step 3, the language table and the manufacturer, product and serial strings, is not run, so a device's
-  inspection record has no strings; a failure there fails nothing, so adding it is a step between `device` and
-  `config_head` with the strings kept on the device.
+  inspection record has no strings, and a reattach ([Reattach](design-usb.md#reattach)) compares the speed and
+  the device and configuration descriptors but no serial: a stick of the same model answering a port reset
+  with another serial takes its functions' runs and counted ends over, though no medium (each is found
+  afresh). A failure there fails nothing, so adding it is a step between `device` and `config_head` with the
+  strings kept on the device and the serial added to `identified/3`'s parts.
 * [Medium] USB, the bus core's enumeration tests (`test/erlang/erx_usb_bus_core_tests.erl`): no case reaches a
   multi-TT hub (SET_INTERFACE's setup bytes, `multi_tt => true` in Configure Endpoint, `multi => true` in a
   child's translator), a refused `bMaxPacketSize0`, a SuperSpeed hub-class device or a malformed descriptor

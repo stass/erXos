@@ -23,7 +23,8 @@
 %%   open; a failed address keeps the window until its answer;
 %% * a connection change read on an occupied port detaches the occupant first;
 %% * every slot handed out belongs to a device the core still holds, and a detached
-%%   device's reference is gone and named by no later action;
+%%   device's reference is gone and named by no later action: an enumeration names a
+%%   reference above every one enumerated before, a port reset's included;
 %% * a hub has at most one port operation in flight, and `handled` goes only to the hub
 %%   function whose report is outstanding;
 %% * no status read reaches a hub's port before its power-good time has passed since
@@ -79,6 +80,11 @@
 %% toward the restarts, and an interface the function cannot drive, which is final.
 -define(FAILED, {shutdown, {transfer, stall}}).
 -define(UNUSABLE, {shutdown, {unusable, no_usable_report}}).
+%% A BOT function's end asking for its device's port to be reset, the top rung of its
+%% recovery, which counts toward the restarts.
+-define(RESET_PORT, {shutdown, {reset_port, reset_2, {transfer, stall}}}).
+%% FreeBSD's power-up delay, which a port settles for before its attempt.
+-define(POWER_UP_DELAY, 300).
 %% wPortStatus's and wPortChange's connection and over-current bits.
 -define(CONNECTION, 1).
 -define(OVER_CURRENT, 8).
@@ -144,7 +150,7 @@ model0() ->
     #{now => ?T0, deadline => none,
       world => #{[1] => port0(), [2] => port0()},
       hubs => #{}, ops => #{}, cmds => [], slots => #{}, things => #{}, seen => #{}, addressed_at => #{},
-      powered => #{}, window => none, answered => #{}, fns => #{}, resets => [],
+      powered => #{}, window => none, answered => #{}, fns => #{}, resets => [], last_ref => none,
       stimuli => 0, errors => 0, ends => 0}.
 
 port0() -> #{thing => none, chg => [], enabled => false, addressed => false, powered => false, signaled => false}.
@@ -264,10 +270,10 @@ finishes(#{fns := Fns}) ->
     [{finish, Ref, I, How} || {Ref, I} := #{state := running, driver := Driver} <- Fns, How <- ends_of(Driver)].
 
 ends_of(erx_usb_hub) -> [failed];
-ends_of(_Driver) -> [failed, unusable].
+ends_of(_Driver) -> [failed, unusable, reset_port].
 
 %% Every reason an end may carry, for the ends delivered as stale.
-end_reasons() -> [?FAILED, ?UNUSABLE].
+end_reasons() -> [?FAILED, ?UNUSABLE, ?RESET_PORT].
 
 runs(Ref, Core) ->
     maps:get(runs, maps:get(Ref, erx_usb_bus_core:devices(Core))).
@@ -457,6 +463,25 @@ follow({finish, Ref, I, failed}, {M = #{ends := E, fns := Fns, hubs := Hubs, now
                    false -> [A || {reset_pipe, R, J, A} <- Last, {R, J} =:= {Ref, I}] =/= []
                end,
     Answered orelse error({function_end_not_answered, Ref, I, Last}),
+    Node;
+%% A function's end asking for a port reset: its device's reference leaves the controller
+%% and every function of the device stops, and its port settles to be reset in its turn,
+%% or, past its restarts, is given up. Whatever comes back is enumerated under a fresh
+%% reference (action/4's enable_slot checks it is above every earlier one), so the model
+%% treats its configuration as a first start, the run numbers carried over aside.
+follow({finish, Ref, I, reset_port}, {M = #{ends := E, fns := Fns, now := Now}, Core}) ->
+    Fn = #{ended := Ended, run := Run} = maps:get({Ref, I}, Fns),
+    Recent = [T || T <- Ended, Now - T < ?RESTART_WINDOW] ++ [Now],
+    #{port := {H, N}} = maps:get(Ref, erx_usb_bus_core:devices(Core)),
+    Ending = M#{ends := E - 1, fns := Fns#{{Ref, I} := Fn#{state := {ended, []}, ended := Recent}}},
+    Node = {#{last := Last}, After} = deliver({function_ended, Ref, I, Run, ?RESET_PORT}, Ending, Core),
+    lists:member({detach, Ref}, Last) orelse error({reset_port_end_not_answered, Ref, I, Last}),
+    Port = maps:get({H, N}, erx_usb_bus_core:ports(After)),
+    case {length(Recent) > ?RESTARTS_MAX, Port} of
+        {true, {disabling, {function, I, {restarts, ?RESET_PORT}}, _}} -> ok;
+        {false, {settling, _At}} -> ok;
+        _ -> error({reset_port_end_left_port, Ref, I, Port})
+    end,
     Node;
 %% A pipe reset's answer: on `ok` the pipe is reset; a failure of a reset in flight must
 %% detach its device.
@@ -722,12 +747,13 @@ action({handled, H, From}, M = #{hubs := Hubs}, _Before, _After) ->
             M#{hubs := Hubs#{H := Fn#{outstanding := false}}};
         #{} -> error({handled_without_report, H, From})
     end;
-action({enable_slot, Ref, Step}, M = #{cmds := Cmds, things := Things, world := World}, Before, After) ->
-    is_map_key(Ref, erx_usb_bus_core:devices(Before)) andalso error({reference_reused, Ref}),
+action({enable_slot, Ref, Step}, M = #{cmds := Cmds, things := Things, world := World, last_ref := Last},
+       _Before, After) ->
+    Ref > Last orelse error({reference_reused, Ref, Last}),
     #{port := {H, N}} = maps:get(Ref, erx_usb_bus_core:devices(After)),
     Place = where(H, N, M),
     #{thing := Thing} = maps:get(Place, World, #{thing => gone}),
-    M#{cmds := Cmds ++ [{slot, Ref, Step, none}], things := Things#{Ref => {Place, Thing}}};
+    M#{cmds := Cmds ++ [{slot, Ref, Step, none}], things := Things#{Ref => {Place, Thing}}, last_ref := Ref};
 %% A low- or full-speed device behind the high-speed hub is served by the hub's
 %% translator on its port; every other device by none.
 action({address, Ref, Step, #{slot := Slot, root_port := RootPort, route := Tiers, tt := TT}},
@@ -1095,6 +1121,79 @@ a_function_restarts_at_most_three_times_a_minute_test() ->
     Later = restarted(Ref, Now + ?RESTART_WINDOW, Three),
     ?assertMatch({_, [{detach, Ref} | _]},
                  erx_usb_bus_core:step({function_ended, Ref, 0, 5, ?FAILED}, Now + ?RESTART_WINDOW, Later)).
+
+%% A function's request for a port reset (docs/design-usb.md, "Reattach"): its device is
+%% detached from the controller, retiring its reference, and its port settles; the port
+%% is reset in its turn, and the device, read back the same, is configured under a fresh
+%% reference with its function's run carried over, starting again as its next instance
+%% with the end counted.
+a_port_reset_carries_the_runs_to_a_fresh_reference_test() ->
+    Running = settle(follow({stimulus, [1], dev1}, trace_start())),
+    {running, Ref} = port_of(Running, {root, 1}),
+    Back = {_, Core} = settle(follow({finish, Ref, 0, reset_port}, Running)),
+    {running, New} = port_of(Back, {root, 1}),
+    ?assert(New > Ref),
+    ?assertNot(is_map_key(Ref, erx_usb_bus_core:devices(Core))),
+    ?assertMatch(#{0 := #{state := running, number := 2, ends := [_]}}, runs(New, Core)).
+
+%% A device that answers its port's reset as another, with no connection change, is a
+%% new device: back at another speed (full-speed dev1 back as high-speed dev2), or at its
+%% speed with other descriptors (dev2 back as a hub), it takes none of the runs the port
+%% kept, and its function starts under the fresh reference as instance 1 with no ends.
+a_port_reset_finds_another_device_new_test() ->
+    back_as_another(dev1, dev2),
+    back_as_another(dev2, hub).
+
+back_as_another(Was, Is) ->
+    Running = settle(follow({stimulus, [1], Was}, trace_start())),
+    {running, Ref} = port_of(Running, {root, 1}),
+    {M = #{world := World}, Reset} = follow({finish, Ref, 0, reset_port}, Running),
+    Below = case Is of
+                hub -> #{[1, 1] => port0(), [1, 2] => port0()};
+                _ -> #{}
+            end,
+    Swapped = {M#{world := maps:merge(World#{[1] := (maps:get([1], World))#{thing := Is}}, Below)}, Reset},
+    Back = {_, Core} = settle(Swapped),
+    {running, New} = port_of(Back, {root, 1}),
+    ?assertNotEqual(Ref, New),
+    ?assertNot(is_map_key(Ref, erx_usb_bus_core:devices(Core))),
+    ?assertMatch(#{0 := #{state := running, number := 1, ends := []}}, runs(New, Core)).
+
+%% A device replugged while its port waits for the reset a function asked for is a new
+%% device, even when it answers the same: the connection change forgets what the port
+%% kept.
+a_replug_before_the_port_reset_forgets_the_kept_device_test() ->
+    Running = settle(follow({stimulus, [1], dev1}, trace_start())),
+    {running, Ref} = port_of(Running, {root, 1}),
+    Reset = follow({finish, Ref, 0, reset_port}, Running),
+    Back = {_, Core} = settle(follow({stimulus, [1], dev1}, follow({stimulus, [1], none}, Reset))),
+    {running, New} = port_of(Back, {root, 1}),
+    ?assertNotEqual(Ref, New),
+    ?assertMatch(#{0 := #{number := 1, ends := []}}, runs(New, Core)).
+
+%% A port reset that its hub never answers is given up at its deadline, as any port's
+%% reset is: the port is logged as failed and disabled, and holds the turn until then.
+a_port_reset_past_its_deadline_gives_the_port_up_test() ->
+    {#{now := Now}, Core0} = Running = settle(follow({stimulus, [1], dev1}, trace_start())),
+    {running, Ref} = port_of(Running, {root, 1}),
+    {Core1, A1} = erx_usb_bus_core:step({function_ended, Ref, 0, 1, ?RESET_PORT}, Now, Core0),
+    ?assertEqual([{detach, Ref}, {deadline, Now + ?POWER_UP_DELAY}], A1),
+    {Core2, A2} = erx_usb_bus_core:step(expired, Now + ?POWER_UP_DELAY, Core1),
+    ?assertEqual([{port, root, 1, reset}], [A || A <- A2, element(1, A) =/= deadline]),
+    {Core3, A3} = erx_usb_bus_core:step(expired, Now + ?ATTEMPT_WINDOW, Core2),
+    ?assertEqual([{log, root, 1, {failed, reset_timeout}}], [A || A <- A3, element(1, A) =/= deadline]),
+    ?assertMatch({disabling, reset_timeout, true}, maps:get({root, 1}, erx_usb_bus_core:ports(Core3))).
+
+%% A request for a port reset counts toward the function's restarts as any end does:
+%% after three restarts within a minute, it gives the port up, named whole.
+a_port_reset_past_the_restarts_gives_the_port_up_test() ->
+    {#{now := Now}, Core0} = Running = settle(follow({stimulus, [1], dev1}, trace_start())),
+    {running, Ref} = port_of(Running, {root, 1}),
+    Three = lists:foldl(fun(At, Core) -> restarted(Ref, At, Core) end, Core0, [Now, Now + 1, Now + 2]),
+    {_, Actions} = erx_usb_bus_core:step({function_ended, Ref, 0, 4, ?RESET_PORT}, Now + 3, Three),
+    ?assertEqual([{detach, Ref}, {log, root, 1, {failed, {function, 0, {restarts, ?RESET_PORT}}}},
+                  {port, root, 1, disable}],
+                 [A || A <- Actions, element(1, A) =/= deadline]).
 
 %% The end that gives a port up is logged by name only (docs/design-log.md, "Reports
 %% carry no term"): a crash whose stack frame holds the keys a keyboard reported

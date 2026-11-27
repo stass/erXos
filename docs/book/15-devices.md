@@ -629,9 +629,12 @@ cancels the transfer still posted by resetting that pipe, so the next
 step never races it; then it sends the storage class's reset and clears
 both bulk pipes; and when a rung fails, or one operation needs recovery
 twice, the function ends, asking for a reset of the device's port; the
-bus resets the port and starts the function again on the stick that
-comes back. The ladder is **Built**; the bus's port reset is
-**Designed**.
+bus resets the port and enumerates what comes back under a fresh
+reference, as it does every device, and when the stick comes back the
+same, its descriptors byte for byte, the function starts again on it
+as its next instance, its ends still counted; a device that comes back
+as another starts afresh.
+The ladder and the bus's port reset are **Built**.
 After a recovery that works, the command is sent again, at most four
 times and within the request's own deadline, which is safe because
 every command the engine sends reads or writes the same blocks when

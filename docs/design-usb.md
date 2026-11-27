@@ -1633,7 +1633,7 @@ back the same ([Reattach](#reattach)).
 
 Each instance of a function has a run number, which the bus core keeps
 per function: 1 at the device's configuration, one more at each start
-again. The core's start, `{start, Ref, Functions}`, pairs each function
+again, a port reset's reattach included ([Reattach](#reattach)). The core's start, `{start, Ref, Functions}`, pairs each function
 with its number, and the bus process keeps the number with the instance
 it starts and passes it back in that instance's end, `{function_ended,
 Ref, Interface, Run, Reason}`, and, for a hub function, in each of its reports,
@@ -3222,8 +3222,8 @@ it.
 
 **What the BOT function needs from the bus.** One request, made by
 ending with `{shutdown, {reset_port, Rung, Reason}}`: reset this
-device's port and enumerate it again, keeping its place when it comes
-back the same. The BOT core owns only the decision to ask, and the
+device's port and enumerate it again under a fresh reference, carrying
+its functions' runs over when it comes back the same. The BOT core owns only the decision to ask, and the
 function logs the rung that failed as it ends. The bus answers such an
 end by resetting the device's port and, through [Reattach](#reattach),
 starting the function again, counting the end toward
@@ -3238,13 +3238,30 @@ restart bound.
 #### Reattach
 
 A port reset brings the device back through Address Device and its
-descriptors. The bus core keeps the device and its reference, instead
-of detaching and attaching it, when the device comes back the same: its
-device descriptor and active configuration descriptor byte for byte,
-and its serial-number string when it has one; it then starts the
-function that asked for the reset again, as it restarts any function
-after its end. A device that comes back different, or whose
-re-enumeration fails, is detached as a new device would be.
+descriptors, and the device it brings back is a new one to the bus: a
+reference is never reused. The bus core stops the device's functions
+and has the controller tear the device's slot down, as a detach does,
+which retires the device's reference for good; it keeps on the port
+the device's identity and its functions' runs, and the port settles and
+takes the address-zero turn as a connected port does, within its
+attempts, so the reset's deadline and failures are any port's. The
+device is enumerated again under a fresh reference, as FreeBSD's
+`usbd_req_re_enumerate` resets the port and addresses the device again
+(`usb_request.c:2063-2160`). When it comes back the same, at the speed
+it had, its device descriptor and active configuration descriptor byte
+for byte, and its serial-number string when it has one, its functions'
+runs are carried over to the fresh reference: every function not
+already unusable, the one that asked among them, starts again as its
+next instance, its ends still counted, so the restart bound holds
+across the reset. A device that answers any part differently is a new
+device, its functions starting with first runs, so one that comes back
+as another at each reset is bounded by its port's attempts alone, as a
+replug is; one whose
+re-enumeration fails gives its port up as a new device's would. A
+connection change before the enumeration forgets what the port kept.
+Nothing that named the old reference, a pipe or a request still in the
+controller, reaches the device that came back: it answers `{error,
+gone}`, as for any detached device ([A name dies at once](#a-name-dies-at-once-hardware-is-freed-only-on-the-controllers-report)).
 
 A port reset keeps no medium. The function asked for it by ending, and
 it is the only writer of its media: its transports, which monitor it,
@@ -3258,8 +3275,8 @@ in. A card swapped inside the reset's window is therefore never written
 with the old card's blocks: nothing of the old medium survives to write
 them. A drive number names a place, and a script finds a stick again by
 its volume label and serial ([design-drives.md](design-drives.md#fat));
-reattach uses the device's own identity only to keep the device and its
-place.
+reattach uses the device's own identity only to carry its functions'
+runs over.
 
 ### The SCSI subset
 
@@ -3625,7 +3642,7 @@ mounts, the same as if the medium had gone after the request.
 | an invalid CSW, a phase error, a stalled CBW, or a CSW that stays stalled after its clear | `erx_usb_bot_core` | the attempt | reset recovery, then the command sent again under a fresh tag, at most 4 times within the 18 s issue bound; with no retry left, the operation answered `{device, reset}`, the medium kept ([Recovery](#recovery)) |
 | a bulk transfer still posted 8 s after its attempt's CBW: a device that stopped answering | the BOT core, on its tick | the attempt | the transfer cancelled by `reset_pipe` on its pipe, then reset recovery and a retry as the row above |
 | a sense of MEDIUM ERROR, HARDWARE ERROR or ABORTED COMMAND | `erx_usb_bot_core` | the attempt | the command sent again, at most 4 times within the 18 s issue bound; with no retry left, the sense is the answer |
-| a second recovery of one operation, or a rung of the ladder (the cancel, or a step of reset recovery) that fails or is not answered in 5 s | the BOT core | the function, ending `{shutdown, {reset_port, Rung, Reason}}` with the rung in its log line; every operation and medium of the function | the bus resets the device's port and starts the function again, keeping a device that comes back the same ([Reattach](#reattach)), within the function's restart bound as above |
+| a second recovery of one operation, or a rung of the ladder (the cancel, or a step of reset recovery) that fails or is not answered in 5 s | the BOT core | the function, ending `{shutdown, {reset_port, Rung, Reason}}` with the rung in its log line; every operation and medium of the function | the bus resets the device's port and starts the function again, carrying its functions' runs over to a fresh reference when the device comes back the same ([Reattach](#reattach)), within the function's restart bound as above |
 | an issued request past its 18 s bound | the BOT core, at the first event that finds the bound past, a tick or a late answer, before that event does anything else | the request, answered `{device, deadline}`; the medium; its windows end; queued requests of the medium answered `gone` | a transfer still posted is cancelled, then reset recovery readies the device before the next command; a rung already under way runs on; the medium is found again by TEST UNIT READY |
 | a medium's transport ends | the function's monitor of it | the medium; its windows end; queued requests of the medium answered `gone`; an operation already issued runs on as any operation, but its command is never sent again, a retry being answered `gone`, and its answer reaches a caller that is gone, or the unit's course | the unit's readiness sequence finds the medium again under a fresh reference, at most once a poll period however often its transport ends; the function and its other units run on |
 | a medium removed or changed | TEST UNIT READY, UNIT ATTENTION, the detach | the medium; its window ends | the media domain ends the medium's volumes; the next medium mounts at the next walk ([design-drives.md](design-drives.md#failure-handling)) |
