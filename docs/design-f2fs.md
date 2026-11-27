@@ -322,8 +322,11 @@ Linux keeps the same rule for single blocks, with a second valid map per
 segment ([R 38-39]); erXos needs no second map, because it allocates
 only whole free sections, and it holds the rule in three more places:
 
-* at mount, the free set leaves out every section holding a block the
-  chain walk read, which Linux's allocator does not know;
+* at mount, the free set is rebuilt from the durable view itself: it
+  leaves out every section holding a block the chain walk read or a
+  data block the chain's records name, and each log resumes past the
+  last block of the durable view in its section, which Linux's allocator does not know
+  ([The mount checkpoint](#read-write-mounts-the-mount-checkpoint));
 * node ids follow the same rule: a nid whose NAT entry is cleared returns
   to the free pool only at the next checkpoint's commit, as on the path
   the records traced in Linux ([R 25]; whether Linux has another is their
@@ -391,9 +394,10 @@ serves the replayed state. A read-write mount commits the replayed state
 with one checkpoint, the **mount checkpoint**, before it admits any
 write. Replay leaves every node it replays or changes dirty and adopts
 no chain node block, so the mount checkpoint writes them all into new
-blocks, like any checkpoint, and its logs append only past the chain's
-end and take only free sections, which leave out the footprint's, so
-none of those blocks lands on the footprint. So:
+blocks, like any checkpoint, and its logs append only past every block
+of the durable view in their sections and take only free sections,
+which leave out every section holding one, so none of those blocks
+lands on the walk's footprint or on data the chain names. So:
 
 * a cut during the mount checkpoint leaves the old checkpoint and the
   whole chain exactly as the mount read them, and the next mount
@@ -497,8 +501,8 @@ the metadata area. Both costs are measured on the Pi's card
 Under these rules the following need no mechanism of their own:
 
 * the recovery checkpoint's exposure ([R 65], [C 14]): the mount
-  checkpoint writes nothing the walk read and no summary the old view
-  reads;
+  checkpoint writes nothing the walk read, no data block the chain's
+  records name and no summary the old view reads;
 * stale chains on a reused medium or after a crash: after a mount every
   stale block carries an older version than the epoch's, and before the
   first mount the format zeroes the warm node log's first block, as
@@ -610,8 +614,10 @@ The state is one record that `erx_f2fs_core` alone constructs:
   are rebuilt from their footers at mount, and every segment in which a
   block has become live since the checkpoint, whose entries `set_slot`
   and `set_node` record ([Segment summaries](#segment-summaries));
-* **the free sections**, a set only a commit adds to and only a log
-  takes from, and the count of blocks allocated in the epoch;
+* **the free sections**, a set a read-write mount builds from the
+  durable view ([The mount checkpoint](#read-write-mounts-the-mount-checkpoint))
+  and that from then on only a commit adds to and only a log takes from,
+  and the count of blocks allocated in the epoch;
 * **the free nid pool** (nids whose committed NAT entry is empty and that
   no step has taken since the checkpoint, [R 25]), which hands out the
   nids freed in this mount first, and **the freed generations**: for
@@ -678,13 +684,14 @@ Node addresses change only through `set_node(State, Nid, Ino, Address)`,
 which keeps the NAT entry, bumps its version when a node is freed
 ([F 33]), records a new node block's summary entry, its nid, in its
 segment's unpublished summary ([F 46]), and keeps every count a node
-block is in: `valid_node_count` and `valid_inode_count`, and, since a
-node block counts in `valid_block_count` ([F 21], [T 75]) and in its
-inode's `i_blocks` ([T 61]), both of those too. A node that comes into
-being, an inode or a direct, indirect or xattr node, adds one to each;
-a freed node takes one away; a node that only moves to a new address,
-as a checkpoint moves every dirty node, changes neither. The inode whose
-`i_blocks` changes is dirty, so the charge counts it.
+block is in. A node that comes into being, an inode or a direct,
+indirect or xattr node, adds one to `valid_node_count`, one to
+`valid_block_count`, since a node block counts there ([F 21], [T 75]),
+and one to its inode's `i_blocks` ([T 61]); an inode, and only an
+inode, also adds one to `valid_inode_count`. A freed node takes away
+exactly what its coming into being added; a node that only moves to a
+new address, as a checkpoint moves every dirty node, changes no count.
+The inode whose `i_blocks` changes is dirty, so the charge counts it.
 
 ### Inodes
 
@@ -914,8 +921,8 @@ requests or between two steps of a long one ([Operations](#operations)),
 and mutations that arrive meanwhile wait until it commits; reads go on. Its plan, built
 whole from the state at its start:
 
-1. **Write the dirty dentry blocks**, allocating each in the hot data log
-   and setting the directory's slots, then **the dirty nodes**: direct
+1. **Write the dirty dentry blocks**, allocating each in the warm data
+   log and setting the directory's slots, then **the dirty nodes**: direct
    nodes and inodes, then indirect nodes, each allocated in its log with
    its footer completed at allocation: the epoch's `cp_ver` (the
    committed version, with the committed CRC in the upper 32 bits), the
@@ -1190,12 +1197,22 @@ passes the block over, and keeps ending the walk where Linux would replay
 the torn block's addresses, a difference the probes pin as a documented
 improvement.
 
-The walk is bounded by what erXos's own writer can leave. Every node
-block of a chain adds three blocks to the epoch's charge
-([The room rule](#the-room-rule)), which stays within 512, so a chain
-erXos writes holds at most 512 div 3 = 170 blocks; the walk reads at
-most one more, its end, and the bound is computed from the charge's
-constants, never written down a second time. A walk that reaches the
+The walk is bounded by what erXos's own writer can leave. Within an
+epoch the warm node log receives node blocks from two writers only,
+records and a checkpoint (a mount checkpoint's lie past the walk's end,
+which still ends the walk:
+[The mount checkpoint](#read-write-mounts-the-mount-checkpoint)), and
+the epoch's charge
+([The room rule](#the-room-rule)) counts every block either writes: a
+record's node block three times, and each node a checkpoint writes once,
+as the dirty node it was; dentry blocks go to the warm data log, which
+the walk never reads. The charge stays within 512 until a commit clears
+it. So whatever a cut leaves after the checkpoint, complete records, a
+torn one, and the nodes a checkpoint the cut interrupted had written,
+which carry the epoch's version and no mark and so extend the chain
+without being replayed, the walk meets at most 512 matching blocks and
+reads one more, its end. The bound is computed from the charge's
+constant, never written down a second time. A walk that reaches the
 bound without ending fails the mount with `eintegrity` and a log line
 saying that the chain is longer than erXos replays and that one mount
 in Linux, which replays it and writes a checkpoint, makes the volume
@@ -1268,7 +1285,9 @@ differently:
 * **Data blocks are adopted where the summary rule allows.** A data
   block a replayed slot names is live where it lies when its segment
   held no valid block at the committed checkpoint or was one of its
-  logs, as [R 58] adopts it; `set_slot` records its summary, and the
+  logs, as [R 58] adopts it, and its section leaves the mount's free set
+  ([The mount checkpoint](#read-write-mounts-the-mount-checkpoint));
+  `set_slot` records its summary, and the
   mount checkpoint writes that segment's SSA block unless the segment is
   one of its own logs, whether or not a log ever enters it again
   ([Segment summaries](#segment-summaries)). Otherwise, which only a
@@ -1324,30 +1343,49 @@ the oracle's check of erXos's checkpoints without their chains
 
 ### Read-write mounts: the mount checkpoint
 
-A read-write mount, after replay, leaves the footprint's sections out
-of the free set and writes the mount checkpoint, an ordinary checkpoint of the replayed
-state, after the copies of [Replay](#replay). It is written whether or
-not anything was replayed, which also closes the unmount checkpoint's
-`UMOUNT` and commits orphan cleanup. Only after its commit does the
-volume admit a request that changes anything.
+A read-write mount, after replay and before anything allocates, takes
+its free set and its logs' positions from one set of blocks, the
+**durable view's blocks**: every block live at the committed checkpoint,
+every block of the walk's footprint, its end block included, and every
+data address a replayed slot names, adopted or to be copied. These are
+the blocks a cut returns to until the mount checkpoint commits, and the
+mount derives from them alone:
 
-Each log writes, during the mount checkpoint, only after the last block
-of its committed segment that is live or in the footprint, as an
-appending log may, and takes a free section only when no block remains
-after that one in its section, when the committed checkpoint marks the
-log SSR, since erXos appends only, or when another log's current
-segment lies in its section, since no two logs share a section
-([The section is the medium's unit](#the-section-is-the-mediums-unit)).
-Every log of a shared section moves, so the mount checkpoint writes
-nothing into a section two logs held, and the old view's chain ends, on
-a cut, at a block it left as it was. A volume erXos last wrote already
-keeps the invariant, so the warm node log resumes past the chain's end,
-and a mount with an empty chain, its logs not SSR, takes no free
-section; only a volume another writer left moves logs, at most six
-sections' worth. The mount checkpoint's node blocks carry the committed
-epoch's version, as a checkpoint's do, and lie past the chain's end,
-where the old view's walk never reaches: that walk stops at the end
-block, which is in the footprint and stays as the walk read it.
+* **the free set**: a section is free when none of its blocks is one of
+  them and no log of the committed checkpoint holds it, the definition
+  of a free section ([The durable view is never overwritten](#the-durable-view-is-never-overwritten))
+  applied to the durable view;
+* **each log's position**: the block after the last of them in its
+  section, over every segment of the section and not only the committed
+  one, which is where an appending log may continue. A log takes a free
+  section instead when no block remains after that one, when the
+  committed checkpoint marks it SSR, since erXos appends only, or when
+  another log's current segment lies in its section, since no two logs
+  share a section
+  ([The section is the medium's unit](#the-section-is-the-mediums-unit)).
+
+A log takes its position this way whether or not the mount checkpoint
+writes into it, so no log keeps a position before a block replay made
+live, and the running volume after the commit appends past every such
+block. The mount checkpoint, its copies included, therefore writes only
+past the last of those blocks in a log's section or into a section that
+holds none of them, and a cut during it leaves the old checkpoint, the
+chain with its end block, and every data block the records name exactly
+as the mount read them. Every log of a shared section moves, so the
+mount checkpoint writes nothing into a section two logs held. On a
+volume erXos last wrote, a log takes a free section only where the
+durable view's blocks reach the end of its section, as the epoch's
+appends can make them; only a volume another writer left moves logs for
+sharing or SSR, at most six sections' worth. The mount checkpoint's node blocks carry the
+committed epoch's version, as a checkpoint's do, and lie past the walk's
+end block, which stays as the walk read it, so the old view's walk still
+stops there and never reaches them.
+
+The mount then writes the mount checkpoint, an ordinary checkpoint of
+the replayed state, after the copies of [Replay](#replay). It is written
+whether or not anything was replayed, which also closes the unmount
+checkpoint's `UMOUNT` and commits orphan cleanup. Only after its commit
+does the volume admit a request that changes anything.
 
 What the mount checkpoint writes into the logs is bounded by the epoch's
 charge the volume carried before the cut, so the room rule that every
@@ -1403,10 +1441,12 @@ count of segments in them is of sections, the logs' unit:
 * **`need(State)`**, which the checkpoint planner answers, is the larger
   of the free sections the next checkpoint takes, from the written logs'
   free tails and the blocks the charge puts in each, and the free
-  sections the mount checkpoint of the durable view would take, from the
-  committed checkpoint's logs as the running volume has filled them.
-  The volume writes two logs, so it is at most two, and zero just after
-  a checkpoint commits.
+  sections the mount checkpoint of the durable view would take, which
+  the planner finds with the mount's own position rule over the durable
+  view's blocks the running volume knows: those live at the checkpoint,
+  the chain it wrote with the block after it, and the data its records
+  name ([The mount checkpoint](#read-write-mounts-the-mount-checkpoint)).
+  The volume writes two logs, so it is at most two.
 * **The rule**: every step leaves at least `need` free sections, and
   every step but a cleaning step or a checkpoint leaves at least
   `need + 2`, the two a cleaning step may take: the warm data log's for
@@ -1417,8 +1457,8 @@ count of segments in them is of sections, the logs' unit:
   instead.
 
 So a checkpoint always finds its segments, at every moment and after any
-cut, since every step leaves `need` and a checkpoint takes at most that
-and leaves `need` at zero, and a freeze or an `fsync` never fails for
+cut, since every step leaves `need` and a checkpoint takes at most that,
+and a freeze or an `fsync` never fails for
 want of room (F2-R8).
 
 ### The cleaner
@@ -1603,9 +1643,11 @@ running `test/erlang/erx_f2fs_fuzz.erl` on the host's stock OTP, one
 entry per reader and one for a whole mount: the superblock, the
 checkpoint pack, the NAT block and journal, the SIT block and journal,
 the inode with its inline area, the dentry block and inline dentries,
-and a mount of a mutated image through the walk and replay, run as the
-mount's need loop with every address it asks for checked against the
-partition. Each entry
+and a whole mount, through the walk and replay, of an image with one of
+the blocks a mount of it reads mutated, under an allowance sometimes too
+small for its SIT, run as the mount's need loop: every address it asks
+for lies in the partition and was not given before, and the loop ends
+within a bounded number of needs. Each entry
 starts from blocks of the corpora's images ([Corpora](#corpora):
 syzkaller's seeds, Fuchsia's image and the Linux-made corpus) and of
 erXos's own, with the
@@ -1869,7 +1911,7 @@ source is a row of this table:
 | a cut of such a run | its crash row; `fsck.f2fs`'s pass rule | the same |
 | a workload run on Linux | the replies; the model's listing, and Linux's own listing of the image | erXos read-only, then read-write, then Linux again |
 | a corpus image | the verdicts and listings of [Corpora](#corpora) | erXos on the host; `fsck.f2fs` and Linux in a hostile-image guest ([Hostile images](#hostile-images)) |
-| a mutation of any of them | erXos's verdict, never a crash ([Reading the medium](#reading-the-medium)) | erXos on the host; a sample to `fsck.f2fs` and Linux in a hostile-image guest |
+| a mutation of any of them | erXos's verdict, never a crash ([Reading the medium](#reading-the-medium)) | erXos on the host |
 
 **The test window** answers the window's three requests one at a time
 and in order, as `erx_blk_window` does, over a map of blocks or a sparse
@@ -2001,7 +2043,7 @@ committed checkpoint; "its chain" is the records written since.
 | [C 11] | an in-place data update | cannot arise from erXos's writes: no data is written in place | a Linux image can show new or torn bytes in CP N's view; erXos reads them as Linux does | no in-place writes |
 | [C 12] | a checkpoint covering data in flight | cannot arise from erXos's writes: no slot holds an address before its write is answered, and erXos writes no `NEW_ADDR` | in a Linux image `NEW_ADDR` reads zeros and other slots their old contents, in erXos as in Linux | ordering 1 |
 | [C 13] | replay at mount | nothing written; the next mount replays the same | the same | replay is pure |
-| [C 14] | the mount checkpoint | before its commit: CP N with the whole chain, recovered the same way again; after it: CP N+1 with no chain | before the commit the image mounts at CP N with its chain: the mount checkpoint wrote nothing the walk read, no SSA block the old view reads, and its node blocks past the chain's end | the footprint; the summary rule; the copies |
+| [C 14] | the mount checkpoint | before its commit: CP N with the whole chain, recovered the same way again; after it: CP N+1 with no chain | before the commit the image mounts at CP N with its chain: the mount checkpoint wrote nothing the walk read, no data block the records name and no SSA block the old view reads, and its node blocks lie past the walk's end block | the durable view's blocks; the summary rule; the copies |
 | [C 15] | orphans listed in CP N | freed at mount, before replay | the same | [R 75] |
 | [C 16] | an orphan's freeing before the next checkpoint | freed again from CP N's state, whose blocks and nid stayed out of reach | the same | the free set and the nid rule |
 | [C 17] | an unlink not yet checkpointed | the file back, with its records | the same | the free set and the nid rule |
@@ -2380,6 +2422,9 @@ inputs, each paired with the seeded fault it must catch:
 | a SIT, footprint or replay past the mount's allowance fails the mount with `enomem`, writing nothing | the footprint left out of the allowance |
 | a read-only mount writes nothing, over a window that fails every write | a read-only mount that writes its mount checkpoint |
 | the walk ends at an address it already read, and at its bound, computed from the charge, fails the mount naming the remedy | the footprint check dropped, so a two-block loop runs to the bound |
+| a cut of a checkpoint after its nodes landed and before its last block, behind a one-node record and with 200 dirty inodes, mounts and replays the record | the bound counted from the records' node blocks alone, so the walk fails at 170 |
+| a record across the boundary of a two-segment section, the warm node log at the first segment's last block: the mount checkpoint resumes past the walk's end block, and every cut of it recovers the record again | the position taken from the committed segment alone, so the mount checkpoint writes over the commit block |
+| a record whose data lies in a section free at the checkpoint and held by no log of it: the mount leaves that section out of its free set, and every cut of the mount checkpoint recovers the record again | the free set rebuilt from the footprint alone, so the mount checkpoint's nodes land on the record's data |
 | `set_node` keeps `valid_block_count` and each inode's `i_blocks` equal to a recount through creating, moving and freeing direct, indirect and xattr nodes | an indirect node left out of its inode's `i_blocks` |
 | replay of a Linux chain whose last marked block is a direct node past the end of the file gives the size Linux's mount gives | the size left as the inode block had it |
 | filling and churning at every format size keeps `need` covered and the cleaner freeing segments | victims restricted to full segments |
@@ -2387,7 +2432,7 @@ inputs, each paired with the seeded fault it must catch:
 | after every commit the six current segments lie in six sections, through a read-write mount and churn of syzkaller's writable seeds with two segments per section and of erXos-formatted volumes with two and four, their logs edited to `mkfs.f2fs`'s segments 0 to 3 ([T 19]) | the shared-section test dropped from the mount checkpoint, so the hot node log appends into the section the warm node log holds |
 | the format's S for every unit from 16 KiB to 64 MiB and every partition from 56 MiB to 64 GiB is the section rule's, and its main area starts on an absolute section boundary for partitions starting at 525 and 590 MiB | segment 0 placed from the partition's start rather than the medium's, which misaligns both partitions |
 | filling and churning with sections of 1, 2, 4 and 8 segments keeps `need` covered and the cleaner freeing sections, no step moving more than 512 blocks | a step that moves the whole victim |
-| every block written lands in the warm node or warm data log, and the other four logs keep their positions through every workload | a directory's dnode placed in the hot node log |
+| every block written lands in the warm node or warm data log, and the other four logs keep their positions through every workload | a checkpoint's dirty dentry block placed in the hot data log |
 | a phase's runs cover exactly its blocks, each run contiguous, at most `max_sectors` and within one phase | two blocks one block apart merged into a run |
 | a workload that crosses many data segments with few dirty nodes, and an unlink of a large file, each take a checkpoint when the epoch's dirty state reaches its share | the unpublished summaries left out of the count |
 | freed generations past their share end the volume after its next commit | the share check removed |

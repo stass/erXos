@@ -414,7 +414,9 @@ references
 The allocator holds this rule by itself. It never hands out a single
 block: a log takes a whole free section and appends through it, and
 only a checkpoint's commit makes a section free, so a block that stops
-being used stays out of reach until the next checkpoint commits. Four rules
+being used stays out of reach until the next checkpoint commits, and a
+mount rebuilds the free set from the durable view itself, so the rule
+holds across a cut as well. Four rules
 about the order of writes and flushes complete it. With these, stale
 chains, torn
 records and blocks freed too early cannot arise from erXos's writes, and

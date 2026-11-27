@@ -3496,7 +3496,8 @@ before: reading comes first, then writing with every `fsync` a
 checkpoint, and records last. (1) The pack's contents and the tables:
 the payload, orphan blocks, summaries in both forms, journals, the SIT
 whole and the NAT by block, the root's checks and the mount's
-allowance. (2) The node tree: a file's blocks through its address array
+allowance, with the fuzz target's whole-mount entry, which grows as the
+mount does. (2) The node tree: a file's blocks through its address array
 and nodes, holes, `NEW_ADDR`, inline data and symlinks, against
 Linux-made images. (3) Directories: the hash, the level geometry,
 lookup and bounded `readdir`, inline dentries. (4) The read-only
