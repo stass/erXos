@@ -100,6 +100,7 @@ evidence, not design contracts.
 | [design-build.md](design-build.md) | the build and host tooling: deadlines, source records, evidence boundaries |
 | [design-host-oracle.md](design-host-oracle.md) | the stock OTP oracle in an isolated Linux container |
 | [design-verification.md](design-verification.md) | pure protocol cores, TLA+ models and model-to-code evidence |
+| [design-crash-states.md](design-crash-states.md) | crash-state enumeration for file systems: recorded block traces, the device model, every image a crash can leave, and the oracle that checks each |
 | [design-bench.md](design-bench.md) | the benchmarks: the record, the one clock, the comparison rule, the three hard limits, the other systems on the same board |
 | [plan.md](plan.md) | milestones, exit criteria and decision gates |
 | [style.md](style.md) | code style |

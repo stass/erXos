@@ -2731,7 +2731,10 @@ inspector's per-client statistic attributes the work.
 
 **FAT.** The FAT server's power-cut harness cuts after every write and
 every flush and around both changes of the dirty flag, and reorders the
-writes between flushes as F2FS's harness does. Every raw cut image,
+writes between flushes as F2FS's harness does; its cut images are the
+crash states that [design-crash-states.md](design-crash-states.md)
+derives from a recorded trace of the server's writes, within that
+document's bounds and device model. Every raw cut image,
 clean or dirty, a finished mount's included, is first checked against
 what the run wrote by `Erx::FatVolume`, a Ruby reader of FAT images that
 shares no code with `erx_fat` or fsimg: no cluster lies in two chains or

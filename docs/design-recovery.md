@@ -890,7 +890,11 @@ and volatile, unless it is set to write through: an answered write
 lands in the volatile part, an answered flush moves the volatile part to
 the durable one, and a break drops the volatile part. The cases'
 "nothing answered lost" check compares what reads back with what was
-answered and flushed.
+answered and flushed. Dropping the whole volatile part is one crash
+state of many; every image a crash could leave of a recorded run, any
+subset of the writes answered since the last flush, is enumerated and
+checked by [design-crash-states.md](design-crash-states.md), whose
+window recorder is the block window stand-in below.
 
 | Stand-in | Exists as | Gains |
 | --- | --- | --- |
