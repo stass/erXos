@@ -240,6 +240,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] storage, the FAT server's long-name runs (`erx_fat_dir`,
+  [design-fsck-msdosfs.md](design-fsck-msdosfs.md#can-erxoss-own-batches-leave-a-long-name-run-without-its-short-entry)):
+  a name's long-name entries and its short entry are written in one step, so a cut that lands one of
+  their two sectors leaves the long entries live without their short entry; once the dirty flag is
+  cleared elsewhere, `place/5` can put a new name's run in the slot right after such an orphan, the
+  overlap another system's checker reports. Make `place/5` take no run that starts right after a live
+  long-name entry, for every name (open decision 4 of design-fsck-msdosfs.md), with a test that cuts a
+  removal across a sector boundary.
 * [Medium] storage, create-or-open's refused truncate (`erx_media_volume:emptied/3`): a refusal
   after part of the truncate committed forgets the caller's hold of the file outright, though a
   holder is counted once however many fids name the file, so a hold an earlier walk took goes too
@@ -713,6 +721,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
+* [Medium] storage, `fsck_msdosfs` and `fsck` ([design-fsck-msdosfs.md](design-fsck-msdosfs.md)):
+  `erx_fat_check`, `erx_fat_alloc:cut/2`, `erx_fat_dir:edit/4`, the admission reasons of `erx_fat`,
+  the volume process's check order and report, the drive's `fsck` command and `sN.fsck`, the two Erlang
+  commands, the damaged-image generator, the fuzz targets, the FreeBSD 15.1 oracle runs and the `usb`
+  suite case. Its open decisions 1 to 3 settle first.
 * [Low] storage, a drive's `status` and `ctl` at `/svc/media`
   ([design-drives.md](design-drives.md#the-media-tree), [design-app-trees.md](design-app-trees.md)): every
   other service's control tree is at `/svc/NAME`, and `/media/diskN` keeps its `status` and `ctl` beside the

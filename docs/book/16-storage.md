@@ -17,7 +17,8 @@
 > on the host.
 > **Designed:** the slot writer, updates with a trial boot and a
 > commit, the reset count, the vault's storage domain, drives, whose
-> FAT and EROFS volumes the media domain serves at `/media`,
+> FAT and EROFS volumes the media domain serves at `/media`, checking
+> and repairing a drive's FAT volume with `fsck_msdosfs`,
 > and erXos's F2FS as a mounted file system with its power-cut harness.
 
 **Background needed.** [Chapter 1](01-operating-systems.md) (block
@@ -482,6 +483,21 @@ keep every cluster in one file only on a volume that starts so, it
 mounts a volume writable only after checking that no two names share a
 cluster and that every directory's `..` names its parent. The FAT server
 is designed and not built.
+
+A volume that fails those conditions, or that a pulled stick left
+marked dirty, mounts read-only, and `fsck_msdosfs` repairs it as
+FreeBSD's does, with the same flags, messages and exit statuses
+([design-fsck-msdosfs.md](../design-fsck-msdosfs.md)). The check is a
+**remount**: the command writes `fsck s1 -y` to the drive's `ctl`, and
+the media domain ends the volume's mount and starts the volume's process
+again with a check to run first. That process decides every repair in
+memory, then writes them all in one ordered plan that marks the volume
+dirty first and clean last, takes references away before adding new
+ones and frees clusters last, so a stick pulled during a repair is left
+no worse and the next run finishes it. It then mounts the volume as any
+volume mounts, writable once the repair has made it consistent. The
+report comes back as a file beside the volume, `s1.fsck`, so no session
+ever reads a stick's sectors. This is designed and not built.
 
 ### 16.5.2 Drives
 

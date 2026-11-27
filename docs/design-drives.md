@@ -253,8 +253,9 @@ the superblock by matching tags, not by offset (`lfs.c:4496-4520`).
 
 Non-goals: FAT12, exFAT, NTFS, ext2, UFS, HFS+, APFS and ISO 9660, each
 named by the probe and refused; littlefs volumes in a release; logical
-partitions inside an MBR's extended partition; repairing a table or a
-volume; media whose blocks are not 512 bytes; device nodes for drives
+partitions inside an MBR's extended partition; repairing a table (a
+volume's repair is [design-fsck-msdosfs.md](design-fsck-msdosfs.md)'s);
+media whose blocks are not 512 bytes; device nodes for drives
 or volumes, and any session's access to a medium's sectors; booting,
 updating or loading code from a drive.
 
@@ -358,7 +359,8 @@ updating or loading code from a drive.
   probe's table, `abi/formats/probe.txt`, and beside it two limits,
   `media_volumes_max`, 8, and `media_volume_bytes`, 2 MiB; one statfs type, `media`; the
   argument forms of the shell's `mount` and `umount`; and the modules of
-  `erx_media`.
+  `erx_media`. The volume check adds the names
+  [design-fsck-msdosfs.md](design-fsck-msdosfs.md) lists.
 * **DR-R8.** A session reaches `/media` only through a `media` facet
   the manifest grants it, and the tree it serves holds every drive; a
   board manifest with a media domain grants one `media` facet, rights
@@ -1012,7 +1014,9 @@ alone:
    a free cluster, or a directory's `..` does not name its parent"),
    checked in that order. Each is a state the server cannot write
    safely: a dirty volume may hold a change half made, which a repair
-   on another machine settles and no guess on erXos does; a hard error
+   by `fsck_msdosfs`, on erXos
+   ([design-fsck-msdosfs.md](design-fsck-msdosfs.md)) or on another
+   machine, settles and no guess of the server's does; a hard error
    is the mark another system leaves after a disk error (its meaning as
    the specification gives it is unverified here), so the volume's
    structures are suspect in the same way; the batches write each FAT
@@ -1324,6 +1328,7 @@ session the manifest grants it mounts at `/media`:
     status        what the drive holds (read)
     ctl           commands (write)
     s1/           volume 1's files, while its medium is mounted
+    s1.fsck       the report of volume 1's last check, once one ran (read)
     s2/ ...
   disk1/
 ```
@@ -1391,11 +1396,12 @@ untrusted source and is escaped as any such text is
 ### Commands
 
 A write to `ctl` is one command, as the `ctl` of an app's tree takes
-one ([design-app-trees.md](design-app-trees.md#commanding-ctl)). The one
-command is `eject`, compared as bytes, its trailing newline optional,
-which finishes the drive's medium
-([Finishing a volume](#finishing-a-volume)); any other answers
-`einval`.
+one ([design-app-trees.md](design-app-trees.md#commanding-ctl)), compared
+as bytes, its trailing newline optional. `eject` finishes the drive's
+medium ([Finishing a volume](#finishing-a-volume)); `fsck sN -FLAGS TAG`
+checks and repairs volume N, as a remount, and its report is `sN.fsck`
+([design-fsck-msdosfs.md](design-fsck-msdosfs.md#the-media-tree)); any
+other answers `einval`.
 
 ### Identity
 
@@ -1864,9 +1870,10 @@ the device service's control facet adds `ctl`
 ([design-system.md](design-system.md#drivers), "The `/dev` tree"), so an ordinary
 `media` grant never lists it; and opened only while the medium is
 idle, no volume process existing then, `ebusy` otherwise, decided by
-the drive process, the drive's one owner. FreeBSD's `newfs_msdos` and
-`fsck_msdosfs` would then be plain programs over `data`, and a dirty
-stick would be repaired on erXos.
+the drive process, the drive's one owner. FreeBSD's `newfs_msdos`
+would then be a plain program over `data`. A dirty stick needs none of
+this: it is repaired by a check that runs as the volume's own process
+([design-fsck-msdosfs.md](design-fsck-msdosfs.md)).
 
 **A grant that answers each window once.** It would keep a medium from
 being mounted twice by refusing a second ask until the medium ended. It
@@ -2047,6 +2054,8 @@ open:
 * [design-stopgap.md](design-stopgap.md#littlefs-on-a-drive): littlefs
   on a drive.
 * [design-f2fs.md](design-f2fs.md): F2FS.
+* [design-fsck-msdosfs.md](design-fsck-msdosfs.md): checking and
+  repairing a FAT volume.
 * FreeBSD src, commit `95719d8a895bf8170851e9844d9b4092b1d2b6fe`, read
   from a local clone with `git show`; SHA-256 of each file:
   * `sys/geom/part/g_part_mbr.c`,
