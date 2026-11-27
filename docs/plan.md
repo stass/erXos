@@ -3509,7 +3509,9 @@ erXos's listings equal to Linux's. (6) The encoders, each a round trip
 against its decoder and Linux-made blocks. (7) The format, its images
 passing `fsck.f2fs` and mounting in Linux. (8) The volume state and the
 checkpoint writer: `set_slot`, `set_node`, the allocator over free
-sections and the mount checkpoint, the two-log placement probe first.
+sections, the node logs' summaries rebuilt from their segments' footers
+when the pack holds none, and the mount checkpoint, the two-log
+placement probe first.
 (9) The namespace operations. (10) The data operations: writes,
 truncates, `setattr` and reads. (11) Orphans and holds. (12) The test
 window, the reference model and the power-cut harness, over fixed

@@ -6,18 +6,23 @@
 F2FS's mount (docs/design-f2fs.md, "Mount"): the rules that relate a
 volume's records to each other and to its partition, and erXos's own rules
 of what it mounts and how ("Scope: features and forms"), over the records
-erx_f2fs_codec reads. It runs the mount's first two steps, the superblock
-copy and the checkpoint pack, and answers the volume's mode; [F n] cites
-fact n of the F2FS facts record, part 1.
+erx_f2fs_codec reads. It chooses the superblock copy and the checkpoint
+pack, reads the pack's contents and the tables, checks the root inode,
+asks whether the checkpoint has a chain of node blocks to replay, and
+answers the volume's mode; [F n] cites fact n of the F2FS facts record,
+part 1.
 
-A mount is a pure function of the partition's size in blocks and the
-blocks read so far, a map from address to block. When it needs a block the
-map lacks it answers {need, Addresses}, every block that step needs at
-once, and the caller reads them and runs it again from the start with them
-added, as the volume process runs any step ("One process owns a volume").
-Every address it asks for lies within the partition: the superblock copies'
-blocks first, and the checkpoint area only once a valid copy has bounded
-the volume by the partition and placed both packs inside that area.
+A mount is a pure function of the partition's size in blocks, the mount's
+allowance in bytes, and the blocks read so far, a map from address to
+block. When it needs a block the map lacks it answers {need, Addresses},
+every block that step needs at once, and the caller reads them and runs it
+again from the start with them added, as the volume process runs any step
+("One process owns a volume"). Every address it asks for lies within the
+partition: the superblock copies' blocks first, the checkpoint area only
+once a valid copy has bounded the volume by the partition and placed both
+packs inside that area, and the SIT, the NAT and the main area only within
+their areas, which that copy also bounds, at indices the checked counts
+and bitmap sizes bound.
 
 The superblock: each copy is valid when the codec reads it, its
 block_count and main area end within the partition, its checkpoint area
@@ -39,17 +44,54 @@ and pass Linux's checks of a checkpoint ([F 55]) in the forms without RO,
 which a mount refuses; then the codec reads its version bitmaps from the
 header and the payload.
 
+The pack's contents ([F 20]): its orphan blocks when it has ORPHAN_PRESENT,
+its data summaries, compact or normal ([F 29], [F 30]), and its node
+summaries when it has UMOUNT or FASTBOOT. Linux finds compact summaries
+from cp_pack_start_sum and normal ones from the pack's end, and does not
+check that the two agree; erXos requires them to, so the data summaries
+are exactly the blocks between cp_pack_start_sum and the node summaries,
+three of them in the normal form and one or two in the compact one.
+Each log's summaries are answered for the blocks it has written, its next
+offset's worth, or the whole segment for an SSR log ([F 29]). A pack
+without node summaries leaves the node logs' summaries to be rebuilt from
+their segments' footers ([F 31]) by the writer, which alone needs them.
+The NAT journal is the hot data log's and the SIT journal the cold data
+log's ([F 28]); each names a node, or a main segment, once.
+
+The tables ([F 34], [F 38], [F 39]): the SIT is admitted against the
+mount's allowance at ?SIT_BYTES_PER_SEGMENT bytes for each main segment
+before any of it is read (docs/design-f2fs.md, "Mount"), then read whole,
+each block from the copy its version bit selects, with the SIT journal
+over it, and checked: the node segments' valid blocks are valid_node_count
+and all segments' at most valid_block_count, and every log's next block is
+free in its segment, with every later block free too for an LFS log. The
+NAT is read by block, as a lookup needs one, the NAT journal over it
+([F 35]); a used entry's block lies in the main area and is valid in the
+SIT. The root is the inode its NAT entry places, a directory with blocks,
+a size and links ([F 55]).
+
+The chain: the warm node log's next block starts the checkpoint's chain of
+fsynced node blocks when its footer carries the checkpoint's version
+(docs/design-f2fs.md, "The walk"). This mount does not replay, so a chain
+fails it with {walk, chain}, whose remedy is one mount in Linux, which
+replays the chain and writes a checkpoint. A first block that tore reads
+as a chain too, failing the mount where the walk would end at once.
+
 The mode is read_write when every feature is in W and the main area has
 more than 16 sections, of any size, and otherwise {read_only, Reasons},
 naming each shortfall: the R features and the main area's sections.
 
 A failure is {Structure, Rule}: the codec's, or one of this module's
-rules, reached by one module-private throw caught at mount/2. A rule that
+rules, reached by one module-private throw caught at mount/3. A rule that
 names bits names each by its [F 10] or [F 25] name, or as the bit's value
-when the record names none.
+when the record names none. {allowance, {sit, Bytes}} is the one failure
+of memory rather than of the medium: the SIT of Bytes would pass the
+allowance, and the caller answers it enomem. The orphan list, at most a
+pack's blocks of 1020 numbers each, is bounded by the format and not
+admitted.
 """.
 
--export([mount/2]).
+-export([mount/3]).
 -export_type([blocks/0, mounted/0, mode/0, failure/0]).
 
 -include("generated/erx_abi.hrl").
@@ -71,6 +113,12 @@ when the record names none.
 %% The main sections erXos's cleaner keeps back, so a main area of no
 %% more leaves it no room (docs/design-f2fs.md, "The space a volume offers").
 -define(CLEANER_RESERVE_SECTIONS, 16).
+%% What the SIT holds in memory for each main segment, in bytes, which the
+%% mount's allowance admits (docs/design-f2fs.md, "Mount"): its entry's map
+%% with the copied 64-byte valid map and its tuple slot, measured with
+%% erts_debug:size at 144 bytes on the host's OTP, 160 when an mtime is
+%% a bignum.
+-define(SIT_BYTES_PER_SEGMENT, 160).
 
 -doc "The blocks a mount has read, by address.".
 -type blocks() :: #{non_neg_integer() => binary()}.
@@ -82,31 +130,57 @@ How the volume mounts: read-write, or read-only naming each reason
                 {read_only, [{features, [atom()]} |
                              {section_count, pos_integer()}]}.
 -doc """
-What the mount's first steps answer: the chosen superblock copy, each bad
-copy's number and failure, the chosen pack's first block and its header
-with its version bitmaps, and the mode.
+What a mount answers: the chosen superblock copy, each bad copy's number
+and failure, the chosen pack's first block and its header with its version
+bitmaps, the pack's orphan inodes, the data logs' summaries and the node
+logs' when the pack has them (each list hot, warm, cold), the SIT, element
+S + 1 for main segment S, the NAT journal's entries by nid and the NAT
+blocks read, by their index in one copy, the root inode, and the mode.
 """.
 -type mounted() :: #{superblock := erx_f2fs_codec:superblock(),
                      bad_copies := [{0 | 1, failure()}],
                      pack := non_neg_integer(),
                      checkpoint := erx_f2fs_codec:checkpoint(),
+                     orphans := [non_neg_integer()],
+                     data_summaries := [[erx_f2fs_codec:summary()]],
+                     node_summaries := [[erx_f2fs_codec:summary()]] | none,
+                     sit := tuple(),
+                     nat_journal := #{non_neg_integer() => erx_f2fs_codec:nat_entry()},
+                     nat_blocks := #{non_neg_integer() => [erx_f2fs_codec:nat_entry()]},
+                     root := erx_f2fs_codec:inode(),
                      mode := mode()}.
 -doc "The structure the mount read and the first rule it broke.".
--type failure() :: {superblock | checkpoint, term()}.
+-type failure() :: {superblock | checkpoint | sit | nat | root | walk | allowance,
+                    term()} |
+                   erx_f2fs_codec:failure().
 
 -doc """
-The mount of a partition of Partition blocks from Blocks, the blocks read
-so far: {ok, Mounted}, {need, Addresses} naming the blocks it needs next,
-or {error, Failure}.
+The mount of a partition of Partition blocks, holding at most Allowance
+bytes of tables, from Blocks, the blocks read so far: {ok, Mounted},
+{need, Addresses} naming the blocks it needs next, or {error, Failure}.
 """.
--spec mount(non_neg_integer(), blocks()) ->
+-spec mount(non_neg_integer(), non_neg_integer(), blocks()) ->
           {ok, mounted()} | {need, [non_neg_integer()]} | {error, failure()}.
-mount(Partition, Blocks) ->
+mount(Partition, Allowance, Blocks) ->
     try
         {Super, BadCopies} = superblock(Partition, Blocks),
         {Pack, Checkpoint} = checkpoint(Super, Blocks),
-        {ok, #{superblock => Super, bad_copies => BadCopies, pack => Pack,
-               checkpoint => Checkpoint, mode => mode(Super)}}
+        Contents = contents(Super, Pack, Checkpoint, Blocks),
+        admit_sit(Super, Allowance),
+        #{nat_journal := Journal} = Contents,
+        Root = maps:get(root_ino, Super),
+        %% The SIT, the chain's first block and the root's NAT block are
+        %% each placed by what is read already, so they are asked at once.
+        read(Blocks, sit_addresses(Super, Checkpoint) ++ [walk_start(Super, Checkpoint)] ++
+                 nat_addresses(Super, Checkpoint, Journal, Root)),
+        Sit = sit(Super, Checkpoint, Contents, Blocks),
+        {RootEntry, NatBlocks} = nat_lookup(Super, Checkpoint, Sit, Journal, Blocks, Root),
+        RootInode = root(Super, RootEntry, Blocks),
+        check_chain(Super, Checkpoint, Blocks),
+        {ok, maps:merge(maps:remove(sit_journal, Contents),
+                        #{superblock => Super, bad_copies => BadCopies, pack => Pack,
+                          checkpoint => Checkpoint, sit => Sit, nat_blocks => NatBlocks,
+                          root => RootInode, mode => mode(Super)})}
     catch
         throw:{?MODULE, need, Addresses} -> {need, Addresses};
         throw:{?MODULE, failure, Failure} -> {error, Failure}
@@ -239,7 +313,7 @@ check_flags(#{ckpt_flags := Flags}) ->
 %% NAT's capacity ([F 36]).
 check_counts(#{segment_count := Segments, segment_count_ckpt := Checkpoint,
                segment_count_sit := Sit, segment_count_nat := Nat,
-               segment_count_ssa := Ssa, segment_count_main := Main},
+               segment_count_ssa := Ssa, segment_count_main := Main} = Super,
              #{rsvd_segment_count := Reserved, overprov_segment_count := Overprovision,
                user_block_count := User, valid_block_count := Valid,
                valid_node_count := Nodes}) ->
@@ -249,22 +323,36 @@ check_counts(#{segment_count := Segments, segment_count_ckpt := Checkpoint,
     require(Overprovision =/= 0 andalso Reserved =/= 0, {checkpoint, reserved_segments}),
     require(User > 0 andalso User < Main * ?BLOCKS_PER_SEG, {checkpoint, user_blocks}),
     require(Valid =< User, {checkpoint, valid_blocks}),
-    Capacity = ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK * table_blocks(Nat),
-    require(Nodes =< Capacity - ?RESERVED_NIDS, {checkpoint, valid_nodes}).
+    require(Nodes =< erx_f2fs_codec:nat_capacity(Super) - ?RESERVED_NIDS,
+            {checkpoint, valid_nodes}).
 
-%% Each of the six logs inside the main area, and no two on one segment
-%% ([F 55]).
-check_logs(#{segment_count_main := Main},
-           #{cur_node_segno := NodeSegments, cur_node_blkoff := NodeOffsets,
-             cur_data_segno := DataSegments, cur_data_blkoff := DataOffsets}) ->
-    Segments = lists:sublist(NodeSegments, ?LOGS_PER_KIND) ++
-        lists:sublist(DataSegments, ?LOGS_PER_KIND),
-    Offsets = lists:sublist(NodeOffsets, ?LOGS_PER_KIND) ++
-        lists:sublist(DataOffsets, ?LOGS_PER_KIND),
-    require(lists:all(fun(Segment) -> Segment < Main end, Segments) andalso
-                lists:all(fun(Offset) -> Offset < ?BLOCKS_PER_SEG end, Offsets),
+%% Each of the six logs inside the main area, no two on one segment
+%% ([F 55]), and each appending or reusing a segment ([F 39]).
+check_logs(#{segment_count_main := Main}, Header) ->
+    Logs = logs(Header),
+    require(lists:all(fun({_Type, Segment, Offset, _Alloc}) ->
+                              Segment < Main andalso Offset < ?BLOCKS_PER_SEG
+                      end, Logs),
             {checkpoint, log_position}),
-    require(length(lists:usort(Segments)) =:= length(Segments), {checkpoint, log_segments}).
+    Segments = [Segment || {_Type, Segment, _Offset, _Alloc} <- Logs],
+    require(length(lists:usort(Segments)) =:= length(Segments), {checkpoint, log_segments}),
+    require(lists:all(fun({_Type, _Segment, _Offset, Alloc}) ->
+                              Alloc =:= ?ERX_F2FS_ALLOC_LFS orelse Alloc =:= ?ERX_F2FS_ALLOC_SSR
+                      end, Logs),
+            {checkpoint, alloc_type}).
+
+%% The six logs in type order, hot, warm and cold data, then node ([F 21]),
+%% each {Type, Segment, NextOffset, AllocType}.
+logs(#{cur_node_segno := NodeSegments, cur_node_blkoff := NodeOffsets,
+       cur_data_segno := DataSegments, cur_data_blkoff := DataOffsets,
+       alloc_type := Alloc}) ->
+    Segments = lists:sublist(DataSegments, ?LOGS_PER_KIND) ++
+        lists:sublist(NodeSegments, ?LOGS_PER_KIND),
+    Offsets = lists:sublist(DataOffsets, ?LOGS_PER_KIND) ++
+        lists:sublist(NodeOffsets, ?LOGS_PER_KIND),
+    Types = lists:seq(0, 2 * ?LOGS_PER_KIND - 1),
+    [{Type, Segment, Offset, binary:at(Alloc, Type)}
+     || {Type, Segment, Offset} <- lists:zip3(Types, Segments, Offsets)].
 
 %% One version bit per block of one copy of each table, exactly, and a SIT
 %% bit for every SIT block the main area's segments need ([F 23], [F 55]).
@@ -295,6 +383,221 @@ check_nat_bits(#{cp_payload := Payload, segment_count_nat := Nat},
             {checkpoint, nat_bits_room});
 check_nat_bits(_Super, _Header) ->
     ok.
+
+%%% The pack's contents
+
+%% The orphan blocks, data summaries and node summaries, in one need, and
+%% the journals the data summaries carry. The data summaries end where the
+%% node summaries start, which end before the copy, the pack's last block.
+contents(#{cp_payload := PayloadBlocks} = Super, Start,
+         #{cp_pack_start_sum := StartSum, cp_pack_total_block_count := Total,
+           ckpt_flags := Flags} = Header, Blocks) ->
+    NodeBlocks = case has(Flags, ?ERX_F2FS_CP_UMOUNT bor ?ERX_F2FS_CP_FASTBOOT) of
+                     true -> ?LOGS_PER_KIND;
+                     false -> 0
+                 end,
+    DataBlocks = Total - 1 - NodeBlocks - StartSum,
+    Compact = has(Flags, ?ERX_F2FS_CP_COMPACT_SUM),
+    require(case Compact of
+                %% Linux writes the compact form only when it fits fewer
+                %% blocks than the normal form's three ([F 25]).
+                true -> DataBlocks >= 1 andalso DataBlocks < ?LOGS_PER_KIND;
+                false -> DataBlocks =:= ?LOGS_PER_KIND
+            end,
+            {checkpoint, pack_layout}),
+    Orphans = case has(Flags, ?ERX_F2FS_CP_ORPHAN_PRESENT) of
+                  true -> span(Start + 1 + PayloadBlocks, StartSum - 1 - PayloadBlocks);
+                  false -> []
+              end,
+    Data = span(Start + StartSum, DataBlocks),
+    Node = span(Start + StartSum + DataBlocks, NodeBlocks),
+    read(Blocks, Orphans ++ Data ++ Node),
+    {DataLogs, NodeLogs} = lists:split(?LOGS_PER_KIND, logs(Header)),
+    {DataSummaries, NatJournal, SitJournal} =
+        data_summaries(Compact, DataLogs, read(Blocks, Data)),
+    #{orphans => lists:append([ok(erx_f2fs_codec:orphan_block(Block))
+                               || Block <- read(Blocks, Orphans)]),
+      data_summaries => DataSummaries,
+      node_summaries => node_summaries(NodeLogs, read(Blocks, Node)),
+      nat_journal => nat_journal(Super, NatJournal),
+      sit_journal => sit_journal(Super, SitJournal)}.
+
+%% The data logs' summaries and the NAT and SIT journals' bytes: the
+%% compact form holds both journals in its first block, and the normal form
+%% the NAT journal in the hot log's summary and the SIT journal in the cold
+%% log's ([F 28], [F 29]).
+data_summaries(true, Logs, Blocks) ->
+    #{nat_journal := Nat, sit_journal := Sit, summaries := Summaries} =
+        ok(erx_f2fs_codec:compact_summaries([written(Log) || Log <- Logs], Blocks)),
+    {Summaries, Nat, Sit};
+data_summaries(false, Logs, Blocks) ->
+    [#{journal := Nat}, _Warm, #{journal := Sit}] = Read =
+        [ok(erx_f2fs_codec:summary_block(Block)) || Block <- Blocks],
+    {logs_summaries(Logs, Read), Nat, Sit}.
+
+node_summaries(_Logs, []) -> none;
+node_summaries(Logs, Blocks) ->
+    logs_summaries(Logs, [ok(erx_f2fs_codec:summary_block(Block)) || Block <- Blocks]).
+
+logs_summaries(Logs, Summaries) ->
+    [lists:sublist(Entries, written(Log))
+     || {Log, #{entries := Entries}} <- lists:zip(Logs, Summaries)].
+
+%% The blocks of its segment a log has written: up to its next offset, or
+%% any of them for an SSR log, which fills free blocks wherever they lie
+%% ([F 29]).
+written({_Type, _Segment, _Offset, ?ERX_F2FS_ALLOC_SSR}) -> ?BLOCKS_PER_SEG;
+written({_Type, _Segment, Offset, ?ERX_F2FS_ALLOC_LFS}) -> Offset.
+
+%% The NAT journal's entries by nid, each a nid the NAT can hold, named
+%% once, so no entry hides another.
+nat_journal(Super, Bytes) ->
+    Entries = ok(erx_f2fs_codec:nat_journal(Bytes)),
+    Nids = [Nid || #{nid := Nid} <- Entries],
+    Capacity = erx_f2fs_codec:nat_capacity(Super),
+    require(lists:all(fun(Nid) -> Nid < Capacity end, Nids), {nat, journal_nid}),
+    require(length(lists:usort(Nids)) =:= length(Nids), {nat, journal_duplicate}),
+    maps:from_list([{Nid, Entry} || #{nid := Nid, entry := Entry} <- Entries]).
+
+%% The SIT journal's entries, each for a main segment ([F 39]), named once.
+sit_journal(#{segment_count_main := Main}, Bytes) ->
+    Entries = ok(erx_f2fs_codec:sit_journal(Bytes)),
+    Segments = [Segment || #{segno := Segment} <- Entries],
+    require(lists:all(fun(Segment) -> Segment < Main end, Segments), {sit, journal_segno}),
+    require(length(lists:usort(Segments)) =:= length(Segments), {sit, journal_duplicate}),
+    Entries.
+
+%%% The tables
+
+admit_sit(#{segment_count_main := Main}, Allowance) ->
+    Bytes = Main * ?SIT_BYTES_PER_SEGMENT,
+    require(Bytes =< Allowance, {allowance, {sit, Bytes}}).
+
+%% Each SIT block the main area needs, from the copy its version bit
+%% selects: copy 1 is the area's second half ([F 38]).
+sit_addresses(#{sit_blkaddr := First, segment_count_sit := Segments,
+                segment_count_main := Main},
+              #{sit_version_bitmap := Bitmap}) ->
+    [First + Index + version_bit(Bitmap, Index) * table_blocks(Segments)
+     || Index <- lists:seq(0, ceil_div(Main, ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK) - 1)].
+
+%% The SIT, whole, as a tuple of the main segments' entries with the
+%% journal's over the blocks', then checked as a whole.
+sit(#{segment_count_main := Main} = Super, Header, #{sit_journal := Journal}, Blocks) ->
+    PerBlock = ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK,
+    Read = lists:enumerate(0, read(Blocks, sit_addresses(Super, Header))),
+    Entries = lists:append(
+                [ok(erx_f2fs_codec:sit_block(Block, min(PerBlock, Main - Index * PerBlock)))
+                 || {Index, Block} <- Read]),
+    Sit = lists:foldl(fun(#{segno := Segment, entry := Entry}, Table) ->
+                              setelement(Segment + 1, Table, Entry)
+                      end, list_to_tuple(Entries), Journal),
+    check_sit(Header, Sit),
+    Sit.
+
+%% The counts the checkpoint records against the SIT's, and each log's next
+%% block free in its segment ([F 39]).
+check_sit(#{valid_node_count := Nodes, valid_block_count := Valid} = Header, Sit) ->
+    Segments = tuple_to_list(Sit),
+    require(lists:sum([Count || #{type := Type, valid_blocks := Count} <- Segments,
+                                Type >= ?ERX_F2FS_LOG_HOT_NODE]) =:= Nodes,
+            {sit, valid_nodes}),
+    require(lists:sum([Count || #{valid_blocks := Count} <- Segments]) =< Valid,
+            {sit, valid_blocks}),
+    require(lists:all(fun(Log) -> next_block_free(Sit, Log) end, logs(Header)),
+            {sit, log_next_block}).
+
+%% A log's next block is free, and for an LFS log, which appends, every
+%% block after it too.
+next_block_free(Sit, {_Type, Segment, Offset, Alloc}) ->
+    #{valid_map := Map} = element(Segment + 1, Sit),
+    <<_:Offset, Next:1, Later/bitstring>> = Map,
+    Next =:= 0 andalso (Alloc =:= ?ERX_F2FS_ALLOC_SSR orelse Later =:= <<0:(bit_size(Later))>>).
+
+%% The NAT block a lookup of Nid reads, none when the journal has it.
+nat_addresses(Super, Header, Journal, Nid) ->
+    require(Nid < erx_f2fs_codec:nat_capacity(Super), {nat, nid}),
+    case is_map_key(Nid, Journal) of
+        true -> [];
+        false -> [nat_address(Super, Header, Nid div ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK)]
+    end.
+
+%% NAT block Index of one copy: the copies interleave a segment at a time,
+%% and its version bit selects the second ([F 34]).
+nat_address(#{nat_blkaddr := First}, #{nat_version_bitmap := Bitmap}, Index) ->
+    First + Index div ?BLOCKS_PER_SEG * 2 * ?BLOCKS_PER_SEG + Index rem ?BLOCKS_PER_SEG +
+        version_bit(Bitmap, Index) * ?BLOCKS_PER_SEG.
+
+%% Nid's NAT entry, the journal's over its block's ([F 35]), and the NAT
+%% block it read, by index; a used entry's node lies in the main area at a
+%% block the SIT marks valid.
+nat_lookup(Super, Header, Sit, Journal, Blocks, Nid) ->
+    {Entry, Read} =
+        case nat_addresses(Super, Header, Journal, Nid) of
+            [] ->
+                {maps:get(Nid, Journal), #{}};
+            Addresses ->
+                [Block] = read(Blocks, Addresses),
+                Entries = ok(erx_f2fs_codec:nat_block(Block)),
+                PerBlock = ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK,
+                {lists:nth(Nid rem PerBlock + 1, Entries), #{Nid div PerBlock => Entries}}
+        end,
+    #{block_addr := Node} = Entry,
+    require(Node =:= ?ERX_F2FS_NULL_ADDR orelse valid_block(Super, Sit, Node), {nat, block_addr}),
+    {Entry, Read}.
+
+%% Whether Address is a main-area block the SIT marks valid.
+valid_block(#{main_blkaddr := Main} = Super, Sit, Address) ->
+    case Address >= Main andalso Address < main_end(Super) of
+        true ->
+            Segment = (Address - Main) div ?BLOCKS_PER_SEG,
+            #{valid_map := Map} = element(Segment + 1, Sit),
+            Offset = (Address - Main) rem ?BLOCKS_PER_SEG,
+            <<_:Offset, Valid:1, _/bitstring>> = Map,
+            Valid =:= 1;
+        false ->
+            false
+    end.
+
+%%% The root
+
+%% The root's inode, at the block its NAT entry names, a directory with
+%% blocks, a size and links ([F 55]); the codec refuses every inode
+%% without blocks.
+root(#{root_ino := Root} = Super, #{block_addr := Address, ino := Owner}, Blocks) ->
+    require(Address =/= ?ERX_F2FS_NULL_ADDR andalso Owner =:= Root, {root, nat_entry}),
+    [Block] = read(Blocks, [Address]),
+    #{i_mode := Mode, i_size := Size, i_links := Links} = Inode =
+        ok(erx_f2fs_codec:inode(Super, Root, Block)),
+    require(Mode band ?ERX_F2FS_MODE_TYPE_MASK =:= ?ERX_F2FS_MODE_DIR, {root, not_directory}),
+    require(Size =/= 0, {root, no_size}),
+    require(Links =/= 0, {root, no_links}),
+    Inode.
+
+%%% The chain
+
+%% The chain starts at the warm node log's next block (docs/design-f2fs.md,
+%% "The walk").
+walk_start(#{main_blkaddr := Main},
+           #{cur_node_segno := [_Hot, Warm | _], cur_node_blkoff := [_, Offset | _]}) ->
+    Main + Warm * ?BLOCKS_PER_SEG + Offset.
+
+check_chain(Super, Header, Blocks) ->
+    [Block] = read(Blocks, [walk_start(Super, Header)]),
+    #{cp_ver := Version} = ok(erx_f2fs_codec:node_footer(Block)),
+    require(not of_checkpoint(Header, Version), {walk, chain}).
+
+%% Whether a node footer's cp_ver is the checkpoint's: its version with its
+%% CRC in the upper 32 bits under CRC_RECOVERY, or the version alone, or
+%% under NOCRC_RECOVERY the version's low 32 bits ([F 43]).
+of_checkpoint(#{checkpoint_ver := Version, crc := Crc, ckpt_flags := Flags}, Footer) ->
+    Expected = case has(Flags, ?ERX_F2FS_CP_CRC_RECOVERY) of
+                   true -> Version bor (Crc bsl 32);
+                   false -> Version
+               end,
+    Footer =:= Expected orelse
+        (has(Flags, ?ERX_F2FS_CP_NOCRC_RECOVERY) andalso
+             Footer band 16#ffffffff =:= Version band 16#ffffffff).
 
 %%% The mode
 
@@ -375,7 +678,18 @@ table_blocks(Segments) -> Segments div 2 * ?BLOCKS_PER_SEG.
 %% A version bitmap's bytes: a bit per block of one copy ([F 23]).
 bitmap_bytes(Segments) -> table_blocks(Segments) div 8.
 
+%% Whether a table's block Index is current in its second copy: its bit in
+%% the version bitmap, first bit most significant ([F 23]).
+version_bit(Bitmap, Index) ->
+    <<_:Index, Bit:1, _/bitstring>> = Bitmap,
+    Bit.
+
 ceil_div(A, B) -> (A + B - 1) div B.
+
+has(Word, Bits) -> Word band Bits =/= 0.
+
+%% Count addresses from First.
+span(First, Count) -> [First + Offset || Offset <- lists:seq(0, Count - 1)].
 
 %%% Blocks and the one failure path
 

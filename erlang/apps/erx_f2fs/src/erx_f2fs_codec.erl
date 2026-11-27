@@ -44,15 +44,18 @@ its inline dentries, where its geometry puts them ([F 41], [F 48]). A
 dentry block (dentry_block/1) answers its used slots. Both dentry forms
 are read by one walk; their bitmaps are first-bit-least-significant
 ([F 5]), and the codec answers each as a bitstring in Erlang's own order,
-first bit most significant.
+first bit most significant. Any block's last bytes read as a node footer
+(node_footer/1), which is how the mount asks whether a log's next block
+holds a node of the checkpoint ([F 43]).
 """.
 
 -export([superblock/1, checkpoint/1, checkpoint_copy/1, checkpoint/3,
          orphan_block/1, nat_block/1, nat_journal/1, sit_block/2,
          sit_journal/1, summary_block/1, compact_summaries/2, inode/3,
-         dentry_block/1, crc/2, extra_attr_features/0]).
+         dentry_block/1, node_footer/1, crc/2, extra_attr_features/0,
+         nat_capacity/1]).
 -export_type([superblock/0, checkpoint/0, nat_entry/0, sit_entry/0,
-              summary/0, inode/0, dentries/0, failure/0]).
+              summary/0, inode/0, dentries/0, footer/0, failure/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -76,8 +79,9 @@ first bit most significant.
 -doc "A superblock copy: erx_abi_packed's map of erx_f2fs_super_block.".
 -type superblock() :: #{atom() => term()}.
 -doc """
-A checkpoint pack's header: erx_abi_packed's map of erx_f2fs_checkpoint,
-and from checkpoint/3 also sit_version_bitmap and nat_version_bitmap.
+A checkpoint pack's header: erx_abi_packed's map of erx_f2fs_checkpoint
+with crc, the checksum it stores at checksum_offset, and from checkpoint/3
+also sit_version_bitmap and nat_version_bitmap.
 """.
 -type checkpoint() :: #{atom() => term()}.
 -doc "A NAT entry: erx_abi_packed's map of erx_f2fs_nat_entry.".
@@ -110,10 +114,15 @@ used slot's record with its name ([F 59], [F 60]).
                                     ino := non_neg_integer(),
                                     file_type := byte(),
                                     name := binary()}]}.
+-doc "A node block's footer: erx_abi_packed's map of erx_f2fs_node_footer.".
+-type footer() :: #{nid := non_neg_integer(), ino := non_neg_integer(),
+                    flag := non_neg_integer(), cp_ver := non_neg_integer(),
+                    next_blkaddr := non_neg_integer()}.
 -doc "The structure a decoder read and the first rule its bytes broke.".
 -type failure() :: {superblock | checkpoint | orphan_block | nat_block |
                     nat_journal | sit_block | sit_journal | summary_block |
-                    compact_summary | inode | dentry_block, atom()}.
+                    compact_summary | inode | dentry_block | node_footer,
+                    atom()}.
 
 %%% Entries
 
@@ -259,6 +268,24 @@ name's run of slots answered once, at its first slot ([F 60]).
 -spec dentry_block(binary()) -> {ok, dentries()} | {error, failure()}.
 dentry_block(Block) ->
     decode(dentry_block, fun() -> require_block(Block), dentries(Block) end).
+
+-doc """
+The nids the NAT of a volume whose superblock is Super holds:
+f2fs_nat_entries_per_block for each block of one of its two copies
+([F 36]).
+""".
+-spec nat_capacity(superblock()) -> non_neg_integer().
+nat_capacity(#{segment_count_nat := Segments}) ->
+    ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK * (Segments div 2) * ?BLOCKS_PER_SEG.
+
+-doc """
+The footer of a node block, its last 24 bytes ([F 43]), read from any
+block: whether the block is a node, and of which checkpoint, is for the
+footer's reader to ask.
+""".
+-spec node_footer(binary()) -> {ok, footer()} | {error, failure()}.
+node_footer(Block) ->
+    decode(node_footer, fun() -> read_node_footer(Block) end).
 
 -doc """
 The features whose inodes Linux reads only with EXTRA_ATTR set ([F 41]),
@@ -408,17 +435,18 @@ read_checkpoint_copy(Block) ->
     require_block(Block),
     <<Fixed:?ERX_F2FS_CHECKPOINT_SIZE/binary, _/binary>> = Block,
     Checkpoint = erx_abi_packed:decode(erx_f2fs_checkpoint, Fixed),
-    check_checkpoint_checksum(Checkpoint, Block),
-    Checkpoint.
+    Checkpoint#{crc => checkpoint_checksum(Checkpoint, Block)}.
 
 %% The checksum lies after the header's fixed part and within the block,
-%% and covers every byte of the block but its own ([F 51]).
-check_checkpoint_checksum(#{checksum_offset := At}, Block) ->
+%% and covers every byte of the block but its own ([F 51]); it is answered
+%% once verified, since a node footer of the checkpoint carries it ([F 43]).
+checkpoint_checksum(#{checksum_offset := At}, Block) ->
     require(At >= ?ERX_F2FS_CHECKPOINT_SIZE andalso
                 At =< ?BLOCK_SIZE - ?CHECKSUM_SIZE,
             checksum_offset),
     <<Before:At/binary, Stored:32/little, After/binary>> = Block,
-    require(crc(?ERX_F2FS_MAGIC, [Before, After]) =:= Stored, crc).
+    require(crc(?ERX_F2FS_MAGIC, [Before, After]) =:= Stored, crc),
+    Stored.
 
 read_checkpoint(PayloadBlocks, Block, Payload) ->
     Checkpoint = read_checkpoint(Block),
@@ -500,7 +528,9 @@ sit_entry(#{vblocks := VBlocks, valid_map := Map, mtime := Age}) ->
     require(Valid =< ?BLOCKS_PER_SEG, valid_blocks),
     require(Valid =:= set_bits(Map), valid_map),
     require(Type < ?ERX_F2FS_SIT_TYPES, type),
-    #{valid_blocks => Valid, type => Type, valid_map => Map, mtime => Age}.
+    %% The map is copied out of its block, so a SIT held whole keeps 64
+    %% bytes a segment rather than every SIT block it was read from.
+    #{valid_blocks => Valid, type => Type, valid_map => binary:copy(Map), mtime => Age}.
 
 %% The bits Bytes sets, a byte at a time, each the sum of its two nibbles'.
 set_bits(Bytes) ->
@@ -589,10 +619,8 @@ bound_hash_depth(Inode) ->
 %% A nid names a node when it is at least the root's and below the NAT's
 %% capacity, f2fs_nat_entries_per_block for each block of one of the NAT's
 %% two copies ([F 6], [F 36]).
-valid_nid(#{segment_count_nat := NatSegments}, Nid) ->
-    Capacity = ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK * (NatSegments div 2)
-                   * ?BLOCKS_PER_SEG,
-    Nid >= ?ERX_F2FS_ROOT_INO andalso Nid < Capacity.
+valid_nid(Super, Nid) ->
+    Nid >= ?ERX_F2FS_ROOT_INO andalso Nid < nat_capacity(Super).
 
 %% The block is the node asked for, an inode, whose footer names it as its
 %% own inode, and not an xattr node, whose node offset is
@@ -740,6 +768,13 @@ inode_body(#{i_inline := Inline, i_size := Size}, Words, ExtraWords,
 
 inline_content([_Reserved | Words]) ->
     << <<Word:32/little>> || Word <- Words >>.
+
+%%% Node footers
+
+read_node_footer(Block) ->
+    require_block(Block),
+    <<_:(?BLOCK_SIZE - ?ERX_F2FS_NODE_FOOTER_SIZE)/binary, Footer/binary>> = Block,
+    erx_abi_packed:decode(erx_f2fs_node_footer, Footer).
 
 %%% Dentries
 

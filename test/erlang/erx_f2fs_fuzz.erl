@@ -63,7 +63,14 @@
                                       mode, links, inline_dentry, inline_data_type,
                                       inline_data_blocks, inline_data_transformed,
                                       inline_data | ?DENTRY_RULES]]
-        ++ [{dentry_block, Rule} || Rule <- [ok, block_size | ?DENTRY_RULES]]).
+        ++ [{dentry_block, Rule} || Rule <- [ok, block_size | ?DENTRY_RULES]]
+        ++ [{mount, ok}, {allowance, sit}, {nat, block_addr}, {sit, valid_nodes}]).
+%% The mount's allowance in most cases: more than any seed's SIT needs.
+-define(ALLOWANCE, (1 bsl 30)).
+%% The most needs a mount of a seed may answer before it ends.
+-define(MOUNT_ROUNDS, 16).
+%% The blocks of erx_f2fs_mount_tests' fixture volume.
+-define(FIXTURE_PARTITION, 16384).
 -define(SIT_RULES, [valid_blocks, valid_map, type]).
 -define(DENTRY_RULES, [name_len, name_run]).
 -define(AREA_FIELDS, [segment0_blkaddr, cp_blkaddr, sit_blkaddr, nat_blkaddr,
@@ -78,7 +85,7 @@ run([Seed, Cases, ThirdParty, Lock]) ->
              fun orphan_case/0, fun nat_case/0, fun nat_journal_case/0,
              fun sit_case/0, fun sit_journal_case/0, fun summary_case/0,
              fun compact_case/0, fun inode_case/0, fun inode_case/0,
-             fun dentry_case/0],
+             fun dentry_case/0, fun mount_case/0, fun mount_case/0],
     Outcomes = [(pick(Kinds))() || _ <- lists:seq(1, Count)],
     io:format("fuzz: ~b cases ok~n", [Count]),
     %% How often each rule answered, so a run shows which checks the cases reach.
@@ -135,19 +142,39 @@ corpus_packs() ->
 %% The images deps.lock at Lock pins, each decoded once from its file under
 %% ThirdParty: its superblock's fields and its valid checkpoint packs.
 load_corpus(ThirdParty, Lock) ->
-    persistent_term:put({?MODULE, corpus},
-                        [corpus_image(ThirdParty, Pin) || Pin <- erx_f2fs_corpus:pins(Lock)]).
+    Images = [corpus_image(ThirdParty, Pin) || Pin <- erx_f2fs_corpus:pins(Lock)],
+    persistent_term:put({?MODULE, corpus}, [{Super, Packs} || {Super, Packs, _Mount} <- Images]),
+    persistent_term:put({?MODULE, mounts},
+                        [{?FIXTURE_PARTITION, erx_f2fs_mount_tests:fixture_volume()}
+                         | [Mount || {_Super, _Packs, Mount} <- Images]]).
 
 corpus_image(ThirdParty, #{id := Id} = Pin) ->
     maybe
         {ok, Image} ?= erx_f2fs_corpus:image(Pin, erx_f2fs_corpus:fetched(ThirdParty, Pin)),
         {ok, Super, Packs} ?= erx_f2fs_corpus:metadata(Image),
-        {Super, Packs}
+        {Super, Packs, mount_seed(Image)}
     else
         Failure -> fail(seed, {Id, Failure})
     end.
 
 corpus() -> persistent_term:get({?MODULE, corpus}).
+
+%% The mount seeds, each a partition and the blocks a mount of it reads.
+mounts() -> persistent_term:get({?MODULE, mounts}).
+
+%% The blocks a mount of Image reads, the mount's whole input, by address.
+mount_seed(Image) ->
+    Partition = byte_size(Image) div ?BLOCK,
+    Read = fun(Addresses) ->
+                   maps:from_list([{A, binary:part(Image, A * ?BLOCK, ?BLOCK)} || A <- Addresses])
+           end,
+    {Partition, mount_reads(Partition, Read, #{})}.
+
+mount_reads(Partition, Read, Given) ->
+    case erx_f2fs_mount:mount(Partition, ?ALLOWANCE, Given) of
+        {need, Addresses} -> mount_reads(Partition, Read, maps:merge(Given, Read(Addresses)));
+        _Answer -> Given
+    end.
 
 check_seeds() ->
     Super = erx_f2fs_codec_tests:superblock_block(super_fields()),
@@ -171,6 +198,8 @@ check_seeds() ->
      || {Volume, Fields, _NameLengths} <- inodes()],
     {Dentries, _NameLengths} = dentry_block(),
     expect(seed, erx_f2fs_codec:dentry_block(Dentries)),
+    expect(seed, mount_loop(?FIXTURE_PARTITION, ?ALLOWANCE,
+                            erx_f2fs_mount_tests:fixture_volume(), #{}, ?MOUNT_ROUNDS)),
     ok.
 
 nat_entries() ->
@@ -537,6 +566,80 @@ stretch(Block, NameLengths) ->
     <<Before/binary, Length:16/little, After/binary>>.
 
 %% Runs one read; anything but {ok, _} or {error, {Structure, Rule}} fails.
+%% A whole mount of a seed with one block mutated, its checksum mostly fixed
+%% up when it is a checkpoint header or copy or an inode, under an allowance
+%% that may be too small for its SIT.
+mount_case() ->
+    {Partition, Blocks} = pick(mounts()),
+    Address = pick(lists:sort(maps:keys(Blocks))),
+    Old = maps:get(Address, Blocks),
+    New = case rand:uniform(3) of
+              1 -> mutate_bytes(Old, ?BLOCK);
+              2 -> write_word(Old, word_offset(), word_value(Partition));
+              3 -> nat_entry_address(Old, word_value(Partition))
+          end,
+    Mutated = Blocks#{Address := fix_mount_block(Blocks, Old, New)},
+    Allowance = pick([?ALLOWANCE, ?ALLOWANCE, rand:uniform(1 bsl 16)]),
+    outcome(mount, mount_loop(Partition, Allowance, Mutated, #{}, ?MOUNT_ROUNDS)).
+
+%% The mount's need loop over Blocks, a block Blocks lacks reading as
+%% zeros: every address it asks for lies inside the partition and was not
+%% given before (`partition`, `repeat`), it ends within Rounds needs
+%% (`rounds`), and it answers {ok, Mounted} or {error, {Structure, Rule}}.
+mount_loop(Partition, Allowance, Blocks, Given, Rounds) ->
+    try erx_f2fs_mount:mount(Partition, Allowance, Given) of
+        {need, [_ | _] = Addresses} when Rounds > 0 ->
+            [fail(partition, {Address, Partition})
+             || Address <- Addresses, not is_integer(Address) orelse Address < 0 orelse
+                                          Address >= Partition],
+            [fail(repeat, Address) || Address <- Addresses, is_map_key(Address, Given)],
+            Read = maps:from_list([{A, maps:get(A, Blocks, <<0:(?BLOCK * 8)>>)} || A <- Addresses]),
+            mount_loop(Partition, Allowance, Blocks, maps:merge(Given, Read), Rounds - 1);
+        {need, _} = Need -> fail(rounds, Need);
+        {ok, #{}} = Result -> Result;
+        {error, {_Structure, _Rule}} = Result -> Result;
+        Other -> fail(shape, Other)
+    catch
+        Class:Reason:Stack -> fail(crash, {mount, Class, Reason, hd(Stack)})
+    end.
+
+%% A checkpoint header or copy keeps a valid checksum in nine cases of ten,
+%% and an inode block of a volume with inode checksums too.
+fix_mount_block(Blocks, Old, New) ->
+    case erx_f2fs_codec:checkpoint_copy(Old) of
+        {ok, #{checksum_offset := At}} ->
+            maybe_fix(New, At);
+        {error, _} ->
+            case erx_f2fs_codec:superblock(maps:get(0, Blocks)) of
+                {ok, Super} -> maybe_fix_inode(Super, New);
+                {error, _} -> New
+            end
+    end.
+
+%% A word among a block's first sixteen in a case of four, where the
+%% records' counts and the first entries lie, else anywhere.
+word_offset() ->
+    case rand:uniform(4) of
+        1 -> 4 * (rand:uniform(16) - 1);
+        _ -> 4 * (rand:uniform(?BLOCK div 4) - 1)
+    end.
+
+word_value(Partition) ->
+    pick([0, 1, Partition - 1, Partition, Partition + 1, 16#ffffffff,
+          rand:uniform(Partition), rand:uniform(16#ffffffff)]).
+
+write_word(Block, At, Value) when At + 4 =< byte_size(Block) ->
+    <<Before:At/binary, _:32, After/binary>> = Block,
+    <<Before/binary, Value:32/little, After/binary>>;
+write_word(Block, _At, _Value) ->
+    Block.
+
+%% The block's NAT entry for the root, nid 3, or a random one, pointed at
+%% Value, as if the block were NAT block 0 ([F 33]).
+nat_entry_address(Block, Value) ->
+    Entry = pick([?ERX_F2FS_ROOT_INO, rand:uniform(?ERX_F2FS_NAT_ENTRIES_PER_BLOCK) - 1]),
+    write_word(Block, Entry * ?ERX_F2FS_NAT_ENTRY_SIZE + ?ERX_F2FS_NAT_ENTRY_OFF_BLOCK_ADDR, Value).
+
 read(Structure, Read, Arguments) ->
     try apply(Read, Arguments) of
         {ok, _} = Result -> Result;
@@ -547,6 +650,7 @@ read(Structure, Read, Arguments) ->
     end.
 
 outcome(Structure, {ok, _}) -> {Structure, ok};
+outcome(_Structure, {error, {Failed, Rule}}) when is_tuple(Rule) -> {Failed, element(1, Rule)};
 outcome(_Structure, {error, Failure}) -> Failure.
 
 tally(Outcomes) ->

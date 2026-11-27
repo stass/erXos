@@ -1148,13 +1148,19 @@ structure and the rule, after writing nothing:
 3. **The pack's contents**: the payload, the orphan blocks (each
    `entry_count` at most 1020, [F 26]), the data summaries in either
    form, the node summaries when the pack has them, the journals within
-   their bounds ([F 32]).
+   their bounds ([F 32]). Linux finds compact summaries from
+   `cp_pack_start_sum` and normal ones from the pack's end ([F 30]);
+   erXos requires the two to agree, so the data summaries are the blocks
+   between `cp_pack_start_sum` and the node summaries, and requires each
+   journal to name a nid the NAT holds, or a main segment, at most once,
+   so no entry hides another: bounds Linux leaves out.
 4. **The SIT**, whole, from the selected copies with the journal over
    them, and its checks: each count equal to its map's set bits and at
    most 512, each type below 6, node valid blocks equal to
    `valid_node_count`, every log's next block free ([F 39]).
-5. **The current node logs' summaries**, from the pack or rebuilt from
-   their segments' footers ([F 31]).
+5. **The current node logs' summaries**, from the pack, or for a
+   read-write mount rebuilt from their segments' footers ([F 31]); a
+   read-only mount writes no summary and needs none of them.
 6. **The root inode**: a directory with non-zero `i_blocks`, `i_size` and
    links ([F 55]).
 7. **The walk**, **orphan cleanup** and **replay**, below.
@@ -1165,7 +1171,7 @@ serves the state as it is.
 **The mount's allowance.** What a mount holds in memory is admitted
 against one allowance, a fixed share of the storage domain's memory
 grant, counted in bytes. The SIT, whose size the superblock's count of
-main segments gives at about 150 bytes a segment, is admitted before
+main segments gives at about 160 bytes a segment, is admitted before
 step 4 reads it; the walk admits each block it adds to the footprint,
 and replay each block it makes dirty, against what remains. A mount that
 would pass the allowance stops there and fails with `enomem`, writing
@@ -1667,6 +1673,7 @@ failure named for them:
 | inode | a directory's `i_current_depth` read past 63 |
 | dentry | a long name's run allowed past the last slot |
 | mount | the walk's footprint check and its bound removed |
+| mount | a NAT entry's node allowed outside the main area |
 
 ## Formatting a volume
 
@@ -1818,7 +1825,7 @@ nothing but its own window.
 **Resource bounds.** What a mount and a running volume hold is bounded by
 the partition, never by the image's claims, and admitted against the
 storage domain's memory before it is held: the superblock's geometry
-must lie within the window, so the SIT, loaded whole at about 150 bytes a
+must lie within the window, so the SIT, loaded whole at about 160 bytes a
 segment, holds at most one entry per 2 MiB of the window, and the
 mount's allowance admits the SIT before it is read, and the footprint
 and replay's dirty blocks as they grow ([Mount](#mount)); the node,
@@ -2498,7 +2505,7 @@ watch list ([todo-performance.md](todo-performance.md)):
   chain can need;
 * the cleaner's overhead at high utilisation with greedy choice alone,
   with two logs on an SD card, and the overprovisioning of 16 sections;
-* memory: the SIT, about 150 bytes a segment, 4.6 MiB for 64 GiB, the
+* memory: the SIT, about 160 bytes a segment, 5 MiB for 64 GiB, the
   caches' bounds and the freed generations.
 
 ## Alternatives considered

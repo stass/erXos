@@ -163,8 +163,9 @@ layout erx_f2fs_orphan_block packed_le 1 4096
   field check_sum u32 4092
 # The NAT entries one NAT block holds [F 33].
 limit f2fs_nat_entries_per_block u32 455
-# A NAT entry: the node's version, its inode and its block, 0 when the nid
-# is free [F 33].
+# A NAT entry: the node's version, its inode and its block, f2fs_null_addr
+# when the nid is free [F 33].
+limit f2fs_null_addr u32 0
 layout erx_f2fs_nat_entry packed_le 1 9
   field version u8 0
   field ino u32 1
@@ -178,6 +179,13 @@ layout erx_f2fs_nat_block packed_le 1 4096
 limit f2fs_sit_entries_per_block u32 55
 limit f2fs_sit_vblocks_bits u32 10
 limit f2fs_sit_types u32 6
+# The log types are numbered hot, warm and cold data, then hot, warm and
+# cold node; the node logs are the types from f2fs_log_hot_node on. A
+# log's alloc_type is LFS, appending, or SSR, reusing a segment's free
+# blocks [F 21].
+limit f2fs_log_hot_node u32 3
+limit f2fs_alloc_lfs u32 0
+limit f2fs_alloc_ssr u32 1
 # A SIT entry: vblocks, the valid map of one bit per block of the segment,
 # first bit most significant, and the segment's age [F 37].
 layout erx_f2fs_sit_entry packed_le 1 74

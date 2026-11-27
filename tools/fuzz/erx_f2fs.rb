@@ -22,9 +22,11 @@ require_relative '../lib/erx/generated'
 module ErxF2fsFuzz
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
-  CODEC = File.join(ROOT, 'erlang/apps/erx_f2fs/src/erx_f2fs_codec.erl')
+  # The modules a seeded fault may change, by name.
+  TARGETS = { codec: File.join(ROOT, 'erlang/apps/erx_f2fs/src/erx_f2fs_codec.erl'),
+              mount: File.join(ROOT, 'erlang/apps/erx_f2fs/src/erx_f2fs_mount.erl') }.freeze
   SOURCES = [File.join(Erx::Generated::OUTPUT, 'erlang/apps/erx/src/generated/erx_abi_packed.erl'),
-             *%w[erx_f2fs_codec_tests erx_f2fs_corpus erx_f2fs_fuzz].map do |name|
+             *%w[erx_f2fs_codec_tests erx_f2fs_mount_tests erx_f2fs_corpus erx_f2fs_fuzz].map do |name|
                File.join(ROOT, "test/erlang/#{name}.erl")
              end].freeze
   CORPUS = File.join(ROOT, 'build/third_party')
@@ -34,7 +36,9 @@ module ErxF2fsFuzz
   # every case, and a seeded fault's ends at its first failure.
   DEADLINE_SECONDS = '280'
 
-  Seed = Data.define(:fault, :anchor, :replacement, :failure)
+  Seed = Data.define(:fault, :target, :anchor, :replacement, :failure) do
+    def initialize(target: :codec, **fields) = super
+  end
 
   SEEDS = [
     Seed.new(fault: 'the area-boundary rule of [F 14] dropped',
@@ -57,32 +61,40 @@ module ErxF2fsFuzz
              replacement: '    require(true andalso', failure: 'extra_isize'),
     Seed.new(fault: "a long name's run allowed past the last slot",
              anchor: '            require(Run =< 1 + bit_size(Bits), name_run),',
-             replacement: '            ok,', failure: 'crash')
+             replacement: '            ok,', failure: 'crash'),
+    Seed.new(fault: "a NAT entry's node allowed outside the main area", target: :mount,
+             anchor: '    require(Node =:= ?ERX_F2FS_NULL_ADDR orelse valid_block(Super, Sit, Node), {nat, block_addr}),',
+             replacement: '    ok,', failure: 'partition')
   ].freeze
 
   module_function
 
   def run(seed:, cases:)
-    source = File.binread(CODEC)
+    sources = TARGETS.transform_values { |path| File.binread(path) }
     SEEDS.each do |fault|
-      raise "no anchor for #{fault.fault} in #{CODEC}" unless source.scan(fault.anchor).size == 1
+      unless sources.fetch(fault.target).scan(fault.anchor).size == 1
+        raise "no anchor for #{fault.fault} in #{TARGETS.fetch(fault.target)}"
+      end
     end
-    output, status = fuzz(source, seed: seed, cases: cases)
+    output, status = fuzz(sources, seed: seed, cases: cases)
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ cases ok$/)
     SEEDS.each do |fault|
-      output, status = fuzz(source.sub(fault.anchor, fault.replacement), seed: seed, cases: cases)
+      faulty = sources.merge(fault.target => sources.fetch(fault.target).sub(fault.anchor, fault.replacement))
+      output, status = fuzz(faulty, seed: seed, cases: cases)
       abort("#{fault.fault} passed:\n#{output}") if status.success? || !output.include?("fuzz failure: #{fault.failure}")
     end
-    puts "erx_f2fs_codec fails every mutated record cleanly over #{cases} cases, " \
-         "and each of #{SEEDS.size} seeded faults fails"
+    puts "erx_f2fs_codec and erx_f2fs_mount fail every mutated record and volume cleanly over #{cases} " \
+         "cases, and each of #{SEEDS.size} seeded faults fails"
   end
 
-  # In a directory of its own, which also takes the crash dump of a failed run.
-  def fuzz(codec_text, seed:, cases:)
+  # In a directory of its own, which also takes the crash dump of a failed run; sources maps each
+  # target to the text it is compiled from.
+  def fuzz(sources, seed:, cases:)
     Dir.mktmpdir('erx-f2fs-fuzz') do |work|
-      codec = File.join(work, 'erx_f2fs_codec.erl')
-      File.binwrite(codec, codec_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, codec, *SOURCES,
+      targets = sources.map do |target, text|
+        File.join(work, File.basename(TARGETS.fetch(target))).tap { |path| File.binwrite(path, text) }
+      end
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, *targets, *SOURCES,
                                        stdin_data: '')
       raise output unless status.success?
 

@@ -227,13 +227,19 @@ a_superblock_block_of_another_size_fails_test() ->
 
 %%% The checkpoint pack
 
+%% A header reads as its fields and the checksum it stores, which a node
+%% footer of its checkpoint carries ([F 43]).
 a_valid_header_reads_as_its_fields_test() ->
     Fields = checkpoint_fields(),
-    ?assertEqual({ok, Fields}, erx_f2fs_codec:checkpoint(header(Fields))).
+    Block = header(Fields),
+    <<_:(?BLOCK - 4)/binary, Crc:32/little>> = Block,
+    ?assertEqual({ok, Fields#{crc => Crc}}, erx_f2fs_codec:checkpoint(Block)).
 
 the_checksum_may_sit_before_the_blocks_end_test() ->
     Fields = (checkpoint_fields())#{checksum_offset => 4000},
-    ?assertEqual({ok, Fields}, erx_f2fs_codec:checkpoint(header(Fields))).
+    Block = header(Fields),
+    <<_:4000/binary, Crc:32/little, _/binary>> = Block,
+    ?assertEqual({ok, Fields#{crc => Crc}}, erx_f2fs_codec:checkpoint(Block)).
 
 a_changed_byte_after_the_checksum_fails_it_test() ->
     Block = header((checkpoint_fields())#{checksum_offset => 4000}),
