@@ -1246,14 +1246,44 @@ does.
 **eMMC.** The driver admits SD cards alone. A driver for an eMMC device
 reports the same facts from its EXT_CSD as FreeBSD reads them: the unit
 is the high-capacity erase group, byte 224 times 1024 sectors, used once
-ERASE_GROUP_DEF, byte 175, is set (`mmc.c:1876-1882`); a discard is
-CMD35, CMD36 and CMD38 with TRIM, argument 1, at sector granularity, when
-SEC_FEATURE_SUPPORT, byte 231, has GB_CL_EN (`mmcsd.c:285-293`;
-`mmcreg.h:272-279, 392, 486`); and the cache is turned on and flushed
-through CACHE_CTRL and FLUSH_CACHE, bytes 33 and 32 (`mmcreg.h:362-363`),
-as FreeBSD turns on an eMMC's cache and never an SD card's, which the
-contract's flush already covers. How many units an eMMC keeps open is
-unmeasured, and it reports 2 until a measurement says more.
+ERASE_GROUP_DEF, byte 175, is set (`mmc.c:1876-1882`); and the cache is
+turned on and flushed through CACHE_CTRL and FLUSH_CACHE, bytes 33 and
+32 (`mmcreg.h:362-363`), as FreeBSD turns on an eMMC's cache and never
+an SD card's, which the contract's flush already covers. How many units
+an eMMC keeps open is unmeasured, and it reports 2 until a measurement
+says more.
+
+A discard on an eMMC is CMD35, CMD36 and CMD38 with TRIM, argument 1,
+at sector granularity, and only on a device that passes both tests
+below; any other device reports `discard => none` and is never sent
+CMD38:
+
+* SEC_FEATURE_SUPPORT, byte 231, has GB_CL_EN (`mmcsd.c:285-293`;
+  `mmcreg.h:272-279, 392, 486`);
+* its CID matches no row of the exclusion table, matched as FreeBSD
+  matches its quirk table: manufacturer, OEM unless the row says any,
+  and product name (`mmc.c:1896-1904`). The table holds FreeBSD's rows,
+  with their reasons: Kingston's V10008 and V10016 (manufacturer 0x70,
+  any OEM), where "a firmware bug can lead to unrecoverable data
+  corruption" on TRIM (`mmc.c:125-130`, `mmcsd.c:285-288`); and
+  SanDisk's iNAND SEM02G, SEM04G, SEM08G, SEM16G and SEM32G
+  (manufacturer 0x2, OEM 0x100), which need CMD38's argument written to
+  EXT_CSD byte 113 first (`mmc.c:115-123`, `mmcsd.c:272-279`). That
+  preparation is not built, and nothing needs it until one of those
+  devices is supported, so they do not discard.
+
+The table only withholds discard, never grants it. Other exclusions
+published elsewhere, Linux's quirk list among them, are GPL source not
+read here, so whether more devices corrupt data on TRIM is unverified.
+Before an eMMC device is supported, its board probe records its CID
+and checks that sectors outside a discarded range read back unchanged
+after the discard; a device that fails joins the table. Discard is an
+optimization the file system never needs for correctness, since its
+power-cut harness gives the same trees with and without it
+([design-f2fs.md](design-f2fs.md#the-power-cut-harness)), so
+withholding it costs only write speed. When the driver is built, its
+tests show a CID of each row with GB_CL_EN set reporting `discard =>
+none`, and fail when the table match is dropped.
 
 **Deadlines and interrupts.** A request keeps the transport contract's
 wait limit and in-flight bound ([Data model](#data-model)) with one

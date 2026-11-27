@@ -282,7 +282,10 @@ nodes to cold node ([R 30]). On a medium that keeps fewer open, an SD
 card, two logs are written: every node block to warm node, which the
 fsync chain needs, and every data block to warm data, as Linux's own
 two-log mode allocates "one for node and the other for data types"
-(F2FS paper, section 2.4). Which data log a block lands in matters to no
+(F2FS paper, section 2.4). Linux's two logs are the hot ones, and it
+writes a checkpoint at every `fsync` instead of a chain ([R 32]); erXos
+keeps the chain, so its node log is the warm one, where every reader's
+walk starts ([R 49]). Which data log a block lands in matters to no
 reader, and whether `fsck.f2fs` and Linux's recovery accept directory
 and indirect nodes in the warm node log is settled in the oracle guest
 ([The section is the medium's unit](#the-section-is-the-mediums-unit)).
@@ -424,7 +427,19 @@ follows from treating the section as the unit:
   takes a new segment "first within the current section" and skips "a
   section in use by a log" ([R 34]). Each log's writes therefore fill one
   allocation unit from its start to its end before they touch another,
-  which is the write a card handles best.
+  which is the write a card handles best. The format and the allocator
+  keep this for every volume erXos writes, but Linux requires only that
+  the six current segments differ ([F 55]), and `mkfs.f2fs` puts the hot
+  node, warm node, cold node and hot data logs in main segments 0 to 3
+  ([T 19]), so on its volumes with two or four segments per section two
+  or four logs share a section. erXos accepts such a volume read-write,
+  as F2-R2 promises: a read-only mount allocates nothing, and a
+  read-write mount's mount checkpoint moves every log whose section
+  another log also holds to a free section of its own
+  ([The mount checkpoint](#read-write-mounts-the-mount-checkpoint)), so
+  from that commit on the invariant holds and erXos's allocation keeps
+  it. The sections those logs leave are closed, part written, and the
+  cleaner takes them like any other.
 * **Cleaning.** A victim is a whole section, so a cleaned section frees
   whole allocation units ([The cleaner](#the-cleaner)).
 * **Space.** The reserves and the room rule count sections
@@ -438,11 +453,12 @@ follows from treating the section as the unit:
   on the medium: each mount chooses it from the window's `open_units`,
   six when the medium takes six or more units at once and two otherwise,
   with the mapping of [Scope](#scope-features-and-forms). The four logs a
-  two-log mount does not write stay where they are, each holding its own
-  section, never appended to; a six-log volume holds six sections for its
-  logs too, so the reserves are the same, and a volume another writer
-  left with partly filled logs keeps their free tails idle, at most four
-  sections' worth, until a six-log mount writes them.
+  two-log mount does not write stay where the mount checkpoint left
+  them, each holding its own section, never appended to; a six-log
+  volume holds six sections for its logs too, so the reserves are the
+  same, and a volume another writer left with partly filled logs keeps
+  their free tails idle, at most four sections' worth, until a six-log
+  mount writes them.
 * **Streams at the card.** Two logs per volume are not two streams at
   the card. The card holds two F2FS volumes, the vault's and the data
   partition, each in its own storage domain, so while both write the
@@ -1245,19 +1261,27 @@ volume admit a request that changes anything.
 Each log writes, during the mount checkpoint, only after the last block
 of its committed segment that is live or in the footprint, as an
 appending log may, and takes a free section only when no block remains
-after that one in its section, or when the committed checkpoint marks the log SSR,
-since erXos appends only. So the warm node log resumes past the chain's
-end, and a mount with an empty chain, its logs not SSR, takes no free
-section. The mount checkpoint's node blocks carry the committed epoch's
-version, as a checkpoint's do, and lie past the chain's end, where the
-old view's walk never reaches: that walk stops at the end block, which
-is in the footprint and stays as the walk read it.
+after that one in its section, when the committed checkpoint marks the
+log SSR, since erXos appends only, or when another log's current
+segment lies in its section, since no two logs share a section
+([The section is the medium's unit](#the-section-is-the-mediums-unit)).
+Every log of a shared section moves, so the mount checkpoint writes
+nothing into a section two logs held, and the old view's chain ends, on
+a cut, at a block it left as it was. A volume erXos last wrote already
+keeps the invariant, so the warm node log resumes past the chain's end,
+and a mount with an empty chain, its logs not SSR, takes no free
+section; only a volume another writer left moves logs, at most six
+sections' worth. The mount checkpoint's node blocks carry the committed
+epoch's version, as a checkpoint's do, and lie past the chain's end,
+where the old view's walk never reaches: that walk stops at the end
+block, which is in the footprint and stays as the walk read it.
 
 What the mount checkpoint writes into the logs is bounded by the epoch's
 charge the volume carried before the cut, so the room rule that every
 erXos volume keeps leaves it the free sections it needs
 ([The room rule](#the-room-rule)). A volume another writer left whose
-mount checkpoint, copies included, does not fit its free sections mounts
+mount checkpoint, copies and moved logs included, does not fit its free
+sections mounts
 read-only instead, with a log line naming the shortfall.
 
 ## Space and the cleaner
@@ -1924,41 +1948,59 @@ C14 is stronger than Linux's own recovery, which a cut may cost records
 
 The harness runs the core and the volume process over the recording test
 window and, for each prefix of a workload's requests, makes the states a
-cut can leave: every write answered before the last answered flush kept,
-and each later write kept, lost or torn at a sector boundary, which
-covers every order in which the medium may complete them. A run of
-several blocks is, to the harness, one write per block, each kept, lost
-or torn on its own, since the medium may complete a multi-block request
-in part. A discard sent after the last answered flush leaves each sector
-of its range reading as its old bytes, zeros, or a fill no write makes,
-in every state made after it was sent. It enumerates
-every subset of up to ten unflushed writes, and each with one kept write
-torn at each of its sector boundaries, and samples beyond ten. Each state
-is mounted read-only and then read-write and checked against the crash
-rule: the tree is a base with `fsync` states, so every block of every
-file holds bytes some write put there or zeros (F2-R4); the counters
-equal a recount; a second mount after the read-write mount's checkpoint
-gives the same tree; and a cut during that mount checkpoint gives the
-same tree again (C14). Its fixed workloads reach every row erXos's own
-writes can leave (C1-C9, C13-C18): creates, writes of every size and
-alignment, truncates to and from partial blocks, large truncates and
-unlinks of large files with checkpoints between their steps, each file
-extended after the restart by `setattr` and by a write past a gap,
-renames, links, unlinks of open files, `fsync` of new and old files,
-concurrent `fsync`s, overwrites of checkpointed files beside `fsync`s of
-others, directory growth past several levels, a volume filled until the
-cleaner runs, and mounts of Linux-made images with chains, those whose
-replay copies blocks included; it also takes the generator's
-workloads under the chains and general profiles at the small
-geometries. A state is made from the recorded writes and a selection of
-them, so the record and the selection reproduce a failing state whatever
-schedule made the writes.
+cut can leave. Its model is the medium's, sector by sector: every write
+answered before the last answered flush is kept; each sector of each
+later write reads old or new on its own; and each sector of a discard
+sent after the last answered flush reads as its old bytes, zeros or a
+fill no write makes, in every state made after the discard was sent. A
+state is one choice for every such sector. The model covers every order
+and every part in which the medium may complete a request, runs
+included: two blocks of one run each partly written, and any subset of a
+block's sectors, not only a prefix.
+
+The harness enumerates these states exhaustively:
+
+* every subset of up to ten unflushed block writes, each block kept or
+  lost whole, with each discard's range reading whole as each of its
+  three outcomes;
+* every choice for every sector when the unflushed writes span at most
+  16 sectors, two 4 KiB blocks, so every pair of partly written blocks
+  with every subset of their sectors;
+* for each unflushed block, every subset of its sectors, with every
+  other unflushed write kept, and again with every other lost.
+
+Beyond these it samples: states drawn from the model, every sector of
+every unflushed write and discard chosen on its own, so that every state
+the model holds can be drawn. Each run reports, per workload, how many
+states it enumerated and how many it sampled, and two partly written
+blocks among more than 16 unflushed sectors, or a discard read other
+than whole, are covered by sampling alone. Each state is mounted
+read-only and then read-write and checked against the crash rule: the
+tree is a base with `fsync` states, so every block of every file holds
+bytes some write put there or zeros (F2-R4); the counters equal a
+recount; a second mount after the read-write mount's checkpoint gives
+the same tree; and a cut during that mount checkpoint gives the same
+tree again (C14). Its fixed workloads reach every row erXos's own writes
+can leave (C1-C9, C13-C18): creates, writes of every size and alignment,
+truncates to and from partial blocks, large truncates and unlinks of
+large files with checkpoints between their steps, each file extended
+after the restart by `setattr` and by a write past a gap, renames,
+links, unlinks of open files, `fsync` of new and old files, concurrent
+`fsync`s, overwrites of checkpointed files beside `fsync`s of others,
+directory growth past several levels, a volume filled until the cleaner
+runs, and mounts of Linux-made images with chains, those whose replay
+copies blocks included; it also takes the generator's workloads under
+the chains and general profiles at the small geometries. A state is made
+from the recorded writes and a selection of them, so the record and the
+selection reproduce a failing state whatever schedule made the writes;
+the record holds the discards with the writes.
 
 | Property | Seeded fault the harness must catch |
 | --- | --- |
 | a record replays whole or not at all | marking every dnode of a record instead of the last |
 | no record's dnode durable before its data | the first flush of a record dropped |
 | a torn commit block never replays | the pre-image left out, so the commit block is written over the block's old contents |
+| a commit block reads as its pre-image or whole, whichever sectors land | the pre-image's first sector taken from the dnode's earlier version, so it differs from the commit block there too, which only a state keeping the last sector and losing the first shows |
 | a record releases nothing | freed blocks and nids returned to the pool at a record's second flush |
 | a cut during the mount checkpoint loses nothing | the warm node log resumed at the chain's start |
 | a cut during the mount checkpoint replays the same again | a replayed block in a segment valid at the checkpoint adopted, and its SSA block rewritten |
@@ -2286,6 +2328,7 @@ inputs, each paired with the seeded fault it must catch:
 | the walk on a looped chain fails within its bound | the bound removed |
 | filling and churning at every format size keeps `need` covered and the cleaner freeing segments | victims restricted to full segments |
 | repeated mounts of a busy volume keep the room rule | the mount checkpoint moving every log to a free section |
+| after every commit the six current segments lie in six sections, through a read-write mount and churn of syzkaller's writable seeds with two segments per section and of erXos-formatted volumes with two and four, their logs edited to `mkfs.f2fs`'s segments 0 to 3 ([T 19]) | the shared-section test dropped from the mount checkpoint, so the hot node log appends into the section the warm node log holds |
 | the format's S for every unit from 16 KiB to 64 MiB and every partition from 56 MiB to 64 GiB is the section rule's, and its main area starts on an absolute section boundary for partitions starting at 525 and 590 MiB | segment 0 placed from the partition's start rather than the medium's, which misaligns both partitions |
 | filling and churning with sections of 1, 2, 4 and 8 segments keeps `need` covered and the cleaner freeing sections, no step moving more than 512 blocks | a step that moves the whole victim |
 | on a two-log mount every block written lands in the warm node or warm data log, and the other four logs keep their positions through every workload | a directory's dnode placed in the hot node log |
@@ -2300,12 +2343,19 @@ written and churned by erXos, pass `fsck.f2fs` and Linux's mount, and
 Linux churns them in turn; a two-log image, with directory and indirect
 nodes in the warm node log, passes `fsck.f2fs`, Linux replays its
 records, and Linux then writes all six logs and `fsck.f2fs` still
-passes; `mkfs.f2fs -s 2` and `-s 4` images mount read-write in erXos and
-churn to full; and Linux mounted with `active_logs=2` is observed to
-write its fsync chain to the warm node log, which [R 49] implies and no
-record states. A seeded fault proves the two-log check runs: the chain
-written to the hot node log on a two-log mount, which Linux's replay
-then misses.
+passes; `mkfs.f2fs -s 2` and `-s 4` images, fresh from `mkfs.f2fs`
+before Linux writes them, so that two or four logs share a section ([T
+19]), mount read-write in erXos, whose mount checkpoint moves those
+logs, pass `fsck.f2fs`, churn to full, and mount again in Linux. Linux's
+own two-log output is a separate check: mounted with `active_logs=2`,
+Linux writes every node to the hot node log and a checkpoint at every
+`fsync` ([R 32], [R 40]), so it leaves no chain, and the guest checks
+that erXos mounts and churns the images it leaves; that Linux replays
+erXos's warm node records, since its walk starts at the warm node log
+and the record names no condition on the number of logs ([R 49]), is the
+check of the two-log image above. A seeded fault proves that check runs:
+the chain written to the hot node log on a two-log mount, which Linux's
+replay then misses.
 
 ## Performance
 

@@ -448,14 +448,18 @@ The table says what correct means before any code is written.
 
 The **power-cut harness** makes those states. It runs the core over a
 test window that records every write, and after each step of a workload
-makes every state a cut could leave: each write since the last answered
-flush kept, lost or torn at a sector boundary, every combination up to
-ten writes and samples beyond. Each state is mounted and checked: every
-file holds bytes some write put there, or zeros, and a second mount
-gives the same tree. Each property has a seeded fault the harness must
-catch, such as a record's first flush dropped ([design-f2fs.md, The
-power-cut harness](../design-f2fs.md#the-power-cut-harness)). The
-harness is designed and not built.
+makes the states a cut could leave: each sector written since the last
+answered flush old or new, and each sector discarded old, zeroed or
+filled, each on its own, so a request may land in any part. It
+enumerates every combination of up to ten whole writes, every sector
+choice over two blocks, and every subset of each block's sectors,
+samples beyond, and reports which states it sampled. Each state is
+mounted and checked: every file holds bytes some write put there, or
+zeros, and a second mount gives the same tree. Each property has a
+seeded fault the harness must catch, such as a record's first flush
+dropped ([design-f2fs.md, The power-cut
+harness](../design-f2fs.md#the-power-cut-harness)). The harness is
+designed and not built.
 
 ### 16.4.4 Fitting the card
 
@@ -469,19 +473,20 @@ volume meets the card
 unit](../design-f2fs.md#the-section-is-the-mediums-unit)). The format
 sizes a section to the card's allocation unit, as timings on the card
 show it rather than as the card reports it, and starts every section
-on one; each log fills a whole section before it takes another; the
-cleaner empties whole sections; and when a checkpoint frees a section,
-the volume tells the card with a **discard**, so the card learns of a
-whole free unit. The card also says how many logs to write: six
-streams would make a card that keeps two units open close and reopen
-them, so on an SD card the volume writes two, one for nodes and one for
-data, while every checkpoint still names the six that Linux's format
-requires. The price is cleaning: data of different lifetimes share a
-log, so a section the cleaner empties holds more live blocks. Writes
-that lie next to each other on the medium travel as one request. A
-measurement on the Pi's own card, against Linux's F2FS on the same card,
-chooses the section size and the number of logs. This is designed and
-not built.
+on one; each log fills a whole section of its own before it takes
+another, and a volume whose logs `mkfs.f2fs` placed in one section has
+them moved apart by its first read-write mount; the cleaner empties
+whole sections; and when a checkpoint frees a section, the volume tells
+the card with a **discard**, so the card learns of a whole free unit.
+The card also says how many logs to write: six streams would make a card
+that keeps two units open close and reopen them, so on an SD card the
+volume writes two, one for nodes and one for data, while every
+checkpoint still names the six that Linux's format requires. The price
+is cleaning: data of different lifetimes share a log, so a section the
+cleaner empties holds more live blocks. Writes that lie next to each
+other on the medium travel as one request. A measurement on the Pi's own
+card, against Linux's F2FS on the same card, chooses the section size
+and the number of logs. This is designed and not built.
 
 ## 16.5 FAT, drives and the SD controller
 
