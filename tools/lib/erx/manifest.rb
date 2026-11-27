@@ -385,6 +385,40 @@ module Erx
     end
     private_class_method :release_reference, :word
 
+    # A key the build derives into a row's init arguments, which no row's own words may
+    # name: an init flag, or an application key of the application flag names
+    # (Check#refuse_derived_keys).
+    DerivedKey = Data.define(:flag, :application_key) do
+      # The key's words, the derived values follow.
+      def words = [flag, *application_key]
+    end
+    # The declaration of the services a domain serves, an init flag (docs/design-system.md,
+    # "The declaration"), and the Bluetooth domain's served GATT set, an application key of
+    # erx_bt (Check#bt_services, docs/design-bluetooth.md, "The Bluetooth domain").
+    SERVES_KEY = DerivedKey.new(flag: '-erx_serves', application_key: nil)
+    BT_SERVICES_KEY = DerivedKey.new(flag: '-erx_bt', application_key: 'services')
+    DERIVED_KEYS = [SERVES_KEY, BT_SERVICES_KEY].freeze
+
+    # A derived key's words: the key, its values, then its own --, so no plain word that
+    # follows (the head of a row's init arguments, a record) continues it.
+    def self.derived_key(key, values) = [*key.words, *values, '--']
+
+    # A word list split at its first --: the emulator's flags and init's arguments, all
+    # the emulator's where it has none.
+    def self.split_init(args) = args.index('--').then { |at| at ? [args[0...at], args[at + 1..]] : [args, []] }
+
+    # The system domain's packed arguments as words: the machine's system_args, args, with
+    # its declaration, pairs of each service's name and interface, first among init's,
+    # after their first -- or, where they have none, after them all with a -- of its own,
+    # so no word of system_args, the records or an erx.arg extends or hides it. A
+    # system_args with no -- holds only emulator flags, so the words the root adds after
+    # it are init's either way. Check#system_args packs them, and the boot transcript's
+    # checkpoint counts them (ProductionImage::Run.checkpoints).
+    def self.system_words(args, pairs)
+      emulator, init = split_init(args)
+      [*emulator, '--', *derived_key(SERVES_KEY, pairs.flatten), *init]
+    end
+
     # The manifest check (docs/design-fiasco.md, "The Phase 1 manifest check"): a
     # development manifest, full or partial boot, with the system domain and its
     # configured domains; test fixtures go through it too. A unit's holder or a service's
@@ -630,7 +664,7 @@ module Erx
         invalid('only the system principal may be named root', 'principal.name') unless root == system_principal
         header = {
           'magic' => @codec.constant('manifest_magic'), 'version' => @codec.constant('manifest_version'),
-          'flags' => flags, 'host' => text(machine, 'host'), 'system_args' => words(machine, 'system_args'),
+          'flags' => flags, 'host' => text(machine, 'host'), 'system_args' => system_args(machine, rows),
           'console' => console,
           'hostlink' => hostlink, 'platform' => platform_name, 'root_memory' => root_memory,
           'system_baseline' => baseline, 'system_reservation' => 0,
@@ -1727,14 +1761,16 @@ module Erx
       end
 
       # The configured domains with their arguments and environment: each row's own
-      # arguments bound to its release's boot script (boot_args), the Bluetooth domain's
-      # with its served set (served_sets), refused past the boot page's strings.
+      # arguments bound to its release's boot script (boot_args), after the derived keys,
+      # every row's declaration (declaration) and the Bluetooth domain's served set
+      # (served_sets), refused past the boot page's strings.
       def domain_arguments(tables, facet_values)
         served = served_sets(tables, facet_values)
         by_name = records('domain').to_h { |record| [record.name, record] }
         tables.fetch('domains').each_with_index.map do |row, index|
           record = by_name.fetch(row.fetch('name'))
-          args = boot_args(record, field: 'domain.args', served: served[index])
+          derived = [*declaration(tables, index), *(served.key?(index) ? bt_services(served.fetch(index)) : [])]
+          args = boot_args(record, field: 'domain.args', derived: derived)
           invalid('arguments and environment exceed the boot page\'s strings', 'domain.args') if
             args.bytesize + words(record, 'env').bytesize > @codec.constant('boot_strings_max')
           row.merge('args' => args, 'env' => words(record, 'env'))
@@ -1755,6 +1791,31 @@ module Erx
           served.fetch(service.fetch('server')).concat(values.fetch('services', [])) if service.fetch('interface') == ble
         end
         served.transform_values(&:sort)
+      end
+
+      # A served set's derived key: one list of quoted atoms, since a reserved word such as
+      # `end` may name a GATT service.
+      def bt_services(names) = 
+        Manifest.derived_key(BT_SERVICES_KEY, ["[#{names.map { |name| "'#{name}'" }.join(',')}]"])
+
+      # The services the domain at server serves, mf_none for the system domain
+      # (docs/design-system.md, "The declaration"), in name order, each as its name and its
+      # interface's number in decimal.
+      def served_pairs(tables, server)
+        tables.fetch('services').select { |service| service.fetch('server') == server }
+              .map { |service| [service.fetch('name'), service.fetch('interface').to_s] }
+      end
+
+      # The declaration of the domain at server: SERVES_KEY, its served pairs, then --;
+      # with no service, the key and its --.
+      def declaration(tables, server) = Manifest.derived_key(SERVES_KEY, served_pairs(tables, server).flatten)
+
+      # The system domain's arguments as the page holds them (Manifest.system_words).
+      def system_args(machine, tables)
+        args = words(machine, 'system_args').split("\0")
+        refuse_derived_keys(args, 'machine.system_args')
+        Manifest.system_words(args, served_pairs(tables, @codec.constant('mf_none')))
+                .map { |word| "#{word}\0" }.join.b
       end
       # Property 14: each session template, keyed by its principal, from which the
       # domain service makes every session of that principal on request
@@ -1827,24 +1888,27 @@ module Erx
       # arguments naming -boot are refused, since its release names the script.
       # erx_domain_srv:boot_args/2 binds a created domain's the same way.
       #
-      # The Bluetooth domain's served set, served, is the application key SERVED_KEY, a
-      # list of quoted atoms (a reserved word such as `end` may name a service), put after
-      # the binding, so no word of the row's (-extra) can make it a plain argument, and
-      # closed by its own --, so no plain word at the head of the row's init arguments
-      # continues it. A row naming the key itself is refused, whichever domain it is, so the
-      # key has one value, the derived one.
-      def boot_args(record, field:, served: nil)
+      # The derived words, derived (derived_key), are put after the binding, so no word of
+      # the row's (-extra) can make them plain arguments. A row naming a derived key itself
+      # is refused, whichever domain or template it is, so each key has one value, the
+      # derived one.
+      def boot_args(record, field:, derived: [])
         args = words(record, 'args').split("\0")
         invalid('the arguments name -boot, which the release sets', field) if args.include?('-boot')
-        invalid("the arguments name #{SERVED_KEY.join(' ')}, which the build derives from the ble rows", field) if
-          application_keys(args, SERVED_KEY.first).include?(SERVED_KEY.last)
-        derived = served ? [*SERVED_KEY, "[#{served.map { |name| "'#{name}'" }.join(',')}]", '--'] : []
+        refuse_derived_keys(args, field)
         boot_page_args(args, release_name(record, field: field.sub('args', 'release')), derived: derived)
       end
 
-      # The application key that carries the Bluetooth domain's served set
-      # (docs/design-bluetooth.md, "The Bluetooth domain"), which the build derives.
-      SERVED_KEY = %w[-erx_bt services].freeze
+      # Refuses args that name a key of DERIVED_KEYS: an init flag as a word of its own,
+      # an application key as a key of its application's flag (application_keys).
+      def refuse_derived_keys(args, field)
+        DERIVED_KEYS.each do |key|
+          named = key.application_key ?
+                    application_keys(args, key.flag).include?(key.application_key) :
+                    args.include?(key.flag)
+          invalid("the arguments name #{key.words.join(' ')}, which the build derives", field) if named
+        end
+      end
 
       # The keys of every `flag Key Value ...` in args, as written: a flag's values run to
       # the next word that begins with a dash, and application_controller takes them in
@@ -1858,7 +1922,7 @@ module Erx
       # A word list bound to the boot script of the release named name, as boot_args
       # describes, with the derived words, closed by their own --, first among init's.
       def boot_page_args(args, name, derived: [])
-        emulator, init = args.index('--').then { |at| at ? [args[0...at], args[at + 1..]] : [args, []] }
+        emulator, init = Manifest.split_init(args)
         [*emulator, '--', '-boot', "/bin/#{name}", '--', *derived, *init].map { |word| "#{word}\0" }.join.b
       end
 

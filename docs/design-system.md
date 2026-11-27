@@ -2531,6 +2531,48 @@ Every refusal is logged and counted, and leaves the rest of the report,
 the domain's ready state included, as it was. What is accepted is the
 incarnation's providers until it ends.
 
+**The declaration.** A server names a mint only for a service its row
+declares, so it must know, at start, which services those are. The
+build tells it: the packer derives from the manifest's `service` rows,
+for every configured domain's row and for the system domain, each
+service the row serves and its interface, and writes them into the
+row's `init` arguments as one flag, `-erx_serves NAME INTERFACE ...`,
+each `NAME` the service's name and each `INTERFACE` its interface's
+number in decimal, as the row holds it, sorted by name, then `--`. A row
+that serves nothing gets the flag with no words, so a domain never
+tells "serves nothing" from "was not told". The words follow the boot
+script's binding, ahead of the row's own init arguments, and their `--`
+closes the flag, so no word of the row's own, an `-extra` included,
+extends or hides them; in the system domain's arguments they follow
+the first `--` of `system_args`, ahead of every record and `erx.arg`
+word; where `system_args` have no `--`, they hold only emulator flags,
+and the declaration follows them all after a `--` of its own. The
+packer refuses a row, a session template or `system_args` whose own
+words name `-erx_serves`, so a configured domain's declaration and the
+system domain's have one writer, the packer. A domain created at run
+time and a session get no declaration: they serve only what their
+creator or the session rules of this section hand them.
+One module, `erx_serves`, owns the reading: it takes `init`'s
+occurrences of the flag, accepts exactly one, of name and interface
+pairs, and keeps it, immutable, for the domain's life; it makes no atom,
+and it does not re-check what the packer took from the rows.
+A missing flag, a second occurrence (an `erx.arg=-erx_serves` word on
+the kernel command line makes one), an odd count or an interface word
+that is no decimal number fails the caller's start with
+`{bad_serves, Detail}`, so a domain that cannot read its declaration
+does not start rather than mint by guess. A server reads it when it
+starts its mints, and starts a mint only for a service it declares:
+the storage domain's littlefs starts the mint of each of its trees,
+`data`, `packages` and `home`, only where its row declares that tree as
+a `files` service and the volume it lies on is present, while
+`storage_ctl`, `system` and `login_keys` keep their own starts. The
+declaration grants nothing and is no evidence to the domain service,
+which checks each `provides` map against the manifest itself, as above;
+a domain that ignores its declaration only gets its report refused.
+Bluetooth's served GATT set is a separate fact the packer derives the
+same way, through the same helper
+([design-bluetooth.md](design-bluetooth.md#the-bluetooth-domain)).
+
 **A session as provider.** A session provides two kinds of service,
 under the same rules with a session in place of a configured domain's
 incarnation: each mint is a pid the session owns, node and creation

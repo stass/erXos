@@ -1053,6 +1053,14 @@ class DomPlannerTest < Minitest::Test
       .reduce(without_record_volume(Erx::Manifest::Edit.without_apps(source))) { |text, record| ManifestContextFixture.substitute(text, record, '') }
   end
 
+  # The storage row's packed arguments, its declaration among them.
+  def storage_args(source)
+    view = @codec.open('manifest', admit_development(source))
+    row = view.count('domains').times.map { |at| view.fetch('domains', at) }
+              .find { |domain| view.string(domain.fetch('name')) == 'storage' }
+    view.string(row.fetch('args'))
+  end
+
   def admit_development(source)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
     Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner).bytes
@@ -1080,7 +1088,9 @@ class DomPlannerTest < Minitest::Test
   # arguments leave less than ERX_BOOT_SYSTEM_IMAGE_WORDS_MAX bytes for it, 12 for the flag,
   # 13 for the form, three numbers of 21, two hex words of 65 and 14 for record_volume, is
   # refused at the view, not at its creation: the storage row takes 116 fewer two-byte words
-  # when it holds the window, and the web row, which does not, takes as many either way.
+  # when it holds the window, less what its declaration of the services it serves grows by
+  # (the system tree's and the packages tree's pairs), and the web row, which does not,
+  # takes as many either way.
   def test_the_system_window_s_holder_keeps_room_for_its_record
     room = lambda do |source, domain|
       (0..@codec.constant('boot_strings_max')).bsearch do |count|
@@ -1088,7 +1098,9 @@ class DomPlannerTest < Minitest::Test
       end
     end
     without = without_system_image(development_source)
-    assert_equal (12 + 13 + (3 * 21) + 65 + 65 + 14) / 2, room.call(without, 'storage') - room.call(development_source, 'storage')
+    declared = storage_args(development_source).bytesize - storage_args(without).bytesize
+    assert_equal (12 + 13 + (3 * 21) + 65 + 65 + 14 + declared) / 2,
+                 room.call(without, 'storage') - room.call(development_source, 'storage')
     assert_equal room.call(without, 'web'), room.call(development_source, 'web')
   end
 

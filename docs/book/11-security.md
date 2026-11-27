@@ -429,6 +429,19 @@ alone (`grant_facets` in
 `erlang/apps/erx_domain/src/erx_domain_srv.erl`), and hands it their
 pids by name. That is the only way a domain learns a facet.
 
+A domain that serves learns what it serves the same way, from the
+build. The packer writes into each domain's start arguments, the
+system domain's included, one flag, `-erx_serves`, followed by each
+service its manifest rows give it and that service's interface number, and
+refuses any hand-written copy of the flag. One module, `erx_serves`,
+reads it: exactly one occurrence of name and number pairs, or the
+domain does not start. So the storage domain starts a
+mint for its `home` tree only on a machine whose manifest declares
+`home`; a mint the manifest does not declare would get the domain's
+whole ready report refused. The declaration grants nothing: the domain
+service still checks every mint against the manifest itself
+([design-system.md](../design-system.md#facets-a-configured-domain-serves)).
+
 ### 11.6.2 What every facet checks
 
 Every facet is an instance of one OTP behaviour, `erx_facet`

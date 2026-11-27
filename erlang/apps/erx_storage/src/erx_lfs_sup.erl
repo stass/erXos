@@ -6,10 +6,14 @@
 The data partition's littlefs volume (docs/design-stopgap.md#littlefs-in-the-storage-domain):
 the volume's owner, `erx_lfs`, on the block service's data window; the grant
 that mounts its `data` tree at `/data` in this domain; and, for each tree of
-the volume (erx_lfs:trees/0), the mint of the files service of the tree's
-name, which hands other domains grants of that tree alone (erx_fs_mint):
-`data`, and `packages`, the installed app packages
-(docs/design-packaging.md, "Where a package lies"). The owner starts once
+the volume (erx_lfs:trees/0) that this domain's declaration names a files
+service (erx_serves, docs/design-system.md, "The declaration"), the mint of
+the files service of the tree's name, which hands other domains grants of
+that tree alone (erx_fs_mint): `data`, `packages`, the installed app
+packages (docs/design-packaging.md, "Where a package lies"), and `home`. A
+tree the declaration does not name gets no mint, since the domain service
+refuses a ready report that names more mints than the row declares
+services. The owner starts once
 the volume has mounted, so a mount that fails fails the domain's boot before
 it reports ready, and each mint names itself its service's mint before that
 report. Every child is permanent and the restart intensity is 0: when any
@@ -22,8 +26,10 @@ of them.
 
 -behaviour(supervisor).
 
--export([start_link/0, start_grant/1, start_mint/2]).
+-export([start_link/0, start_grant/1, start_mint/2, minted/1]).
 -export([init/1]).
+
+-include("generated/erx_abi.hrl").
 
 -define(NAME, erx_lfs).
 -define(POINT, <<"/data">>).
@@ -45,8 +51,13 @@ init([]) ->
     Mints = [#{id => {mint, Tree}, start => {?MODULE, start_mint, [Tree, ?NAME]},
                restart => permanent, shutdown => brutal_kill, type => worker,
                modules => [erx_fs_mint]}
-             || Tree <- erx_lfs:trees()],
+             || Tree <- minted(erx_serves:declared())],
     {ok, {Flags, [Owner, Grant | Mints]}}.
+
+-doc "The trees of the volume Declaration (erx_serves:declared/0) names as files services.".
+-spec minted(erx_serves:declaration()) -> [atom()].
+minted(Declaration) ->
+    [Tree || Tree <- erx_lfs:trees(), lists:member({atom_to_binary(Tree), ?ERX_SERVICE_FILES}, Declaration)].
 
 -doc false.
 -spec start_grant(atom()) -> {ok, pid()} | ignore | {error, term()}.

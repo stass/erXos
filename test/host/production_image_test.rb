@@ -1143,9 +1143,16 @@ class ProductionImageTest < Minitest::Test
                     "between the root's room, the device tree and Fiasco's kernel memory"
   end
 
+  # The words of the system domain's packed arguments in source: its system_args's, then
+  # its declaration (docs/design-system.md, "The declaration"), -erx_serves, a name and an
+  # interface number for each service the system domain serves, and --.
+  def system_words(source)
+    source[/^\s*system_args "(.*)"$/, 1].split.size + 2 + (2 * source.scan(/^service \S+\n  server system$/).size)
+  end
+
   # A root that drops system_args, or an erx.arg word, says fewer arguments than the page should hold.
   def test_the_erts_line_must_count_the_manifests_arguments_and_the_command_lines
-    system_args = PLATFORM.manifest_source(ROOT)[/^\s*system_args "(.*)"$/, 1].split.size
+    system_args = system_words(PLATFORM.manifest_source(ROOT))
     refute_equal 0, system_args
     # The system domain holds the host link's unit and the RTC unit, the storage domain the
     # block unit and the network domain the net unit, so the root adds two device records to
@@ -1168,7 +1175,7 @@ class ProductionImageTest < Minitest::Test
   def test_the_erts_line_counts_a_record_per_device_of_a_kind_in_a_held_unit
     source = PLATFORM.manifest_source(ROOT).sub(/^(unit display\n  placement "display"\n  holder )@domain\.display$/, '\1system')
     refute_equal PLATFORM.manifest_source(ROOT), source
-    system_args = source[/^\s*system_args "(.*)"$/, 1].split.size
+    system_args = system_words(source)
     display = PLATFORM.record.fetch('units').find { |unit| unit.fetch('key') == 'display' }.fetch('devices')
     kinds = Erx::DeviceKinds.given(ROOT).map { |kind| [kind.role, kind.compatible] }
     given = display.count { |device| kinds.include?(device.values_at('role', 'compatible')) }

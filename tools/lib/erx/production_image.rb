@@ -1294,8 +1294,12 @@ module Erx
         memory, baseline = %w[root_memory system_baseline].map { |key| source.machine.decimal(key) }
         units = source.records.fetch('unit', []).size
         records = record_words(root, manifest_source, hostlink: hostlink != QemuPlan::NO_HOSTLINK)
-        # system_args is optional: an absent field gives the runtime no words, as the checker reads it.
-        system_words = source.machine.properties.key?('system_args') ? source.machine.string('system_args').split.size : 0
+        # system_args is optional: an absent field gives the runtime only the system
+        # domain's declaration, a word pair for each service it serves (Manifest.system_words).
+        given = source.machine.properties.key?('system_args') ? source.machine.string('system_args').split : []
+        served = source.records.fetch('service', []).select { |service| service.reference('server') == 'system' }
+        system_words = Manifest.system_words(given,
+                                             served.map { |service| [service.name, service.reference('interface')] }).size
         arguments = arguments_always(root) + records + system_words + extra_arguments
         count = schedulers(manifest_source, cpus: cpus)
         raise Error, 'a production boot refuses a test image' if built.test_code && !test_image

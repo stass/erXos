@@ -109,11 +109,15 @@ class BootManifestTest < Minitest::Test
     assert_equal 'console /pl011@9000000 matches 0', console_line('')
   end
 
+  # The system domain's declaration (docs/design-system.md, "The declaration"), as the page
+  # prints it: the key, each service's name and interface number, then its --.
+  DECLARATION = '-erx_serves (?:[a-z_0-9]+ [0-9]+ )+-- '
+
   def test_the_page_takes_the_node_the_words_and_the_limits_of_the_source
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "node system@erxos\n"
-    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -nocookie -no_epmd -proto_dist erx \n"
+    assert_match(%r{^words-- #{DECLARATION}-root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -nocookie -no_epmd -proto_dist erx \n}, output)
     assert_includes output, "limits #{system_runtime_limits.join(' ')}\n"
   end
 
@@ -355,16 +359,16 @@ end
     peripherals.each { |name| assert_includes table, %(.name = "#{name}"), name }
   end
 
-  def test_a_manifest_with_no_system_args_gives_no_words
+  def test_a_manifest_with_no_system_args_gives_the_declaration_alone
     output, status = read(admitted(@source.sub(/^  system_args .*\n/, '')))
     assert status.success?, output
-    assert_includes output, "words\nlimits"
+    assert_match(/^words-- #{DECLARATION}\nlimits/, output)
   end
 
   def test_a_word_list_in_hexadecimal_passes_as_written
     output, status = read(admitted(@source.sub(/^  system_args .*\n/, "  system_args hex:2d61006200\n")))
     assert status.success?, output
-    assert_includes output, "words-a b \n"
+    assert_match(/^words-a b -- #{DECLARATION}\n/, output)
   end
 
   # ERTS echoes a flag it does not know to the terminal, so these bytes would be a terminal escape.

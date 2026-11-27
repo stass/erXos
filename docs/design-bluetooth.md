@@ -716,7 +716,11 @@ the release otherwise only loads, declared per script
   writes `services` itself, a list of quoted atoms, after the boot
   script's binding and closed by `--`, ahead of the row's own init
   arguments, and refuses a row whose own arguments name it, so the
-  domain serves the set the rows give and no other. The host name is
+  domain serves the set the rows give and no other. It is one of the
+  packer's derived keys, written and refused by the one helper that
+  also writes every row's `-erx_serves` declaration
+  ([design-system.md](design-system.md#facets-a-configured-domain-serves),
+  "The declaration"). The host name is
   the host part of the domain's node name up to its first dot, so
   `bt@pi.example.com` advertises `pi`
   ([design-system.md](design-system.md#identifiers)). The release's boot

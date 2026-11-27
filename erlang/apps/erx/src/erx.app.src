@@ -102,6 +102,7 @@
              erx_report,
              erx_runtime_records,
              erx_schema,
+             erx_serves,
              erx_service_sup,
              erx_session_line,
              erx_source,

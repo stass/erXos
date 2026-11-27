@@ -407,6 +407,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Low] display, a display domain learns the name of the display it serves from the
+  `display=` word the domain library writes into its environment from its display record
+  (`liberx/system/dom_core.c`), a second route beside the `-erx_serves` declaration every
+  domain gets ([design-system.md](design-system.md#facets-a-configured-domain-serves), "The
+  declaration"). Take the name from the declaration and keep only the record's policy,
+  idle times and palette in the environment, so a served service's name has one route.
 * [Low] display, a window opened where no connection agent runs answers `noproc`, which is no
   errno (`erx_win:own/4` passes `erx_area:open/1`'s `{error, noproc}` up through `erx_win:open/2`,
   and `erx_session_export:open_window/1` maps only `none` to `ENODEV`): a program's first open

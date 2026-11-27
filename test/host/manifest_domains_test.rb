@@ -377,12 +377,14 @@ class ManifestDomainsTest < Minitest::Test
 
   # A row's release names a boot script of the domain release, and the packer binds it:
   # the packed arguments are the row's emulator flags, then -- -boot /bin/<name> --,
-  # then the row's init arguments, so the binding is init's first flag and no later word
+  # then the row's declaration (docs/design-system.md, "The declaration"; none served
+  # here), then its init arguments, so the binding is init's first flag and no later word
   # (-extra, a final -S) can make it a plain argument. A row whose own arguments name
   # -boot is refused, so no row boots a script its release does not name.
   def test_a_domain_boots_the_script_its_release_names
-    { '-x y' => "-x\0y\0--\0-boot\0/bin/app\0--\0",
-      '-x -- -nouser -extra a' => "-x\0--\0-boot\0/bin/app\0--\0-nouser\0-extra\0a\0" }.each do |args, packed|
+    serves = "-erx_serves\0--\0"
+    { '-x y' => "-x\0y\0--\0-boot\0/bin/app\0--\0#{serves}",
+      '-x -- -nouser -extra a' => "-x\0--\0-boot\0/bin/app\0--\0#{serves}-nouser\0-extra\0a\0" }.each do |args, packed|
       view = @codec.open('manifest', admit(with_domains(self.class.domain('alpha') + "  args \"#{args}\"\n")).bytes)
       assert_equal packed, view.string(rows(view, 'domains').fetch(0).fetch('args'))
     end
@@ -1712,6 +1714,45 @@ class ManifestDomainsTest < Minitest::Test
             message: /the arguments name -erx_bt services, which the build derives/)
     continued = served.call(@source + "  args \"-- services [bondcheck] -eval ok\"\n" + ble_grant(%w[nus])).fetch('beta')
     assert_equal "{ok,[nus]} [\"services\",\"[bondcheck]\"]\n", erx_bt_keys(continued)
+  end
+
+  # Every domain's declaration (docs/design-system.md, "The declaration"): the build derives
+  # -erx_serves, each service of the row's server as its name and its interface's number,
+  # sorted by name, first among init's words after the boot binding and closed by --; a
+  # row that serves nothing gets the key and its -- alone; the system domain's, its
+  # services', follows system_args's first --. A domain row or system_args naming the key
+  # is refused. Under the oracle's erl, init gives the key one occurrence, the derived
+  # words, and plain words at the head of a row's init arguments stay plain.
+  def test_every_domain_declares_what_it_serves
+    key = ->(*words) { ['--', '-erx_serves', *words, '--'].join("\0") }
+    source = @source + "  args \"-- head words\"\n" + service('zeta', '@domain.beta') + service('eta', '@domain.beta') +
+             service('omega', 'system')
+    view = @codec.open('manifest', admit(source).bytes)
+    args = rows(view, 'domains').to_h { |row| [view.string(row.fetch('name')), view.string(row.fetch('args'))] }
+    assert_includes args.fetch('beta'), "\0#{key.call('eta', '1', 'zeta', '1')}\0"
+    assert_includes args.fetch('alpha'), "\0#{key.call}\0"
+    system = rows(view, 'services').select { |row| row.fetch('server') == @codec.constant('mf_none') }
+                                   .flat_map { |row| [view.string(row.fetch('name')), row.fetch('interface').to_s] }
+    assert_equal %w[omega 1], system
+    assert view.string(view.header.fetch('system_args')).start_with?("#{key.call(*system)}\0")
+    assert_equal "{ok,[[\"eta\",\"1\",\"zeta\",\"1\"]]} [\"head\",\"words\"]\n", init_view(args.fetch('beta'))
+    ['-erx_serves', '-- -erx_serves x 1', '-- -extra -erx_serves'].each do |words|
+      refused(Erx::Manifest::Invalid, 'domain.args', @source + "  args \"#{words}\"\n",
+              message: /the arguments name -erx_serves, which the build derives/)
+    end
+    refused(Erx::Manifest::Invalid, 'machine.system_args', @source.sub(/^  system_args "/, '\0-erx_serves x 1 '),
+            message: /the arguments name -erx_serves, which the build derives/)
+  end
+
+  # What the oracle's erl's init makes of a domain's packed arguments past the boot
+  # binding: the -erx_serves key's occurrences and the plain arguments.
+  def init_view(packed)
+    words = packed.split("\0")
+    report = 'io:format("~p ~p~n", [init:get_argument(erx_serves), init:get_plain_arguments()]), halt().'
+    output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell',
+                                     *words.drop(words.index('-boot') + 3), '-eval', report, stdin_data: '')
+    assert status.success?, output
+    output
   end
 
   # What the oracle's erl makes of a domain's packed arguments past the boot binding:
