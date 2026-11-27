@@ -840,6 +840,7 @@ service's restart decision) and checks at every transition:
 | Property | Seeded fault that must break it |
 | --- | --- |
 | every operation is answered exactly once, by its deadline | delete one rung's deadline |
+| a write or a flush is answered `ok` only after the device has completed it, so a flush answered `ok` covers every write answered `ok` before it was sent ([design-crash-states.md](design-crash-states.md#the-window-recorder)) | send the `ok` to a write at its submission |
 | `next_deadline/1` is a time whenever an operation or a rung is outstanding | answer `infinity` from one rung state |
 | rungs are taken in ladder order, and a client's success returns the count to zero | leave the count unchanged on success |
 | a rung's own command never returns the count to zero | clear the count when a reset is answered |

@@ -358,7 +358,11 @@ If it is built:
   at each epoch's end; the state count is the sum over those points,
   bounded by the number of FUA writes plus epochs.
 
-Whether to build it is [Open decisions](#open-decisions).
+It is not part of this design's plan: what it adds, a smoke test of
+the composed path, does not pay for an NBD server, its facts record, a
+probe of QEMU's behaviour and marks carried from guest to host. It is
+reconsidered only if a storage fault escapes both a driver core's
+explorer and the window recorder.
 
 ## The device model
 
@@ -729,14 +733,7 @@ moment is among the epoch end's.
 
 ## Open decisions
 
-1. **Whether the end-to-end recorder is built.** It adds a smoke test
-   of the composed path through the driver and QEMU, at the cost of an
-   NBD server, its facts record, a probe of QEMU's behaviour and marks
-   carried from guest to host
-   ([An end-to-end recorder, deferred](#an-end-to-end-recorder-deferred)).
-   Recommendation: leave it out of the plan, and reconsider only if a
-   storage fault escapes both a driver core's explorer and the window
-   recorder.
+None.
 
 ## References
 

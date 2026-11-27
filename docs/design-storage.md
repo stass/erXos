@@ -2743,19 +2743,33 @@ allocate; each directory's `..` names the directory that holds its name;
 no chain is shorter than its file's size; every name, size and byte an
 earlier batch committed is there unchanged; the cut batch's files hold
 old or new bytes block by block, within old or new sizes, and its names
-are whole, missing or under their short name alone; and a clean flag
-comes only with every batch committed, exactly the tree the run wrote.
-fsimg's verify, which compares no expected tree or contents
+are whole, missing or under their short name alone; a dirty image may
+also hold what the batch's write order lets a cut leave within a step,
+FAT copies whose entries differ from the FAT the server reads, each the
+entry's old or new value, since each entry goes to every copy in one
+step, and orphan long-name runs where the cut batch wrote or removed a
+long name, since a long name may cross a sector boundary, both of which
+`Erx::FatVolume` accepts there; and a clean flag comes only with every
+batch committed, exactly the tree the run wrote, so a clean image holds
+neither. fsimg's verify, which compares no expected tree or contents
 (`lib/formats/fat/verify.c:66-80` at fsimg `b6c1ea2` reads a file's
 bytes without comparing them), then checks the structure of every cut
-image: a clean one unmodified; a dirty one, which may hold lost clusters
-and chains longer than their sizes, both of which verify rejects
-("unowned FAT allocation", `verify.c:128`, and "FAT file chain length differs
-from its size", `lib/formats/fat/read.c:321-324`), and the dirty flag ("FAT volume is
-dirty", `verify.c:156`), on a copy that `Erx::FatVolume` derives with the
-lost clusters freed, each longer chain cut at its size's last cluster
-with the rest freed, in every FAT, and the dirty flag cleared, which is
-all the normalization the guarantees allow. macOS's `fsck_msdos` and
+image: a clean one unmodified; a dirty one, which may hold lost
+clusters, chains longer than their sizes, differing FAT copies and
+orphan long-name runs, all of which verify rejects ("unowned FAT
+allocation", `verify.c:128`; "FAT file chain length differs from its
+size", `lib/formats/fat/read.c:321-324`; "mirrored FAT entries
+disagree", `read.c:130`; "orphaned FAT long-name sequence",
+`lib/formats/fat/directory.c:113-135`, and "FAT long-name checksum or
+count mismatch", `lib/formats/fat/codec.c:359-360`), and the dirty flag
+("FAT volume is dirty", `verify.c:156`), on a copy that
+`Erx::FatVolume` derives with the FAT the server reads written over
+every other copy, the lost clusters freed, each longer chain cut at its
+size's last cluster with the rest freed, in every FAT, each orphan
+long-name run's entries marked deleted, and the dirty flag cleared,
+which is all the normalization the guarantees allow. So verify keeps
+refusing all of these in a clean image, where none is legal, and needs
+no change. macOS's `fsck_msdos` and
 FreeBSD's `fsck_msdosfs` give second opinions, which the harness reports
 and which fail nothing. Its layouts include a chain whose old last entry
 and new run lie in different FAT sectors, a chain that grows and one
