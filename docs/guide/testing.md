@@ -34,13 +34,19 @@ make check
 (The variables are in [Host setup](../../README.md#host-setup).) It
 regenerates `build/gen/`, checks that every authored file is ASCII and every
 import matches its `ORIGIN.md`, runs the build checks (architecture terms,
-chokepoints, the stack proof), builds the web client, then runs every
+chokepoints, the stack proof), builds the web client, runs Dialyzer over
+erXos's Erlang, then runs every
 `test/host/*_test.rb` and the integration tests of `test/integration/`
 except those that boot QEMU, need the hosted runtime, the stock suites'
 runtime or OpenSSL. It never downloads and never boots a guest. A new
 checkout needs `make setup` first ([Fresh worktree](../../README.md#fresh-worktree)).
-It ends with `offline source, generation, host and native integration
-checks passed`, and names any test it could not run on this host.
+It ends with `offline source, generation, Dialyzer, host and native
+integration checks passed`, and names any test it could not run on this host.
+Dialyzer is strict: any warning of its default set fails the run, and its
+log names each one. It reads its table of OTP's types (the PLT) from the
+tree's own OTP, compiled into `build/dialyzer/` and kept until those
+sources change. How to fix a warning is in the
+[style guide](../style.md#erlang).
 `make check-arch-terms` runs the architecture-terms scan alone, which is
 the check to run after a change to documents.
 

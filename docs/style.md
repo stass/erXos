@@ -588,7 +588,10 @@ erx_ring_has_space(const erx_ring_t *ring, size_t record_bytes)
 * erXos-owned modules are prefixed `erx_`. Each module has one
   responsibility, stated in its `-moduledoc`.
 * Every exported function has a `-spec` and a `-doc`. Code compiles with
-  `warnings_as_errors` and is Dialyzer-clean.
+  `warnings_as_errors` and is Dialyzer-clean, which `make check` enforces.
+  A Dialyzer warning is fixed in the code or its spec; a `-dialyzer`
+  attribute names one function and says in a comment why no code fix
+  exists, such as gen's improper `[alias | Ref]` reply tag.
 * Long-lived processes are OTP behaviours (`gen_server`, `gen_statem`,
   `supervisor`) running under a supervisor. A bare `spawn` is for
   short-lived work whose failure the caller observes.

@@ -61,6 +61,7 @@ begin
   require_relative 'lib/erx/net_bench_freebsd'
   require_relative 'lib/erx/toolchain_provenance'
   require_relative 'lib/erx/code_commands'
+  require_relative 'lib/erx/dialyzer'
 rescue Erx::Error, SystemCallError => error
   Erx::Terminal.puts(error.message)
   exit 1
@@ -164,7 +165,7 @@ module Erx
     end
 
     def self.check(input_arguments, runner_class: Runner, checks_class: Checks, arch_terms: ArchTerms,
-                   fiasco_downsides: FiascoDownsides,
+                   fiasco_downsides: FiascoDownsides, dialyzer: Dialyzer,
                    runtime: method(:with_test_runtime), rc_oracle: method(:ensure_rc_oracle), web: WebBuild.method(:build),
                    platform: RUBY_PLATFORM)
       arguments = input_arguments.dup
@@ -179,6 +180,7 @@ module Erx
       rc_oracle.call(runner: runner)
       left_out = []
       runtime.call(runner: runner) do |environment|
+        dialyzer.new(root: ROOT, runner: runner, erlc: environment.fetch('ERX_ERLC')).check
         stack_proof(runner: runner, environment: environment)
         tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
         raise Error, 'no host tests found' if tests.empty?
@@ -186,7 +188,7 @@ module Erx
                    run_tests(integration_tests(ROOT), runner: runner, name: 'native-integration',
                                      environment: environment, platform: platform)
       end
-      Terminal.puts("offline source, generation, host and native integration checks passed#{not_run_note(left_out)}")
+      Terminal.puts("offline source, generation, Dialyzer, host and native integration checks passed#{not_run_note(left_out)}")
       0
     end
 
