@@ -37,7 +37,7 @@ every write in a volume to the volume's changes below, each of which answers
 with a flush after each (docs/design-storage.md, "Durability"): before the first
 batch after the mount the dirty flag's plan, and then each batch at `fsync`, 5 s
 after a change while changes wait, as soon as the batch holds more than its bound
-(?BATCH_SECTORS, the lesser of 1,024 sectors and a quarter of `media_volume_bytes`),
+(erx_fat_dir:full/1, a quarter of `media_volume_bytes` at what a held sector costs it),
 and at the volume's finish, its last batches and the clean bit: at finish/1, or
 when its process ends without one. A change answers once the batch holds it. A write or flush that fails ends
 the volume, `{shutdown, {failed, Why}}`, so every request after answers `eio` and
@@ -120,7 +120,7 @@ number answers `enfile`.
 %% entry, FAT node and key and its slots in both maps, measured flat (shares counted
 %% twice) for a file under a directory and a path past 2^59, 38 words. An eighth,
 %% since a collection counts the heap's old and new blocks at once, measured at about
-%% four times the live words, beside the batch's quarter of binaries.
+%% four times the live words, beside the batch's quarter.
 %% (erx_media_volume_write_tests checks the table full against its eighth.)
 -define(TABLE_ENTRY_WORDS, 44).
 -define(TABLE_MAX, (?ERX_MEDIA_VOLUME_BYTES div 8 div (?TABLE_ENTRY_WORDS * 8))).
@@ -128,13 +128,9 @@ number answers `enfile`.
 %% The formats the media domain writes on a drive: FAT alone, the format table's one
 %% row that writes and is served here (docs/design-drives.md, "The writable rule").
 -define(WRITTEN, [fat]).
-%% A batch commits once it holds more than this many sectors (docs/design-storage.md,
+%% A batch commits once it is full (erx_fat_dir:full/1, docs/design-storage.md,
 %% "Durability"), and 5 s after a change while changes wait.
--define(BATCH_SECTORS, min(1024, ?ERX_MEDIA_VOLUME_BYTES div 4 div 512)).
 -define(BATCH_DELAY_MS, 5000).
-%% A growth past a file's size is zeroed this many bytes a change at a time, so no
-%% one change holds more than half a batch.
--define(GROWTH_BYTES, (?BATCH_SECTORS * 512 div 2)).
 %% The largest file FAT holds: 4 GiB less one byte.
 -define(FILE_MAX, 16#ffffffff).
 
@@ -493,11 +489,12 @@ request(_Other, State) ->
 
 %% A growth to Target past a file's size Size, zeroed a part at a time, each part a
 %% change of its own, so that no change holds more than half a batch.
-grown(Path, Target, Size, State) when Target > Size + ?GROWTH_BYTES ->
-    Part = Size + ?GROWTH_BYTES,
-    grown(Path, Target, Part, after_growth(Path, {truncate, Part}, State));
-grown(_Path, _Target, _Size, State) ->
-    State.
+grown(Path, Target, Size, State) ->
+    Part = Size + erx_fat_alloc:batch_sectors() * 512 div 2,
+    case Target > Part of
+        true -> grown(Path, Target, Part, after_growth(Path, {truncate, Part}, State));
+        false -> State
+    end.
 
 %% The change Change of the file at Path after a growth's parts, each of which may
 %% have committed: a refusal keeps the state the parts left.
@@ -650,7 +647,7 @@ moved(Old, Node, #{places := Places, nodes := Nodes} = State) ->
 %% The batch, once it holds a change: committed when it holds more than its bound,
 %% else committed 5 s on.
 held(#{batch := B, timer := Timer} = State) ->
-    case {erx_fat_dir:held(B) > ?BATCH_SECTORS, Timer} of
+    case {erx_fat_dir:full(B), Timer} of
         {true, _} -> committed(State);
         {false, none} -> State#{timer := erlang:start_timer(?BATCH_DELAY_MS, self(), commit)};
         {false, _} -> State

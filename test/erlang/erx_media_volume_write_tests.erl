@@ -506,3 +506,25 @@ finished_ignores_forget() ->
     ok = erx_media_volume:forget(Pid, File),
     ?assertEqual(Before, sys:get_state(Pid)),
     finish(Pid).
+
+%% A batch held just under its bound costs no more heap than its sectors' share of
+%% erx_fat_alloc's HELD_SECTOR_BYTES says, held_sector_words/0 words each beyond
+%% the batch the writes start from: a share past it would let a batch end its volume
+%% before it commits
+%% (docs/design-drives.md, "Time and memory").
+a_held_sector_costs_its_share_of_heap_test() ->
+    Base = image("fat16.img"),
+    Pid = volume(ram(Base, infinity), Base),
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    {ok, file, File} = erx_media_volume:create(Pid, Root, <<"held">>),
+    #{batch := Before} = sys:get_state(Pid),
+    Bound = erx_fat_alloc:batch_sectors(),
+    Piece = 8192,
+    lists:foreach(fun(I) -> {ok, Piece} = erx_media_volume:write(Pid, File, I * Piece, binary:copy(<<I>>, Piece)) end,
+                  lists:seq(0, (Bound - 32) * 512 div Piece - 1)),
+    #{batch := Batch} = sys:get_state(Pid),
+    Held = erx_fat_dir:held(Batch),
+    ?assert(Held > Bound div 2, {held, Held}),
+    Words = erts_debug:flat_size(Batch) - erts_debug:flat_size(Before),
+    ?assert(Words =< erx_fat_alloc:held_sector_words() * (Held - erx_fat_dir:held(Before)), {words, Words, Held}),
+    finish(Pid).

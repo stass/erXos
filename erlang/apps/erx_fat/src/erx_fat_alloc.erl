@@ -67,8 +67,8 @@ throw, `{erx_fat_alloc, Finding}`, caught at each exported entry, and leaves the
 allocator as it was.
 """.
 
--export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, finish/2, volume_flags/2, fsinfo/1, entry_place/2,
-         writable/1, view/1]).
+-export([new/1, chain/2, span/3, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, finish/2, volume_flags/2, fsinfo/1, entry_place/2,
+         writable/1, view/1, batch_sectors/0, held_sector_words/0]).
 -export_type([alloc/0, layout/0, plan/0, step/0, finding/0, cluster/0]).
 
 -include("generated/erx_abi.hrl").
@@ -96,9 +96,21 @@ allocator as it was.
 %% The steps that write FAT entries of the overlay, in the batch's order; the
 %% caller's publication step lies between linking and cutting, and release follows.
 -define(STEPS, [preparation, linking, cutting]).
-%% The FAT sectors one release step writes at most, a quarter of the volume's memory
-%% bound, media_volume_bytes, as every batch's bound is.
--define(BATCH_SECTORS, (?ERX_MEDIA_VOLUME_BYTES div 4 div ?SECTOR)).
+%% What one sector a batch holds costs the volume's memory bound when a collection
+%% checks it (docs/design-drives.md, "Time and memory"): its 512-byte image, and as
+%% much again for the image a later change replaced until a collection frees it; and
+%% its share of the batch's maps, at most ?HELD_SECTOR_WORDS words of heap, which a
+%% collection counts four times (the young heap's slack, the new heap it builds and
+%% the old one at once; measured on the BEAM for the node table, erx_media_volume's
+%% TABLE_MAX): 2 x 512 + 4 x ?HELD_SECTOR_WORDS x 8 bytes, rounded up to a whole KiB.
+%% (erx_media_volume_write_tests checks the heap words a held sector costs against
+%% ?HELD_SECTOR_WORDS.)
+-define(HELD_SECTOR_WORDS, 30).
+-define(HELD_SECTOR_BYTES, ((2 * ?SECTOR + 4 * ?HELD_SECTOR_WORDS * 8 + 1023) div 1024 * 1024)).
+%% The sectors a batch holds before it commits (erx_fat_dir:full/1) and the FAT
+%% sectors one release step writes at most: a quarter of the volume's memory bound,
+%% media_volume_bytes, at what each costs.
+-define(BATCH_SECTORS, (?ERX_MEDIA_VOLUME_BYTES div 4 div ?HELD_SECTOR_BYTES)).
 
 -type cluster() :: pos_integer().
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
@@ -165,6 +177,18 @@ writable(#{hard_error := true}) -> {read_only, hard_error};
 writable(#{mirrored := false}) -> {read_only, mirror};
 writable(#{}) -> ok.
 
+-doc """
+The sectors a batch holds, by held/1's measure and erx_fat_dir's, before it
+commits, and the FAT sectors one release step writes at most: a quarter of
+media_volume_bytes at what one held sector costs the volume's memory bound.
+""".
+-spec batch_sectors() -> pos_integer().
+batch_sectors() -> ?BATCH_SECTORS.
+
+-doc "The heap words a sector a batch holds may cost at most, beside its image (?HELD_SECTOR_BYTES).".
+-spec held_sector_words() -> pos_integer().
+held_sector_words() -> ?HELD_SECTOR_WORDS.
+
 -doc "The allocator of a volume a writable mount admitted, with no batch open.".
 -spec new(layout()) -> alloc().
 new(#{read := Read, type := Type, fat_start := FatStart, fats := Fats, fat_sectors := FatSectors,
@@ -202,10 +226,33 @@ sector_entries(#alloc{type = Type, batch = Batch}, Index) ->
     [{Cluster, Value} || Cluster <- lists:seq(Index * PerSector, Index * PerSector + PerSector - 1),
                          {_Kind, Value} <- [maps:get(Cluster, Batch, none)]].
 
--doc "The chain from First as the batch leaves it, first to last.".
+-doc "The whole chain from First as the batch leaves it, first to last; the tests' oracle, as the server follows only spans (span/3).".
 -spec chain(alloc(), cluster()) -> {ok, [cluster()]} | {error, finding()}.
 chain(Alloc, First) ->
     guarded(fun() -> lists:reverse(whole(Alloc, First, fun(Cluster, Got) -> [Cluster | Got] end, [])) end).
+
+-doc """
+The chain from First as the batch leaves it, followed at most Need clusters: how
+many it has of them, the last of those, and those from index From on (the first
+cluster's is 0), first to last. Only those are kept, so what it holds grows with
+Need less From, not with the chain; a Need past the volume's clusters is
+no_space. It follows Need links and no further, so it refuses no loop past a
+free, reserved or bad link: the volume calls it only after the ownership check
+(erx_fat:check/3) found every chain a name reaches disjoint and loop-free, and a
+batch links only free clusters, so it makes no loop.
+""".
+-spec span(alloc(), cluster(), {non_neg_integer(), pos_integer()}) ->
+          {ok, {pos_integer(), cluster(), [cluster()]}} | {error, finding()}.
+span(#alloc{clusters = Clusters}, _First, {_From, Need}) when Need > Clusters ->
+    {error, no_space};
+span(Alloc, First, {From, Need}) ->
+    guarded(fun() ->
+                    Take = fun(Cluster, {Index, _Last, Got}) when Index >= From -> {Index + 1, Cluster, [Cluster | Got]};
+                              (Cluster, {Index, _Last, Got}) -> {Index + 1, Cluster, Got}
+                           end,
+                    {{Count, Last, Got}, _} = follow(Alloc, First, Need, Take, {0, none, []}),
+                    {Count, Last, lists:reverse(Got)}
+            end).
 
 -doc """
 Count new clusters at the end of the chain from First, or as a new chain when First

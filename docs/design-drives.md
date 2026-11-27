@@ -1306,9 +1306,15 @@ Two things finish volumes:
   ended alone (`erlang.erl:8120-8165`, `process_flag(max_heap_size,
   ...)`). The FAT server holds a batch's changes until it commits,
   measured as the sectors the batch will write, file data, directories
-  and FAT alike, and commits early once they pass a quarter of the
-  bound; its release step frees a long chain over as many batches as
-  its FAT sectors need, each within the same quarter; and the two bit
+  and FAT alike, and commits early once what they cost passes a quarter
+  of the bound, each sector costed at what a collection counts for it:
+  its image and the image a later change replaced, and four times its
+  share of the batch's maps on the heap, 2 KiB in all, so a batch
+  commits past 256 sectors (`erx_fat_alloc:batch_sectors/0`); a change
+  reads its file's chain only as far as its bytes and keeps only the
+  clusters they land in, so no change holds a file's whole chain; its
+  release step frees a long chain over as many batches as its FAT
+  sectors need, each within the same quarter; and the two bit
   sets of its ownership check, which together stay within half of the
   bound, are dropped before its first batch
   ([design-storage.md](design-storage.md#removable-media-fat)); and its

@@ -212,6 +212,49 @@ a_chain_that_loops_is_refused_test() ->
     ?assertEqual({error, does_not_read}, whole(Fat, [<<"sub">>, ?LONG])),
     ?assertEqual({ok, expected(["hello.txt"])}, whole(Fat, [<<"hello.txt">>])).
 
+%% A read is refused when the chain to its last cluster meets a cluster twice, however
+%% far its offset skips and whatever its length, so it never answers a loop's clusters
+%% repeated or lands on the wrong cluster: a self-loop at the long file's second
+%% cluster, a loop from its fourth back to its second, and one from its fourth back to
+%% its first, read at the cluster where the chain returns, the longest loop a read to
+%% that cluster can meet. A read that ends before the loop answers its bytes, and so
+%% does one whose check runs past its last cluster into a free link, which no loop holds.
+a_loop_a_read_reaches_is_refused_test() ->
+    Image = image("fat16.img"),
+    Read = fun(Looped, Offset, Count) ->
+                   Fat = mounted(Looped),
+                   {ok, File} = path(Fat, [<<"sub">>, ?LONG]),
+                   erx_fat:read(File, Offset, Count, Fat)
+           end,
+    ?assertEqual({error, does_not_read}, Read(long_relinked(Image, 1, 1), 2048, 100)),
+    Middle = long_relinked(Image, 3, 1),
+    ?assertEqual({error, does_not_read}, Read(Middle, 4096, 100)),
+    ?assertEqual({error, does_not_read}, Read(Middle, 0, 5000)),
+    ?assertEqual({ok, binary:part(expected(["sub", "Long File Name.dat"]), 0, 2048)}, Read(Middle, 0, 2048)),
+    ?assertEqual({error, does_not_read}, Read(long_relinked(Image, 3, 0), 4096, 100)),
+    Freed = put16(Image, fat16_start(Image) + lists:nth(4, long_chain(Image)) * 2, 0),
+    ?assertEqual({ok, binary:part(expected(["sub", "Long File Name.dat"]), 2048, 100)}, Read(Freed, 2048, 100)).
+
+%% FAT16 Image with the link of the From-th cluster of the long file's chain, counted
+%% from 0, aimed at its To-th.
+long_relinked(Image, From, To) ->
+    Chain = long_chain(Image),
+    put16(Image, fat16_start(Image) + lists:nth(From + 1, Chain) * 2, lists:nth(To + 1, Chain)).
+
+long_chain(Image) ->
+    Fat = mounted(Image),
+    {ok, File} = path(Fat, [<<"sub">>, ?LONG]),
+    fat16_chain(Image, erx_fat:first(File)).
+
+%% The FAT16 chain from Cluster, as Image's first FAT links it.
+fat16_chain(Image, Cluster) ->
+    Place = fat16_start(Image) + Cluster * 2,
+    <<_:Place/binary, Link:16/little, _/binary>> = Image,
+    case Link >= 16#fff8 of
+        true -> [Cluster];
+        false -> [Cluster | fat16_chain(Image, Link)]
+    end.
+
 %% Whole, and as a read of the first two clusters, whose second is the bad link
 %% itself and is never read.
 a_link_out_of_the_data_area_or_free_is_refused_test() ->

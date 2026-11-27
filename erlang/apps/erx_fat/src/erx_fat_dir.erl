@@ -68,7 +68,7 @@ throw, `{erx_fat_dir, Error}`, caught at each exported entry, and leaves the bat
 as it was.
 """.
 
--export([new/1, view/1, create/4, mkdir/4, remove/3, rmdir/3, rename/5, free/2, held/1, commit/1, finish/1]).
+-export([new/1, view/1, create/4, mkdir/4, remove/3, rmdir/3, rename/5, free/2, held/1, full/1, commit/1, finish/1]).
 -export([write/5, write_removed/4, truncate/4, truncate_removed/3, setattr/3, setattr_removed/3,
          refreshed/2]).
 -export_type([batch/0, error/0]).
@@ -144,6 +144,13 @@ step that writes it, with the allocator's measure (erx_fat_alloc:held/1).
 -spec held(batch()) -> non_neg_integer().
 held(#batch{alloc = Alloc, images = Images}) ->
     lists:sum([map_size(Steps) || _Sector := Steps <- Images]) + erx_fat_alloc:held(Alloc).
+
+-doc """
+Whether the batch holds more sectors than its bound (erx_fat_alloc:batch_sectors/0),
+so that its holder commits it before taking another change.
+""".
+-spec full(batch()) -> boolean().
+full(B) -> held(B) > erx_fat_alloc:batch_sectors().
 
 -doc """
 The batch's plan, directory sectors and FAT sectors in the steps of the module's
@@ -370,25 +377,35 @@ cluster_bytes(#batch{fat = Fat}) -> maps:get(cluster_bytes, erx_fat:info(Fat)).
 
 %% Data, the file's bytes from Start, written in preparation in the file's chain,
 %% grown first to hold them, and its first cluster and size Size given to Publish.
+%% Start is never past the file's size, since both callers start at most there
+%% (written/5 at the lesser of the offset and the size, resized/4 at the old size,
+%% each with zeroes up to the bytes asked for). So when the chain grows, the cluster
+%% Start lies in is the chain's own (From =< Have, as Start =< Old =< Have clusters),
+%% Span ++ Run runs on from it, and every grown cluster is written from its first byte.
 contents(B, File, _Start, <<>>, Size, Publish) ->
     Publish(B, File, erx_fat:first(File), Size);
 contents(B = #batch{alloc = Alloc}, File, Start, Data, Size, Publish) ->
     #{size := Old} = erx_fat:attr(File),
     PerCluster = cluster_bytes(B),
+    From = Start div PerCluster,
     Need = (Start + byte_size(Data) + PerCluster - 1) div PerCluster,
-    Chain = case erx_fat:first(File) of 0 -> []; First -> ok(erx_fat_alloc:chain(Alloc, First)) end,
-    {Whole, B1} = case Need - length(Chain) of
-                      More when More > 0 ->
-                          %% A chain shorter than its size has no clusters of its own past its end.
-                          length(Chain) * PerCluster >= Old orelse fail(does_not_read),
-                          Last = case Chain of [] -> none; _ -> lists:last(Chain) end,
-                          {Run, Alloc1} = ok(erx_fat_alloc:grow(Alloc, Last, More)),
-                          {Chain ++ Run, B#batch{alloc = Alloc1}};
-                      _ ->
-                          {Chain, B}
-                  end,
-    B2 = data_written(B1, lists:nthtail(Start div PerCluster, Whole), Start rem PerCluster, Data),
-    Publish(B2, File, hd(Whole), Size).
+    %% The chain is followed only as far as the data needs, and only the clusters
+    %% the data lands in are kept, so a write holds no file's whole chain.
+    {Have, Last, Span} = case erx_fat:first(File) of
+                             0 -> {0, none, []};
+                             First -> ok(erx_fat_alloc:span(Alloc, First, {From, Need}))
+                         end,
+    {Run, B1} = case Need - Have of
+                    More when More > 0 ->
+                        %% A chain shorter than its size has no clusters of its own past its end.
+                        Have * PerCluster >= Old orelse fail(does_not_read),
+                        {Grown, Alloc1} = ok(erx_fat_alloc:grow(Alloc, Last, More)),
+                        {Grown, B#batch{alloc = Alloc1}};
+                    _ ->
+                        {[], B}
+                end,
+    B2 = data_written(B1, Span ++ Run, Start rem PerCluster, Data),
+    Publish(B2, File, case Have of 0 -> hd(Run); _ -> erx_fat:first(File) end, Size).
 
 %% Data written from byte Offset of the first of Clusters on, a sector at a time:
 %% a whole sector as it is, a part patched into the sector as the batch leaves it.

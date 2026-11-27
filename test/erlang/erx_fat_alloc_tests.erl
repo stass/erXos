@@ -330,10 +330,10 @@ a_run_starts_after_the_last_cluster_allocated_and_wraps_test() ->
     %% No run of five: the first five free clusters met, from 8 on.
     ?assertMatch({ok, [8, 9, 41, 2, 3], _}, erx_fat_alloc:grow(committed(A2), none, 5)).
 
-%% The volume's last batches, each plan applied, until nothing waits.
+%% The volume's last batches, each plan applied, until nothing waits: the last plan.
 finished(A) ->
     case erx_fat_alloc:finish(A) of
-        {ok, Plan, finished} -> apply_plan(Plan);
+        {ok, Plan, finished} -> apply_plan(Plan), Plan;
         {ok, Plan, A1} -> apply_plan(Plan), finished(A1)
     end.
 
@@ -347,29 +347,31 @@ long_chain(Clusters, Last) ->
       fsinfo => 1}.
 
 %% A chain of 140,000 clusters cut to its first: the cut's sector, counted for linking
-%% and cutting, and one waiting chain are what the batch holds; its release frees 1,024 FAT sectors' worth from cluster 3 on
+%% and cutting, and one waiting chain are what the batch holds; its release frees a
+%% batch's worth of FAT sectors (erx_fat_alloc:batch_sectors/0) from cluster 3 on
 %% and leaves the rest waiting, allocated and reached by nothing; the next batch can
-%% allocate what the first freed; and the finish frees the rest before it cleans.
+%% allocate what the first freed; and the finish frees the rest, a batch's worth at a time, before it cleans.
 a_long_chain_is_released_over_several_batches_each_within_the_bound_test_() ->
     {timeout, 120,
      fun() ->
              Clusters = 140000,
              L = long_chain(Clusters, 16#0fffffff),
+             Bound = erx_fat_alloc:batch_sectors(),
              {ok, A} = erx_fat_alloc:shrink(erx_fat_alloc:new(L), 2, 1),
              ?assertEqual(3, erx_fat_alloc:held(A)),
              {ok, Plan, A1} = erx_fat_alloc:commit(A),
              ?assertEqual([cutting, release], [Step || {Step, _} <- Plan]),
              Released = proplists:get_value(release, Plan),
-             ?assertEqual(lists:seq(2, 2 + 1023), [Sector || {Sector, _} <- Released]),
+             ?assertEqual(lists:seq(2, 2 + Bound - 1), [Sector || {Sector, _} <- Released]),
              apply_plan(Plan),
              ?assertEqual(1, erx_fat_alloc:held(A1)),
              ?assertEqual([2], walk(L, 2)),
-             ?assertEqual(lists:seq(1024 * 128, Clusters + 1), walk(L, 1024 * 128)),
-             ?assertEqual(0, value(L, 1024 * 128 - 1)),
+             ?assertEqual(lists:seq(Bound * 128, Clusters + 1), walk(L, Bound * 128)),
+             ?assertEqual(0, value(L, Bound * 128 - 1)),
              ?assertMatch({ok, [3], _}, erx_fat_alloc:grow(A1, none, 1)),
-             {ok, Last, finished} = erx_fat_alloc:finish(A1),
-             ?assertEqual([release, clean], [Step || {Step, _} <- Last]),
-             apply_plan(Last),
+             {ok, First, _} = erx_fat_alloc:finish(A1),
+             ?assertEqual([release], [Step || {Step, _} <- First]),
+             ?assertEqual([release, clean], [Step || {Step, _} <- finished(A1)]),
              ?assertEqual([2], allocated(L))
      end}.
 
@@ -382,7 +384,8 @@ a_release_ends_on_a_medium_that_forgets_its_writes_test_() ->
      fun() ->
              L = long_chain(140000, 3),
              {ok, A} = erx_fat_alloc:shrink(erx_fat_alloc:new(L), 2, 1),
-             ?assertEqual({error, does_not_read}, forgetful(A, 4))
+             Passes = 140000 div (erx_fat_alloc:batch_sectors() * 128) + 2,
+             ?assertEqual({error, does_not_read}, forgetful(A, Passes))
      end}.
 
 forgetful(_A, 0) -> gave_up;

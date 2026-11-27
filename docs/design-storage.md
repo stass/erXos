@@ -1877,8 +1877,9 @@ designed. It maps the format onto the file protocol as follows:
   holds its bytes, and every read sees every write answered before
   it. The server then commits changes in **batches**: at `fsync`,
   at the volume's finish, every 5 s while changes wait, and as soon as
-  what a batch holds passes 1,024 sectors, half a MiB and a quarter of the
-  volume's memory bound, `media_volume_bytes`
+  what a batch holds costs more than a quarter of the volume's memory
+  bound, `media_volume_bytes`: 256 sectors at 2 KiB each, what a
+  collection counts for a held sector
   ([design-drives.md](design-drives.md#time-and-memory)). A batch holds
   its changes as the sectors it will write, file data, directories and
   FAT alike, each counted once for every step that writes it, and each
@@ -1944,7 +1945,7 @@ designed. It maps the format onto the file protocol as follows:
   or the tail that a shrink's cut leaves. The server keeps such a chain
   as its first cluster alone, and a batch's release step frees chains
   from their first clusters on, following each on the medium, for as
-  long as the step's FAT sectors stay within 1,024; a chain it does not
+  long as the step's FAT sectors stay within the same 256; a chain it does not
   finish waits from the cluster it reached, and the next batch, which
   follows at once, goes on with it. So freeing or shrinking a file of any
   length needs memory for one step's FAT sectors, not for its chain, and
@@ -2137,7 +2138,9 @@ designed. It maps the format onto the file protocol as follows:
 A FAT image is untrusted input like any other: the boot sector, the FATs,
 the directories and the long-name chains are decoded with checked bounds,
 a cluster chain is followed at most as many steps as the volume has
-clusters, so a loop ends with `{error, eio}`, and the decoders have a fuzz
+clusters, a read refuses a chain that meets a cluster twice by its last
+cluster (erx_fat's module documentation, "Reads"), so a loop ends with
+`{error, eio}` and never answers a loop's clusters, and the decoders have a fuzz
 target on the host's stock OTP. fsimg, the FAT server's oracle, creates
 FAT images for the server to read and checks every image the server
 writes with its verify (`fsimg W`).

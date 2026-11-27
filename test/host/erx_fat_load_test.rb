@@ -48,19 +48,28 @@ class ErxFatLoadTest < Minitest::Test
   # FAT32's least volume of 512-byte clusters, with room for the jobs.
   SHORT = Volume.new(mib: 40, cluster: 512, ops: 300)
   SOAK = 'soak'
-  SOAK_VOLUMES = '300:4096:5000,1024:4096:20000,2048:32768:20000'
+  SOAK_VOLUMES = '300:4096:5000,1024:4096:20000,4096:32768:20000'
   DEFAULT_SEED = 1
 
   Fault = Data.define(:name, :path, :from, :to, :caught_by)
 
-  # Each fault replaces one passage; the short run must fail in the named job.
+  # Each fault replaces one passage; the short run must fail in the named job, or, for
+  # IMAGE, pass the driver and leave an image that fails fsimg's verify, fsck_msdos or
+  # the extract.
+  IMAGE = 'image'
   FAULTS = [
     Fault.new(name: 'a cluster the batch allocated taken as free', path: ALLOC,
               from: 'not is_map_key(Cluster, Batch) andalso Value =:= ?FREE', to: 'Value =:= ?FREE',
               caught_by: 'files'),
     Fault.new(name: 'the next-fit search not wrapping to the first cluster', path: ALLOC,
               from: 'Ranges = [{Next, Clusters + 1}, {2, Next - 1}],', to: 'Ranges = [{Next, Clusters + 1}],',
-              caught_by: 'files')
+              caught_by: 'files'),
+    Fault.new(name: 'a held sector counted at its 512 bytes alone', path: ALLOC,
+              from: '-define(HELD_SECTOR_BYTES, ((2 * ?SECTOR + 4 * ?HELD_SECTOR_WORDS * 8 + 1023) div 1024 * 1024)).',
+              to: '-define(HELD_SECTOR_BYTES, ?SECTOR).',
+              caught_by: 'seq'),
+    Fault.new(name: 'a FAT sector written to the first FAT alone', path: ALLOC,
+              from: 'Copy <- lists:seq(0, Fats - 1)', to: 'Copy <- [0]', caught_by: IMAGE)
   ].freeze
 
   def test_a_seeded_load_reads_back_and_leaves_a_volume_that_checks
@@ -80,7 +89,12 @@ class ErxFatLoadTest < Minitest::Test
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
       outcome = load(SHORT, seed: DEFAULT_SEED, replaced: { fault.path => original.sub(fault.from) { fault.to } })
       refute outcome.passed?, "#{fault.name}: the load passed"
-      assert_match(/FAILED seed=#{DEFAULT_SEED} op=\d+ job=#{fault.caught_by}: /, outcome.output, fault.name)
+      if fault.caught_by == IMAGE
+        refute_match(/FAILED/, outcome.output, fault.name)
+        assert_match(/\A(?:fsimg verify|fsck_msdos -n|fsimg extract)/, outcome.failure, fault.name)
+      else
+        assert_match(/FAILED seed=#{DEFAULT_SEED} op=\d+ job=#{fault.caught_by}: /, outcome.output, fault.name)
+      end
       outcome.discard
     end
   end

@@ -25,10 +25,14 @@ class ErxFatTest < Minitest::Test
   # Each fault replaces one passage of erx_fat; the case named in caught_by must fail, or
   # time out where the fault makes a walk endless.
   FAULTS = [
-    Fault.new(name: 'a cluster seen twice in a chain not checked',
-              from: "exact_chain(_Fat, Cluster, _Left, Seen, _Got) when is_map_key(Cluster, Seen) ->\n    " \
-                    "fail(does_not_read);\n",
-              to: '', caught_by: 'a_chain_that_loops_is_refused_test'),
+    Fault.new(name: "no links followed past a read's last cluster",
+              from: 'unlooped(Fat, Cluster, Cluster, Last, Cache)',
+              to: 'unlooped(Fat, Cluster, Cluster, 0, Cache)',
+              caught_by: 'a_loop_a_read_reaches_is_refused_test'),
+    Fault.new(name: "one link fewer followed past a read's last cluster than it is from the first",
+              from: 'unlooped(Fat, Cluster, Cluster, Last, Cache)',
+              to: 'unlooped(Fat, Cluster, Cluster, Last - 1, Cache)',
+              caught_by: 'a_loop_a_read_reaches_is_refused_test'),
     Fault.new(name: "a directory's chain followed past the clusters its entries fill",
               from: "        _Next when Taken =:= Max -> fail(does_not_read);\n", to: '',
               caught_by: 'a_directory_chain_that_loops_is_refused_test'),

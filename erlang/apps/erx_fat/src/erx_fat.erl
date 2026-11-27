@@ -34,11 +34,17 @@ byte of the volume is untrusted input.
 * **Lookups.** A name is found by its bytes, or else as the first entry whose
   name compares equal by erx_fat_name:key/1, each UTF-16 code unit of the Basic
   Multilingual Plane uppercased by the generated case table.
-* **Reads.** A chain is followed at most as many steps as the read needs and the
-  volume has clusters, each link a cluster of the data area not seen before in
-  the chain; a link out of the data area, a cluster seen twice and an end of
-  chain before the clusters needed are `does_not_read`. A read answers at most
-  the bytes the directory entry's size gives.
+* **Reads.** A chain is followed from its first cluster as many steps as the read
+  needs, at most as many as the volume has clusters, each link a cluster of the
+  data area, and only the clusters the read answers are kept, so what a read holds
+  does not grow with its file; consecutive links in one FAT sector read it once. A
+  link out of the data area, an end of chain before the clusters needed and a read
+  past more links than the volume has clusters are `does_not_read`, and so is a
+  walk that meets a cluster twice by the read's last cluster: the walk goes on
+  from that cluster as many links as it took to reach it, or to the chain's end,
+  and meeting it again refuses the read, since any loop the read reached holds
+  that cluster and is no longer than that. A read answers at most the bytes the
+  directory entry's size gives.
 * **The ownership check.** check/3 runs before a writable mount writes anything:
   two passes over the FAT the server reads, each in runs of as many sectors as the
   function it is handed reads at once, and a walk of every directory, which
@@ -274,7 +280,7 @@ read(#fat_node{first = First, size = Size}, Offset, Count, Fat = #fat{per_cluste
                     Bytes = PerCluster * ?SECTOR,
                     End = min(Size, Offset + Count),
                     Skip = Offset div Bytes,
-                    Chain = lists:nthtail(Skip, chain(Fat, First, (End - 1) div Bytes + 1)),
+                    Chain = clusters(Fat, First, Skip, (End - 1) div Bytes + 1 - Skip),
                     Data = iolist_to_binary([cluster(Fat, Cluster) || Cluster <- Chain]),
                     binary:copy(binary:part(Data, Offset - Skip * Bytes, End - Offset))
             end).
@@ -468,37 +474,86 @@ raw_entry(#fat{read = Read, type = Type, fat_start = FatStart}, Cluster) ->
 %% every cluster a walk reaches passes: the root directory's first, a directory
 %% entry's first and every link. A free, reserved or bad entry is none, and breaks
 %% its chain.
-data_cluster(Clusters, Cluster) when is_integer(Cluster), Cluster >= 2, Cluster < Clusters + 2 ->
-    Cluster;
-data_cluster(_Clusters, _Cluster) ->
-    fail(does_not_read).
+data_cluster(Clusters, Cluster) ->
+    case data_area(Clusters, Cluster) of
+        true -> Cluster;
+        false -> fail(does_not_read)
+    end.
+
+%% Whether Cluster is one of the Clusters clusters of the data area. No end-of-chain
+%% mark is: FAT16 has fewer than 16#fff6 clusters and FAT32 at most 16#0ffffff5.
+data_area(Clusters, Cluster) when is_integer(Cluster), Cluster >= 2, Cluster < Clusters + 2 -> true;
+data_area(_Clusters, _Cluster) -> false.
 
 %% Cluster's link: end of chain, or the next cluster of the data area.
-next_link(Fat = #fat{type = Type}, Cluster) ->
-    case raw_entry(Fat, Cluster) band mask(Type) of
+next_link(Fat, Cluster) -> link_of(Fat, raw_entry(Fat, Cluster)).
+
+%% What entry Entry links to: end of chain, or the next cluster of the data area.
+link_of(#fat{type = Type, clusters = Clusters}, Entry) ->
+    case Entry band mask(Type) of
         Mark when Type =:= 16, Mark >= ?END_MARK_16; Type =:= 32, Mark >= ?END_MARK_32 -> end_of_chain;
-        Next -> data_cluster(Fat#fat.clusters, Next)
+        Next -> data_cluster(Clusters, Next)
     end.
 
 mask(16) -> 16#ffff;
 mask(32) -> 16#0fffffff.
 
-%% Exactly Count clusters of the chain from First, none seen before in it, so a
-%% chain that loops or ends before them is does_not_read.
-chain(#fat{clusters = Clusters}, _First, Count) when Count > Clusters ->
+%% The Count clusters of the chain from First that follow its first Skip, first to
+%% last. A chain that ends before them, that they would take past as many links as
+%% the volume has clusters, or that meets a cluster twice by the last of them
+%% (unlooped/5), is does_not_read. The skipped clusters are followed, not kept, and a
+%% FAT sector is read once for the links in it that follow each other.
+clusters(#fat{clusters = Clusters}, _First, Skip, Count) when Skip + Count > Clusters ->
     fail(does_not_read);
-chain(Fat, First, Count) ->
-    exact_chain(Fat, data_cluster(Fat#fat.clusters, First), Count, #{}, []).
+clusters(Fat, First, Skip, Count) ->
+    kept(Fat, data_cluster(Fat#fat.clusters, First), 0, Skip, Skip + Count - 1, none, []).
 
-exact_chain(_Fat, Cluster, _Left, Seen, _Got) when is_map_key(Cluster, Seen) ->
-    fail(does_not_read);
-exact_chain(_Fat, Cluster, 1, _Seen, Got) ->
+%% Cluster, the Index-th of the chain counted from 0, and the clusters after it to the
+%% Last-th, each kept from the Skip-th on; Got holds those kept before Cluster, last
+%% first, and Cache the FAT sector of the link read last (cached_link/3).
+kept(Fat, Cluster, Last, _Skip, Last, Cache, Got) ->
+    unlooped(Fat, Cluster, Cluster, Last, Cache),
     lists:reverse([Cluster | Got]);
-exact_chain(Fat, Cluster, Left, Seen, Got) ->
-    case next_link(Fat, Cluster) of
-        end_of_chain -> fail(does_not_read);
-        Next -> exact_chain(Fat, Next, Left - 1, Seen#{Cluster => true}, [Cluster | Got])
+kept(Fat, Cluster, Index, Skip, Last, Cache, Got) ->
+    case cached_link(Fat, Cluster, Cache) of
+        {end_of_chain, _} -> fail(does_not_read);
+        {Next, Cache1} when Index >= Skip -> kept(Fat, Next, Index + 1, Skip, Last, Cache1, [Cluster | Got]);
+        {Next, Cache1} -> kept(Fat, Next, Index + 1, Skip, Last, Cache1, Got)
     end.
+
+%% Refuses a walk to the Last-th cluster of a chain, Mark, that met a cluster twice.
+%% When the i-th and the j-th clusters are one, i < j =< Last, the chain from the i-th
+%% on repeats every j - i links, at most Last, and Mark lies in that loop, so it comes
+%% round again within Last links: the walk follows Left = Last links on from Mark, and
+%% stops early, accepted, at a link out of the data area, an end of chain among them,
+%% since every link of a loop is a data cluster. Holding one cluster, it refuses every
+%% loop the read reaches for at most as many links again as the read followed.
+unlooped(_Fat, _Mark, _Cluster, 0, _Cache) ->
+    ok;
+unlooped(Fat = #fat{type = Type, clusters = Clusters}, Mark, Cluster, Left, Cache) ->
+    {Entry, Cache1} = cached_entry(Fat, Cluster, Cache),
+    Next = Entry band mask(Type),
+    case data_area(Clusters, Next) of
+        false -> ok;
+        true when Next =:= Mark -> fail(does_not_read);
+        true -> unlooped(Fat, Mark, Next, Left - 1, Cache1)
+    end.
+
+%% Cluster's link as next_link/2 answers it, and the FAT sector it lies in (cached_entry/3).
+cached_link(Fat, Cluster, Cache) ->
+    {Entry, Cache1} = cached_entry(Fat, Cluster, Cache),
+    {link_of(Fat, Entry), Cache1}.
+
+%% Cluster's entry, and the FAT sector it lies in, {Sector, Bytes}, kept for the next
+%% entry: Cache when it is that sector already.
+cached_entry(#fat{read = Read, type = Type, fat_start = FatStart}, Cluster, Cache) ->
+    {Index, Offset} = erx_fat_alloc:entry_place(Type, Cluster),
+    Sector = case Cache of
+                 {Index, Bytes} -> Bytes;
+                 _ -> sector(Read, FatStart + Index)
+             end,
+    <<_:Offset/binary, Entry:Type/little, _/binary>> = Sector,
+    {Entry, {Index, Sector}}.
 
 %% The first sector of data cluster Cluster.
 cluster_start(#fat{data_start = DataStart, per_cluster = PerCluster}, Cluster) ->

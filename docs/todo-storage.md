@@ -303,36 +303,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   stops, finishes in `terminate/2`, and the default 5 s shutdown can end a finish that releases many
   chains on a slow stick, which then mounts `{ro, dirty}`; derive the shutdown from the finish's
   bound. An eject's `finish/1` waits on no such deadline.
-* [High] storage, a long FAT file's chain as a list (`erlang/apps/erx_fat/src/erx_fat_dir.erl`,
-  `contents/6`; `erx_fat:read/4`): a write, a cut or a read of a file holds the file's whole chain
-  as a list, so a file of a few thousand clusters passes the volume's memory bound and ends the
-  volume; the medium then mounts read-only as dirty. Measured on the host with 64 KiB writes and
-  an `fsync` every 256 KiB, which keeps the batch small: the volume ended at the write that took
-  a file past 14.25 MiB, 3,648 clusters of 4 KiB, so a session cannot copy a 15 MiB file to a
-  stick. A read walks the chain from the first cluster each time too, so 4 KiB reads at random
-  offsets of a 1 MiB file of 512-byte clusters run at about 2 MB/s. The per-fid cursor of
-  [todo-performance.md](todo-performance.md)'s FAT write path item removes the list. The load
-  test (`test/host/erx_fat_load_test.rb`) keeps every file within `?FILE_CLUSTERS_MAX`, 1,024
-  clusters, until then; the fix raises it past the bound.
-* [High] storage, the FAT volume's memory under load (`erlang/apps/erx_media/src/erx_media_volume.erl`,
-  `?BATCH_SECTORS`; `erx_fat_dir`'s sector images): the batch commits once it holds 1,024 sectors,
-  a quarter of `media_volume_bytes` (design-storage.md, "Durability"), but the volume passes its
-  2 MiB bound and ends well before that: with no `fsync`, after five 64 KiB writes (640 sectors)
-  on a FAT32 volume of 512-byte clusters, after nine (1,152 sectors) of 4 KiB clusters, and after
-  43 writes of 8 KiB (688 sectors). A sequential copy of a few hundred KiB therefore ends the
-  volume and leaves the medium dirty. (Host numbers, macOS on Apple Silicon, stock OTP 29\n  with the JIT, the volume over an image file.) Its heap reached 86,071 words with 640 sectors held, about
-  1 KiB of heap a 512-byte sector, and a collection needs as much again, so a quarter of the bound
-  in sector data cannot fit. Separately, after a remount whose client walked and listed 76
-  directories of up to about 150 names each, a 64 KiB read near the end of a 2,048-cluster file
-  ended the volume (the load test with its listings moved before its reads, seed 1); the same
-  reads alone on the same image peak at 40,000 words. With the listings after the reads, a soak
-  of a 300 MiB volume of 4 KiB clusters (seed 568413737) still ended the volume on its first read
-  near the end of a 2,048-cluster file after the remount, the same file having read back whole
-  before it. Measure what a volume holds per sector and
-  per listing, then either make the batch's measure count what it holds (bytes of heap, not
-  sectors) or hold less per sector, and state the result in design-drives.md's "Time and memory".
-  The load test commits every 128 KiB of changes (`?COMMIT_BYTES`, its `cap-fsync` calls) and
-  lists after reading until then; the fix removes both.
 * [Medium] media, an eject waits inside the ejecting grant (`erx_media_tree:write/4` on `ctl`,
   `erx_media_drive`'s `eject`): the finish answers every request a volume holds first, so a slow or
   stalled stick with many reads queued holds the drive process, every walk of `diskN` and `status`

@@ -14,10 +14,11 @@ not driven; the volume's own tests cover them.
 
 The jobs follow fio's shapes, sized from the volume:
 
-* `seq`: one file written in 64 KiB pieces, a quarter of the volume up to 256 MiB,
+* `seq`: one file written in 64 KiB pieces, a sixteenth of the volume (file_cap/1)
+  up to 256 MiB,
   then read back;
 * `rand-fsyncN`: 4 KiB reads and writes at aligned random offsets of a file of an
-  eighth of the volume up to 64 MiB, half each, with `fsync` after every N writes,
+  thirty-second of the volume up to 64 MiB, half each, with `fsync` after every N writes,
   N 0 (never), 1 and 16 (docs/design-bench.md's `rand-io`);
 * `mixed`: reads and writes of 1 byte to 64 KiB at any offset of that file, past
   its end among them;
@@ -32,8 +33,7 @@ The jobs follow fio's shapes, sized from the volume:
 The expected contents are a model, each file its size and its 4 KiB chunks, every
 byte drawn from a pool of seeded random bytes, so a run's calls are reproduced by
 its seed; when the volume commits between them also follows its 5 s timer, and so
-the host's speed. File sizes are capped by file_cap/1 (see ?FILE_CLUSTERS_MAX), so
-on the short volume the files the jobs name are far smaller than their shares.
+the host's speed. File sizes are capped by file_cap/1, a sixteenth of the volume.
 Every read is compared with the model as it answers, and each job's files are read
 whole when it ends. The first difference, or any answer that is not the expected
 one, ends the run with `FAILED seed=S op=N job=J: What`, N the count of the
@@ -60,14 +60,10 @@ and kind of call: its calls, bytes and microseconds spent in the volume's calls.
 -define(INTERLEAVED, 4).
 %% The tree of the small files: MIDS directories, each with LEAVES.
 -define(MIDS, 8).
-%% Caps below two bugs of the volume (docs/todo-storage.md, "the FAT volume's batch
-%% bound" and "a long FAT file's chain as a list"), each of which ends the volume
-%% under its memory bound: an fsync once the changes since the last pass
-%% ?COMMIT_BYTES, each change of a name or a size counted as ?META_BYTES or ?PIECE,
-%% and no file past ?FILE_CLUSTERS_MAX clusters. Both go with the fixes.
--define(COMMIT_BYTES, 131072).
--define(META_BYTES, 1024).
--define(FILE_CLUSTERS_MAX, 1024).
+%% No file is larger than a sixteenth of the volume (file_cap/1): thousands of
+%% clusters on every volume, so a file's chain is long, and room for the jobs' files
+%% beside each other.
+-define(FILE_SHARE, 16).
 -define(LEAVES, 8).
 %% The least room the ballast leaves for the small files.
 -define(ROOM_MIN, 4194304).
@@ -94,7 +90,7 @@ main([Image, Manifest, Seed, Ops]) ->
 run(Image, Manifest, Seed, Ops) ->
     {Proxy, Sectors} = medium(Image),
     Ctx0 = #{proxy => Proxy, sectors => Sectors, cluster => cluster_bytes(Image), seed => Seed, ops => Ops,
-             op => 0, unsynced => 0, job => "mount", results => #{}, files => #{}, dirs => #{}, held => #{}},
+             op => 0, job => "mount", results => #{}, files => #{}, dirs => #{}, held => #{}},
     Jobs = [fun mounted/1, fun seq/1, fun rand/1, fun mixed/1, fun interleaved/1, fun truncated/1,
             fun small_files/1, fun remounted/1],
     Ctx = lists:foldl(fun(Job, C) -> Job(C) end, Ctx0, Jobs),
@@ -179,21 +175,21 @@ expect(Ctx, Kind, What, Call, Expected) ->
 
 create(Ctx, Dir, Name) ->
     case timed(Ctx, create, fun() -> erx_media_volume:create(pid(Ctx), Dir, Name) end) of
-        {{ok, file, Q}, Next} -> {{ok, Q}, changed(Next, ?META_BYTES)};
+        {{ok, file, Q}, Next} -> {{ok, Q}, Next};
         {{error, enospc}, Next} -> {enospc, Next};
         {Other, Next} -> failed(Next, {create, Name, Other})
     end.
 
 mkdir(Ctx, Dir, Name) ->
     case timed(Ctx, mkdir, fun() -> erx_media_volume:mkdir(pid(Ctx), Dir, Name) end) of
-        {{ok, dir, Q}, Next} -> {Q, changed(Next, ?META_BYTES)};
+        {{ok, dir, Q}, Next} -> {Q, Next};
         {Other, Next} -> failed(Next, {mkdir, Name, Other})
     end.
 
 write(Ctx, Q, Offset, Bytes) ->
     Size = byte_size(Bytes),
     case timed(Ctx, write, fun() -> erx_media_volume:write(pid(Ctx), Q, Offset, binary:copy(Bytes)) end) of
-        {{ok, Size}, Next} -> {ok, changed(Next, Size)};
+        {{ok, Size}, Next} -> {ok, Next};
         {{error, enospc}, Next} -> {enospc, Next};
         {Other, Next} -> failed(Next, {write, Offset, Size, Other})
     end.
@@ -208,30 +204,24 @@ write_ok(Ctx, Q, Offset, Bytes) ->
 truncate(Ctx, Q, Size) ->
     {_, Next} = expect(Ctx, truncate, {truncate, Size}, fun() -> erx_media_volume:truncate(pid(Ctx), Q, Size) end,
                        fun(A) -> A =:= ok end),
-    changed(Next, ?PIECE).
+    Next.
 
 fsync(Ctx) -> synced(Ctx, fsync).
 
 synced(Ctx, Kind) ->
     {_, Next} = expect(Ctx, Kind, Kind, fun() -> erx_media_volume:fsync(pid(Ctx)) end, fun(A) -> A =:= ok end),
-    Next#{unsynced := 0}.
-
-%% Ctx after a change that may add Bytes to the volume's batch: once what the
-%% changes since the last fsync add passes ?COMMIT_BYTES, an fsync of kind
-%% `cap-fsync`, which the results show apart from the jobs' own.
-changed(Ctx = #{unsynced := Unsynced}, Bytes) when Unsynced + Bytes >= ?COMMIT_BYTES -> synced(Ctx, 'cap-fsync');
-changed(Ctx = #{unsynced := Unsynced}, Bytes) -> Ctx#{unsynced := Unsynced + Bytes}.
+    Next.
 
 remove(Ctx, Dir, Name) ->
     {_, Next} = expect(Ctx, remove, {remove, Name}, fun() -> erx_media_volume:remove(pid(Ctx), Dir, Name) end,
                        fun(A) -> A =:= ok end),
-    changed(Next, ?META_BYTES).
+    Next.
 
 %% A rename: ok, or enospc where the target directory has no room for the name and
 %% the volume no cluster to grow it.
 rename(Ctx, FromDir, From, ToDir, To) ->
     case timed(Ctx, rename, fun() -> erx_media_volume:rename(pid(Ctx), FromDir, From, ToDir, To) end) of
-        {ok, Next} -> {ok, changed(Next, ?META_BYTES)};
+        {ok, Next} -> {ok, Next};
         {{error, enospc}, Next} -> {enospc, Next};
         {Other, Next} -> failed(Next, {rename, From, To, Other})
     end.
@@ -354,7 +344,7 @@ bytes(Ctx = #{pool := Pool}, Count) when Count =< ?PIECE ->
 volume_bytes(#{sectors := Sectors}) -> Sectors * ?SECTOR.
 
 %% The largest size of a file.
-file_cap(#{cluster := Cluster}) -> ?FILE_CLUSTERS_MAX * Cluster.
+file_cap(Ctx = #{cluster := Cluster}) -> volume_bytes(Ctx) div ?FILE_SHARE div Cluster * Cluster.
 
 %% Size scaled from the volume, at most Max, a multiple of Unit.
 scaled(Ctx, Share, Max, Unit) -> min(volume_bytes(Ctx) div Share, Max) div Unit * Unit.
@@ -699,16 +689,14 @@ verify_walked(Ctx, Path) ->
 %% Remount: the volume finished, mounted again and read whole
 %% ---------------------------------------------------------------------------
 
-%% Every directory walked to and held, every file read whole, and then every
-%% directory listed: the listings come last, as reads after them can end the volume
-%% (docs/todo-storage.md, "the FAT volume's memory under load").
+%% Every directory walked to and held and listed, and then every file read whole.
 remounted(Ctx) ->
     C1 = finished(job(Ctx, "remount")),
     C2 = mounted(C1),
     C3 = job(C2, "remount"),
     C4 = lists:foldl(fun walked_dir/2, C3, lists:sort(maps:keys(model_dirs(Ctx)))),
-    C5 = lists:foldl(fun(Path, C) -> verify_walked(C, Path) end, C4, lists:sort(maps:keys(maps:get(files, C4)))),
-    lists:foldl(fun listed/2, C5, lists:sort(maps:keys(model_dirs(Ctx)))).
+    C5 = lists:foldl(fun listed/2, C4, lists:sort(maps:keys(model_dirs(Ctx)))),
+    lists:foldl(fun(Path, C) -> verify_walked(C, Path) end, C5, lists:sort(maps:keys(maps:get(files, C5)))).
 
 %% The directories of the model: each held one's path, the root among them.
 model_dirs(#{dirs := Dirs}) -> Dirs.
