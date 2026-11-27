@@ -129,7 +129,7 @@ records_until(P, N, Last) ->
 function(#{places := Places}, Subclass, Protocol, Descriptor) ->
     Device = spawn(fun() -> device(Descriptor) end),
     Function = #{driver => erx_usb_hid, interface => ?INTERFACE, alternate => 0,
-                 setting => setting(Subclass, Protocol, Descriptor), pipes => []},
+                 setting => setting(Subclass, Protocol, Descriptor), pipes => [], quirks => []},
     {ok, Pid} = erx_usb_hid:start_link(#{function => Function, control => {stand_in_pipe, Device, 0},
                                          pipes => [{stand_in_pipe, Device, 16#81}], places => Places}),
     unlink(Pid),
@@ -350,7 +350,7 @@ a_function_finds_no_input_number_test() ->
     [{ok, _, _} = erx_usb_places_sup:occupy_input(Places, H) || H <- Holders],
     Device = spawn(fun() -> device(?KEYBOARD) end),
     Function = #{driver => erx_usb_hid, interface => 0, alternate => 0,
-                 setting => setting(1, 1, ?KEYBOARD), pipes => []},
+                 setting => setting(1, 1, ?KEYBOARD), pipes => [], quirks => []},
     ?assertEqual({error, {shutdown, {unusable, no_input_number}}},
                  erx_usb_hid:start_link(#{function => Function, control => {stand_in_pipe, Device, 0},
                                           pipes => [{stand_in_pipe, Device, 16#81}], places => Places})),

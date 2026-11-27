@@ -21,7 +21,7 @@
   {vsn, "1"},
   {modules, [erx_hid_core, erx_hid_desc, erx_usb, erx_usb_bot, erx_usb_bot_core, erx_usb_bus, erx_usb_bus_core, erx_usb_bus_link,
              erx_usb_bus_sup, erx_usb_claim, erx_usb_desc, erx_usb_hid, erx_usb_hub, erx_usb_hub_core,
-             erx_usb_input_stream, erx_usb_input_tree, erx_usb_pipe, erx_usb_places_sup, erx_usb_setup,
+             erx_usb_input_stream, erx_usb_input_tree, erx_usb_pipe, erx_usb_places_sup, erx_usb_quirks, erx_usb_setup,
              erx_xhci, erx_xhci_core]},
   {registered, [erx_usb]},
   {applications, [kernel, stdlib, erx, erx_files, erx_blk]},

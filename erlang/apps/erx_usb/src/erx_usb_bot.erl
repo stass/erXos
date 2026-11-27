@@ -122,9 +122,10 @@ request(Function, Ref, Request) ->
 %% ---------------------------------------------------------------------------
 
 -doc false.
-init(#{function := #{interface := Interface}, control := Control, pipes := [In, Out], places := Places}) ->
+init(#{function := #{interface := Interface, quirks := Quirks}, control := Control, pipes := [In, Out],
+       places := Places}) ->
     {ok, #bot{interface = Interface, control = Control, in = In, out = Out, places = Places,
-              engine = erx_usb_bot_core:new()}}.
+              engine = erx_usb_bot_core:new(Quirks)}}.
 
 -doc false.
 handle_call({request, Ref, Request}, From, B) ->

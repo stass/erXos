@@ -863,6 +863,43 @@ the_start_runs_reset_recovery_before_get_max_lun_test() ->
     ?assertMatch({_, [{stop, {reset_port, reset_3, gone}}]}, step({reset_pipe, {error, gone}}, S4)).
 
 %% ---------------------------------------------------------------------------------------
+%% Quirks: each kind against a device that has it, and against one that does not.
+
+a_single_unit_device_is_asked_no_max_lun_test() ->
+    {_, Actions, []} = run(erx_usb_bot_core:new([single_unit]), [start, {request, t, none, {test_unit_ready, 0}}],
+                           [ok, ok, ok, ok, {csw, 0, 0}]),
+    ?assertNot(lists:member(get_max_lun, Actions)),
+    ?assert(lists:member({units, 1}, Actions)),
+    ?assertEqual([ok], replies(Actions)).
+
+a_no_inquiry_device_has_its_inquiry_answered_unsent_test() ->
+    Inquiry = {request, i, none, {inquiry, 0}},
+    ?assertEqual({ok, #{type => 0, qualifier => 0, removable => true}}, reply(step(Inquiry, quirked([no_inquiry])))),
+    ?assertMatch({_, [{command, _, {inquiry, 0}}]}, step(Inquiry, quirked([]))).
+
+an_ignore_csw_tag_device_has_a_csw_of_another_tag_taken_test() ->
+    Status = fun(Quirks) -> trace(Quirks, {test_unit_ready, 0}, [ok, {tagged, 16#dead, 0, 0}]) end,
+    ?assertEqual([ok], replies(Status([ignore_csw_tag]))),
+    ?assert(lists:member(class_reset, Status([]))).
+
+a_wrong_csw_signature_device_has_only_freebsds_two_taken_test() ->
+    Status = fun(Quirks, Signature) -> trace(Quirks, {test_unit_ready, 0}, [ok, {signed, Signature, 0, 0}]) end,
+    ?assertEqual([ok], replies(Status([wrong_csw_signature], 16#43425355))),
+    ?assertEqual([ok], replies(Status([wrong_csw_signature], 16#55425355))),
+    ?assert(lists:member(class_reset, Status([wrong_csw_signature], 16#55534244))),
+    ?assert(lists:member(class_reset, Status([], 16#43425355))).
+
+a_capacity_is_count_device_has_its_last_block_read_as_a_count_test() ->
+    Capacity = fun(Quirks, Last) ->
+                       replies(trace(Quirks, {read_capacity_10, 0}, [ok, {data, <<Last:32, 512:32>>}, {csw, 0, 0}]))
+               end,
+    ?assertEqual([{error, {device, short}}], Capacity([capacity_is_count], 0)),
+    ?assertEqual([{ok, #{last_block => 999, block_length => 512}}], Capacity([capacity_is_count], 1000)),
+    %% All ones asks for READ CAPACITY(16), and is left as it is.
+    ?assertEqual([{ok, #{last_block => 16#ffffffff, block_length => 512}}], Capacity([capacity_is_count], 16#ffffffff)),
+    ?assertEqual([{ok, #{last_block => 1000, block_length => 512}}], Capacity([], 1000)).
+
+%% ---------------------------------------------------------------------------------------
 %% The decoders.
 
 a_csw_is_valid_and_meaningful_as_bot_says_test() ->
@@ -910,6 +947,20 @@ started() ->
     {State, _Actions, []} = run(erx_usb_bot_core:new(), [start], [ok, ok, ok, {max_lun, <<1>>}]),
     State.
 
+%% An engine of a device with Quirks started with Get Max LUN naming one unit.
+quirked(Quirks) ->
+    {State, _Actions, []} = run(erx_usb_bot_core:new(Quirks), [start], [ok, ok, ok, {max_lun, <<0>>}]),
+    State.
+
+%% Every action of Command, a request for no medium, on a device with Quirks answered
+%% from Script.
+trace(Quirks, Command, Script) ->
+    {_, Actions, []} = run(quirked(Quirks), [{request, r, none, Command}], Script),
+    Actions.
+
+%% The one reply of a step.
+reply({_State, [{answer, _Id, Reply}]}) -> Reply.
+
 %% Unit Lun given a medium, one that flushes or one whose readiness drew ILLEGAL REQUEST.
 ready(State, Lun, Flush) ->
     Ref = make_ref(),
@@ -953,6 +1004,10 @@ event({data_in, Tag, _Length}, {data, Bytes}) -> {transfer, Tag, {ok, Bytes}};
 event({data_out, Tag, _Command}, {moved, Moved}) -> {transfer, Tag, {ok, Moved}};
 event({status, Tag}, {csw, Residue, Status}) -> {transfer, Tag, {ok, csw(Tag, Residue, Status)}};
 event({status, Tag}, {raw, Bytes}) -> {transfer, Tag, {ok, Bytes}};
+event({status, Tag}, {tagged, CswTag, Residue, Status}) ->
+    {transfer, Tag, {ok, <<?CSW_SIGNATURE:32/little, CswTag:32/little, Residue:32/little, Status>>}};
+event({status, Tag}, {signed, Signature, Residue, Status}) ->
+    {transfer, Tag, {ok, <<Signature:32/little, Tag:32/little, Residue:32/little, Status>>}};
 event({_Bulk, Tag, _}, stall) -> {transfer, Tag, {error, stall}};
 event({status, Tag}, stall) -> {transfer, Tag, {error, stall}}.
 

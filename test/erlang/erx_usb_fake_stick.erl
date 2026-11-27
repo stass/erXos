@@ -21,11 +21,13 @@ The test plants faults, each taken by the next transfer it fits:
 ERROR, as an unreadable sector; `hold_data`, a data phase left
 unanswered, so the device can be unplugged mid-transfer; and
 `short_csw` and `bad_csw`, a CSW of 12 bytes or with a wrong signature.
+A stick told to lie about residue (lie_about_residue/1) reports FFFFFFFFh
+as every CSW's residue from then on, as a device that cannot count.
 """.
 
 -include("generated/erx_abi.hrl").
 
--export([new/1, units/1, fault/2, reset/1, bulk_out/2, bulk_in/2]).
+-export([new/1, lie_about_residue/1, units/1, fault/2, reset/1, bulk_out/2, bulk_in/2]).
 
 -define(BLOCKS, 128).
 -define(BLOCK, 512).
@@ -35,6 +37,8 @@ unanswered, so the device can be unplugged mid-transfer; and
 new(Units) ->
     #{media => maps:from_keys(lists:seq(0, Units - 1), binary:copy(<<0>>, ?BLOCKS * ?BLOCK)), phase => cbw,
       sense => {0, 0, 0}, faults => []}.
+
+lie_about_residue(Stick) -> Stick#{residue_lie => true}.
 
 units(#{media := Media}) -> map_size(Media).
 
@@ -66,7 +70,11 @@ bulk_in(_Length, Stick = #{phase := {data_in, Tag, Bytes, Residue}, faults := Fa
             {{ok, Bytes}, Stick#{phase := {csw, Tag, Residue, 0}}}
     end;
 bulk_in(_Length, Stick = #{phase := {csw, Tag, Residue, Status}, faults := Faults}) ->
-    Csw = <<?ERX_USB_BOT_CSW_SIGNATURE:32/little, Tag:32/little, Residue:32/little, Status>>,
+    Reported = case Stick of
+                   #{residue_lie := true} -> 16#ffffffff;
+                   #{} -> Residue
+               end,
+    Csw = <<?ERX_USB_BOT_CSW_SIGNATURE:32/little, Tag:32/little, Reported:32/little, Status>>,
     case Faults of
         [short_csw | Rest] -> {{ok, binary_part(Csw, 0, 12)}, Stick#{phase := cbw, faults := Rest}};
         [bad_csw | Rest] -> {{ok, <<0:32, (binary_part(Csw, 4, 9))/binary>>}, Stick#{phase := cbw, faults := Rest}};

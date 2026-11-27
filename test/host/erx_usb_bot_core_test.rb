@@ -17,12 +17,16 @@ require_relative '../fixtures/erlang_build'
 # a request of an ended medium is sent to the next; the engine idle after a failed status
 # with the sense queued behind it, so a queued write runs before a UNIT ATTENTION is
 # seen; a failed sense answered by asking for sense again; a flush of a medium that
-# cannot flush answered `ok`; and eight of the recovery ladder (docs/design-usb.md,
+# cannot flush answered `ok`; eight of the recovery ladder (docs/design-usb.md,
 # "Recovery"): the class reset sent while the transfer it gave up on is still posted,
 # a rung waiting with no deadline of its own, a failed rung that ends the function
 # without asking for the port, a retry counter that never stops, a retry sent for a
 # medium the function has ended, a retried write of the next block, the function's end
-# of a medium ignored, and a cancel that resets the other pipe.
+# of a medium ignored, and a cancel that resets the other pipe. Three more seed the
+# quirks (docs/design-usb.md, "Device quirks"), each failing the case it names: any
+# signature taken from a device with wrong_csw_signature, every device's capacity read
+# as a count, and every device's residue taken from its data phase, which the
+# exploration's devices with no quirk catch.
 class ErxUsbBotCoreTest < Minitest::Test
   APPLICATIONS = %w[erx_usb].freeze
   CORE = 'erlang/apps/erx_usb/src/erx_usb_bot_core.erl'
@@ -30,7 +34,10 @@ class ErxUsbBotCoreTest < Minitest::Test
   EXPLORATION = 'the_engine_explored_keeps_its_invariants_test_'
   DEADLINE_SECONDS = '600'
 
-  Seed = Data.define(:fault, :anchor, :replacement)
+  # A fault planted by replacing anchor, and the case that must fail on it.
+  Seed = Data.define(:fault, :anchor, :replacement, :test) do
+    def initialize(fault:, anchor:, replacement:, test: EXPLORATION) = super
+  end
 
   SEEDS = [
     Seed.new(fault: "the CSW's tag check removed",
@@ -81,7 +88,18 @@ class ErxUsbBotCoreTest < Minitest::Test
              replacement: "on({end_medium, _Lun, _Ref}, _Now, State) ->\n    {State, []};"),
     Seed.new(fault: 'a cancel on the other pipe',
              anchor: 'posted(Phase) when Phase =:= command; Phase =:= data_out -> out;',
-             replacement: 'posted(Phase) when Phase =:= command; Phase =:= data_out -> in;')
+             replacement: 'posted(Phase) when Phase =:= command; Phase =:= data_out -> in;'),
+    Seed.new(fault: 'any signature taken from a device with wrong_csw_signature',
+             anchor: 'pick(Has(wrong_csw_signature) andalso Known,',
+             replacement: 'pick(Has(wrong_csw_signature),',
+             test: 'a_wrong_csw_signature_device_has_only_freebsds_two_taken_test'),
+    Seed.new(fault: "every device's capacity read as a count",
+             anchor: 'counted(erx_usb_quirks:has(capacity_is_count, Quirks), Capacity)',
+             replacement: 'counted(true, Capacity)',
+             test: 'a_capacity_is_count_device_has_its_last_block_read_as_a_count_test'),
+    Seed.new(fault: "every device's residue taken from its data phase",
+             anchor: 'pick(Has(ignore_residue), max(0, Length - Moved), Residue)',
+             replacement: 'pick(true, max(0, Length - Moved), Residue)')
   ].freeze
 
   def test_bot_core_cases_pass_under_eunit
@@ -90,13 +108,13 @@ class ErxUsbBotCoreTest < Minitest::Test
     assert_match(/All \d+ tests passed/, output)
   end
 
-  def test_each_seeded_fault_fails_the_exploration
+  def test_each_seeded_fault_fails_its_case
     source = File.binread(File.join(ErlangBuild::ROOT, CORE))
     SEEDS.each do |seed|
       assert_equal 1, source.scan(seed.anchor).size, "seed anchor for #{seed.fault} is not unique"
       output, status = run_cases(replaced: { CORE => source.sub(seed.anchor) { seed.replacement } })
       refute status.success?, "#{seed.fault}: the cases passed"
-      assert_match(/#{Regexp.escape(EXPLORATION)}[^\n]*\*failed\*/, output, seed.fault)
+      assert_match(/#{Regexp.escape(seed.test)}[^\n]*\*failed\*/, output, seed.fault)
     end
   end
 

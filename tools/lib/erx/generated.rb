@@ -18,6 +18,7 @@ require_relative 'terminal_generation'
 require_relative 'fat_case'
 require_relative 'keymap'
 require_relative 'gatt_decl'
+require_relative 'usb_quirks'
 require_relative 'splash_mark'
 
 module Erx
@@ -117,6 +118,7 @@ module Erx
       Generator.new(name: 'facets', plan: ->(root) { FacetNames.generation(root: root) }, code: CODE),
       Generator.new(name: 'keymap', plan: ->(root) { Keymap.generation(root: root) }, code: CODE),
       Generator.new(name: 'gatt', plan: ->(root) { GattDecl.generation(root: root) }, code: CODE),
+      Generator.new(name: 'usb_quirks', plan: ->(root) { UsbQuirks.generation(root: root) }, code: CODE),
       Generator.new(name: 'splash', plan: ->(root) { SplashMark.generation(root: root) }, code: CODE)
     ].freeze
 

@@ -181,6 +181,23 @@ a_stick_serves_its_medium_test() ->
         ?assertEqual(ok, erx_blk:flush(Transport))
     end).
 
+%% A stick the quirk table names gets its quirks' behaviour (design-usb.md, "Device
+%% quirks"): 04cf:8818, FreeBSD's ignore_residue and no_sync_cache, reports a wrong residue
+%% in every CSW, which would refuse each command, yet its medium is served, its residue
+%% taken from what each data phase moved, with no reset beyond the start's, and it cannot
+%% flush, no SYNCHRONIZE CACHE sent.
+a_quirked_stick_gets_its_quirks_behaviour_test() ->
+    with_bus(#{[1] => {residue_liar, 16#04cf, 16#8818}}, fun() ->
+        configured([1]),
+        Transport = transport(),
+        ?assertMatch({ok, #{capacity := 128, flush := false}}, erx_blk:info(Transport)),
+        Data = << <<(I rem 251)>> || I <- lists:seq(1, 1024) >>,
+        ?assertEqual(ok, erx_blk:write(Transport, 2, Data)),
+        ?assertEqual({ok, Data}, erx_blk:read(Transport, 2, 2)),
+        ?assertEqual({error, no_flush}, erx_blk:flush(Transport)),
+        ?assertEqual(1, class_resets())
+    end).
+
 %% A served medium is logged when it comes up and when it ends, as numbers and names: a
 %% transport killed ends its medium with the reason's name.
 a_medium_is_logged_as_ready_and_as_ended_test() ->

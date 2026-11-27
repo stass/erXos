@@ -10,7 +10,9 @@ controller does, over a world the test changes.
 The world maps places to things: a place is a route from the root, the
 root port first, and a thing a `keyboard`, a `composite` of two HID
 interfaces, a mass-storage `stick`, a card reader of Units such units,
-`{stick, Units}`, or `{hub, Ports}`, each
+`{stick, Units}`, a stick that is the device Vendor:Product and reports a
+wrong residue in every CSW, `{residue_liar, Vendor, Product}`, or
+`{hub, Ports}`, each
 high-speed, with the descriptors erx_usb_desc_tests builds. A root port's
 reset ends with a port event showing its reset change; a hub port's when
 its next GET_STATUS shows the change, as the design says of each. A hub
@@ -250,6 +252,9 @@ descriptor(device, {stick, _Units}) -> descriptor(device, stick);
 descriptor(device, Thing) when Thing =:= keyboard; Thing =:= composite; Thing =:= stick ->
     erx_usb_desc_tests:device(0, 0, 0);
 descriptor(device, {hub, _Ports}) -> erx_usb_desc_tests:device(9, 0, 1);
+descriptor(device, {residue_liar, Vendor, Product}) ->
+    <<Head:8/binary, _Ids:4/binary, Tail/binary>> = erx_usb_desc_tests:device(0, 0, 0),
+    <<Head/binary, Vendor:16/little, Product:16/little, Tail/binary>>;
 descriptor(configuration, keyboard) ->
     erx_usb_desc_tests:configuration([erx_usb_desc_tests:interface(0, 0, 3, 1, 1),
                                       erx_usb_desc_tests:endpoint(16#81, 3, 8, 10)]);
@@ -259,6 +264,7 @@ descriptor(configuration, composite) ->
                                       erx_usb_desc_tests:interface(1, 0, 3, 0, 0),
                                       erx_usb_desc_tests:endpoint(16#82, 3, 8, 10)]);
 descriptor(configuration, {stick, _Units}) -> descriptor(configuration, stick);
+descriptor(configuration, {residue_liar, _Vendor, _Product}) -> descriptor(configuration, stick);
 descriptor(configuration, stick) ->
     erx_usb_desc_tests:storage();
 descriptor(configuration, {hub, _Ports}) ->
@@ -327,8 +333,11 @@ hub_at(Place, #{refs := Refs}) ->
 stick(Place, #{sticks := Sticks, world := World}) ->
     case Sticks of
         #{Place := Stick} -> Stick;
-        #{} -> erx_usb_fake_stick:new(units(maps:get(Place, World)))
+        #{} -> made(maps:get(Place, World))
     end.
+
+made({residue_liar, _Vendor, _Product}) -> erx_usb_fake_stick:lie_about_residue(erx_usb_fake_stick:new(1));
+made(Thing) -> erx_usb_fake_stick:new(units(Thing)).
 
 units(stick) -> 1;
 units({stick, Units}) -> Units.

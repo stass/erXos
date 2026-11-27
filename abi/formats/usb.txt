@@ -290,6 +290,38 @@ limit usb_bot_cb_max u32 16
 limit usb_bot_csw_size u32 13
 limit usb_bot_csw_signature u32 0x53425355
 limit usb_bot_lun_max u8 15
+# The two wrong signatures a CSW of a device with the quirk wrong_csw_signature may carry
+# in place of usb_bot_csw_signature, FreeBSD's CSWSIGNATURE_IMAGINATION_DBX1 and
+# CSWSIGNATURE_OLYMPUS_C1 (umass.c:259-261, accepted at :1569-1576).
+limit usb_bot_csw_signature_dbx1 u32 0x43425355
+limit usb_bot_csw_signature_olympus u32 0x55425355
+# The quirks of a mass-storage device that erXos's stack has a behaviour for, the closed
+# set the rows of abi/formats/usb_quirks.txt may name (design-usb.md, "Device quirks").
+# Each names its consumer and the behaviour it changes:
+# force_bot, force_scsi: erx_usb_claim claims a mass-storage interface as Bulk-Only, or
+#   as speaking SCSI, whatever its protocol, or its subclass, says; with both, an
+#   interface of any class.
+# single_unit: erx_usb_bot_core sends no Get Max LUN and serves unit 0 alone.
+# no_inquiry: erx_usb_bot_core sends no INQUIRY and answers it itself, a removable
+#   direct-access unit.
+# ignore_residue: erx_usb_bot_core takes the residue from what the data phase moved,
+#   not from the CSW.
+# ignore_csw_tag: erx_usb_bot_core takes a CSW whatever its tag.
+# wrong_csw_signature: erx_usb_bot_core takes a CSW signed usb_bot_csw_signature_dbx1
+#   or usb_bot_csw_signature_olympus as signed usb_bot_csw_signature.
+# no_sync_cache: erx_usb_bot_core sends no SYNCHRONIZE CACHE; the medium cannot flush.
+# capacity_is_count: erx_usb_bot_core reads READ CAPACITY(10)'s last block, below all
+#   ones, as the count of blocks, one more than the last.
+enum usb_quirk u8
+  value force_bot 0
+  value force_scsi 1
+  value single_unit 2
+  value no_inquiry 3
+  value ignore_residue 4
+  value ignore_csw_tag 5
+  value wrong_csw_signature 6
+  value no_sync_cache 7
+  value capacity_is_count 8
 enum usb_bot_status u8
   value good 0
   value failed 1

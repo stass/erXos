@@ -50,6 +50,27 @@ mass_storage_takes_its_first_bulk_in_and_first_bulk_out_endpoint_test() ->
                                                       endpoint(16#81, 2, 512, 0),
                                                       endpoint(16#02, 2, 512, 0)]))).
 
+%% A device whose quirks force SCSI or Bulk-Only has a mass-storage interface of another
+%% subclass or protocol taken as such, and its functions carry its quirks; without them the
+%% interface runs none. 0411:001c is FreeBSD's MELCO DUBPXXG (usb_quirk.c:308-309,
+%% usbdevs:97 and :3273); 0451:5416 at release 0100h is the Linux facts record's, which
+%% forces Bulk-Only alone, so an ATAPI interface of it stays unclaimed.
+quirks_force_a_mass_storage_interface_test() ->
+    Atapi = configuration([interface(0, 0, 8, 5, 0), endpoint(16#81, 2, 512, 0), endpoint(16#02, 2, 512, 0)]),
+    Cbi = configuration([interface(0, 0, 8, 6, 0), endpoint(16#81, 2, 512, 0), endpoint(16#02, 2, 512, 0)]),
+    ?assertMatch({ok, [#{driver := erx_usb_bot, quirks := [force_bot, force_scsi, ignore_residue]}]},
+                 claim(high, device_of(16#0411, 16#001c), Atapi)),
+    ?assertEqual({ok, []}, claim(high, Atapi)),
+    ?assertMatch({ok, [#{driver := erx_usb_bot, quirks := [force_bot]}]},
+                 claim(high, device_of(16#0451, 16#5416), Cbi)),
+    ?assertEqual({ok, []}, claim(high, device_of(16#0451, 16#5416), Atapi)),
+    ?assertEqual({ok, []}, claim(high, Cbi)).
+
+%% A device descriptor of Vendor and Product, otherwise device(0, 0, 0)'s, release 0100h.
+device_of(Vendor, Product) ->
+    <<Head:8/binary, _Ids:4/binary, Tail/binary>> = device(0, 0, 0),
+    <<Head/binary, Vendor:16/little, Product:16/little, Tail/binary>>.
+
 a_multi_tt_hub_selects_its_alternate_setting_1_test() ->
     Hub = erx_usb_desc_tests:hub_multi_tt(),
     ?assertMatch({ok, [#{driver := erx_usb_hub, alternate := 1, setting := #{protocol := 2},

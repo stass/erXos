@@ -716,7 +716,7 @@ by its alternate setting 0:
 | --- | --- | --- | --- |
 | interface 0 (`bInterfaceNumber` 0) of a device of device class 09h, hub, whatever the interface's own class | `erx_usb_hub` at full or high speed; none at low and SuperSpeed | 1 on a multi-TT hub (device protocol 2), as FreeBSD's `uhub_attach` selects it (`usb_hub.c:1252-1258`); 0 otherwise | the first interrupt-IN endpoint |
 | class 03h, HID, any subclass and protocol | `erx_usb_hid` | 0 | the first interrupt-IN endpoint |
-| class 08h, mass storage, subclass 06h, protocol 50h | `erx_usb_bot` | 0 | the first bulk-IN and the first bulk-OUT endpoint |
+| class 08h, mass storage, subclass 06h, protocol 50h, or forced so by the device's quirks ([Device quirks](#device-quirks)) | `erx_usb_bot` | 0 | the first bulk-IN and the first bulk-OUT endpoint |
 | anything else, an interface of class 09h on a device of another class included | none | | |
 
 A hub is a device, not an interface: FreeBSD's `uhub_probe` matches a
@@ -3149,7 +3149,10 @@ would carry a rule for one class.
 
 Then the function sends Get Max LUN, a one-byte answer, decoded by
 `erx_usb_bot_core`; a STALL or any failure means one unit, as BOT
-allows, and a value above 15 refuses the interface.
+allows, and a value above 15 refuses the interface. A device with the
+quirk `single_unit` ("Device quirks") is sent none and has one unit. The
+units are asked for only after the start's reset recovery; a later one
+keeps them.
 
 ### Recovery
 
@@ -3316,12 +3319,85 @@ are read-only on erXos; writing to them needs a mount option with
 durability and `fsync` semantics of its own, which this design does not
 define.
 
-The quirks that concern commands the transport does send, a device that
-fails TEST UNIT READY or INQUIRY, miscounts its residue, signs its CSW
-wrongly or reports its capacity off by one, are not carried: such a
-device fails safe, unserved, and the first one that matters adds a quirk
-table as data to `abi/formats/usb.txt`, naming the device in its
-comment.
+The quirks that concern commands the transport does send are
+[Device quirks](#device-quirks).
+
+### Device quirks
+
+Some devices break a rule of the BOT engine or the claim table above.
+`abi/formats/usb_quirks.txt` is the one table of them: each row names a
+device by vendor, product (or every product of a vendor) and an inclusive
+`bcdDevice` range, the quirks it needs, and the rows of its sources it
+comes from. A device takes every quirk of every row it matches.
+`tools/lib/erx/usb_quirks.rb` reads the table whole and generates
+`erx_usb_quirks`, whose `lookup/3` the claim table calls once for each
+device it configures; every claimed function carries the device's
+quirks, and the mass-storage function makes its engine with them.
+Every consumer asks `erx_usb_quirks:has/2` whether a device has a kind,
+and its contract takes only a member of the enum, so Dialyzer fails the
+build on a consumer that names a kind the enum does not have, as a
+renamed member would leave behind. Dialyzer widens a union of more than
+13 atoms to any atom, so the generator refuses an enum of more members.
+
+A row may name only a member of the enum `usb_quirk` of
+`abi/formats/usb.txt`, and that enum holds only the quirks the stack has
+a behaviour for. Each names its consumer and the one rule it changes:
+
+| Quirk | Consumer | What changes |
+| --- | --- | --- |
+| `force_scsi`, `force_bot` | `erx_usb_claim` | an interface is taken as speaking SCSI, or Bulk-Only, whatever its subclass, or protocol, says; with both, whatever its class, as FreeBSD's `umass_probe_proto` takes it (`umass.c:862-898`) |
+| `single_unit` | `erx_usb_bot_core` | no Get Max LUN; unit 0 alone is served (FreeBSD's `NO_GETMAXLUN`, `umass.c:1107-1110`) |
+| `no_inquiry` | `erx_usb_bot_core` | INQUIRY is answered unsent, a removable direct-access unit, so it is polled (`umass.c:2339-2346`) |
+| `ignore_residue` | `erx_usb_bot_core` | the CSW's residue is replaced by what the data phase did not move before the CSW is judged (`umass.c:1560-1563`) |
+| `ignore_csw_tag` | `erx_usb_bot_core` | the CSW's tag is taken as the CBW's |
+| `wrong_csw_signature` | `erx_usb_bot_core` | a CSW signed with one of FreeBSD's two known wrong signatures is taken as signed rightly (`umass.c:259-261`, `:1569-1576`) |
+| `no_sync_cache` | `erx_usb_bot_core` | no readiness SYNCHRONIZE CACHE; the medium is one that cannot flush, as FreeBSD's ILLEGAL REQUEST answer makes it (`umass.c:2358-2361`) |
+| `capacity_is_count` | `erx_usb_bot_core` | READ CAPACITY(10)'s last block, below all ones, is read as the count of blocks (`umass.c:2554-2562`); a count of 0 serves nothing, and all ones is left as it is, so READ CAPACITY(16) still follows |
+
+The rows come from two sources. FreeBSD's `sys/dev/usb/quirk/usb_quirk.c`
+(release/15.1.0, BSD-2-Clause) gives every row of a mass-storage quirk
+that maps onto the set above, cited by line, with its notices
+reproduced at the top of the table. Linux's
+`drivers/usb/storage/unusual_devs.h` (v6.19.14, GPL-2.0) gives facts
+only: a separate reader wrote down, in its own words, each disk-relevant
+device's identifiers, revision range and the behaviours it needs, and
+the table's Linux rows carry those facts, never Linux's code, comments,
+names or ordering. Its `single_lun` maps to `single_unit`,
+`fake_inquiry` to `no_inquiry`, `capacity_minus_one` to
+`capacity_is_count`, and a row forcing SCSI or Bulk-Only to
+`force_scsi` or `force_bot`. macOS's mass-storage driver has no
+per-device table, so it gives no row. OpenBSD's and NetBSD's tables are
+not imported; OpenBSD's SCSI table is under a four-clause license.
+
+What is not imported, and why: a quirk for a command the stack never
+sends (FreeBSD's `NO_START_STOP`, `NO_PREVENT_ALLOW`, `NO_INQUIRY_EVPD`;
+Linux's `no_prevent_allow`, `no_wp_detect`, `no_fua`), a bound the
+stack already keeps (`FORCE_SHORT_INQ`, `bad_sense` and `sane_sense`:
+INQUIRY asks 36 bytes and REQUEST SENSE 18; Linux's `max_sectors_64`: a transfer is 32
+KiB, 64 sectors), a READ CAPACITY(16) quirk (it is sent only when (10)
+answers all ones), and the rest, which no erXos consumer reads:
+`NO_TEST_UNIT_READY` (erXos has no START UNIT to send instead),
+`NO_RS_CLEAR_UA`, `SHUTTLE_INIT` and the eject quirks; Linux's
+`capacity_minus_one_if_odd`, `capacity_trusted`, `cbw_32`,
+`delay_after_command`, `initial_read10_retry`,
+`always_sync`, `write_cache_on` and `sense_after_sync`; every row of
+Linux's UAS table, and every row that forces a transport other than
+Bulk-Only or a command set other than SCSI, since erXos runs neither.
+Such a device fails safe, unserved. FreeBSD's `IGNORE` and Linux's
+`ignore_device` keep the mass-storage driver off a device whose storage
+interface another driver must have instead (a modem's, a camera's);
+erXos has no such driver, so nothing would take the device, and the
+mass-storage function serving its interface fails safe, as any device
+that does not speak BOT does.
+
+A device chooses its own identifiers, so any device can claim any row.
+Each quirk is chosen so that claiming it falsely gains nothing a
+device could not get by speaking BOT: fewer units, a medium that cannot
+flush, one block less, or a CSW judged by what the data phase moved; a
+READ or WRITE still succeeds only whole, and BOT still runs one command
+at a time, so an unchecked tag can name only the command in flight.
+`force_scsi` with `force_bot` claims an interface of any class, which a
+device could equally get by declaring 08h, 06h, 50h.
 
 ### Media and drives
 
@@ -3640,7 +3716,9 @@ targeted traces carry the longer sequences.
 | `erx_hid_desc` against FreeBSD's `hid.c` compiled on the host as the oracle, over the fuzz corpus, comparing each input field's offset, size, count and usage | the push-depth bound removed: a descriptor of four nested pushes is accepted |
 | `erx_hid_core` | the ErrorRollOver check removed; the state reduced to one previous report; the interrupt length taken as the packet size |
 | the usage table, `abi/formats/hid.txt`'s map compared with FreeBSD's `evdev_usb_scancodes` read from the pinned source | one map entry changed |
-| `erx_usb_bot_core`, explored to a fixed point over two units, two media generations a unit and every CSW and sense outcome, and over the recovery ladder with time (ticks at its deadline, transfers that never complete or complete after their cancel, steps answered late, failed or never, and the function's end of a medium at any moment), and a table of BOT 1.0's thirteen cases (section 6.7) | the tag check removed; the residue rule removed; the medium reference check removed; the engine idle after status 1 with the sense queued behind it, so a queued write runs before a UNIT ATTENTION is seen; a failed sense answered by asking for sense again; a refused flush answered `ok`; the class reset sent while the transfer it gave up on is still posted; a rung waiting with no deadline of its own; a failed rung ending the function without asking for the port; a retry counter that never stops; a retry sent for a medium the function has ended; a retried write of the next block; the function's end of a medium ignored; a cancel that resets the other pipe |
+| `erx_usb_bot_core`, explored to a fixed point over two units, two media generations a unit and every CSW and sense outcome, and over the recovery ladder with time (ticks at its deadline, transfers that never complete or complete after their cancel, steps answered late, failed or never, and the function's end of a medium at any moment), and a table of BOT 1.0's thirteen cases (section 6.7) | the tag check removed; the residue rule removed; the medium reference check removed; the engine idle after status 1 with the sense queued behind it, so a queued write runs before a UNIT ATTENTION is seen; a failed sense answered by asking for sense again; a refused flush answered `ok`; the class reset sent while the transfer it gave up on is still posted; a rung waiting with no deadline of its own; a failed rung ending the function without asking for the port; a retry counter that never stops; a retry sent for a medium the function has ended; a retried write of the next block; the function's end of a medium ignored; a cancel that resets the other pipe; every device's residue taken from its data phase |
+| `erx_usb_bot_core`'s quirks, a trace of each kind on a device that has it and on one that does not: `single_unit` asks no Get Max LUN and serves one unit; `no_inquiry` answers INQUIRY unsent; `ignore_csw_tag` takes a CSW of another tag; `wrong_csw_signature` takes FreeBSD's two signatures and no other; `capacity_is_count` reads a count of 0 as short, an ordinary count as one more than the last block, and leaves all ones | any signature taken under `wrong_csw_signature`; every device's capacity read as a count |
+| `tools/lib/erx/usb_quirks.rb` on each refusal (a kind outside the enum `usb_quirk`, an undeclared source, a malformed device or range, a range that ends before it starts, a kind twice, a row out of order or twice, a citation not in the form its source declares, a source line whose commit or form is malformed), then the generated `erx_usb_quirks`, its leading comment carrying erXos's copyright line and the three `usb_quirk.c` reproduces, against devices written from the sources, a FreeBSD row, a vendor-only row and the two Linux rows of one device whose ranges differ by a kind; and through the bus, a stick the table names that misreports every residue, served with its residue taken from its data phases and no flush | a lookup that ignores the range; a generator that drops a row's last kind |
 | a BOT function's replacement, on the host, through `erx_usb_bus_core`'s restart path and `erx_usb_bot_core`, against a model BOT device whose command state (waiting for a CBW, expecting data out, holding data in, holding a CSW) survives the function's end, changes only on a CBW, data, a CSW read or a class reset, and whose halts and toggles survive a class reset (BOT 1.0, section 3.1); the function killed after the device accepted a WRITE(10) CBW, halfway through a WRITE(10)'s data-out and a READ(10)'s data-in phase, and with a CSW not yet read | the start's reset recovery skipped, so the model takes the replacement's CBW as the write's data and no valid CSW answers it; the recovery's halt clears run before its class reset |
 | `erx_blk_write`'s BOT functions on a trial boot value | the trial check removed |
 | the HID function, `erx_usb_hid` with `erx_hid_core`'s plan, from a model device behind a stand-in of `erx_usb_pipe` through the places to the records a reader of the input tree decodes: a keyboard's attach and its requests, typing, removal with a key held, a stop mid-typing and the next instance, a refused descriptor on a boot keyboard, a report storm with no reader, and no free number | a transfer not posted again; one posted again before the stream took its records; SET_IDLE(0) not sent; a failed transfer posted again instead of ending; a refused descriptor kept in the report protocol |

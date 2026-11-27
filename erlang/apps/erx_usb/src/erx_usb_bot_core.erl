@@ -80,7 +80,9 @@ A unit's medium is the engine's: none, or the reference the function made
 for it and whether it flushes. It becomes current only in the step that
 checks its readiness SYNCHRONIZE CACHE (`{ready, Lun, Ref}`), which a
 success or an ILLEGAL REQUEST sense answers, the latter as a medium that
-cannot flush. Every request names the medium it is for, `none` when the
+cannot flush; on a device with the quirk `no_sync_cache`, the step that takes
+the readiness makes it current unsent, as a medium that cannot flush.
+Every request names the medium it is for, `none` when the
 unit has none, and is answered `{error, {device, gone}}` without being sent
 when that is not the unit's current medium as it reaches the head of the
 queue; a read, write or flush needs a medium, and a readiness a unit with
@@ -122,6 +124,13 @@ a device a predecessor left inside a command is ready for a new CBW (BOT
 1.0, 6.2.1 and 5.3.4). Get Max LUN's answer (max_lun/1) names the units;
 then queued requests run.
 
+**Quirks.** The engine is made with the device's quirks
+(`erx_usb_quirks`), and asks erx_usb_quirks:has/2 for each; what each kind
+changes is the table of design-usb.md, "Device quirks". Each fails safe
+on a device that claims a quirk it lacks: it gets fewer units, no flush,
+a smaller medium, or a CSW judged by what the data phase moved, and a
+READ or WRITE still succeeds only whole.
+
 Everything a device sends is untrusted: csw/3, max_lun/1 and the
 decoders take exactly the fields their formats have, answer instead of
 raising, and create no atom. The function and its transports are trusted
@@ -130,7 +139,7 @@ unit Get Max LUN did not name, crashes the function, which its supervisor
 restarts.
 """.
 
--export([new/0, step/3, deadline/1, data_phase/1, csw/3, max_lun/1, inquiry/1, sense/1,
+-export([new/0, new/1, step/3, deadline/1, data_phase/1, csw/3, max_lun/1, inquiry/1, sense/1,
          read_capacity_10/1, read_capacity_16/1]).
 
 -export_type([state/0, event/0, action/0, request/0, command/0, reply/0, lun/0, medium_ref/0]).
@@ -204,7 +213,8 @@ end the function.
 
 %% `until` is the deadline of the step a recovery phase waits on, none in any other phase.
 -opaque state() :: #{phase := phase(), tag := non_neg_integer(), op := op() | none, until := integer() | none,
-                     queue := queue:queue(entry()), units := none | #{lun() => medium()}}.
+                     queue := queue:queue(entry()), units := none | #{lun() => medium()},
+                     quirks := [erx_usb_quirks:kind()]}.
 
 %% The phases that wait on a bulk transfer, the only ones a completion or an operation's
 %% deadline can find.
@@ -217,10 +227,15 @@ end the function.
 -define(ON_PIPE_RESET(Phase), (Phase =:= clear_data orelse Phase =:= clear_status orelse Phase =:= cancel
                                orelse Phase =:= reset_2 orelse Phase =:= reset_3)).
 
--doc "An engine that has not started.".
+-doc "An engine that has not started, of a device with no quirk.".
 -spec new() -> state().
 new() ->
-    #{phase => new, tag => 0, op => none, until => none, queue => queue:new(), units => none}.
+    new([]).
+
+-doc "An engine that has not started, of a device with Quirks.".
+-spec new([erx_usb_quirks:kind()]) -> state().
+new(Quirks) ->
+    #{phase => new, tag => 0, op => none, until => none, queue => queue:new(), units => none, quirks => Quirks}.
 
 -doc "The next state on Event at time Now, in milliseconds, and the actions the function performs.".
 -spec step(event(), integer(), state()) -> {state(), [action()]}.
@@ -375,13 +390,10 @@ next(Now, State = #{phase := idle, queue := Queue}) ->
 next(_Now, State) ->
     {State, []}.
 
-admit(Entry = #{id := Id, request := Request}, Now, State) ->
+admit(Entry = #{id := Id}, Now, State) ->
     case refusal(Entry, State) of
-        none ->
-            send(#{entry => Entry, stage => command, issued => Now, retries => 0, recovered => false},
-                 command(Request), Now, State);
-        Refused ->
-            answer_next(Id, Refused, Now, State)
+        none -> issue(Entry, Now, State);
+        Refused -> answer_next(Id, Refused, Now, State)
     end.
 
 %% Why a request's command is not sent, or none: it is sent only for its unit's current
@@ -396,6 +408,23 @@ refusal(#{medium := Medium, request := Request}, State) ->
         {true, #{ref := _Live}, {ready, _Lun, _New}} -> {error, {device, gone}};
         {true, #{flush := false}, {flush, _Lun}} -> {error, no_flush};
         {true, _Current, _Request} -> none
+    end.
+
+%% The admitted request's command sent, unless the device's quirks answer it unsent: an
+%% INQUIRY under no_inquiry as a direct-access unit (peripheral type 0, qualifier 0),
+%% removable so it is polled; a readiness, of a unit refusal/2 found without a medium,
+%% under no_sync_cache as a medium that cannot flush. A request answered unsent is never
+%% on the wire, so retry/4 never meets one and sends its command without asking again.
+issue(Entry = #{id := Id, request := Request}, Now, State = #{quirks := Quirks, units := Units}) ->
+    case {Request, erx_usb_quirks:has(no_inquiry, Quirks), erx_usb_quirks:has(no_sync_cache, Quirks)} of
+        {{inquiry, _Lun}, true, _NoSyncCache} ->
+            answer_next(Id, {ok, #{type => 0, qualifier => 0, removable => true}}, Now, State);
+        {{ready, Lun, Ref}, _NoInquiry, true} ->
+            Ready = State#{units := Units#{Lun := #{ref => Ref, flush => false}}},
+            answer_next(Id, {ok, #{flush => false}}, Now, Ready);
+        {_Request, _NoInquiry, _NoSyncCache} ->
+            send(#{entry => Entry, stage => command, issued => Now, retries => 0, recovered => false},
+                 command(Request), Now, State)
     end.
 
 answer_next(Id, Reply, Now, State) ->
@@ -471,9 +500,7 @@ controlled(reset_1, {error, Reason}, _Now, State) ->
 controlled(max_lun, Answer, Now, State) ->
     case max_lun(Answer) of
         {ok, Count} ->
-            Units = maps:from_keys(lists:seq(0, Count - 1), none),
-            {Next, Actions} = next(Now, State#{phase := idle, until := none, units := Units}),
-            {Next, [{units, Count} | Actions]};
+            units(Count, Now, State);
         {error, Reason} ->
             stop(Reason, State)
     end.
@@ -501,8 +528,19 @@ reset(Now, State) ->
 posted(Phase) when Phase =:= command; Phase =:= data_out -> out;
 posted(Phase) when Phase =:= data_in; Phase =:= status; Phase =:= status_again -> in.
 
-recovered(Now, State = #{units := none}) ->
-    wait(max_lun, get_max_lun, Now, State);
+%% The function's units known, each without a medium, and the queue's head started.
+units(Count, Now, State) ->
+    Units = maps:from_keys(lists:seq(0, Count - 1), none),
+    {Next, Actions} = next(Now, State#{phase := idle, until := none, units := Units}),
+    {Next, [{units, Count} | Actions]}.
+
+%% Reset recovery done. Units are asked for only once, after the first: a later recovery
+%% keeps them, so a single_unit device is never sent Get Max LUN, before or after a reset.
+recovered(Now, State = #{units := none, quirks := Quirks}) ->
+    case erx_usb_quirks:has(single_unit, Quirks) of
+        true -> units(1, Now, State);
+        false -> wait(max_lun, get_max_lun, Now, State)
+    end;
 recovered(Now, State = #{op := none}) ->
     next(Now, State#{phase := idle});
 recovered(Now, State = #{op := #{stage := command}}) ->
@@ -523,12 +561,30 @@ retry(Reply, Medium, Now, State = #{op := Op = #{retries := Retries, entry := En
 stop(Reason, State) ->
     {State#{phase := stopped, until := none}, [{stop, Reason}]}.
 
-judge(Bytes, Now, State = #{op := #{tag := Tag, length := Length}}) ->
-    case csw(Bytes, Tag, Length) of
+judge(Bytes, Now, State = #{op := Op = #{tag := Tag, length := Length}, quirks := Quirks}) ->
+    case csw(as_judged(Bytes, Op, Quirks), Tag, Length) of
         {good, Residue} -> moved(Residue, Now, State);
         {failed, _Residue} -> failed(Now, State);
         Invalid -> recover(none, {csw, Invalid}, Now, State)
     end.
+
+%% A CSW as the engine judges it: each of the device's CSW quirks rewrites the field it
+%% names, the residue to what the data phase did not move, the tag to the CBW's, and a wrong
+%% signature FreeBSD knows to the right one (umass.c:1560-1576). Other bytes are as sent.
+as_judged(<<Signature:32/little, CswTag:32/little, Residue:32/little, Status>>,
+          #{tag := Tag, length := Length, moved := Moved}, Quirks) ->
+    Has = fun(Kind) -> erx_usb_quirks:has(Kind, Quirks) end,
+    Known = lists:member(Signature, [?ERX_USB_BOT_CSW_SIGNATURE_DBX1, ?ERX_USB_BOT_CSW_SIGNATURE_OLYMPUS]),
+    Signed = pick(Has(wrong_csw_signature) andalso Known, ?ERX_USB_BOT_CSW_SIGNATURE, Signature),
+    Tagged = pick(Has(ignore_csw_tag), Tag, CswTag),
+    Counted = pick(Has(ignore_residue), max(0, Length - Moved), Residue),
+    <<Signed:32/little, Tagged:32/little, Counted:32/little, Status>>;
+as_judged(Bytes, _Op, _Quirks) ->
+    Bytes.
+
+%% A field as judged: the quirked value when the device has the quirk, else what it sent.
+pick(true, Quirked, _Sent) -> Quirked;
+pick(false, _Quirked, Sent) -> Sent.
 
 %% Status 1: the command's failure is explained by the operation's REQUEST SENSE, sent now,
 %% before any other request; the sense's own failure is not explained further.
@@ -563,10 +619,20 @@ decode({read_capacity_16, _Lun}, Bytes) -> read_capacity_16(Bytes).
 
 completed(ok, Now, State = #{op := #{entry := #{request := {ready, Lun, Ref}}}}) ->
     become_ready(Lun, Ref, true, Now, State);
+completed({ok, Capacity = #{last_block := Last}}, Now,
+          State = #{quirks := Quirks, op := #{command := {read_capacity_10, _Lun}}}) when Last < 16#ffffffff ->
+    finish(counted(erx_usb_quirks:has(capacity_is_count, Quirks), Capacity), keep, Now, State);
 completed({error, short}, Now, State) ->
     finish({error, {device, short}}, keep, Now, State);
 completed(Reply, Now, State) ->
     finish(Reply, keep, Now, State).
+
+%% READ CAPACITY(10)'s answer below all ones, on a device with capacity_is_count its last
+%% block read as the count of blocks (umass.c:2554-2562), a count of 0 being short. All
+%% ones is left as it is, so READ CAPACITY(16) still follows.
+counted(false, Capacity) -> {ok, Capacity};
+counted(true, #{last_block := 0}) -> {error, {device, short}};
+counted(true, Capacity = #{last_block := Count}) -> {ok, Capacity#{last_block := Count - 1}}.
 
 %% A readiness SYNCHRONIZE CACHE refused with ILLEGAL REQUEST makes a medium that cannot
 %% flush (design-usb.md, "The SCSI subset"); any other sense is the request's answer.

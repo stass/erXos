@@ -1,0 +1,328 @@
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# USB mass-storage device quirks (docs/design-usb.md, "Device quirks"): the one table of
+# the devices that need a behaviour of erXos's stack other than the standard one, read
+# whole by tools/lib/erx/usb_quirks.rb, which generates erx_usb_quirks from it.
+#
+# Rows from FreeBSD are derived from FreeBSD's sys/dev/usb/quirk/usb_quirk.c, under
+# these notices:
+#
+#   Copyright (c) 1998 The NetBSD Foundation, Inc. All rights reserved.
+#   Copyright (c) 1998 Lennart Augustsson. All rights reserved.
+#   Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
+#
+#   Redistribution and use in source and binary forms, with or without
+#   modification, are permitted provided that the following conditions
+#   are met:
+#   1. Redistributions of source code must retain the above copyright
+#      notice, this list of conditions and the following disclaimer.
+#   2. Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions and the following disclaimer in the
+#      documentation and/or other materials provided with the distribution.
+#
+#   THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+#   ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+#   ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+#   FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#   DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+#   OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+#   HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+#   LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+#   OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+#   SUCH DAMAGE.
+#
+# Rows from Linux carry facts only, a device's identifiers and that it needs a
+# behaviour, taken from a facts record of Linux's drivers/usb/storage/unusual_devs.h
+# written in its own words by a reader separate from this table's author; no code,
+# comment, name or ordering of that GPL-2.0 file is reproduced here.
+#
+# Lines are tokens separated by spaces, # starting a comment:
+#
+#   source NAME RELEASE COMMIT FORM    a source rows may cite, at its pinned release
+#   quirk VVVV:PPPP LLLL-HHHH KIND... from CITE...
+#
+# A source's COMMIT is 12 to 40 lowercase hexadecimal digits, and its FORM how rows cite
+# it: line, as NAME:LINE, the line of the source a row comes from, or bare, as NAME
+# alone. A quirk row names a device by its vendor and product identifiers, four
+# lowercase hexadecimal digits each, or * for every product of the vendor, and the
+# inclusive range of its bcdDevice, four digits each; its kinds, one or more members of
+# the enum usb_quirk of abi/formats/usb.txt, each once; and one or more citations of
+# declared sources. Rows are sorted by vendor, product (* first), then range, and no
+# two share all three; a device takes every kind of every row it matches.
+#
+# The files the rows were read from, by SHA-256: FreeBSD's, at the commit its source
+# line pins (the tag's peeled commit is 96841ea08dcfa84b954a32dc5ae1a26c28966cf4);
+# Linux's, at the commit its source line pins (ca1def99248052a4d954ae97063263edc6a09aae),
+# read only by the facts record's writer:
+#
+#   d3a27b7aa96ff08b6215f74e74b89895c64de0ab4a62f5d7ff0bebc149ffe115  freebsd sys/dev/usb/quirk/usb_quirk.c
+#   77ab6a7845714e87e6b932324598f0d0a8897f1fef20222e552a49e722fc49f7  freebsd sys/dev/usb/quirk/usb_quirk.h
+#   c9af7e94cf94194410508052c4c745414333396e5e57f411caace3418f395ba6  freebsd sys/dev/usb/usbdevs
+#   870e4fe1d4c9882963e5e32aa4f1e229ed540a837b152cf9f6fd635297681085  linux drivers/usb/storage/unusual_devs.h
+#   6318f0c0e03479d6987114c48f65eb803461e871f78ad2462cba3a83c323f8c6  linux include/linux/usb_usual.h
+#
+# Which of the sources' quirks are not imported, and why, is in docs/design-usb.md,
+# "Device quirks".
+
+source freebsd release/15.1.0 96841ea08dcf line
+source linux v6.19.14 ca1def992480 bare
+
+quirk 03eb:2002 0100-0100 ignore_residue from linux
+quirk 03ee:6906 0003-0003 ignore_residue from linux
+quirk 03f0:4002 0001-0001 capacity_is_count from linux
+quirk 0409:0040 0000-9999 single_unit from linux
+quirk 040d:6204 0000-ffff no_sync_cache force_bot force_scsi from freebsd:476
+quirk 040d:6205 0003-0003 ignore_residue from linux
+quirk 0411:001c 0000-ffff ignore_residue force_bot force_scsi from freebsd:308
+quirk 0411:001c 0113-0113 no_inquiry from linux
+quirk 0419:0100 0100-0100 ignore_residue from linux
+quirk 0419:aace 0100-0100 ignore_residue from linux
+quirk 0419:aaf5 0100-0100 ignore_residue from linux
+quirk 0419:aaf6 0100-0100 ignore_residue from linux
+quirk 041e:3295 0000-ffff no_inquiry from freebsd:231
+quirk 041e:4106 0001-ffff capacity_is_count force_bot force_scsi from freebsd:229
+quirk 0420:0001 0100-0100 ignore_residue from linux
+quirk 0421:042e 0100-0100 ignore_residue capacity_is_count from linux
+quirk 0421:0433 0100-0100 ignore_residue capacity_is_count from linux
+quirk 0421:0434 0100-0100 ignore_residue capacity_is_count from linux
+quirk 0421:0444 0100-0100 ignore_residue capacity_is_count from linux
+quirk 0421:0446 0100-0100 ignore_residue capacity_is_count from linux
+quirk 0421:044e 0100-0100 ignore_residue capacity_is_count from linux
+quirk 0436:0005 0000-ffff force_scsi from freebsd:465
+quirk 0451:5416 0100-0100 force_bot from linux
+quirk 0482:0103 0000-ffff no_inquiry force_bot force_scsi from freebsd:298
+quirk 0482:0103 0100-0100 no_inquiry from linux
+quirk 0482:0105 0000-ffff no_inquiry force_bot force_scsi from freebsd:292
+quirk 0482:0107 0100-0100 capacity_is_count from linux
+quirk 0492:0140 0000-ffff no_inquiry no_sync_cache force_bot force_scsi from freebsd:526
+quirk 04a5:3010 0100-0100 ignore_residue from linux
+quirk 04b0:041a 0000-ffff force_bot force_scsi from freebsd:337
+quirk 04b4:6830 0000-ffff single_unit no_sync_cache from freebsd:232
+quirk 04b8:0602 0000-ffff single_unit force_bot force_scsi from freebsd:240
+quirk 04b8:0602 0110-0110 single_unit force_bot force_scsi from linux
+quirk 04bb:0204 0000-ffff force_bot force_scsi from freebsd:281
+quirk 04bb:0206 0000-ffff force_bot force_scsi from freebsd:282
+quirk 04ce:0002 0000-026b capacity_is_count ignore_csw_tag from linux
+quirk 04ce:0002 026c-026c capacity_is_count from linux
+quirk 04cf:8818 0000-ffff ignore_residue no_sync_cache from freebsd:328
+quirk 04da:0d0a 0000-ffff force_bot force_scsi from freebsd:386
+quirk 04da:0d0e 0000-ffff force_bot force_scsi from freebsd:388
+quirk 04da:2372 0000-9999 capacity_is_count from linux
+quirk 04da:2373 0000-9999 capacity_is_count from linux
+quirk 04e6:0002 0000-ffff force_bot force_scsi from freebsd:427
+quirk 04e6:0003 0000-ffff single_unit force_scsi from freebsd:429
+quirk 04e6:0005 0000-ffff force_scsi from freebsd:426
+quirk 04e6:0006 0205-0205 single_unit force_scsi from linux
+quirk 04e8:5122 0000-9999 ignore_csw_tag from linux
+quirk 050d:0115 0000-ffff force_bot force_scsi from freebsd:223
+quirk 0525:a4a5 0000-ffff no_sync_cache from freebsd:336
+quirk 052b:1801 0100-0100 ignore_residue from linux
+quirk 052b:1804 0100-0100 ignore_residue from linux
+quirk 052b:1807 0100-0100 ignore_residue from linux
+quirk 052b:1905 0100-0100 ignore_residue from linux
+quirk 052b:1911 0100-0100 ignore_residue from linux
+quirk 054c:0010 0106-0450 single_unit force_scsi from linux
+quirk 054c:0025 0000-ffff single_unit force_bot force_scsi from freebsd:453
+quirk 054c:0025 0100-0100 single_unit from linux
+quirk 054c:002b 0000-ffff force_bot force_scsi from freebsd:459
+quirk 054c:002c 0501-2000 single_unit from linux
+quirk 054c:002d 0000-ffff single_unit force_bot force_scsi from freebsd:457
+quirk 054c:002d 0100-0100 single_unit from linux
+quirk 054c:002e 0106-0310 single_unit force_scsi from linux
+quirk 054c:0032 0000-9999 single_unit from linux
+quirk 054c:0058 0000-9999 no_inquiry from linux
+quirk 054c:0058 0000-ffff no_inquiry force_bot force_scsi from freebsd:455
+quirk 054c:006d 0000-9999 no_inquiry from linux
+quirk 054c:006d 0000-ffff no_inquiry force_bot force_scsi from freebsd:442
+quirk 054c:0099 0000-9999 no_inquiry from linux
+quirk 054c:016a 0000-9999 no_inquiry from linux
+quirk 055d:2020 0000-0210 single_unit from linux
+quirk 058f:9361 0000-ffff single_unit force_bot force_scsi from freebsd:215
+quirk 059b:0001 0000-ffff force_bot force_scsi from freebsd:283
+quirk 059b:0001 0100-0100 single_unit from linux
+quirk 059b:0040 0100-0100 single_unit from linux
+quirk 05ab:0060 1104-1110 force_bot force_scsi from linux
+quirk 05ac:1202 0000-9999 capacity_is_count from linux
+quirk 05ac:1203 0000-9999 capacity_is_count from linux
+quirk 05ac:1204 0000-9999 capacity_is_count from linux
+quirk 05ac:1205 0000-9999 capacity_is_count from linux
+quirk 05ac:120a 0000-9999 capacity_is_count from linux
+quirk 05dc:0001 0000-ffff force_scsi from freebsd:303
+quirk 05dc:a833 0000-ffff no_inquiry from freebsd:304
+quirk 05dc:b002 0000-0113 no_inquiry from linux
+quirk 05dc:b002 0000-ffff no_inquiry force_bot force_scsi from freebsd:301
+quirk 05e3:0700 0000-ffff ignore_residue force_bot force_scsi from freebsd:258
+quirk 05e3:0701 0000-ffff ignore_residue from linux
+quirk 05e3:0702 0000-ffff ignore_residue no_sync_cache force_bot force_scsi from freebsd:252 linux
+quirk 05e3:0732 0000-ffff no_inquiry from freebsd:262
+quirk 05e3:0760 0000-ffff wrong_csw_signature force_bot force_scsi from freebsd:260
+quirk 0603:8611 0000-ffff ignore_csw_tag from linux
+quirk 0634:0655 0000-ffff no_sync_cache from freebsd:312
+quirk 0636:0003 0000-9999 no_inquiry force_bot force_scsi from linux
+quirk 0636:0003 0000-ffff no_inquiry force_bot force_scsi from freebsd:478
+quirk 066f:8000 0001-0001 capacity_is_count from linux
+quirk 066f:8008 0000-ffff force_bot force_scsi from freebsd:432
+quirk 067b:2506 0000-ffff no_sync_cache from freebsd:395
+quirk 067b:2507 0001-0100 capacity_is_count from linux
+quirk 067b:3507 0001-0101 capacity_is_count from linux
+quirk 0686:4011 0000-ffff force_bot force_scsi from freebsd:318
+quirk 0686:4011 0001-0001 force_bot force_scsi from linux
+quirk 0686:4017 0000-ffff force_scsi from freebsd:317
+quirk 0686:4017 0001-0001 force_scsi from linux
+quirk 0693:0002 0000-ffff force_bot force_scsi from freebsd:264
+quirk 0693:0005 0000-ffff force_bot force_scsi from freebsd:263
+quirk 0693:0005 0100-0100 force_bot force_scsi from linux
+quirk 069b:3004 0001-0001 capacity_is_count from linux
+quirk 071b:3203 0000-ffff no_sync_cache from freebsd:467
+quirk 0727:0306 0100-0100 ignore_residue from linux
+quirk 0781:0002 0000-ffff capacity_is_count force_bot force_scsi from freebsd:414
+quirk 0781:0002 0009-0009 capacity_is_count from linux
+quirk 0781:0200 0000-ffff single_unit capacity_is_count force_scsi from freebsd:400
+quirk 0781:5581 0000-ffff no_sync_cache from freebsd:412
+quirk 0781:7100 0000-ffff ignore_residue no_sync_cache force_bot force_scsi from freebsd:404
+quirk 0781:7104 0000-ffff ignore_residue force_bot force_scsi from freebsd:406
+quirk 0781:7112 0000-ffff ignore_residue force_bot force_scsi from freebsd:408
+quirk 0781:7113 0000-ffff ignore_residue force_bot force_scsi from freebsd:410
+quirk 0781:b6ba 0000-ffff single_unit no_sync_cache from freebsd:416
+quirk 0789:0033 0000-ffff force_scsi from freebsd:305
+quirk 0789:00b3 0000-ffff force_bot force_scsi from freebsd:306
+quirk 07ab:fc01 0000-ffff force_scsi from freebsd:244
+quirk 07ab:fccd 0000-9999 capacity_is_count from linux
+quirk 07af:0004 0000-ffff force_bot force_scsi from freebsd:313
+quirk 07af:0005 0000-ffff force_bot force_scsi from freebsd:315
+quirk 07b4:0102 0000-ffff single_unit wrong_csw_signature no_sync_cache force_bot force_scsi from freebsd:339 freebsd:348
+quirk 07b4:0105 0000-ffff single_unit from freebsd:341
+quirk 07b4:0118 0000-ffff single_unit no_sync_cache from freebsd:358
+quirk 07b4:012c 0000-ffff single_unit no_sync_cache from freebsd:360
+quirk 07b4:012e 0000-ffff single_unit no_sync_cache from freebsd:369
+quirk 07c4:0400 0000-ffff single_unit no_sync_cache force_bot force_scsi from freebsd:371
+quirk 07c4:a000 0000-ffff force_scsi from freebsd:377
+quirk 07c4:a001 0000-ffff force_scsi from freebsd:373
+quirk 07c4:a003 0000-ffff force_scsi from freebsd:379
+quirk 07c4:a005 0000-ffff force_scsi from freebsd:375
+quirk 07c4:a006 0000-ffff force_scsi from freebsd:376
+quirk 07c4:a103 0000-ffff no_inquiry force_scsi from freebsd:378
+quirk 07c4:a109 0000-ffff force_scsi from freebsd:374
+quirk 07c4:a400 0000-ffff no_inquiry capacity_is_count from linux
+quirk 07c4:a4a5 0000-ffff ignore_residue from linux
+quirk 07cc:0330 0000-ffff ignore_residue force_bot force_scsi from freebsd:434
+quirk 07f7:011e 0000-ffff ignore_residue force_bot force_scsi from freebsd:227
+quirk 0839:000a 0000-ffff no_inquiry force_bot force_scsi from freebsd:396
+quirk 0839:000a 0001-0001 no_inquiry from linux
+quirk 0840:0082 0001-0001 capacity_is_count from linux
+quirk 0840:0084 0001-0001 capacity_is_count from linux
+quirk 0840:0085 0001-0001 capacity_is_count from linux
+quirk 08bd:1100 0000-0000 single_unit from linux
+quirk 08ca:2011 0000-ffff force_bot force_scsi from freebsd:213
+quirk 08ca:3103 0100-0100 ignore_residue from linux
+quirk 08ec:0010 0000-ffff single_unit ignore_residue force_bot force_scsi from freebsd:323
+quirk 090a:1001 0000-ffff force_scsi from freebsd:474
+quirk 090a:1001 0100-0100 force_bot from linux
+quirk 090c:1132 0000-ffff capacity_is_count force_bot force_scsi from freebsd:242 linux
+quirk 090c:6200 0000-ffff no_sync_cache from freebsd:243
+quirk 091e:086d 0000-ffff no_inquiry from freebsd:248
+quirk 091e:0d8a 0000-ffff no_inquiry from freebsd:251
+quirk 091e:23c0 0000-ffff no_inquiry from freebsd:247
+quirk 091e:2459 0000-ffff no_inquiry from freebsd:249
+quirk 091e:26c8 0000-ffff no_inquiry from freebsd:250
+quirk 0930:6545 0000-ffff no_sync_cache from freebsd:528
+quirk 093b:0011 0000-ffff force_bot force_scsi from freebsd:391
+quirk 094f:05fc 0000-ffff ignore_residue force_bot force_scsi from freebsd:511
+quirk 0951:162b 0000-ffff no_inquiry from freebsd:289
+quirk 0951:1666 0000-ffff no_sync_cache from freebsd:290
+quirk 0a16:8888 0000-ffff no_inquiry force_bot force_scsi from freebsd:468
+quirk 0a17:0004 0000-ffff no_inquiry force_bot force_scsi from freebsd:218
+quirk 0a17:0004 1000-1000 no_inquiry from linux
+quirk 0a17:0006 0000-ffff no_inquiry force_bot force_scsi from freebsd:220
+quirk 0aec:3260 0000-ffff force_bot force_scsi from freebsd:329
+quirk 0bf6:a001 0000-ffff force_bot force_scsi from freebsd:211
+quirk 0c0b:a109 0000-ffff single_unit force_scsi from freebsd:236
+quirk 0c45:1060 0100-0100 single_unit from linux
+quirk 0d7d:1300 0000-ffff ignore_residue force_bot force_scsi from freebsd:205
+quirk 0d7d:1400 0000-ffff ignore_residue force_bot force_scsi from freebsd:207
+quirk 0d7d:1420 0000-ffff ignore_residue force_bot force_scsi from freebsd:209
+quirk 0d96:410a 0000-ffff no_inquiry force_bot force_scsi from freebsd:436
+quirk 0d96:410a 0001-ffff no_inquiry from linux
+quirk 0d96:5200 0000-ffff no_inquiry force_bot force_scsi from freebsd:438
+quirk 0d96:5200 0001-0200 no_inquiry from linux
+quirk 0dd8:0003 0000-ffff ignore_residue force_bot force_scsi from freebsd:333
+quirk 0dd8:1060 0000-ffff no_inquiry force_bot force_scsi from freebsd:331 linux
+quirk 0dd8:d202 0000-9999 ignore_residue from linux
+quirk 0dda:0001 0012-0012 ignore_residue from linux
+quirk 0dda:0301 0012-0012 ignore_residue from linux
+quirk 0e21:0520 0100-0100 force_bot from linux
+quirk 0e39:1700 0000-ffff no_inquiry from freebsd:533
+quirk 0ea0:2168 0110-0110 ignore_residue from linux
+quirk 0ea0:6828 0110-0110 ignore_residue from linux
+quirk 0ed1:6660 0000-ffff no_inquiry force_bot force_scsi from freebsd:509
+quirk 0ed1:6660 0100-0300 no_inquiry from linux
+quirk 0ed1:7636 0103-0103 ignore_residue from linux
+quirk 0f19:0103 0100-0100 ignore_residue from linux
+quirk 0f19:0105 0100-0100 ignore_residue from linux
+quirk 0f88:042e 0100-0100 capacity_is_count from linux
+quirk 0fce:e030 0000-0000 ignore_residue capacity_is_count from linux
+quirk 0fce:e031 0000-0000 ignore_residue capacity_is_count from linux
+quirk 0fce:e092 0000-0000 ignore_residue from linux
+quirk 1005:b113 0000-ffff no_sync_cache from freebsd:217
+quirk 1019:0c55 0000-ffff force_bot force_scsi from freebsd:234
+quirk 1058:0200 0000-ffff ignore_residue force_bot force_scsi from freebsd:480
+quirk 1058:0400 0000-ffff ignore_residue force_bot force_scsi from freebsd:482
+quirk 1058:070a 0000-ffff no_sync_cache from freebsd:498
+quirk 1058:071a 0000-ffff no_sync_cache from freebsd:499
+quirk 1058:0730 0000-ffff no_sync_cache from freebsd:500
+quirk 1058:0732 0000-ffff no_sync_cache from freebsd:501
+quirk 1058:0740 0000-ffff no_sync_cache from freebsd:502
+quirk 1058:0741 0000-ffff no_sync_cache from freebsd:497
+quirk 1058:0742 0000-ffff no_sync_cache from freebsd:503
+quirk 1058:0746 0000-ffff no_sync_cache from freebsd:487
+quirk 1058:0748 0000-ffff no_sync_cache from freebsd:488
+quirk 1058:074a 0000-ffff no_sync_cache from freebsd:489
+quirk 1058:074c 0000-ffff no_sync_cache from freebsd:490
+quirk 1058:074e 0000-ffff no_sync_cache from freebsd:491
+quirk 1058:0750 0000-ffff no_sync_cache from freebsd:504
+quirk 1058:0752 0000-ffff no_sync_cache from freebsd:505
+quirk 1058:07a0 0000-ffff no_sync_cache from freebsd:506
+quirk 1058:07a2 0000-ffff no_sync_cache from freebsd:507
+quirk 1058:07a6 0000-ffff no_sync_cache from freebsd:492
+quirk 1058:07a8 0000-ffff no_sync_cache from freebsd:493
+quirk 1058:07aa 0000-ffff no_sync_cache from freebsd:494
+quirk 1058:07ac 0000-ffff no_sync_cache from freebsd:495
+quirk 1058:07ae 0000-ffff no_sync_cache from freebsd:496
+quirk 1058:0901 0000-ffff no_sync_cache force_bot force_scsi from freebsd:484
+quirk 1065:2136 0000-ffff force_bot force_scsi from freebsd:226
+quirk 1210:0003 0100-0100 ignore_residue from linux
+quirk 126f:1325 0000-ffff force_bot force_scsi from freebsd:475
+quirk 12d1:1f01 0000-ffff single_unit no_inquiry from freebsd:272
+quirk 1370:6828 0110-0110 ignore_residue from linux
+quirk 13fd:3609 0209-0209 ignore_residue from linux
+quirk 13fe:1e20 0000-ffff no_sync_cache from freebsd:233
+quirk 13fe:2240 0000-ffff no_sync_cache from freebsd:237
+quirk 13fe:3600 0100-0100 ignore_csw_tag from linux
+quirk 149a:2107 0000-ffff wrong_csw_signature force_bot force_scsi from freebsd:273
+quirk 14af:af01 0000-ffff no_sync_cache from freebsd:222
+quirk 14cd:121c 0000-ffff no_sync_cache from freebsd:463
+quirk 14cd:6600 0000-ffff ignore_residue no_sync_cache from freebsd:462
+quirk 14cd:6600 0201-0201 ignore_residue from linux
+quirk 152d:0567 0000-ffff single_unit from freebsd:286
+quirk 152d:2329 0100-0100 ignore_residue from linux
+quirk 152d:2338 0000-ffff no_sync_cache force_bot force_scsi from freebsd:287
+quirk 152d:3569 0000-ffff single_unit from freebsd:285
+quirk 154b:0010 0000-ffff ignore_residue force_bot force_scsi from freebsd:393
+quirk 1652:6600 0201-0201 ignore_residue from linux
+quirk 177f:0400 0000-0000 ignore_csw_tag from linux
+quirk 19d2:1225 0000-ffff single_unit from linux
+quirk 19d2:1420 0000-ffff single_unit no_inquiry from freebsd:531
+quirk 1cae:* 0000-ffff no_sync_cache from freebsd:322
+quirk 1e68:001b 0000-0000 ignore_residue from linux
+quirk 1e74:4621 0000-0000 ignore_csw_tag from linux
+quirk 1fc9:0117 0100-0100 ignore_residue from linux
+quirk 2109:0700 0000-ffff no_sync_cache from freebsd:530
+quirk 2109:0701 0000-ffff no_inquiry from freebsd:280
+quirk 2116:0320 0001-0001 capacity_is_count from linux
+quirk 22b8:3010 0001-0001 ignore_residue capacity_is_count from linux
+quirk 22b8:4810 0000-ffff single_unit force_bot force_scsi from freebsd:320
+quirk 22b8:6426 0101-0101 no_inquiry capacity_is_count ignore_csw_tag from linux
+quirk 2537:1081 0000-ffff no_inquiry from freebsd:338
+quirk 4102:1020 0100-0100 ignore_residue from linux
+quirk 55aa:a103 0000-ffff single_unit force_scsi from freebsd:382

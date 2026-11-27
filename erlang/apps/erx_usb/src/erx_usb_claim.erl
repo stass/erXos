@@ -22,7 +22,13 @@ the multi-TT hub's (:1252-1258) and in 0 otherwise, whatever the
 interface's own class; at SuperSpeed it runs none. An interface of class
 09h on a device of another class is not a hub. Otherwise HID (class 03h)
 takes its first interrupt-IN endpoint, and mass storage over SCSI and
-Bulk-Only (08h, 06h, 50h) its first bulk-IN and first bulk-OUT endpoint.
+Bulk-Only (08h, 06h, 50h) its first bulk-IN and first bulk-OUT endpoint;
+a device whose quirks (`erx_usb_quirks`, design-usb.md, "Device quirks")
+force SCSI or Bulk-Only has that interface taken as such whatever its
+subclass or protocol, and with both forced whatever its class, as
+FreeBSD's `umass_probe_proto` takes it (sys/dev/usb/storage/umass.c:862-898,
+release/15.1.0). Every function carries the device's quirks, which the
+mass-storage function alone reads.
 Every other interface runs no function, and so does one whose
 selected setting lacks an endpoint its function needs. A setting the table
 selects that the configuration lacks refuses it (`missing_setting`); so
@@ -90,12 +96,13 @@ exponent of that interval in 125 us units.
                   payload := 1..?ERX_XHCI_BULK_BUFFER_SIZE,
                   interval_exponent := 0..(?ERX_XHCI_INTERVAL_BINTERVAL_MAX - 1)}.
 
--doc "One claimed function: its driver, the interface and setting it runs on, that setting, and its pipes in the order its driver needs them.".
+-doc "One claimed function: its driver, the interface and setting it runs on, that setting, its pipes in the order its driver needs them, and its device's quirks.".
 -type function_() :: #{driver := driver(),
                        interface := byte(),
                        alternate := byte(),
                        setting := erx_usb_desc:setting(),
-                       pipes := [pipe()]}.
+                       pipes := [pipe()],
+                       quirks := [erx_usb_quirks:kind()]}.
 
 -type reason() :: missing_setting | missing_companion | duplicate_endpoint | too_many_endpoints
                 | malformed_descriptor | endpoint_too_large | zero_interval_payload.
@@ -140,14 +147,15 @@ admitted(Functions, Speed, Settings) ->
     check(length(Pipes) + 1 =< ?ERX_USB_ENDPOINTS_MAX, too_many_endpoints),
     Functions.
 
-claim(Speed, Device, Settings) ->
+claim(Speed, Device = #{vendor := Vendor, product := Product, release := Release}, Settings) ->
     Interfaces = lists:usort([Number || {Number, 0} <- maps:keys(Settings)]),
+    Quirks = erx_usb_quirks:lookup(Vendor, Product, Release),
     [Function || Number <- Interfaces,
-                 Function <- interface_function(Speed, Device, Number, Settings)].
+                 Function <- interface_function(Speed, Device, Quirks, Number, Settings)].
 
 %% The table, then the setting it selects and the endpoints its driver needs.
-interface_function(Speed, Device, Number, Settings) ->
-    case driver(Speed, Device, Number, map_get({Number, 0}, Settings)) of
+interface_function(Speed, Device, Quirks, Number, Settings) ->
+    case driver(Speed, Device, Quirks, Number, map_get({Number, 0}, Settings)) of
         none ->
             [];
         {Driver, Alternate, Needs} ->
@@ -157,7 +165,7 @@ interface_function(Speed, Device, Number, Settings) ->
                     [];
                 Endpoints ->
                     [#{driver => Driver, interface => Number, alternate => Alternate,
-                       setting => Setting, pipes => [pipe(Speed, E) || E <- Endpoints]}]
+                       setting => Setting, pipes => [pipe(Speed, E) || E <- Endpoints], quirks => Quirks}]
             end
     end.
 
@@ -166,18 +174,28 @@ selected(error) -> refuse(missing_setting).
 
 %% A hub device's interface 0 by the device's class alone; every other
 %% interface by its alternate setting 0.
--spec driver(speed(), erx_usb_desc:device(), byte(), erx_usb_desc:setting()) ->
+-spec driver(speed(), erx_usb_desc:device(), [erx_usb_quirks:kind()], byte(), erx_usb_desc:setting()) ->
           none | {driver(), byte(), [need()]}.
-driver(Speed, #{class := ?ERX_USB_CLASS_HUB, protocol := Protocol}, 0, _Setting) ->
+driver(Speed, #{class := ?ERX_USB_CLASS_HUB, protocol := Protocol}, _Quirks, 0, _Setting) ->
     hub(Speed, Protocol);
-driver(_Speed, _Device, _Number, #{class := ?ERX_USB_CLASS_HID}) ->
+driver(_Speed, _Device, _Quirks, _Number, #{class := ?ERX_USB_CLASS_HID}) ->
     {erx_usb_hid, 0, [{interrupt, in}]};
-driver(_Speed, _Device, _Number, #{class := ?ERX_USB_CLASS_MASS_STORAGE,
-                                   subclass := ?ERX_USB_SUBCLASS_SCSI,
-                                   protocol := ?ERX_USB_PROTOCOL_BULK_ONLY}) ->
-    {erx_usb_bot, 0, [{bulk, in}, {bulk, out}]};
-driver(_Speed, _Device, _Number, _Setting) ->
-    none.
+driver(_Speed, _Device, Quirks, _Number, Setting) ->
+    case {speaks(scsi, Setting, Quirks), speaks(bulk_only, Setting, Quirks)} of
+        {true, true} -> {erx_usb_bot, 0, [{bulk, in}, {bulk, out}]};
+        _NotBoth -> none
+    end.
+
+%% Whether a mass-storage interface speaks SCSI, by its subclass, or Bulk-Only, by its
+%% protocol, or the device's quirks force it to.
+speaks(scsi, Setting, Quirks) ->
+    erx_usb_quirks:has(force_scsi, Quirks) orelse
+        maps:with([class, subclass], Setting) =:= #{class => ?ERX_USB_CLASS_MASS_STORAGE,
+                                                    subclass => ?ERX_USB_SUBCLASS_SCSI};
+speaks(bulk_only, Setting, Quirks) ->
+    erx_usb_quirks:has(force_bot, Quirks) orelse
+        maps:with([class, protocol], Setting) =:= #{class => ?ERX_USB_CLASS_MASS_STORAGE,
+                                                    protocol => ?ERX_USB_PROTOCOL_BULK_ONLY}.
 
 hub(Speed, ?ERX_USB_HUB_PROTOCOL_MULTI_TT) when Speed =:= full; Speed =:= high ->
     {erx_usb_hub, ?ERX_USB_HUB_MULTI_TT_ALTERNATE, [{interrupt, in}]};
