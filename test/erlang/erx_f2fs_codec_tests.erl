@@ -980,12 +980,14 @@ a_sit_block_encodes_to_its_block_test() ->
     ?assertEqual(Block, erx_f2fs_codec:encode_sit_block(Read)),
     ?assertEqual(Block, erx_f2fs_codec:encode_sit_block([Entry#{valid_blocks := 0} || Entry <- Read])).
 
-%% check_sum, which no one computes, is written as 0.
+%% check_sum, which no one computes, is written as 0, and the journal is
+%% always empty: a block whose journal holds entries comes back without them.
 a_summary_block_encodes_to_its_block_test() ->
-    Journal = binary:copy(<<16#3c>>, ?ERX_F2FS_NAT_JOURNAL_SIZE),
-    <<Head:(?BLOCK - 4)/binary, _:32>> = summary_block(Journal),
-    {ok, Summary} = erx_f2fs_codec:summary_block(summary_block(Journal)),
-    ?assertEqual(<<Head/binary, 0:32>>, erx_f2fs_codec:encode_summary_block(Summary)).
+    Empty = erx_f2fs_codec:empty_journal(),
+    <<Head:(?BLOCK - 4)/binary, _:32>> = summary_block(Empty),
+    {ok, #{entries := Entries, entry_type := Type}} =
+        erx_f2fs_codec:summary_block(summary_block(binary:copy(<<16#3c>>, ?ERX_F2FS_NAT_JOURNAL_SIZE))),
+    ?assertEqual(<<Head/binary, 0:32>>, erx_f2fs_codec:encode_summary_block(Entries, Type)).
 
 %% Inodes of every layout erXos writes: the fixture's E = 3 under
 %% INODE_CHKSUM, E = 9 with every extra attribute set and an inline xattr
@@ -1083,11 +1085,11 @@ generated_tables_decode_to_their_values_test() ->
     generated(fun() ->
                       #{entries => [#{nid => uniform(32), version => uniform(8), ofs_in_node => uniform(16)}
                                     || _ <- lists:seq(1, 512)],
-                        journal => random_bytes(?ERX_F2FS_NAT_JOURNAL_SIZE), entry_type => uniform(1)}
+                        journal => erx_f2fs_codec:empty_journal(), entry_type => uniform(1)}
               end,
-              fun(Summary) ->
+              fun(#{entries := Entries, entry_type := Type} = Summary) ->
                       ?assertEqual({ok, Summary},
-                                   erx_f2fs_codec:summary_block(erx_f2fs_codec:encode_summary_block(Summary)))
+                                   erx_f2fs_codec:summary_block(erx_f2fs_codec:encode_summary_block(Entries, Type)))
               end),
     generated(fun() -> [uniform(32) || _ <- lists:seq(1, rand:uniform(1021) - 1)] end,
               fun(Inodes) ->

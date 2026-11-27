@@ -873,8 +873,9 @@ round_trip(nat_block, [_Block], Entries) ->
     same(Entries, erx_f2fs_codec:nat_block(erx_f2fs_codec:encode_nat_block(Entries)));
 round_trip(sit_block, [_Block, Used], Entries) ->
     same(Entries, erx_f2fs_codec:sit_block(erx_f2fs_codec:encode_sit_block(Entries), Used));
-round_trip(summary_block, [_Block], Summary) ->
-    same(Summary, erx_f2fs_codec:summary_block(erx_f2fs_codec:encode_summary_block(Summary)));
+round_trip(summary_block, [_Block], #{entries := Entries, entry_type := Type} = Summary) ->
+    same(Summary#{journal := erx_f2fs_codec:empty_journal()},
+         erx_f2fs_codec:summary_block(erx_f2fs_codec:encode_summary_block(Entries, Type)));
 round_trip(inode, [Super, Nid, _Block], #{addresses := _, i_ext := Extent} = Inode) ->
     Written = Inode#{i_ext := Extent#{len := 0}},
     same(Written, erx_f2fs_codec:inode(Super, Nid, erx_f2fs_codec:encode_inode(Super, Written)),

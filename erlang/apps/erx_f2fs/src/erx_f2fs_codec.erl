@@ -67,7 +67,8 @@ a value leaves out is written as zeros: padding, reserved bytes, the check
 words no one computes, a free dentry slot. Every checksum that applies is
 computed by the same function its reader checks it with; i_ext is written
 with len 0 ([F 44]). The forms erXos only reads (compact summaries,
-journals other than empty ones, inline data and dentries) have no encoder.
+journals other than empty ones, inline data and dentries) have no encoder;
+a summary block is always written with an empty journal.
 """.
 
 -export([superblock/1, checkpoint/1, checkpoint_copy/1, checkpoint/3,
@@ -76,9 +77,9 @@ journals other than empty ones, inline data and dentries) have no encoder.
          direct_node/4, indirect_node/4, dentry_block/1, inline_dentries/1,
          node_footer/1, crc/2,
          encode_superblock/1, encode_checkpoint/2, encode_orphan_block/3,
-         encode_nat_block/1, encode_sit_block/1, encode_summary_block/1,
+         encode_nat_block/1, encode_sit_block/1, encode_summary_block/2,
          encode_inode/2, encode_direct_node/2, encode_indirect_node/2,
-         encode_dentry_block/1,
+         encode_dentry_block/1, empty_journal/0,
          dentry_hash/1, dentry_slots/1, bit/2, extra_attr_features/0,
          nat_capacity/1, node_capacity/1, main_end/1]).
 -export_type([superblock/0, checkpoint/0, nat_entry/0, sit_entry/0,
@@ -498,16 +499,24 @@ encode_sit_block(Entries) ->
                           #{entries => pad_list(Packed, ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK, Free)}).
 
 -doc """
-A summary block in the normal form, as summary_block/1 answers it: its
-entries, its journal's bytes and its entry_type, with check_sum 0, which
-no one computes ([F 45]).
+A summary block in the normal form of Entries, its
+f2fs_summaries_per_block entries, and entry_type Type, with an empty
+journal and check_sum 0, which no one computes ([F 45]). erXos keeps every
+NAT and SIT entry in its table block, so it writes no journal entry, and
+summary_block/1 answers the journal of a block erXos wrote as zeros.
 """.
--spec encode_summary_block(#{entries := [summary()], journal := binary(),
-                             entry_type := byte()}) -> binary().
-encode_summary_block(#{entries := Entries, journal := Journal, entry_type := Type}) ->
+-spec encode_summary_block([summary()], byte()) -> binary().
+encode_summary_block(Entries, Type) ->
     erx_abi_packed:encode(erx_f2fs_summary_block,
-                          #{entries => Entries, journal => Journal, entry_type => Type,
-                            check_sum => 0}).
+                          #{entries => Entries, journal => empty_journal(),
+                            entry_type => Type, check_sum => 0}).
+
+-doc """
+The bytes of an empty journal, the one journal erXos writes ([F 47]): the
+one source for its readers and tests.
+""".
+-spec empty_journal() -> binary().
+empty_journal() -> <<0:(?ERX_F2FS_JOURNAL_SIZE * 8)>>.
 
 -doc """
 The node block of Inode, an inode of a volume whose superblock is Super,

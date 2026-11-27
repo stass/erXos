@@ -218,7 +218,9 @@ pack(#{cp_payload := Payload} = Super, Image, Start, Acc) ->
 
 summary(Block, Acc) ->
     round_trip(summary_block, Block, erx_f2fs_codec:summary_block(Block),
-               fun erx_f2fs_codec:encode_summary_block/1, fun erx_f2fs_codec:summary_block/1, Acc).
+               fun(#{entries := Entries, entry_type := Type}) ->
+                       erx_f2fs_codec:encode_summary_block(Entries, Type)
+               end, fun erx_f2fs_codec:summary_block/1, Acc).
 
 %% The NAT and SIT blocks the newest pack's version bitmaps select, and the
 %% SSA ([F 34], [F 38], [F 45]).
@@ -228,7 +230,7 @@ tables(#{nat_blkaddr := Nat, segment_count_nat := NatSegments, sit_blkaddr := Si
     #{nat_version_bitmap := NatBits, sit_version_bitmap := SitBits} = newest(Super, Image),
     Natted = lists:foldl(
                fun(Index, In) ->
-                       Block = block(Image, table_block(Nat, NatSegments, NatBits, Index)),
+                       Block = block(Image, nat_block(Nat, NatBits, Index)),
                        round_trip(nat_block, Block, erx_f2fs_codec:nat_block(Block),
                                   fun erx_f2fs_codec:encode_nat_block/1,
                                   fun erx_f2fs_codec:nat_block/1, In)
@@ -245,11 +247,17 @@ tables(#{nat_blkaddr := Nat, segment_count_nat := NatSegments, sit_blkaddr := Si
     lists:foldl(fun(Segment, In) -> summary(block(Image, Ssa + Segment), In) end,
                 Sitted, lists:seq(0, Main - 1)).
 
-%% Block Index of a table's current copy: copy 1 is the area's second half.
+%% Block Index of the SIT's current copy: copy 1 is the area's second half
+%% ([F 38]).
 table_block(First, Segments, Bitmap, Index) ->
     First + Index + erx_f2fs_codec:bit(Bitmap, Index) * copy_blocks(Segments).
 
 copy_blocks(Segments) -> Segments div 2 * 512.
+
+%% NAT block Index of the current copy: the copies interleave a segment at a
+%% time, copy 1 the second segment of each pair ([F 34]).
+nat_block(First, Bitmap, Index) ->
+    First + 1024 * (Index div 512) + Index rem 512 + erx_f2fs_codec:bit(Bitmap, Index) * 512.
 
 newest(Super, Image) ->
     {ok, Super, Packs} = erx_f2fs_corpus:metadata(Image),
@@ -267,7 +275,7 @@ nodes(#{nat_blkaddr := Nat, segment_count_nat := NatSegments} = Super, Image, Ac
     Entries = [{Index * ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK + Slot, Entry}
                || Index <- lists:seq(0, copy_blocks(NatSegments) - 1),
                   {ok, Read} <- [erx_f2fs_codec:nat_block(
-                                   block(Image, table_block(Nat, NatSegments, NatBits, Index)))],
+                                   block(Image, nat_block(Nat, NatBits, Index)))],
                   {Slot, Entry} <- lists:enumerate(0, Read)],
     lists:foldl(fun({Nid, #{ino := Ino, block_addr := Address}}, In) ->
                         case Nid >= ?ERX_F2FS_ROOT_INO andalso in_main(Super, Image, Address) of
@@ -343,6 +351,7 @@ round_trip(_Kind, _Block, {error, _}, _Encode, _Decode, Acc) ->
 %% The value erXos would write for a decoded one: an inode's extent hint
 %% has len 0 ([F 44]); any other record is written as read.
 writer_form(inode, #{i_ext := Extent} = Inode) -> Inode#{i_ext := Extent#{len := 0}};
+writer_form(summary_block, Summary) -> Summary#{journal := erx_f2fs_codec:empty_journal()};
 writer_form(_Kind, Value) -> Value.
 
 %% What a value decodes back as: its checksums are the computed ones.

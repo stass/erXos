@@ -75,8 +75,8 @@ module ErxF2fsFuzz
              replacement: '    8 * Bytes div (8 * (?ERX_F2FS_DIR_ENTRY_SIZE + ?ERX_F2FS_NAME_SLOT_SIZE) + 1) + 1.',
              failure: 'crash'),
     Seed.new(fault: "a summary block's entry_type written as 0",
-             anchor: '                          #{entries => Entries, journal => Journal, entry_type => Type,',
-             replacement: '                          #{entries => Entries, journal => Journal, entry_type => 0 * Type,',
+             anchor: '                            entry_type => Type, check_sum => 0}).',
+             replacement: '                            entry_type => 0 * Type, check_sum => 0}).',
              failure: 'round_trip')
   ].freeze
 
