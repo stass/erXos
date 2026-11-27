@@ -72,6 +72,21 @@ the_medium_s_window_reaches_the_function_under_its_reference_test() ->
     unlink(Function),
     exit(Function, kill).
 
+%% The transport checks a request by erx_blk_request:range/4 alone: given a capacity that
+%% is not an integer, which the function never builds, every request is refused
+%% out_of_range and nothing reaches the function.
+a_medium_without_a_capacity_takes_no_request_test() ->
+    Test = self(),
+    Function = spawn_link(fun() -> function(Test) end),
+    {ok, {Transport, _Monitor}} =
+        erx_blk_usb:start_monitor(#{function => Function, lun => ?LUN, ref => make_ref(), capacity => undefined,
+                                    flush => true, detail => #{}, drive => none}),
+    ?assertEqual({error, out_of_range}, gen_server:call(Transport, {read, 0, 1})),
+    ?assertEqual({error, out_of_range}, gen_server:call(Transport, {write, 0, <<0:?SECTOR/unit:8>>})),
+    receive {ran, _, _} -> ?assert(false) after 0 -> ok end,
+    exit(Transport, shutdown),
+    unlink(Function),
+    exit(Function, kill).
 
 %% A medium that cannot flush: the transport answers no_flush, and the window answers
 %% enotsup, which a mount takes as a medium without a cache to flush; never eio.

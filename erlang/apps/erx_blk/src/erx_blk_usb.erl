@@ -21,7 +21,8 @@
 %% sends nothing. It checks
 %% each request against the contract's bounds before the function sees it: a count of no
 %% sectors, or above max_sectors, or bytes that are not whole sectors is bad_count; sectors
-%% past the capacity are out_of_range. Every other answer is the engine's: `{device, Detail}`
+%% past the capacity are out_of_range (erx_blk_request:range/4). Every other answer is the
+%% engine's: `{device, Detail}`
 %% with Detail a sense's three integers, no_sense, reset, short, gone or deadline, and
 %% no_flush for a flush of a medium that cannot flush.
 %%
@@ -95,13 +96,13 @@ format_status(Status) ->
 medium_facts(M = #{lun := _, capacity := _, flush := _}) -> maps:with([lun, capacity, flush], M);
 medium_facts(_State) -> hidden.
 
-checked(_Sector, Count, _M, _Send) when not is_integer(Count); Count < 1; Count > ?MAX_SECTORS ->
-    {error, bad_count};
-checked(Sector, Count, #{capacity := Capacity}, _Send) when not is_integer(Sector); Sector < 0;
-                                                             Sector + Count > Capacity ->
-    {error, out_of_range};
-checked(_Sector, _Count, _M, Send) ->
-    Send().
+%% Send the request only if its sectors are one request on the medium, by the transports'
+%% one check (erx_blk_request:range/4).
+checked(Sector, Count, #{capacity := Capacity}, Send) ->
+    case erx_blk_request:range(Sector, Count, ?MAX_SECTORS, Capacity) of
+        ok -> Send();
+        Refused -> Refused
+    end.
 
 %% The function's call has no timeout, so it exits only when the function has ended. That
 %% end ends this process with `shutdown`, as its monitor would, so no crash report carries

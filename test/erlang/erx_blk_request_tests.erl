@@ -24,6 +24,8 @@ range_test_() ->
      ?_assertEqual({error, out_of_range}, erx_blk_request:range(15, 2, Max, 16)),
      ?_assertEqual({error, out_of_range}, erx_blk_request:range(-1, 1, Max, 16)),
      ?_assertEqual({error, out_of_range}, erx_blk_request:range(0, 1, Max, 0)),
+     %% A capacity that is not an integer admits no sector.
+     ?_assertEqual({error, out_of_range}, erx_blk_request:range(0, 1, Max, undefined)),
      ?_assertEqual({error, out_of_range}, erx_blk_request:range(sector, 1, Max, 16)),
      ?_assertEqual({error, out_of_range}, erx_blk_request:range(1 bsl 64, 1, Max, 1 bsl 64)),
      ?_assertEqual({error, bad_count}, erx_blk_request:range(0, 0, Max, 16)),

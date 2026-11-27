@@ -48,17 +48,18 @@ capacity(Low, High) -> (High bsl 32) bor Low.
 
 %% Whether Count sectors from Sector lie on a device of Capacity sectors, and Count is one
 %% request's worth, at most Max, the transport's own limit: max_sectors/0 on virtio,
-%% erx_blk_sd_host:max_sectors/0 on the SD controller. The sum is an Erlang integer, so it
-%% cannot wrap.
--spec range(term(), term(), pos_integer(), non_neg_integer()) -> ok | {error, out_of_range | bad_count}.
+%% erx_blk_sd_host:max_sectors/0 on the SD controller, and erx_blk_usb's bulk buffer on a
+%% USB medium. One clause admits, on integers alone: Erlang orders every number below every
+%% non-number, so a bare comparison would admit any sector against a Capacity that is not an
+%% integer. The sum is an Erlang integer, so it cannot wrap.
+-spec range(term(), term(), pos_integer(), term()) -> ok | {error, out_of_range | bad_count}.
 range(_Sector, Count, Max, _Capacity) when not is_integer(Count); Count < 1; Count > Max ->
     {error, bad_count};
-range(Sector, _Count, _Max, _Capacity) when not is_integer(Sector); Sector < 0 ->
-    {error, out_of_range};
-range(Sector, Count, _Max, Capacity) when Sector + Count > Capacity ->
-    {error, out_of_range};
+range(Sector, Count, _Max, Capacity) when is_integer(Sector), Sector >= 0, is_integer(Capacity),
+                                          Sector + Count =< Capacity ->
+    ok;
 range(_Sector, _Count, _Max, _Capacity) ->
-    ok.
+    {error, out_of_range}.
 
 %% The result of a request from the bytes the device wrote into its in segments, end to end
 %% and cut at the length it reported. A read must have written every sector and the status;
