@@ -25,6 +25,7 @@ class ErxMediaVolumeTest < Minitest::Test
   TESTS = (MODULES + HELPERS).map { |name| "test/erlang/#{name}.erl" }.freeze
   MEDIUM = 'erlang/apps/erx_media/src/erx_media_medium.erl'
   VOLUME = 'erlang/apps/erx_media/src/erx_media_volume.erl'
+  PLAN = 'erlang/apps/erx_fat/src/erx_fat_plan.erl'
   DRIVE = 'erlang/apps/erx_media/src/erx_media_drive.erl'
   TREE = 'erlang/apps/erx_media/src/erx_media_tree.erl'
   FAT = 'erlang/apps/erx_fat/src/erx_fat.erl'
@@ -95,9 +96,9 @@ class ErxMediaVolumeTest < Minitest::Test
                     "    Alias ! ?ERX_FS_ANSWER(Alias, {error, eio}),\n    {noreply, State};\n",
               to: '',
               caught_by: 'the_finish_answers_what_came_before_and_refuses_what_comes_after_test'),
-    Fault.new(name: "a step's flush dropped", path: VOLUME,
-              from: "                          answered(erx_media_medium:window(Proxy, flush))\n",
-              to: "                          ok\n",
+    Fault.new(name: "a step's flush dropped", path: PLAN,
+              from: "            case Flush() of\n",
+              to: "            case erlang:phash2(Flush) >= 0 andalso ok of\n",
               caught_by: 'round_trip_test_/0-fun-1- (fat16.img)'),
     Fault.new(name: 'the ownership check skipped at a writable mount', path: VOLUME,
               from: 'ok -> checked(Fat, Proxy, Volume)',

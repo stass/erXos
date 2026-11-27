@@ -691,13 +691,12 @@ batches_finished(#{batch := B} = State) ->
 planned({ok, Plan, Next}) -> {Plan, Next};
 planned({error, Why}) -> failed(Why).
 
-%% Plan written step by step through the window proxy,  each step's writes and then
-%% a flush, so no write of a step reaches the medium before the steps before it.
+%% Plan written step by step through the window proxy by the plans' one writer,
+%% erx_fat_plan, each step's writes and then a flush, so no write of a step reaches
+%% the medium before the steps before it.
 applied(Plan, #{proxy := Proxy, volume := Volume}) ->
-    lists:foreach(fun({_Step, Writes}) ->
-                          lists:foreach(fun({Sector, Bytes}) -> placed_write(Proxy, Volume, Sector, Bytes) end, Writes),
-                          answered(erx_media_medium:window(Proxy, flush))
-                  end, Plan).
+    answered(erx_fat_plan:apply(Plan, fun(Sector, Bytes) -> placed_write(Proxy, Volume, Sector, Bytes) end,
+                                fun() -> erx_media_medium:window(Proxy, flush) end)).
 
 placed_write(Proxy, Volume, Sector, Bytes) ->
     case erx_media_table:place(Volume, Sector, 1) of
