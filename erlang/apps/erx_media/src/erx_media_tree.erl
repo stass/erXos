@@ -10,7 +10,8 @@ namespace marks every entry on a facet of that interface nofollow (erx_facets:ta
 so no link a medium holds is ever followed through it.
 
 * The root lists `diskN` for each drive `{drive, N}` the registry holds at the
-  request.
+  request, and the empty directory `raw`, the mount point of the drives' raw sectors
+  (erx_media_raw_tree), so it exists for a session that holds no `media_raw` grant.
 * A walk of `diskN` asks the drive process for its medium (erx_media_drive:medium/1),
   which mounts it, so the listing that follows names every volume: `status`, `ctl`,
   and `sN` for each volume the table serves, whatever its outcome. An MBR's extended
@@ -59,7 +60,7 @@ within the volume in its low 40 (erx_media_volume:path/0); the root, each `diskN
 
 %% A node: the root, a drive's directory, its status or ctl, or a node of volume Pid,
 %% its kind and its qid path, by which the volume holds it.
--type node_() :: root | {drive | status | ctl, non_neg_integer()}
+-type node_() :: root | raw | {drive | status | ctl, non_neg_integer()}
                | {volume, pid(), dir | file, erx_media_volume:path()}.
 
 %% ---------------------------------------------------------------------------
@@ -76,6 +77,8 @@ root(_Fs) ->
 
 -doc false.
 -spec walk(node_(), binary(), media) -> {ok, node_(), erx_fs:qid()} | {error, file:posix()}.
+walk(root, <<"raw">>, _Fs) ->
+    {ok, raw, qid(raw)};
 walk(root, Name, _Fs) ->
     case number(<<"disk">>, Name) of
         {ok, N} -> drive_walk(N, medium(N));
@@ -110,6 +113,7 @@ forget(_TreeNode, _Fs) -> ok.
 
 -doc false.
 getattr(root, _Fs) -> erx_fs_node:attr(qid(root), dir, 8#555);
+getattr(raw, _Fs) -> erx_fs_node:attr(qid(raw), dir, 8#555);
 getattr({drive, N}, _Fs) -> erx_fs_node:attr(qid({drive, N}), dir, 8#555);
 getattr({status, N}, _Fs) -> erx_fs_node:attr(qid({status, N}), file, 8#444);
 getattr({ctl, N}, _Fs) -> erx_fs_node:attr(qid({ctl, N}), file, 8#200);
@@ -138,7 +142,10 @@ open({volume, _Pid, dir, _Dir}, Flags, _Fs) when Flags band ?ERX_P9_O_ACCMODE =/
 open(_TreeNode, Flags, _Fs) when Flags band ?ERX_P9_O_ACCMODE =/= ?READ ->
     {error, eacces};
 open(root, _Flags, _Fs) ->
-    {ok, erx_fs_node:listing([{qid({drive, N}), ?ERX_P9_DT_DIR, name(<<"disk">>, N)} || N <- drives()])};
+    {ok, erx_fs_node:listing([{qid(raw), ?ERX_P9_DT_DIR, <<"raw">>}
+                              | [{qid({drive, N}), ?ERX_P9_DT_DIR, name(<<"disk">>, N)} || N <- drives()]])};
+open(raw, _Flags, _Fs) ->
+    {ok, erx_fs_node:listing([])};
 %% Every volume of the table is listed, by its root's qid, whatever its outcome: one that
 %% mounted no files answers `eio` at its walk, and its drive's status shows why. A volume
 %% that has ended, or that drew no mount number, has no root's path and is left out.
@@ -354,7 +361,7 @@ to `info` and the table the medium's reader answered, or none for no medium, wit
 each served volume's outcome from Outcome. The window does not say its transport or
 whether it flushes, so both are `unknown`.
 """.
--spec status(term(), erx_media_medium:table() | ejected | none, fun((pid()) -> erx_media_volume:outcome())) -> binary().
+-spec status(term(), erx_media_medium:table() | ejected | raw | none, fun((pid()) -> erx_media_volume:outcome())) -> binary().
 status(_Info, none, _Outcome) ->
     lines([{medium, none}]);
 status(Info, Table, Outcome) ->
@@ -362,6 +369,7 @@ status(Info, Table, Outcome) ->
            | table(Table, Outcome)]).
 
 medium_line(ejected) -> [idle, ejected];
+medium_line(raw) -> raw;
 medium_line({refused, _Finding}) -> [idle, table];
 medium_line({failed, Why}) -> [idle, failed, Why];
 medium_line({_Scheme, _Volumes, _Unserved}) -> ready.
@@ -370,6 +378,8 @@ sectors({ok, #{sectors := Sectors}}) when is_integer(Sectors) -> Sectors;
 sectors(_Info) -> unknown.
 
 table(ejected, _Outcome) ->
+    [];
+table(raw, _Outcome) ->
     [];
 table({refused, Finding}, _Outcome) ->
     [{table, [refused, Finding]}];
@@ -380,6 +390,8 @@ table({Scheme, Volumes, Unserved}, Outcome) ->
 
 volume({#{number := Number}, extended}, _Outcome) ->
     [{field(Number, <<>>), extended}, {field(Number, <<"_mount">>), [none, extended]}];
+volume({#{number := Number, length := Length}, raw}, _Outcome) ->
+    [{field(Number, <<>>), unknown}, {field(Number, <<"_mount">>), [none, raw]}, {field(Number, <<"_sectors">>), Length}];
 volume({#{number := Number, length := Length}, Pid}, Outcome) ->
     #{format := Format, mount := Mount} = Shown = Outcome(Pid),
     Fields = [{<<>>, Format}, {<<"_mount">>, mount(Mount)}]
@@ -462,10 +474,11 @@ canonical(N, Digits) ->
         _Padded -> error
     end.
 
-%% The tree's own nodes' qids, of mount number 0: the root's path 0, and drive N's
-%% directory, status and ctl 4N + 1, 2 and 3.
--spec qid(root | {drive | status | ctl, non_neg_integer()}) -> erx_fs:qid().
+%% The tree's own nodes' qids, of mount number 0: the root's path 0, `raw`'s 4, and
+%% drive N's directory, status and ctl 4N + 1, 2 and 3.
+-spec qid(root | raw | {drive | status | ctl, non_neg_integer()}) -> erx_fs:qid().
 qid(root) -> qid(dir, 0);
+qid(raw) -> qid(dir, 4);
 qid({drive, N}) -> qid(dir, 4 * N + 1);
 qid({status, N}) -> qid(file, 4 * N + 2);
 qid({ctl, N}) -> qid(file, 4 * N + 3).

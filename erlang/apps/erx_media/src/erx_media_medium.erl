@@ -34,7 +34,7 @@ The reader and every volume run under one memory bound, memory_bound/0: a
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/0, read/2, memory_bound/0, window/2]).
+-export([start_link/0, read/2, restart_volume/3, memory_bound/0, window/2, run_sectors/1]).
 -export([init/1, start_reader/3]).
 -export_type([table/0]).
 
@@ -123,12 +123,24 @@ started({Scheme, Volumes}, Sup, Proxy) ->
 volume(#{serve := extended}, _Sup, _Proxy) ->
     extended;
 volume(#{serve := yes, number := Number} = Volume, Sup, Proxy) ->
-    Spec = #{id => {volume, Number}, start => {erx_media_volume, start_link, [Proxy, Volume]},
-             restart => temporary},
-    case supervisor:start_child(Sup, Spec) of
+    case supervisor:start_child(Sup, volume_spec(Proxy, Volume)) of
         {ok, Pid} -> Pid;
         {error, Why} -> throw({?MODULE, {volume, Number, Why}})
     end.
+
+-doc """
+Starts volume Volume afresh under the medium's supervisor Sup, its earlier process, one
+the raw process held out of service, stopped first: `{ok, Pid}` or the supervisor's
+error.
+""".
+-spec restart_volume(pid(), pid(), erx_media_table:volume()) -> {ok, pid()} | {error, term()}.
+restart_volume(Sup, Proxy, #{number := Number} = Volume) ->
+    _ = supervisor:terminate_child(Sup, {volume, Number}),
+    _ = supervisor:delete_child(Sup, {volume, Number}),
+    supervisor:start_child(Sup, volume_spec(Proxy, Volume)).
+
+volume_spec(Proxy, #{number := Number} = Volume) ->
+    #{id => {volume, Number}, start => {erx_media_volume, start_link, [Proxy, Volume]}, restart => temporary}.
 
 -doc """
 A window request through the proxy Proxy, for the reader and the volumes (a volume's
@@ -144,3 +156,11 @@ window(Proxy, Request) ->
     catch
         exit:_Ended -> {error, eio}
     end.
+
+-doc """
+The most sectors one window request carries, from the window's answer to `info` (the
+transport's max_sectors); a window that names none is sent a sector a request.
+""".
+-spec run_sectors(term()) -> pos_integer().
+run_sectors({ok, #{max_sectors := Max}}) when is_integer(Max), Max >= 1 -> Max;
+run_sectors(_Answer) -> 1.

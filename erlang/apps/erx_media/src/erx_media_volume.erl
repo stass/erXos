@@ -839,7 +839,7 @@ labelled(Label) -> [<<", label ">>, Label].
 
 %% The writable rule's fourth condition: the volume's flags, then the ownership
 %% check, which runs only on a volume the flags admit and reads it whole, its FAT in
-%% runs as long as the window takes in one request (run_sectors/1).
+%% runs as long as the window takes in one request (erx_media_medium:run_sectors/1).
 owned(Fat, Proxy, Volume) ->
     case erx_fat_alloc:writable(erx_fat:info(Fat)) of
         {read_only, Reason} -> Reason;
@@ -849,7 +849,7 @@ owned(Fat, Proxy, Volume) ->
 %% The ownership check's outcome, the volume read through the proxy.
 checked(Fat, Proxy, Volume) ->
     ReadRun = fun(First, Count) -> read_run(Proxy, Volume, First, Count) end,
-    Max = run_sectors(erx_media_medium:window(Proxy, info)),
+    Max = erx_media_medium:run_sectors(erx_media_medium:window(Proxy, info)),
     case erx_fat:check(Fat, ReadRun, Max) of
         ok -> ok;
         {read_only, Reason} -> Reason;
@@ -868,7 +868,3 @@ read_run(Proxy, Volume, First, Count) ->
         {error, erange} = Refused -> Refused
     end.
 
-%% The most sectors one window request reads, as the window's info names it (the
-%% transport's max_sectors); a window that names none is read a sector at a time.
-run_sectors({ok, #{max_sectors := Max}}) when is_integer(Max), Max >= 1 -> Max;
-run_sectors(_Answer) -> 1.

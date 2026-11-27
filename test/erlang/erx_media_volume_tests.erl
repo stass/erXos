@@ -280,9 +280,9 @@ the_drive_mounts_its_medium_at_the_ask_and_ends_it_with_its_proxy_test() ->
         [exit(P, kill) || P <- [Drive, Facet, Proxy]]
     end.
 
-%% A medium whose table is refused is held idle, with no volume and its supervisor
-%% stopped, until its proxy ends.
-a_refused_table_leaves_the_medium_idle_with_no_supervisor_test() ->
+%% A medium whose table is refused is held idle, with no volume, until its proxy ends;
+%% its supervisor runs on with no child, for the raw process that serves its `data`.
+a_refused_table_leaves_the_medium_idle_with_no_volume_test() ->
     Proxy = proxy(mbr([{16#0e, ?START, 100}, {16#0e, ?START + 50, 100}], [{?START + 150, <<0:512/unit:8>>}]), ok),
     unlink(Proxy),
     Facet = spawn(fun() -> facet(Proxy) end),
@@ -291,7 +291,8 @@ a_refused_table_leaves_the_medium_idle_with_no_supervisor_test() ->
     unlink(Drive),
     try
         ?assertMatch({ok, #{proxy := Proxy, table := {refused, _}}}, gen_server:call(Drive, medium, 5000)),
-        ?assertEqual({links, []}, process_info(Drive, links))
+        {links, [Sup]} = process_info(Drive, links),
+        ?assertEqual([], supervisor:which_children(Sup))
     after
         [exit(P, kill) || P <- [Drive, Facet, Proxy]]
     end.

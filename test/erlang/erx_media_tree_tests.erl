@@ -245,7 +245,7 @@ list_and_read_through_the_tree_test() ->
     #{grant := Grant} = Tree = start(mbr([{16#0e, ?START, sectors(Fat16)}, {16#0c, Second, Unknown}],
                                          [{?START, Fat16}, {Second, <<0:(Unknown * 512)/unit:8>>}])),
     try
-        ?assertEqual([<<"disk0">>], names(Grant, 1, 2)),
+        ?assertEqual([<<"raw">>, <<"disk0">>], names(Grant, 1, 2)),
         {ok, _} = call(Grant, {walk, 1, 3, [<<"disk0">>]}),
         Listed = entries(Grant, 3, 4),
         ?assertEqual([<<"status">>, <<"ctl">>, <<"s1">>, <<"s2">>], [Name || {_, _, _, Name} <- Listed]),

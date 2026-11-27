@@ -11,7 +11,8 @@
 # The grant's quantities (docs/design-drives.md gives each figure's reason): max_request
 # is the smallest power of two not below the largest request the proxy takes, a write of
 # a USB transport's max_sectors, 32 KiB, in its call's envelope; in_flight is
-# one for each of a medium's volumes, each of which sends one request at a time; reductions and
+# one for each of a medium's volumes and one for its raw process, each of which sends one
+# request at a time; reductions and
 # period_ns are the share of the serving domain's grant the media domain's requests may
 # spend; max_heap_size, 1 MiB on a 64-bit runtime, holds in_flight requests of
 # max_request and their replies, and the facet and its proxy each run with it.
@@ -20,7 +21,7 @@ service drive 23
   served_by drive
   operation window 1
   quantity max_request 65536
-  quantity in_flight 8
+  quantity in_flight 9
   quantity reductions 1000000
   quantity period_ns 1000000000
   quantity max_heap_size 131072
