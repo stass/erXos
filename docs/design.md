@@ -72,7 +72,7 @@ evidence, not design contracts.
 | [design-storage.md](design-storage.md) | partitions, the boot image, system partitions, EROFS, FAT, A/B updates |
 | [design-f2fs.md](design-f2fs.md) | erXos's F2FS, the main read-write file system, in Erlang |
 | [design-drives.md](design-drives.md) | drives: every medium but the boot medium served whole, its table and its volumes' formats read in the media domain, FAT and EROFS volumes at `/media`, littlefs ones in development builds |
-| [design-fsck-fat.md](design-fsck-fat.md) | `fsck_fat` and `fsck -t fat`: checking and repairing a FAT volume, an ordinary program over a drive's raw sectors, making FreeBSD's repairs |
+| [design-fsck-fat.md](design-fsck-fat.md) | `fsck_fat` and `fsck -t fat`: checking and repairing a FAT volume, an ordinary program over a drive's raw sectors, finding what FreeBSD's checker finds |
 | [design-usb.md](design-usb.md) | USB: xHCI, hubs, HID and mass storage |
 | [design-network-stack.md](design-network-stack.md) | erXos's TCP/IP stack, translated from FreeBSD into Erlang, and its fast path (runs, receive merging, batching, benchmarks); [Networking](#networking) holds the choices that bound it |
 | [design-wifi.md](design-wifi.md) | WiFi on the Raspberry Pi 4's CYW43455 |

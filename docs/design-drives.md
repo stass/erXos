@@ -364,16 +364,18 @@ drive.
   probe's table, `abi/formats/probe.txt`, and beside it two limits,
   `media_volumes_max`, 8, and `media_volume_bytes`, 2 MiB; one statfs type, `media`; the
   argument forms of the shell's `mount` and `umount`; and the modules of
-  `erx_media`; and for raw access the rights value `admin`, the files
-  `data` and `sN.data`, the process `erx_media_raw`, and the outcomes
-  `medium raw` and `sN_mount none raw` ([Raw sectors](#raw-sectors)).
+  `erx_media`; and for raw access the service `media_raw`, its tree at
+  `/media/raw` with the files `data` and `sN.data`, the process
+  `erx_media_raw`, and the outcomes `medium raw` and
+  `sN_mount none raw` ([Raw sectors](#raw-sectors)).
 * **DR-R8.** A session reaches `/media` only through a `media` facet
   the manifest grants it, and the tree it serves holds every drive; a
   board manifest with a media domain grants one `media` facet to the
-  system principal's session template, rights `admin` in a development
-  build and `rw` in a release unless a row names `admin`, so root's
-  session reads and changes its drives and no other session of that
-  manifest sees them. The
+  system principal's session template, rights `rw`, so root's session
+  reads and changes its drives and no other session of that manifest
+  sees them; a development board manifest grants that template a
+  `media_raw` facet too, and a release manifest only in a row of its
+  own ([Raw sectors](#raw-sectors)). The
   media domain holds the drives because each drive's window row names
   it, and no other row grants `drive`
   ([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).
@@ -609,11 +611,12 @@ admission**:
      largest request the proxy takes, a `write` of a USB transport's
      `max_sectors`, 32 KiB, in its call's envelope, with its caller's
      pid and alias of a 255-character node name;
-   * `in_flight`, 8, `media_volumes_max`: one for each volume of a
-     medium, each of which sends one request at a time
-     ([Volumes](#volumes)), so the media domain's own volumes never meet
-     `busy`; the facet's own `window` asks never come near it, since
-     each ends the proxy of the one before;
+   * `in_flight`, 9, `media_volumes_max` and one: one for each volume
+     of a medium and one for its raw process, each of which sends one
+     request at a time ([Volumes](#volumes), [Raw sectors](#raw-sectors)),
+     so the media domain's own requests never meet `busy`; the facet's
+     own `window` asks never come near it, since each ends the proxy of
+     the one before;
    * `reductions`, 1,000,000, and `period_ns`, one second: the share of
      the serving domain's grant that the media domain's requests may
      spend, sized for a medium read at full speed and to be measured
@@ -811,8 +814,9 @@ The manifest check refuses:
   drive record, and a row naming a block drive's holder that the
   holder's list does not admit;
 * more drives on one USB domain's controllers than `usb_drives_max`;
-* a `media` service row of an interface other than `media`, whose
-  links a grantee would follow; a `media` facet row with rights `rx` is
+* a `media` or `media_raw` service row of an interface other than
+  `media`, whose links a grantee would follow; a facet row of either
+  with rights `rx` is
   refused as every row's parameters are, since the interface's rights
   lack `rx`;
 * a `service` row or a `facet` row of the interface `drive`, whose only
@@ -1244,8 +1248,9 @@ what its flush made durable, and none is answered after it.
 Two things finish volumes:
 
 * **Eject**, written to a drive's `ctl`: the drive process, which takes
-  the drive's requests one at a time, sends every volume of the medium
-  its finish at once and waits for each answer, walks of the drive
+  the drive's requests one at a time, sends every volume of the medium,
+  and its raw process when it runs ([Raw sectors](#raw-sectors)), its
+  finish at once and waits for each answer, walks of the drive
   waiting behind it; then it ends the medium's supervisor and shows the
   medium `idle ejected`.
   The write answers `ok` when every finish answered `ok`, `eio` when one
@@ -1262,11 +1267,12 @@ Two things finish volumes:
 * **The ordered end.** The media service takes the freezing checkpoint
   on its durability facet, which only the system domain holds, as the
   storage services do ([design-storage.md](design-storage.md#interfaces)):
-  `erx_fs` closes mutation admission at every `media` grant and lets
-  each finish the writes it admitted
+  `erx_fs` closes mutation admission at every `media` and `media_raw`
+  grant and lets each finish the writes it admitted
   ([design-files.md](design-files.md#serving-the-erx_fs-behaviour),
-  "Freezing"); the media tree then finishes every mounted volume of
-  every drive at once and answers when all have; and every later write
+  "Freezing"); the media tree then finishes every mounted volume and
+  every raw process of every drive at once and answers when all have;
+  and every later write
   answers `erofs`. It offers no checkpoint without a freeze, which only
   the vault uses. The ordered end's deadline, and its record of each
   outcome, are the coordinator's
@@ -1335,15 +1341,16 @@ session the manifest grants it mounts at `/media`:
     status        what the drive holds (read)
     ctl           commands (write)
     s1/           volume 1's files, while its medium is mounted
-    data          the medium's raw sectors, to an admin grant (read, write)
-    s1.data       volume 1's raw sectors, to an admin grant (read, write)
     s2/ ...
   disk1/
+  raw/            the mount point of the drives' raw sectors (Raw sectors)
 ```
 
 The root lists every drive whose grant the media domain's registry holds
 at the request, `{drive, N}` as `diskN`, whether or not it holds a
-medium, so `ls /media` shows the machine's drives, but for one whose
+medium, and the empty directory `raw`, the mount point of [Raw
+sectors](#raw-sectors), so `ls /media` shows the machine's drives, but
+for one whose
 serving domain is restarting or whose grant failed
 ([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).
 A walk of `diskN`
@@ -1386,7 +1393,7 @@ parser reads both:
 
 | Name | Value |
 | --- | --- |
-| `medium` | `none`, no medium; `ready`, its volumes served; `raw`, `data` open for writing and no volume served; or `idle REASON`, present and not served: `ejected`, `table` when the table was refused, or `failed` with why its reading ended |
+| `medium` | `none`, no medium; `ready`, its volumes served; `raw`, `data` open for writing and no volume served; or `idle REASON`, present and not served: `ejected`, `table` when the table was refused, or `failed` with why its reading, or its raw access, ended |
 | `transport`, `sectors`, `flush` | the transport's name, the medium's capacity, and `yes` or `no` |
 | `table` | `mbr`, `gpt`, `none` or `refused FINDING` |
 | `sN` | volume N's format, a name of the probe's table or `unknown`; `extended` for an MBR's extended entry |
@@ -1434,11 +1441,11 @@ link itself acts on it
 ([design-app-trees.md](design-app-trees.md#links)). The rule belongs to
 the grant's interface. `abi/services` declares `media` as an interface
 of its own, served as a tree that speaks 9P2000.L as `files` does, with
-`files`'s quantities and one parameter, its rights, `ro`, `rw` or
-`admin`, the last adding the drives' raw sectors ([Raw sectors](#raw-sectors)): a
+`files`'s quantities and one parameter, its rights, `ro` or `rw`: a
 client's contract with a grant of it differs from a `files` grant's in
 that its links are a stranger's and are never followed. The `media`
-service row of the manifest names that interface. The one fact that
+service row of the manifest names that interface, and so does the
+`media_raw` row ([Raw sectors](#raw-sectors)). The one fact that
 decides the mark is then the one that keeps a display from programs
 ([design-files.md](design-files.md#narrowing-for-a-program)): every
 facet a domain's registry holds carries its service's interface number,
@@ -1561,14 +1568,17 @@ safe to pull.
 A program that repairs, formats, images or inspects a medium needs its
 sectors, not its files: `fsck_fat`
 ([design-fsck-fat.md](design-fsck-fat.md)), `dd`, a ported
-`newfs_msdos`, or a user's own repairer. The media tree serves them as
-files, to a grant of rights `admin` alone:
+`newfs_msdos`, or a user's own repairer. The media domain serves them
+as a second tree, the service `media_raw`, which a session granted it
+mounts at `/media/raw`:
 
 ```text
-/media/disk0/
-  data          the medium whole: every sector, from sector 0
-  s1.data       volume 1: its sectors alone, from its first
-  s2.data ...
+/media/raw/
+  disk0/        one directory for each drive, as in /media
+    data        the medium whole: every sector, from sector 0
+    s1.data     volume 1: its sectors alone, from its first
+    s2.data ...
+  disk1/
 ```
 
 * **What they are.** `data` is the medium whole, present while the drive
@@ -1581,37 +1591,69 @@ files, to a grant of rights `admin` alone:
   its sectors times 512, the only sector size a drive serves, and both
   are what a program that would ask a FreeBSD disk for its media size
   and sector size reads instead: `stat` and the constant 512.
-  `sN.data` is not redundant with `data`: tools written for FreeBSD's
-  per-partition devices (`/dev/da0s1`) expect a volume's boot sector at
-  offset 0, and a program handed one volume cannot write another or the
-  table.
-* **Who reaches them.** `media_rights` gains `admin`, which is `rw` and
-  the `data` files; a grant of `ro` or `rw` never lists or walks them,
-  and narrowing a grant to `rw` or `ro` drops them, as rights only
-  shrink. So the allow-list is the manifest's `media` facet rows: every
-  development board manifest grants root's session `admin`, and any
-  other principal, or root in a release, holds it only where a row names
-  it. A program reaches the files exactly when its namespace holds an
-  entry of such a grant ([design-files.md](design-files.md#narrowing-for-a-program)),
-  and a starter that narrows the entry's root to `/media/diskN` hands it
-  that one drive.
+  `sN.data` exists because tools written for FreeBSD's per-partition
+  devices (`/dev/da0s1`) expect a volume's boot sector at offset 0. A
+  walk of `/media/raw/diskN` asks the drive process for the medium as a
+  walk of `/media/diskN` does, so its listing names every volume.
+* **Holding the grant is the authority.** `media_raw` is a service of
+  the `media` interface, so its grants carry the `nofollow` mark, take
+  the rights `ro` or `rw`, and are refused to an `apps` row as `media`'s
+  are ([Manifest rows](#manifest-rows)). It is a tree of its own, and a
+  grant reaches the files of one tree
+  ([design-files.md](design-files.md#version-and-attach)), so no `media`
+  grant reaches a sector whatever its rights, and a `media_raw` grant
+  reaches every drive's sectors and nothing else. The allow-list is the
+  manifest's `media_raw` facet rows: every development board manifest
+  grants one, rights `rw`, to root's session template, and a release
+  manifest grants it only in a row of its own
+  ([design-fsck-fat.md](design-fsck-fat.md#open-decisions), open
+  decision 3). The media tree's root lists one empty directory, `raw`,
+  beside the drives, so the mount point exists for a session that holds
+  no `media_raw` grant too, as the release slice's `/media` does for one
+  that holds no `media` grant.
+* **A program gets what its starter hands it.** A native program's
+  namespace is narrowed by its handler, which walks only below an
+  entry's root and sends no write through an entry whose rights are not
+  `rw` (`erx_file_remote:exchange/2`,
+  [design-files.md](design-files.md#narrowing-for-a-program)). So a
+  program handed `/media/raw/disk0` reaches that drive's sectors alone;
+  one handed it `ro` reads them and writes none; one handed
+  `/media/disk0`, or a volume beneath it, reaches files and no sector. A
+  drive is the narrowest place: an entry's root is a directory, and a
+  drive's directory holds `data`, so no entry confines a program to one
+  volume's `sN.data`. Erlang code holds its domain's grants whole, and
+  the media domain mints no grant narrower than every drive (DR-R8), so
+  no Erlang code is confined to one drive.
 * **Who serves them.** One process per medium, `erx_media_raw`, a
   temporary child of the medium's supervisor, started at the first open
-  of a `data` file and ended at the last close, so it ends with the
-  medium as every holder of a medium's state does (DR-R4). It keeps the
-  holders of each file's fids, as a volume process keeps its nodes'
-  holders, so a holder's end closes its opens; places each request; and
-  sends it to the medium's window proxy, under the drive grant's share.
-  Its reads and writes are waiting requests whose keeper it is.
+  of a raw file of the medium. It is the one way from the raw tree to
+  the medium: it keeps every open of a raw file by grant and fid,
+  monitors each grant it holds an open for, places each request, and
+  sends it to the medium's window proxy under the drive grant's share,
+  one window request at a time. Its reads and writes are waiting
+  requests whose keeper it is
+  ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)).
+  The drive grant's `in_flight` counts one request for it beside one
+  for each volume ([How the grant reaches the media
+  domain](#how-the-grant-reaches-the-media-domain)), so it never meets
+  `busy`.
 * **Requests are untrusted on both sides.** The media domain takes a
   request's offset and count from the client: each must be a multiple of
-  512, and their sum, in checked arithmetic, within the file, or the
-  request fails with `einval`; a read that starts at the end answers no
-  bytes; a count is at most the grant's `max_request`, 128 KiB. Placement
-  then confines `sN.data` to its volume. What a read answers is the
-  medium's bytes, a stranger's, for the program to treat as untrusted.
-  `fsync` on a `data` file is the window's flush, and the only promise
-  of order or durability a program gets.
+  512, and a count at most the grant's `max_request`, 128 KiB, or the
+  request fails with `einval`. A write's end, in checked arithmetic,
+  must lie within the file, or it fails with `einval`. A read that runs
+  past the end answers the sectors up to it, and one that starts at or
+  past the end answers no bytes, so `dd` with any block size reads a
+  medium to its last sector. Placement then confines `sN.data` to its
+  volume. A request larger than the transport's largest window request
+  is sent as consecutive pieces of that size, in order: a read answers
+  the bytes of the pieces up to the first that failed, or that failure
+  if it was the first; a write answers its count when every piece
+  succeeded and otherwise the first failure, which pieces landed being
+  then unknown, as after a failed write to a disk. What a read answers
+  is the medium's bytes, a stranger's, for the program to treat as
+  untrusted. `fsync` on a raw file is the window's flush, and the only
+  promise of order or durability a program gets.
 
 **A writing open takes volumes out of service.** An open for writing
 asks the drive process, which takes the drive's requests one at a time,
@@ -1620,25 +1662,45 @@ before it answers:
 1. For `sN.data`, the drive process sends volume N's process its
    finish ([Finishing a volume](#finishing-a-volume)), which writes what
    a writable mount holds, clears its dirty flag and flushes, then ends
-   the process. Volume N shows `sN_mount none raw`, and no walk starts its
-   process again while a writing open of `sN.data` or `data` stays.
+   the process. Volume N shows `sN_mount none raw`, and no walk starts
+   its process again while the raw files hold it.
 2. For `data`, it does the same for every volume of the medium, and the
    medium shows `medium raw`, listing no volume, since the table itself
    may be rewritten.
-3. Every fid of an ended mount answers `eio` from then on, as after
+3. The raw process sends the window one flush. Anything but `ok`
+   refuses the open: `erofs` when the flush answered `enotsup`, since
+   erXos writes no medium that cannot flush, raw or mounted, and the
+   flush's own answer otherwise. The volumes return to the ordinary rule
+   at once, nothing having been written.
+4. Every fid of an ended mount answers `eio` from then on, as after
    `eject`; one line of the system log names the drive and the volumes
    taken out of service. A finish that fails fails the open with its
    answer, and the volume stays as the failure left it.
 
 Writing opens are counted, so two programs may write at once, as two
 UNIX processes may write one disk device; what they do to each other is
-theirs. At the last writing close of `sN.data`, volume N returns to the
-ordinary rule: its next walk starts its process, which probes and mounts
-it by [the writable rule](#the-writable-rule). At the last writing close
-of `data`, the drive process ends the medium's supervisor, and with it
-every open of any `data` file of the medium, which then answers `eio`;
-the next walk mounts the medium afresh, its table read again. A program
-that ends without closing closes by its end.
+theirs.
+
+**The volumes return behind one barrier.** The raw process hands the
+volumes back when two facts hold together: no writing open of the
+medium's raw files remains, and none of the requests it sent the window
+is unanswered. It then has the window flush and tells the drive
+process, which returns volume N, or for `data` ends the medium's
+supervisor, every open of a raw file of the medium then answering
+`eio`, so the next walk mounts the medium afresh and reads its table
+again. However an open ends, by a clunk, which settles that fid's
+requests first
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)), by
+its holder's end, whose clunks the grant makes itself, or by the end of
+the grant it came through, which the raw process's monitor counts as
+the close of every open made through it, the same two facts decide, so
+the next mount never reads the medium while a raw write it did not see
+is still on its way. The raw process ends once its last open has ended
+and nothing it sent is unanswered. A flush that answers anything but
+`ok` there, or the raw process ending any other way while it holds a
+writing open, ends the medium: it shows `idle failed` with the cause
+and, as an ejected medium, mounts again only once it has ended, since
+requests the raw process sent may still reach the window.
 
 **A reading open disturbs nothing.** It is answered at once and leaves
 every mount as it is, as FreeBSD lets a mounted disk be read. Its reads
@@ -1648,24 +1710,32 @@ and may land in the middle of one being committed, so a check made
 through a reading open of a mounted, writable volume can report findings
 that the volume's next batch removes.
 
-`eject` ends the raw process with the medium, after the process has had
-the window flush, so every raw write answered before the eject is on a
-medium that flushes; the media service's freeze makes later raw writes
-answer `erofs` and flushes the same way. Raw access is not a mount: the
-writable rule decides only the media domain's own writing, and a program
-holding `admin` writes whatever it likes.
+**Eject and the ordered end finish the raw process.** `eject` sends the
+raw process, when it runs, a finish as it sends each volume one. The
+raw process then answers every later request `eio`, waits until every
+request it sent the window is answered, has the window flush, and
+answers `ok` or the first failure; the drive process then ends the
+medium's supervisor. So every raw write answered before the eject is in
+what that flush made durable, and none is answered after it. The media
+domain's freeze closes mutation admission at every `media_raw` grant
+as at every `media` grant, and the media tree finishes the raw
+processes with the volumes; later raw writes answer `erofs`. Raw access
+is not a mount: the writable rule decides only the media domain's own
+writing, and a program holding `media_raw` writes whatever it likes.
 
-**What a hostile program holding it can do.** Through an `admin` entry
-narrowed to `/media/diskN`: read and overwrite that drive's medium
-whole, eject it, keep its volumes out of service for as long as it holds
-a writing open, and leave a crafted medium for the media domain to read
-at its last close, which the media domain reads as it reads any
-stranger's medium. Nothing else: the raw process forwards sectors of
+**What a hostile program holding it can do.** Through a `media_raw`
+entry narrowed to `/media/raw/diskN`, rights `rw`: read and overwrite
+that drive's medium whole, keep its volumes out of service for as long
+as it holds a writing open, and leave a crafted medium for the media
+domain to read at its last close, which the media domain reads as it
+reads any stranger's medium. Through rights `ro`: read that medium,
+deleted files' sectors included. Nothing else: it cannot eject, since
+`ctl` lies in the media tree, and the raw process forwards sectors of
 that medium alone through its proxy, under the grant's share, so the
 program reaches no other drive, no memory of the media domain, nothing
 of the transport's domain beyond that medium's sectors, and nothing of
-the boot medium. Through an `admin` entry that is not narrowed, the same
-for every drive.
+the boot medium. Through an entry that is not narrowed, the same for
+every drive.
 
 ## Where each parser runs
 
@@ -1885,7 +1955,7 @@ so a pass shows the code under test ran.
 | the littlefs owner over a fake port on the host: a block request past the volume refused; a program and an erase during the mount of a writable volume, during a read, on a read-only volume and after the finish each refused with the fake window's sectors unchanged, and during a write on a writable volume answered; the port's exit, and its silence past the deadline, ending the volume | the placement check removed; the write admission removed, so the read-only volume's fake window receives the program |
 | the media tree's renames: a rename between two volumes answers `exdev` with neither volume asked, one inside a volume reaches it | the volume comparison dropped, so the rename reaches the source volume |
 | `mount` and `umount`: `mount /media/disk0/s1 /mnt` reads the volume at `/mnt`, `mount -r` refuses a write through `/mnt` with `erofs` while `/media/disk0/s1` still writes, `umount /mnt` removes the entry, a `/dev` source and `-t` are refused naming the working form, `umount` of a path that is no entry names `eject` | `-r` dropped, so the write through `/mnt` succeeds; `umount` that ejects, so `/media/disk0/s1` ends |
-| raw sectors over the fake window: an `admin` grant lists `data` and `sN.data` and an `rw` grant neither, nor walks them; a read of `s2.data` at 0 answers volume 2's first sector; offsets and counts not multiples of 512, past the end, or whose sum overflows answer `einval`; a reading open leaves `s1` mounted; a writing open of `s1.data` finishes `s1` (its last batch on the fake window first), answers `eio` to an old fid, shows `sN_mount none raw` and leaves `s2` served; its last close, or its holder's end, mounts `s1` again at the next walk; a writing open of `data` shows `medium raw` and its last close mounts the medium afresh, the table read again; a volume whose boot sector is unreadable has its `sN.data`; `eject` during a writing open flushes before it answers | the open answered before the finish, so the volume's last batch lands after the program's first write; the placement skipped for `sN.data`, so a write past the volume's end reaches volume 2; the holder's end not counted as a close, so `s1` never returns |
+| raw sectors over the fake window, with sentinel sectors around each volume: a `media_raw` grant lists `data` and `sN.data` under each drive, and a `media` grant of either rights reaches no raw file, nor does a program's entry on it narrowed to `rw`; a read of `s2.data` at 0 answers volume 2's first sector; offsets and counts not multiples of 512, and writes past the end or whose sum overflows, answer `einval`; a 64 KiB read whose last 4 KiB lie past the end answers 60 KiB; a 128 KiB write on the virtio transport lands as 32 pieces in order; a reading open leaves `s1` mounted; a writing open of `s1.data` finishes `s1` (its last batch on the fake window first), answers `eio` to an old fid, shows `sN_mount none raw` and leaves `s2` served; a writing open on a window whose flush answers `enotsup` is refused `erofs` and `s1` mounts again; two writers closing in both orders, writers of `data` and `s1.data` together, and readers during writes, after each of which `s1` returns only when the last writer has closed; a write held at the fake window while its writer closes, while its holder ends, and while its grant ends: `s1` returns only after that write is answered and the window flushed; the raw process killed with a writing open, after which the medium shows `idle failed` and no walk mounts it; `eject` with a write queued behind the raw process's finish, which answers `eio` and reaches no window; a writing open of `data` shows `medium raw` and its last close mounts the medium afresh, the table read again; a volume whose boot sector is unreadable has its `sN.data` | the open answered before the finish, so the volume's last batch lands after the program's first write; the placement skipped for `sN.data`, so a write past the volume's end touches a sentinel; the holder's end not counted as a close, so `s1` never returns; the volume returned at the last close without waiting for unanswered writes, so the held write lands after the new mount's first read; the raw process's finish not closing admission, so the queued write is answered `ok` after the eject's flush |
 
 ### Fuzz targets
 
@@ -1928,7 +1998,7 @@ when the names and hashes equal the harness's.
 | a file open on a stick when QMP ejects its medium: the next read answers `eio`, `ls /media/disk0` shows `status` and `ctl`; the medium put back through QMP mounts again and reads equal | the volume's node naming the drive rather than the volume process, so the old fid reads the new medium |
 | `device_del` mid-write, then `device_add`: the stick mounts again, FAT read-only `dirty` | the dirty flag ignored at mount |
 | a session's `mount /media/disk0/s1 /mnt`, the stick's files read through `/mnt` and their hashes equal, then `umount /mnt`, after which `/mnt` is gone and `/media/disk0/s1` still reads | `mount` binding the drive's directory instead of the volume, so `/mnt` lists `status` and `ctl` |
-| `dd if=/media/disk0/data of=/tmp/img bs=64k` gives the stick's bytes, its SHA-256 the harness's; a program started with its namespace narrowed to `/media/disk0` writes `disk0/data` and is refused every path of `disk1` | the `data` files listed for an `rw` grant, so a session without `admin` reads them; the narrowing ignored for `media` entries, so the program reaches `disk1` |
+| `dd if=/media/raw/disk0/data of=/tmp/img bs=64k` gives the stick's bytes, its SHA-256 the harness's; a program started with its namespace narrowed to `/media/raw/disk0` writes `disk0/data` and is refused every path of `disk1`; one started with `/media/disk0` alone finds no raw file | the raw files served on the `media` grant, so the program handed `/media/disk0` reaches `data`; the narrowing ignored for `media_raw` entries, so the program reaches `disk1` |
 | a second virtio disk of the `drive` role, served by a block driver domain of its own, listed and read | the block service reading the boot layout on a `drive` device |
 | the same virtio disk read again after the media domain is restarted, with nothing detached | the grant answering every ask after the first `no_medium`, so the disk is not mounted again |
 | the same virtio disk read again after its driver is restarted through `/dev`'s `ctl`, with the media domain running | the facet holding the grant it found at its mint, so every later ask answers `failed` and the disk is not mounted again |

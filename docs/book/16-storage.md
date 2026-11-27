@@ -485,21 +485,28 @@ cluster and that every directory's `..` names its parent. The FAT server
 is designed and not built.
 
 A volume that fails those conditions, or that a pulled stick left
-marked dirty, mounts read-only, and `fsck_fat` repairs it, making the
-repairs FreeBSD's checker makes ([design-fsck-fat.md](../design-fsck-fat.md)).
+marked dirty, mounts read-only, and `fsck_fat` repairs it, finding what
+FreeBSD's checker finds ([design-fsck-fat.md](../design-fsck-fat.md)).
 It is an ordinary program. The media domain serves each drive's raw
-sectors as files, `/media/disk0/data` for the medium whole and
-`/media/disk0/s1.data` for one volume, to the sessions a manifest allows,
-root's among them; opening one for writing takes the volumes it covers
-out of service, and the last close puts them back under the ordinary
-mount rule ([design-drives.md, Raw sectors](../design-drives.md#raw-sectors)).
+sectors as files of a second tree, `/media/raw/disk0/data` for the
+medium whole and `/media/raw/disk0/s1.data` for one volume, to the
+sessions a manifest grants that tree, root's among them; the tree is a
+grant of its own, so a program handed a drive's files never reaches its
+sectors. Opening a raw file for writing takes the volumes it covers out
+of service, and they return once the last writer has closed and every
+write it sent has been answered and flushed
+([design-drives.md, Raw sectors](../design-drives.md#raw-sectors)).
 `fsck_fat` reads `s1.data` through the FAT server's own decoders, used
-as a library, decides every repair in memory, shows them all, asks once,
-and writes them in one ordered plan that marks the volume dirty first
-and clean last, takes references away before adding new ones and frees
-clusters last, so a stick pulled during a repair is left no worse and
-the next run finishes it. Any other program, a `dd` or a user's own
-repairer, can open the same files. This is designed and not built.
+as a library, decides every repair in memory as a list of small edits,
+shows them all, asks once, and writes them in ordered steps, each read
+back from the medium and patched when its turn comes, so no step undoes
+another. A repair never frees or allocates a cluster: it cuts chains,
+edits entries and names lost chains in an existing `LOST.DIR`, keeping
+any it cannot name. So a stick pulled during a repair loses nothing,
+and the next run finishes it. The repair is accepted only if the FAT
+server's own ownership check passes on its result, so a repaired volume
+mounts writable. Any other program, a `dd` or a user's own repairer, can
+open the same files. This is designed and not built.
 
 ### 16.5.2 Drives
 
