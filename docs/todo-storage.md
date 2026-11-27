@@ -925,7 +925,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   littlefs volume. It needs its own design first: who may write the table (only the slot writer writes the
   record and slots today), how a power cut midway is recovered, and how littlefs grows in place.
 * [Medium] storage, F2FS read-write volume review residuals: a mount checkpoint that does not fit fails
-  the mount with eio rather than mounting read-only (design-f2fs.md, "Read-write mounts"); writes leave
+  the mount with eio rather than mounting read-only (design-f2fs.md, "Read-write mounts: the mount checkpoint"); writes leave
   the qid version and data_version 0; erx_f2fs_core:roomy/1 is a stand-in for the room rule (dirty
   nodes and dentry blocks within the walk's 512, three free sections in place of need + 2, so a
   checkpoint from three free sections may commit a state whose next mount checkpoint does not fit),
