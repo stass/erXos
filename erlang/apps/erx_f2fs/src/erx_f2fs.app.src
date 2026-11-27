@@ -6,13 +6,15 @@
 %% erx_f2fs_codec, the only module that reads a volume's block bytes, and the
 %% mount, erx_f2fs_mount, which relates the records it reads, and the node
 %% tree's reads, erx_f2fs_core, behind the one lookup of the NAT, and each request as
-%% steps over it, erx_f2fs_request, all pure; and the read-only volume, erx_f2fs_volume,
+%% steps over it, erx_f2fs_request, all pure; the read-only volume, erx_f2fs_volume,
 %% the one process that owns a mounted volume and reads its window, which erx_f2fs, the
-%% erx_fs callback module, calls.
+%% erx_fs callback module, calls; and the format of a new volume, erx_f2fs_format,
+%% which the installation runs on the host.
 {application, erx_f2fs,
  [{description, "erXos F2FS"},
   {vsn, "1"},
-  {modules, [erx_f2fs, erx_f2fs_codec, erx_f2fs_core, erx_f2fs_mount, erx_f2fs_request, erx_f2fs_volume]},
+  {modules, [erx_f2fs, erx_f2fs_codec, erx_f2fs_core, erx_f2fs_format, erx_f2fs_mount,
+             erx_f2fs_request, erx_f2fs_volume]},
   {registered, []},
   {applications, [kernel, stdlib, erx, erx_files, erx_blk]},
   {env, []}]}.

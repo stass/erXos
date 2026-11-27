@@ -513,8 +513,8 @@ Under these rules the following need no mechanism of their own:
   records name and no summary the old view reads;
 * stale chains on a reused medium or after a crash: after a mount every
   stale block carries an older version than the epoch's, and before the
-  first mount the format zeroes the warm node log's first block, as
-  `mkfs.f2fs` does ([T 25]);
+  first mount the format zeroes the warm node log's next block, as
+  `mkfs.f2fs` zeroes that log's first block ([T 25]);
 * a dnode durable before its data ([R 48], [C 10]) and a checkpoint
   covering data still in flight ([R 11], [C 12]): orderings 1 and 2;
 * a torn commit block of a record, and with it any dependence on how
@@ -1759,7 +1759,8 @@ clean room's facts too.
 
 * **Section.** S segments per section and one section per zone, where S
   is the medium's allocation unit in 2 MiB segments, rounded up, at
-  least 1 and at most 8, and at most the partition's segments over 256,
+  least 1 and at most 8, and halved, so that it still divides the unit,
+  until it is at most the partition's segments over 256,
   so that the 16 sections the cleaner reserves stay within a sixteenth
   of the partition. The unit is the allocation unit the installation passes
   in `Options`: the unit the card profile inferred for the card or its
@@ -1770,7 +1771,8 @@ clean room's facts too.
   image built once for every card takes the default. So the vault's
   64 MiB and the data partition's 128 MiB as packed have one-segment
   sections, and a data partition grown to the rest of a card of a few
-  GiB has the card's unit, up to 16 MiB. A larger unit costs reserve:
+  GiB has the card's unit, or a half or quarter of it below 256 of its
+  units, up to 16 MiB. A larger unit costs reserve:
   16 sections of 16 MiB are 256 MiB.
 * **Geometry.** Blocks of 4096 bytes, segments of 512; segment 0 at the
   first absolute section boundary of the medium at or past the
@@ -1786,7 +1788,8 @@ clean room's facts too.
   source. The
   checkpoint area 2 segments; the SIT and NAT copies sized as [T 12]
   gives, the SIT bitmap moving to payload blocks when it passes 3836
-  bytes ([F 23]); the SSA one block per main segment and one more
+  bytes ([F 23]), past 3 TiB, and a partition of more than 2^23 segments,
+  16 TiB, refused ([F 54]); the SSA one block per main segment and one more
   ([F 17]); the four areas padded together to whole sections, as
   `mkfs.f2fs` pads them to a zone ([T 12]), so the main area starts on an
   absolute section boundary and every section covers whole units. The
@@ -1795,19 +1798,24 @@ clean room's facts too.
   ([Space](#space-and-the-cleaner));
   `user_block_count` is the main area less the overprovisioned segments.
   These satisfy every check of [F 55] and [T 47-48]. The smallest
-  partition the format takes has 20 main segments, so that a volume holds
-  at least 8 MiB, as `mkfs.f2fs`'s smallest does ([T 17]): 28 segments
-  with the superblocks and the metadata, 56 MiB. The vault's 64 MiB and
+  partition the format takes has 20 main sections, so that a volume holds
+  at least 8 MiB, as `mkfs.f2fs`'s smallest does ([T 17]): with one-segment
+  sections at a start on a 2 MiB boundary, 28 segments with the superblocks
+  and the metadata, 56 MiB. The vault's 64 MiB and
   the data partition's 128 MiB at least ([abi/medium.txt](../abi/medium.txt))
   are above it.
 * **Contents.** Features `EXTRA_ATTR`, `INODE_CHKSUM` and `SB_CHKSUM`;
-  the root directory, nid 3, in the hot node log's first block and its
-  dentry block in the hot data log's; NAT block 0 with nids 1 and 2 at
+  the root directory, nid 3, in the warm node log's first block and its
+  dentry block, `.` and `..`, in the warm data log's, the two logs erXos
+  writes ([Scope](#scope-features-and-forms)); each of the six logs at the
+  first segment of a section of its own, the log of type T in main
+  section T, so no two logs share a section; NAT block 0 with nids 1 and 2 at
   address 1, as `fsck.f2fs` requires, and nid 3 ([T 26], [T 73]); the
   SIT's first copy with the two used blocks and the six logs' types; the
   first copy of every other SIT and NAT block, zeros; the warm node log's
-  first block, zeros ([T 25]); pack 1 an unmount checkpoint with normal
-  summaries, and pack 2 zeros, which fails its CRC. The version is an
+  next block, the walk's first, zeros ([T 25]); pack 1 an unmount
+  checkpoint with `CRC_RECOVERY`, normal summaries and empty journals, and
+  pack 2's header zeros, which fails its CRC. The version is an
   odd 31-bit number the caller passes, random for an installation and
   fixed for a test; the UUID and the times likewise.
 * **Order.** Phase 1 writes zeros over blocks 0 and 1, so no superblock

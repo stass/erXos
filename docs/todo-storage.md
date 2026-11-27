@@ -255,6 +255,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   whose nearest earlier entry that is not deleted is a live long-name entry, for every name
   ([design-fsck-fat.md](design-fsck-fat.md#the-fat-servers-side)), with a test that cuts a removal
   across a sector boundary.
+* [Low] storage, F2FS NAT addressing has two copies: `erx_f2fs_core:nat_address/3` (private) and `erx_f2fs_format:tables/3` each compute where NAT block b of a copy lies ([F 34]), and the SIT copy halves and copy size are written in `erx_f2fs_mount:table_blocks/1`, `erx_f2fs_format` and the corpus walk; export them from `erx_f2fs_codec` and call them from every reader and writer once the core's volume-state branch lands.
 * [Medium] storage, create-or-open's refused truncate (`erx_media_volume:emptied/3`): a refusal
   after part of the truncate committed forgets the caller's hold of the file outright, though a
   holder is counted once however many fids name the file, so a hold an earlier walk took goes too
