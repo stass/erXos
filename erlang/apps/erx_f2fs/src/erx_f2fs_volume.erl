@@ -87,8 +87,8 @@ holds first. ok, or eio when that checkpoint failed; the volume ends either way.
 -spec unmount(pid()) -> ok | {error, eio}.
 unmount(Volume) -> call(Volume, unmount).
 
--doc "Request on Volume, eio once the volume has ended.".
--spec call(pid(), erx_f2fs_request:request()) -> term().
+-doc "Request, or unmount, on Volume, eio once the volume has ended.".
+-spec call(pid(), erx_f2fs_request:request() | unmount) -> term().
 call(Volume, Request) ->
     try gen_server:call(Volume, Request, infinity) catch exit:_ -> {error, eio} end.
 
