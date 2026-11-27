@@ -167,7 +167,7 @@ request's answer comes back as the operation's by hub_answer/2.
 -export([new/1, step/3, ports/1, histories/1, devices/1, hub_request/2, hub_answer/2, unusable/1]).
 
 -export_type([state/0, event/0, action/0, hub_id/0, ref/0, target/0, op/0, port_state/0, port_history/0, step/0, run/0,
-              run_no/0]).
+              run_no/0, address_params/0]).
 
 -include("generated/erx_abi.hrl").
 
