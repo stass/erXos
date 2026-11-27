@@ -235,7 +235,7 @@ has none, its table being the media domain's
 them is the **write path**, `erx_blk_write`, a module the device
 processes call for every request they hand a controller, so the trial
 rule sits below every transport. A window receives `{read, Sector, Count}`,
-`{write, Sector, Bytes}` and `flush` from its one client, checks each
+`{write, Sector, Bytes}`, `flush` and `{discard, Sector, Count}` from its one client, checks each
 against its sectors, and hands it to the device process. A read
 completes with a fresh binary: on virtio the bytes the device NIF copied
 out of the pool at completion, on the SD controller the words the device
@@ -246,7 +246,7 @@ The device NIF parses nothing a device wrote: the Erlang processes do,
 with binary matching in supervised processes, so a malicious controller
 corrupts no memory.
 
-**The transport contract.** Every device process answers the same four
+**The transport contract.** Every device process answers the same five
 calls, so nothing above it depends on the controller:
 
 * `erx_blk:read(Sector, Count)`: `{ok, Bytes}`, `Count` sectors from
@@ -263,30 +263,44 @@ calls, so nothing above it depends on the controller:
   that refuses SYNCHRONIZE CACHE
   ([design-usb.md](design-usb.md#the-scsi-subset)); virtio and the SD
   controller never answer it;
-* `erx_blk:info()`: `{ok, #{transport, capacity, max_sectors, flush, detail}}`,
+* `erx_blk:discard(Sector, Count)`: `ok` once the medium has taken the
+  range. From then on each of its sectors may read as anything, its old
+  bytes included, until it is written again; a client discards only
+  sectors whose contents it no longer needs, and relies on nothing they
+  read. A discard changes the medium, so it is a write to the trial rule
+  (U4). A transport whose medium cannot discard answers
+  `{error, no_discard}` and never `ok`: virtio without the device's
+  discard feature, a standard-capacity SD card, and a USB medium, whose
+  SCSI subset has no UNMAP ([design-usb.md](design-usb.md#the-scsi-subset));
+* `erx_blk:info()`: `{ok, #{transport, capacity, max_sectors, flush, erase_unit, open_units, discard, detail}}`,
   the transport's name (`virtio_mmio`, `sdhci` or `usb_bot`), the medium's length
-  in sectors of 512 bytes, the most sectors one request moves, whether the
-  medium flushes, and a map
+  in sectors of 512 bytes, the most sectors one read or write moves, whether the
+  medium flushes; the medium's allocation unit in sectors, the unit a
+  managed-flash medium erases and maps in, or `unknown`; how many such
+  units it takes writes into at once without a penalty, a number or
+  `unlimited`; the most sectors one discard covers, or `none`; and a map
   of what the transport reports about itself for the log and the
   inspector (virtio's version and features; the card's type, bus width
   and clock).
 
 Each answers with one closed set of errors: `{error, bad_count}` for
-bytes that are not whole sectors or a count above `max_sectors`, and
+bytes that are not whole sectors, a read or write count above
+`max_sectors` or a discard count above `discard`, and
 `{error, out_of_range}` for sectors past the capacity, both before the
 controller is touched; `{error, erofs}` from the write path on a trial
 boot (U4); `{error, busy}` when the device process's backlog is full;
 `{error, no_device}` when no device process runs; `{error, no_flush}`
-from `flush()` on a medium that cannot flush; and
+from `flush()` on a medium that cannot flush; `{error, no_discard}`
+from `discard/2` on a medium that cannot discard; and
 `{error, {device, Detail}}` for a request the controller or the medium
 failed, `{device, no_sense}` among them for a USB command whose sense
 failed ([design-usb.md](design-usb.md#the-block-transport)),
 where `Detail` is built from fixed atoms and integers for the
 driver's log line, never from a controller's bytes, and never reaches a
 client. A window answers its client `einval` for `bad_count`, `erofs` for
-`erofs`, `enotsup` for `no_flush`, so a file system can tell a medium
+`erofs`, `enotsup` for `no_flush` and `no_discard`, so a file system can tell a medium
 that cannot flush from one whose flush failed, and `eio` for every other
-error. Two checks bound a request's sectors: the window checks them
+error; a read-only window answers a discard `erofs`, as it answers a write. Two checks bound a request's sectors: the window checks them
 against its own sectors before the transport sees the request and
 answers `erange` for any outside it
 ([Interfaces](#interfaces)); the transport checks them against the
@@ -297,7 +311,17 @@ transport's: 8 sectors on virtio, the sectors one pool buffer holds
 beside its header and status byte; 32 sectors on the SD controller,
 16 KiB (`blk_sd_max_sectors` of `abi/formats/blk.txt`, beside its
 deadlines), whose write a card within its specification finishes
-inside both the wait limit and the in-flight bound below. The
+inside both the wait limit and the in-flight bound below. The facts of the medium that only
+shape how a client writes come from the transport the same way: on
+virtio the allocation unit is `unknown`, `open_units` is `unlimited`, and
+`discard` is the device's `max_discard_sectors` when it offers
+`VIRTIO_BLK_F_DISCARD` (feature 13, virtio 1.2 sections 5.2.3 and
+5.2.4), which the start then accepts, and `none` otherwise; a discard is
+one `VIRTIO_BLK_T_DISCARD` request (type 11) carrying one 16-byte
+segment, its sector, its count and flags of zero, since the `unmap` bit
+"MUST be zero for discard commands" (5.2.6.1); on the SD controller the
+three are as [The SD host controller](#the-sd-host-controller) gives
+them. The
 block service reads it from `info/0` when it starts a window, and the
 window refuses a larger request with `einval`; the window's own `info`
 names it as `max_sectors`, beside its role and length, so a file system
@@ -366,7 +390,7 @@ module, `erx_blk_write`, performs both acts. It builds every virtio
 header and every SD command word itself, from CMD0 at a card's
 initialisation to CMD13 at a flush, from the generated fields of the
 SVD source; a device process names what it wants: `{read, Sector,
-Count}`, `{write, Sector, Data}`, `flush`, or a card-identification step
+Count}`, `{write, Sector, Data}`, `flush`, `{discard, Sector, Count}`, or a card-identification step
 of `erx_blk_sd_card`, `{cmd | acmd, Index, Argument}` with the data
 block it moves, never a request type or a command word. One place
 decides which commands reach the card: `erx_blk_write`'s SD table, an
@@ -375,9 +399,9 @@ allowlist of exactly the identification's commands (CMD0, 2, 3, 7, 8,
 type and the block it moves, refuses every other index and any step
 whose data disagrees with its row; and only its read, write and flush
 functions build CMD17 and CMD18, CMD24 and CMD25, and CMD13 (SEND_STATUS). Only its
-write functions, one per transport, build a type or a command that
-writes the medium (virtio's `OUT`; SD's CMD24 and CMD25), and each
-calls the one trial check first.
+write and discard functions, one of each per transport, build a type or a command that
+changes the medium (virtio's `OUT` and `DISCARD`; SD's CMD24 and CMD25,
+and CMD32, CMD33 and CMD38), and each calls the one trial check first.
 On the Raspberry Pi 4 it also issues the commands of the legacy
 controller's SDIO card, from a second table, CMD3, 5, 7, 52 and 53, built
 only by its SDIO builders and issued only on a record of kind `sdio`, as
@@ -1149,6 +1173,78 @@ before it has already waited for its programming, and the start turned
 the card's cache off (*The card's cache* above), so a programmed write
 is durable. FreeBSD turns a cache on only on eMMC cards, never on SD
 (`mmcsd.c:304-318, 1510-1531`), and the driver turns none on.
+
+**Why the cache stays off.** The SD Association reaches A2's figures "by
+using functions of Command Queuing and Cache", and only "the
+combination of A2 supported host and A2 supported card"
+([Application Performance Class](https://www.sdcard.org/developers/sd-standard-overview/application-performance-class/),
+quoted through the writable file system survey of 2026-11-27); the
+device process serves one request at a time, with no command queue, so
+no measurement shows what the cache alone would give, and with it off a
+flush stays one CMD13. Turning it on would change two steps and nothing
+above the transport: the start would write Cache Enable 1, and a flush
+would write Flush Cache with CMD49 and read byte 261 with CMD48 until
+the card clears it, within the specification's 1 s, before it answers.
+The contract already makes an answered write durable only at an answered
+flush, as virtio's write-back cache requires (virtio 1.2, 5.2.5), and
+every client flushes for durability, so a client sees the same device
+model either way. Whether the cache pays is the card profile's to
+measure ([todo-performance.md](todo-performance.md)).
+
+**The allocation unit.** The SD status that ACMD13 reads for the cache
+also carries AU_SIZE, four bits from bit 428, which FreeBSD decodes
+(`mmc.c:1325`) and turns into a unit of `16 << AU_SIZE` sectors when the
+field is not zero (`mmc.c:1735-1737`): 16 KiB for 1 up to 4 MiB for 9.
+`info/0` reports that unit as `erase_unit`, and `unknown` for zero.
+Whether the specification codes the values above 9 as FreeBSD's shift
+does is unverified, since its table was not read; the value sizes only
+discards and the file system's log line, so a wrong one costs speed and
+no data. `open_units` is 2 on every card: no register says how many
+units a card keeps open, and while "on many of the better drives, five
+or more segments can be open simultaneously", "some brands can only have
+one or two segments open at a time" (Bergmann,
+[LWN 428584](https://lwn.net/Articles/428584/)); the card profile
+measures the Pi's cards before this changes.
+
+**Discards.** A high-capacity card whose CSD lists command class 5, bit
+5 of the CCC field in bits 95 to 84 (`mmc.c:1236`), takes a discard as
+FreeBSD issues one (`mmcsd.c:1237-1360`): CMD32 with the first sector,
+CMD33 with the last, one below the end (`mmcsd.c:1307, 1332`), and CMD38
+with argument 0, erase (`mmcreg.h:275-276`), answered with busy
+(`mmcsd.c:1345-1347`), so its transfer complete follows the end of the
+erase, as a write's follows programming; then CMD13, as after a write.
+`erx_blk_write`'s SD discard function alone builds the three commands,
+after the trial check. `discard` in `info/0` is the allocation unit, or
+8192 sectors when it is `unknown`, so one request erases at most one
+unit, as FreeBSD's largest delete is one erase sector (`mmcsd.c:546`). A
+block-addressed card erases any whole sectors (Linux's documentation:
+for SD, "erase_size" is "512 if the card is block-addressed",
+`mmc-dev-attrs.rst` l.47-52), so the driver does not round a range to
+unit boundaries as FreeBSD does (`mmcsd.c:1265-1271`); the file system
+above discards whole units when its sections cover them. A
+standard-capacity card, whose erase granularity its CSD gives
+(`mmc.c:1221`) and the driver does not read, and a card without class 5
+report `discard => none`. What an erased sector then reads is the card's
+concern: the contract promises a client nothing about it. Whether the
+card's own discard argument would be faster than erase is unverified,
+and so is whether every card erases a 4 MiB unit within the in-flight
+bound: the SD status's ERASE_SIZE, ERASE_TIMEOUT and ERASE_OFFSET
+(`mmc.c:1326-1328`) give the specification's erase timeout by a formula
+not read here, and the board probe records them with the time one unit's
+erase takes. A card past the bound fails the request as any missed bound
+does.
+
+**eMMC.** The driver admits SD cards alone. A driver for an eMMC device
+reports the same facts from its EXT_CSD as FreeBSD reads them: the unit
+is the high-capacity erase group, byte 224 times 1024 sectors, used once
+ERASE_GROUP_DEF, byte 175, is set (`mmc.c:1876-1882`); a discard is
+CMD35, CMD36 and CMD38 with TRIM, argument 1, at sector granularity, when
+SEC_FEATURE_SUPPORT, byte 231, has GB_CL_EN (`mmcsd.c:285-293`;
+`mmcreg.h:272-279, 392, 486`); and the cache is turned on and flushed
+through CACHE_CTRL and FLUSH_CACHE, bytes 33 and 32 (`mmcreg.h:362-363`),
+as FreeBSD turns on an eMMC's cache and never an SD card's, which the
+contract's flush already covers. How many units an eMMC keeps open is
+unmeasured, and it reports 2 until a measurement says more.
 
 **Deadlines and interrupts.** A request keeps the transport contract's
 wait limit and in-flight bound ([Data model](#data-model)) with one
@@ -2293,18 +2389,20 @@ reported as a durable checkpoint.
 * **The block service.** A window process of the block driver takes
   `{read, Sector, Count}`,
   answered `{ok, Blocks}`, fresh binaries no controller can still write;
-  `{write, Sector, Bytes}`, answered `ok`; and `flush`, answered `ok` once
-  the medium acknowledged it; each may answer `{error, eio}` for a device
+  `{write, Sector, Bytes}`, answered `ok`; `flush`, answered `ok` once
+  the medium acknowledged it; and `{discard, Sector, Count}`, answered
+  `ok` once the medium took it; each may answer `{error, eio}` for a device
   error, `{error, einval}` for a request that names no whole sectors or
   more than the transport's maximum, `{error, erange}` for sectors
   outside the window,
   `{error, erofs}` for a write on a trial boot outside the record's window,
-  and, for `flush` alone, `{error, enotsup}` when the medium cannot flush.
+  a write or discard on a read-only window,
+  and, for `flush` and `discard` alone, `{error, enotsup}` when the medium cannot flush or discard.
   A window's pid reaches its client at the client domain's creation, with
   its other grants, or locally in the driver's own domain.
 * **The transport.** Beneath the windows is the device process registered
-  as `erx_blk`, whatever the controller: `read/2`, `write/2`, `flush/0`
-  and `info/0` with the closed error set of [the transport
+  as `erx_blk`, whatever the controller: `read/2`, `write/2`, `flush/0`,
+  `discard/2` and `info/0` with the closed error set of [the transport
   contract](#data-model), which only the block driver's own modules
   call. Beneath it is the device NIF, `erx_device`
   ([design-runtime.md](design-runtime.md#the-device-nif)), which only the
@@ -2557,13 +2655,16 @@ runs the driver whole. Each check and the seeded fault it must catch:
 | a card is admitted exactly when *Admitting a card* allows, every admitted capacity a whole number of sectors whose last address fits 32 bits | any `READ_BL_LEN` accepted (fails at 15, a 64 GiB card addressed in bytes); the agreement check dropped |
 | the CSD, SCR, SD status, General Information and Performance Enhancement parsers give known values, CSD capacities equal to the model's for 2 and 4 GiB images | the R2 parser's one-byte shift dropped |
 | the cache step skips a card without bit 330, refuses one without CMD48, flushes and clears an enabled cache, and refuses one that still reads enabled | the read-back skipped |
+| AU_SIZE of the SD status gives `erase_unit` for each value 1 to 9 and `unknown` for 0, from known SD status words | the field read one bit low |
+| a discard on a high-capacity card with class 5 issues CMD32 with its first sector, CMD33 with its last and CMD38 with argument 0, in order, then CMD13; it answers `erofs` on a trial boot touching no register; a standard-capacity card or one without class 5 reports `discard => none` and answers `no_discard`; a count above `discard` is `bad_count` | CMD33 given the end rather than the last sector; the trial check removed from the discard function |
+| on the `raspi4b` model, a discard of a 4 GiB image's unit is answered `ok` and a later write and read of its first sector return the written bytes | the discard sent after the write it should precede |
 | the divider's clock is at most the target and the next smaller divisor exceeds it | `<` in place of `=<` |
 | the largest request's worst case at the specification's limits fits the in-flight bound, and a request with it ahead is still issued within the wait limit | the limit at 64 sectors |
 | no two register writes but `data`'s are less than 6 us apart, the command's included | the spacing set to zero |
 | a set 1.8 V signalling enable refuses the start before any reset or command | the check dropped |
 | the command's wait takes command complete and the data track in either order, ignores a data end on a command with neither data nor busy, and fails an out-of-order event | the data track held until command complete |
 | an Auto CMD12 R1 error fails a multi-block transfer, out of range excused only on a CMD18 ending at the last sector | out of range ignored on every transfer |
-| every word `erx_blk_write` builds outside its write functions is one of CMD0, 2, 3, 7, 8, 9, 12, 13, 16, 17, 18, 48, 49 and 55 and ACMD6, 13, 41 and 51, a list the test holds apart from the SD table, so CMD24 and CMD25 are built only by the write functions, and CMD49 writes only the Performance Enhancement register; on a trial boot value the SD write answers `erofs` touching no register | CMD24 added to the SD table under an identification step; the trial check removed |
+| every word `erx_blk_write` builds outside its write and discard functions is one of CMD0, 2, 3, 7, 8, 9, 12, 13, 16, 17, 18, 48, 49 and 55 and ACMD6, 13, 41 and 51, a list the test holds apart from the SD table, so CMD24 and CMD25 are built only by the write functions and CMD32, 33 and 38 only by the discard function, and CMD49 writes only the Performance Enhancement register; on a trial boot value the SD write answers `erofs` touching no register | CMD24 added to the SD table under an identification step; the trial check removed |
 | `sd_issue/2` writes the clear, `blksizecnt`, `arg` and command in order and refuses after 10 ms of inhibit; `sd_feed/3` writes only the plan's bytes; the argument rule admits CMD16 with 512 and CMD49 with the cache rule's writes | CMD49's argument unchecked; a feed past the plan's blocks; the inhibit wait skipped |
 | on the `raspi4b` model, 4 GiB (high capacity) and 2 GiB (standard capacity, [research-sdhci-qemu-model.md](research-sdhci-qemu-model.md#qemus-sd-card-model-how-it-sizes-a-medium)) images identify, mount `/data` and read a synced file back after a storage domain restart | a medium whose data partition holds a different known file |
 | a device process killed under a write load: clients see `eio`, the domain restarts, the card identifies from the state it was left in, the load resumes | CMD0 left out of the start sequence |
@@ -2961,6 +3062,9 @@ does: root hash, salt, block size, hash algorithm and data-block count
 | An SD card loses or tears an acknowledged write, the one-sector rewrite of the boot-selection record included | medium | high | the record changes only at a commit; the power-cut harness covers lost and reordered writes between flushes; each board's port tests what its firmware does with a damaged record; a torn record needs an installation, since no normal boot may rewrite it |
 | On a board, the trial request does not survive the reset that ends a trial, or an unreadable record stops the firmware instead of falling back ([design-platforms.md](design-platforms.md#trial-requests)) | medium | high | each board's port tests the trial path before it accepts updates: a requested trial boots the spare once, a crash or hang in it boots the committed slot, and a damaged record is tried in place; a dropped request shows as a failed trial |
 | A board firmware's watchdog settings do not behave as documented, or are missing ([design-platforms.md](design-platforms.md#the-watchdog)) | medium | medium | each board's port tests a trial whose firmware stage hangs; without them, such a trial needs a power cycle, as U3 states |
+| An SD card's erase of one allocation unit outlasts the 18 s in-flight bound | low | the storage domain restarts at every discard until its intensity ends it | the board probe times one unit's erase and records the SD status's erase fields; a card past the bound is a reason to report `discard => none` for it |
+| Open: requests above 32 KiB on an SD card. Bergmann's card wrote efficiently only from 64 KB, and ADMA2 and high speed would raise the bus rate; the 64-sector limit is what the specification's worst busy, 250 ms a block, fits in the 18 s bound | open | slower writes than the card allows | recommendation: let the card profile measure 32, 64 and 128 KiB writes; if larger requests pay, derive the SD in-flight bound from the largest request at the specification's limits and raise the callers' deadlines above it, rather than shorten the bound below the specification |
+| Open: the SD card's cache ([Why the cache stays off](#the-sd-host-controller)) | open | A2 cards' small-write figures out of reach | recommendation: keep it off until the card profile shows a gain with one request at a time; turning it on changes the start and the flush alone |
 | The Erlang block driver misses the controller's timing or costs too much of its throughput | medium | slow storage on the boards | `tools/erx bench blk` at gate G9 per controller; completion batching; a per-byte C primitive for the ring work as a measured exception row in the driver table ([design-system.md](design-system.md#the-driver-table)) |
 | The default configuration puts the block device and the data partition's file system in one domain | low | a logic bug in the Erlang file system that reaches the device NIF, or a storage-domain restart that drops every window on the medium | the build check that only the driver's modules reference the NIF; Erlang's memory safety; the native stopgap in a sub-space port; the configuration that gives the device a domain of its own, required where the controller is unconfined and available elsewhere |
 | Erlang file systems are slower than the boards need, on the Raspberry Pi 4 above all, which has no SHA-256 instructions | medium | medium | `tools/erx bench fs` on both boards; metadata caching in the reader; the per-byte work already in C; G12 and G13 measure before littlefs is replaced |
@@ -3061,6 +3165,7 @@ outside this design are decided
   and `hw/arm/bcm2838.c`
   (`a81db2b2fda5403e7a71daeb4760c3f2f003237cfadba3540d5e7ad375c58299`),
   fetched from github.com/qemu/qemu at tag `v11.1.3`.
+* For the allocation unit, discards and the cache: FreeBSD's `mmc.c`, `mmcreg.h` and `mmcsd.c` at `release/15.1.0` above, whose hashes the files read again for them matched; Linux v6.18's `Documentation/driver-api/mmc/mmc-dev-attrs.rst`, documentation only, from git.kernel.org (SHA-256 `f47dd61f02c6a9fc55288c8dd1506c13cf8edccd62e28cf7f07e5d85374e7576`); the OASIS VIRTIO 1.2 specification, committee specification draft 01, `virtio-v1.2-csd01.html` (SHA-256 `e18d68ee81b03bb9d8fb493356704fa77e3a9eac1c10f79111940cbd482f7bc1`), sections 5.2.3 to 5.2.6; and Arnd Bergmann, "Optimizing Linux with cheap flash drives", LWN, 2011-02-18, https://lwn.net/Articles/428584/ (SHA-256 of the page read `ad4f19b8af5609f3a2462b668ed8a06f038907bb63e84bc37d988ac603df9923`).
 * FreeBSD's `msdosfs` at `release/14.3.0` (BSD-2-Clause), for the FAT
   server's last-reference release, its lookup that skips an unlinked open
   file and its count of the clusters a new entry needs:

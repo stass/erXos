@@ -46,6 +46,12 @@ where it links:
   ([Scope](#scope-features-and-forms)) and converts an inline file or
   directory to blocks in the step that first changes it
   ([Directories](#directories)).
+* **The section is the medium's unit.** A section spans the medium's
+  allocation unit and starts on one; every log takes whole sections,
+  cleaning moves whole sections, the reserves count sections, and a
+  section the commit frees is discarded. The medium also says how many
+  logs are written: two on an SD card, six elsewhere
+  ([The section is the medium's unit](#the-section-is-the-mediums-unit)).
 
 ## Context
 
@@ -111,15 +117,41 @@ observed as a black box, and their output is untrusted input to the host.
 ### The medium under the volume
 
 The block service's window (`erlang/apps/erx_blk/src/erx_blk_window.erl`)
-takes `{read, Sector, Count}`, `{write, Sector, Bytes}` and `flush` from
-its one client and answers one request at a time, in order. A write is
-answered once the controller reports it written; a flush is answered once
-every write answered before it is durable on the medium; there is no
-forced-unit-access write. The most one request moves is the transport's
-`max_sectors`, 8 sectors on virtio: one 4 KiB block. The storage design
-assumes a medium that writes a sector atomically and honours a flush
-([design-storage.md](design-storage.md#invariants)); this design rests on
-those two assumptions and on nothing else about the medium.
+takes `{read, Sector, Count}`, `{write, Sector, Bytes}`, `flush` and
+`{discard, Sector, Count}` from its one client and answers one request
+at a time, in order. A write is answered once the controller reports it
+written; a flush is answered once every write answered before it is
+durable on the medium; there is no forced-unit-access write. A discard
+tells the medium that the sectors' contents are no longer needed: after
+it each sector reads as anything, its old bytes included. The window's
+`info` gives four facts of the medium
+([design-storage.md](design-storage.md#data-model)): `max_sectors`, the
+most one read or write moves, 8 sectors on virtio, one 4 KiB block, and
+64 on an SD card, 32 KiB; `erase_unit`, the medium's allocation unit in
+sectors, or `unknown`; `open_units`, how many allocation units the
+medium takes writes into at once without a penalty, 2 on an SD card and
+`unlimited` on virtio; and `discard`, the most sectors one discard
+covers, or `none`. The storage design assumes a medium that writes a
+sector atomically and honours a flush
+([design-storage.md](design-storage.md#invariants)); this design's
+correctness rests on those two assumptions and on nothing else about the
+medium. The other facts shape only where and how it writes.
+
+What an SD card asks of a writer, which those facts carry, is
+measured, though on cards of 2011: in Bergmann's measurements "the most
+common size for these segments is 4MB for drives in the multi-gigabyte
+class", and "the drive will never erase any unit smaller than a
+segment"; "on many of the better drives, five or more segments can be
+open simultaneously", "but some brands can only have one or two
+segments open at a time"; on one SDHC card, which kept one open,
+"alternating between two segments" slowed writes "to a mere 33KB/s",
+and "the smallest efficient block size for reads and writes is 64KB"
+([LWN 428584](https://lwn.net/Articles/428584/)). F2FS's own
+documentation "expects that the section size would be the same as the
+unit size of garbage collection in FTL" (`f2fs.rst` l.785-787, section
+Default Block Allocation, in [References](#references)). How far current A1 and A2 cards
+relax the open-unit limit is unverified; the measurement of
+[Performance](#performance) settles it for the Pi's card.
 
 F2FS's records are packed, with a 64-bit `block_count` at offset 36 of
 the superblock and 32-bit fields at odd offsets in NAT entries, summary
@@ -134,8 +166,8 @@ them in its packed storage
   promised: the last completed checkpoint with every acknowledged `fsync`.
 * **F2-R2.** erXos mounts read-write any image Linux v7.3.4 or
   `mkfs.f2fs` 1.16.0 writes with features and checkpoint flags erXos
-  maintains, one segment per section (`mkfs.f2fs -s 1`, its default), a
-  main area of more than 16 segments and room for its mount checkpoint,
+  maintains, any number of segments per section (`mkfs.f2fs -s`), a
+  main area of more than 16 sections and room for its mount checkpoint,
   and replays Linux's roll-forward records as Linux would. Any other
   image whose features and flags it can read it mounts read-only.
 * **F2-R3.** An acknowledged `fsync` survives a power cut at any later
@@ -208,11 +240,12 @@ mount accepts, every other flag refused with a diagnostic naming it.
 
 Beyond the feature word and the flags, a mount refuses a block size
 other than 4096 bytes and a segment other than 512 blocks ([F 3]), and
-mounts read-only a volume whose main area of 16 segments or fewer leaves
+mounts read-only a volume whose main area of 16 sections or fewer leaves
 erXos's cleaner no room
-([The space a volume offers](#the-space-a-volume-offers)) and a volume
-with more than one segment per section
-([The cleaner](#the-cleaner)). A
+([The space a volume offers](#the-space-a-volume-offers)). Any number
+of segments per section that Linux accepts ([F 54]) mounts read-write,
+since every rule below counts sections ([The section is the medium's
+unit](#the-section-is-the-mediums-unit)). A
 volume marked as needing a check (`FSCK` or `QUOTA_NEED_FSCK`, or a
 non-zero `s_errors` or stop-reason count in the superblock, [F 12])
 mounts as Linux mounts it ([F 56]), with the mark kept and shown: erXos
@@ -229,18 +262,25 @@ What erXos writes, among the forms Linux allows:
 | NAT and SIT journals | empty | read, and their entries written to blocks at the next checkpoint | one rule for where an entry lives |
 | data summaries in the pack | normal form, three blocks | compact form too ([F 29]) | one layout; both of Linux's ways of finding normal summaries agree on it ([F 30]) |
 | `nat_bits` | never; the flag cleared | ignored | an optimisation Linux uses only with a mount option ([F 27]) |
-| logging | appending (LFS) only | threaded (SSR) logs' summaries too | appending is correct on its own; the mount checkpoint moves a log the committed checkpoint marks SSR to a free segment ([The mount checkpoint](#read-write-mounts-the-mount-checkpoint)) |
+| logging | appending (LFS) only | threaded (SSR) logs' summaries too | appending is correct on its own; the mount checkpoint moves a log the committed checkpoint marks SSR to a free section ([The mount checkpoint](#read-write-mounts-the-mount-checkpoint)) |
 | in-place data updates | never | nothing to read: they leave ordinary blocks | an overwritten block can tear and is visible before any checkpoint ([R 46], [C 11]) |
 | superblock | written once, by the format | either valid copy | no run-time superblock write, so no torn superblock and no host-dependent `s_errors` bit order ([F 5]) |
-| discards | none | - | the block service has no discard request |
-| six logs | hot, warm and cold for nodes and data, by kind | any placement | Linux requires six distinct current segments ([F 55]); the fsync chain must be the warm node log ([R 49]) |
+| discards | every section a checkpoint frees, after its commit, on a medium that takes them | - | Linux issues its discards only after the commit that frees the blocks ([R 37], [R 39]); `f2fs.rst`'s `discard` option discards "when a segment is cleaned" |
+| six logs | six current segments in every checkpoint; two or six of them written, as the medium's `open_units` allows | any placement | Linux requires six distinct current segments ([F 55]); the fsync chain must be the warm node log ([R 49]); Linux itself writes 2, 4 or 6 (`f2fs.rst`, `active_logs`) |
 
-Placement by kind: a directory's dentry blocks go to hot data, a
-regular file's data and a symlink's target to warm data, blocks the
-cleaner and the mount checkpoint copy to cold data; a directory's direct
-nodes to hot node, every other direct node, inode and xattr node to warm
-node, and indirect nodes to cold node ([R 30]). Which data log a block
-lands in matters to no reader.
+Placement by kind, on a medium that keeps six or more units open: a
+directory's dentry blocks go to hot data, a regular file's data and a
+symlink's target to warm data, blocks the cleaner and the mount
+checkpoint copy to cold data; a directory's direct nodes to hot node,
+every other direct node, inode and xattr node to warm node, and indirect
+nodes to cold node ([R 30]). On a medium that keeps fewer open, an SD
+card, two logs are written: every node block to warm node, which the
+fsync chain needs, and every data block to warm data, as Linux's own
+two-log mode allocates "one for node and the other for data types"
+(F2FS paper, section 2.4). Which data log a block lands in matters to no
+reader, and whether `fsck.f2fs` and Linux's recovery accept directory
+and indirect nodes in the warm node log is settled in the oracle guest
+([The section is the medium's unit](#the-section-is-the-mediums-unit)).
 
 ## The construction
 
@@ -316,8 +356,9 @@ request is one step of a pure function, `step(State, Request) -> {State1,
 Reply, Plan}`, where a plan is a sequence of phases, each a set of block
 writes followed by a flush, or a set of block reads. The volume process
 carries the plan out: it sends every read and write to the window
-itself, asynchronously, collects the answers, and continues the step
-that waited for them. Since the window answers one request at a time in
+itself, asynchronously, contiguous blocks of one phase as one request
+([Runs](#the-section-is-the-mediums-unit)), collects the answers, and
+continues the step that waited for them. Since the window answers one request at a time in
 the order it receives them, and the volume process is its only client, a
 read the volume issued before a write is answered before that write
 lands, whatever the two touch. No other process reads the medium, so no
@@ -356,6 +397,70 @@ the walk's footprint until it commits. So:
   version, so no stale block left by an earlier crash, an unreplayed
   dnode of an inode that never reached the chain, say, can ever be linked
   into a later chain and replayed against a reused nid.
+
+### The section is the medium's unit
+
+A section is `segs_per_sec` consecutive segments of 512 blocks, from
+the superblock ([F 54]), and it is the one unit in which the volume meets
+the medium. The format sizes a section to the medium's allocation unit
+and starts the main area on an absolute section boundary of the medium
+([Formatting a volume](#formatting-a-volume)), so a section covers whole
+allocation units, or part of one on a medium whose unit is larger than
+the largest section. A mount whose window reports an `erase_unit` that
+the volume's sections do not cover whole, as on a card whose unit
+exceeds the format's default, writes as usual and says so in one log
+line and in the inspector, which show both sizes. Everything else
+follows from treating the section as the unit:
+
+* **Allocation.** A log takes a free section, one that no log holds and
+  whose every block is free, and appends through its segments in order;
+  no two logs share a section. This is Linux's own shape: its allocator
+  takes a new segment "first within the current section" and skips "a
+  section in use by a log" ([R 34]). Each log's writes therefore fill one
+  allocation unit from its start to its end before they touch another,
+  which is the write a card handles best.
+* **Cleaning.** A victim is a whole section, so a cleaned section frees
+  whole allocation units ([The cleaner](#the-cleaner)).
+* **Space.** The reserves and the room rule count sections
+  ([Space and the cleaner](#space-and-the-cleaner)).
+* **Discard.** Each section a checkpoint's commit frees is discarded
+  after the commit, in requests of at most the window's `discard`
+  sectors ([Checkpoints](#checkpoints)), so the card learns of whole free
+  units.
+* **Logs written.** A checkpoint always names six current segments, as
+  Linux requires ([F 55]), but how many of them the volume writes is not
+  on the medium: each mount chooses it from the window's `open_units`,
+  six when the medium takes six or more units at once and two otherwise,
+  with the mapping of [Scope](#scope-features-and-forms). The four logs a
+  two-log mount does not write stay where they are, each holding its own
+  section, never appended to; a six-log volume holds six sections for its
+  logs too, so the reserves are the same, and a volume another writer
+  left with partly filled logs keeps their free tails idle, at most four
+  sections' worth, until a six-log mount writes them.
+* **Runs.** The volume process sends each phase's writes in address
+  order, a run of contiguous blocks as one request of at most the
+  window's `max_sectors`, and merges a step's reads the same way. Logs
+  append, so a checkpoint's nodes in one log, a record's dnodes with its
+  pre-image, and a write's data blocks are each one run. A phase is a set
+  of writes before one flush, and the crash model already lets any subset
+  of its sectors land ([The power-cut harness](#the-power-cut-harness)):
+  a run that lands in part, any of its sectors and not others, is a state
+  that model already holds, so runs add no crash state. A run is built
+  within one phase and never crosses a flush.
+
+What the two-log mode costs is cleaning. In the F2FS paper's experiment
+(section 3.2.3, Figure 6), with two logs over 75 % of dirty segments held
+more than 256 of their 512 blocks valid, while six logs gave a bimodal
+spread, more segments nearly empty and more nearly full, which is
+"improved cleaning efficiency", while "the benefit of four logs over
+two logs was rather insignificant". A churned volume on an SD card therefore
+moves more blocks per freed section than it would with six logs. What
+six logs would cost there is larger: six streams on a card that keeps two
+units open make the card close and reopen units, the pattern Bergmann
+measured at 33 KB/s. Between checkpoints the card sees two appending
+streams; each checkpoint adds its NAT, SIT, summary and pack blocks in
+the metadata area. Both costs are measured on the Pi's card
+([Performance](#performance)).
 
 ### What disappears
 
@@ -440,7 +545,7 @@ the only effects.
 | `erx_f2fs_codec` | every on-disk record's decoder and encoder over the generated layouts, the CRC, the dentry hash, the bitmaps' bit orders; the only module that reads or builds block bytes |
 | `erx_f2fs_mount` | choosing the superblock copy and the checkpoint pack, the mount checks, loading the SIT, the chain walk, orphan cleanup and replay; answers the initial state |
 | `erx_f2fs_core` | the volume state and every operation on it: lookup, create, write, truncate, link, unlink, rename, setattr, readdir, holds; the allocator, the room rule and the one slot-setting function |
-| `erx_f2fs_plan` | the checkpoint plan, the mount checkpoint's copies, the `fsync` record plan and the decision between record and checkpoint, and `need/1`, the free segments the next checkpoint takes |
+| `erx_f2fs_plan` | the checkpoint plan, the mount checkpoint's copies, the `fsync` record plan and the decision between record and checkpoint, and `need/1`, the free sections the next checkpoint takes |
 | `erx_f2fs_clean` | victim choice and the move step |
 | `erx_f2fs_format` | the format plan of a new volume |
 
@@ -462,10 +567,13 @@ The state is one record that `erx_f2fs_core` alone constructs:
 * **nodes and dentry blocks**: a cache of clean blocks, bounded, and the
   dirty ones, which stay until a plan writes them; a dirty node or dentry
   block has no address until then;
-* **the six logs**: each a segment and the next offset in it; the log
-  knows its next block after every allocation, moving to a free segment
-  when its segment fills, because each node footer names that next block
-  ([R 35]);
+* **the six logs**: each a section, a segment in it and the next offset
+  in that segment, and whether this mount writes it; the log knows its
+  next block after every allocation, moving to the next segment of its
+  section when its segment fills and to a free section when its section
+  fills, because each node footer names that next block ([R 35]);
+* **the victim in progress**: the section the cleaner is emptying, if
+  any, which no allocation takes ([R 83]);
 * **the unpublished summaries**: the whole summary block of each
   segment whose SSA block does not hold its summary. Those are the
   committed checkpoint's six logs, whose summaries come from its pack or
@@ -499,11 +607,11 @@ the state with them claimed. It answers `enospc` before changing anything
 when the volume's space cannot take them, and `room` when the room rule
 refuses them, after which the volume process cleans or checkpoints, as
 that rule says, and runs the step again
-([Space and the cleaner](#space-and-the-cleaner)). A free segment is one
+([Space and the cleaner](#space-and-the-cleaner)). A free section is one
 whose blocks are all free and that no log holds. A log appends within its
-segment, and an appending log's next block and every block after it in
-the segment are free, which Linux and `fsck.f2fs` require of a
-checkpoint's logs ([F 39], [T 75]).
+section, and an appending log's next block and every block after it in
+the section are free, which covers what Linux and `fsck.f2fs` require of
+a checkpoint's logs within their segments ([F 39], [T 75]).
 
 Every change of a block reference goes through one function,
 `set_slot(State, Owner, Index, Address)`, where the owner is a dnode or an
@@ -622,7 +730,7 @@ block, claims new blocks in the warm data log, and answers a plan that
 writes the merged blocks. When every write is answered, the second
 installs them with `set_slot`, grows `i_size` and sets the times; if the
 volume broke meanwhile the claims die with the state. A write whose
-blocks would take more than one free segment runs as several such
+blocks would take more than one free section runs as several such
 pairs, each taking at most one, so no step takes more.
 
 **No byte at or past a file's size is kept or trusted.** A truncate to a
@@ -727,7 +835,7 @@ durable as it stands. So `sync; rename(a, b); fsync(b)` leaves `b`, and
 no `a`, after any later cut.
 
 A checkpoint runs at least every 30 s while anything is dirty, when the
-epoch's charge reaches its bound, when the cleaner needs prefree segments
+epoch's charge reaches its bound, when the cleaner needs prefree sections
 freed, at an `fsync` that a record cannot express, and on the durability
 facet. A write the volume answered is in the next checkpoint whatever its
 file's state, since the checkpoint writes every dirty node.
@@ -760,10 +868,19 @@ whole from the state at its start:
 4. **Flush.** Then **write the last block**, the header's copy, and
    **flush** again. The checkpoint is committed when that flush is
    answered, and this is the one place anything is released: the touched
-   set becomes the live set, prefree segments become free, freed nids
+   set becomes the live set, prefree sections become free, freed nids
    join the pool, the unpublished summaries become the new logs' alone,
    the epoch's facts and charge clear, the epoch ends, and the checkpoint
    is reported.
+5. **Discard** every section that became free at that commit, when the
+   window's `discard` is not `none`, each in requests of at most that
+   many sectors. The checkpoint does not wait for them. They are free in
+   the committed checkpoint, so no durable view references them, which
+   is Linux's order too: its discards are "issued only after that
+   checkpoint's commit block completes" ([R 37], crash state [C 6]). The
+   window serves requests in order, so a write the next epoch makes into
+   such a section reaches the medium after its discard. A failed discard
+   is a failed request and ends the volume like a failed write.
 
 The header carries the new version, one above the committed one, the
 counts, the six logs' positions, all `alloc_type` LFS, and the flags:
@@ -868,10 +985,17 @@ on the medium ([design-storage.md](design-storage.md#data-model)). It
 needs no forced-unit-access write: where Linux writes a commit block with
 a preflush and FUA ([R 8]), erXos writes it after one flush and before
 another. Of the medium it assumes what the storage design does: a sector
-written whole or not at all. On media that do not honour flushes, SD
-cards among them, no ordering holds, which
-[design-storage.md](design-storage.md#invariants) already records as a
-residual.
+written whole or not at all, and nothing larger: a run of several blocks
+in one request may land in part, and the design needs no more than each
+sector, since a run never holds both a block and what must be durable
+before it. A discard needs nothing of the medium either: it touches only
+sections no durable view references, so whatever a discarded sector
+reads after it, or after a cut during it, no reader reads it. On media
+that do not honour flushes, SD cards among them, no ordering holds,
+which [design-storage.md](design-storage.md#invariants) already records
+as a residual. Whether an SD card's own cache is on changes none of
+this: an answered write is durable only once a flush is answered, on
+every transport ([design-storage.md](design-storage.md#the-sd-host-controller)).
 
 ### Freezing
 
@@ -1088,20 +1212,20 @@ volume admit a request that changes anything.
 
 Each log writes, during the mount checkpoint, only after the last block
 of its committed segment that is live or in the footprint, as an
-appending log may, and takes a free segment only when no block remains
-after that one, or when the committed checkpoint marks the log SSR,
+appending log may, and takes a free section only when no block remains
+after that one in its section, or when the committed checkpoint marks the log SSR,
 since erXos appends only. So the warm node log resumes past the chain's
 end, and a mount with an empty chain, its logs not SSR, takes no free
-segment. The mount checkpoint's node blocks carry the committed epoch's
+section. The mount checkpoint's node blocks carry the committed epoch's
 version, as a checkpoint's do, and lie past the chain's end, where the
 old view's walk never reaches: that walk stops at the end block, which
 is in the footprint and stays as the walk read it.
 
 What the mount checkpoint writes into the logs is bounded by the epoch's
 charge the volume carried before the cut, so the room rule that every
-erXos volume keeps leaves it the free segments it needs
+erXos volume keeps leaves it the free sections it needs
 ([The room rule](#the-room-rule)). A volume another writer left whose
-mount checkpoint, copies included, does not fit its free segments mounts
+mount checkpoint, copies included, does not fit its free sections mounts
 read-only instead, with a log line naming the shortfall.
 
 ## Space and the cleaner
@@ -1109,20 +1233,21 @@ read-only instead, with a log line naming the shortfall.
 ### The space a volume offers
 
 The volume's space is the checkpoint's `user_block_count` ([F 21]) or
-less: erXos counts at most (M - 16) x 512 blocks, where M is the main
-area's segments and 16 the overprovisioning the cleaner's argument below
-needs. **A volume whose main area has 16 segments or fewer therefore
-offers erXos no space and mounts read-only**, with a log line naming M,
-as a volume with a feature outside W does
-([Scope](#scope-features-and-forms)). `mkfs.f2fs` makes such a volume on
-a device of 44 MiB, its smallest, with 14 main segments ([T 17]), up to
-just under 50 MiB, by the arithmetic of [T 11-12]. erXos's format
-overprovisions at least 16 segments
-([Formatting a volume](#formatting-a-volume)), so on its own volumes the
-checkpoint's count is never the larger; on a writable volume `mkfs.f2fs` made,
-whose overprovisioning can be as little as 10 segments ([T 15],
-[T 18]), erXos answers `enospc` up to six segments earlier than Linux
-would. A step that would take `valid_block_count` past the space answers
+less: erXos counts at most (M - 16) x B blocks, where M is the main
+area's sections, B the 512 x `segs_per_sec` blocks of a section, and 16
+the overprovisioning the cleaner's argument below needs. **A volume
+whose main area has 16 sections or fewer therefore offers erXos no space
+and mounts read-only**, with a log line naming M, as a volume with a
+feature outside W does ([Scope](#scope-features-and-forms)).
+`mkfs.f2fs` makes such a volume with one-segment sections on a device of
+44 MiB, its smallest, with 14 main segments ([T 17]), up to just under
+50 MiB, by the arithmetic of [T 11-12], and with larger sections on
+proportionally larger devices. erXos's format overprovisions at least 16
+sections ([Formatting a volume](#formatting-a-volume)), so on its own
+volumes the checkpoint's count is never the larger; on a writable volume
+`mkfs.f2fs` made with one-segment sections, whose overprovisioning can
+be as little as 10 segments ([T 15], [T 18]), erXos answers `enospc` up
+to six segments earlier than Linux would. A step that would take `valid_block_count` past the space answers
 `enospc` before it changes anything, as does one that needs more nodes
 than the NAT has free nids.
 
@@ -1130,7 +1255,8 @@ than the NAT has free nids.
 
 Space alone does not make a checkpoint possible: a checkpoint writes its
 nodes and dentry blocks into the logs, and a log that fills takes a free
-segment. Two bounds and one rule keep every checkpoint possible:
+section. Two bounds and one rule keep every checkpoint possible; every
+count of segments in them is of sections, the logs' unit:
 
 * **The epoch's charge** counts what a checkpoint would write into the
   logs: the dirty nodes and dentry blocks, and what the mount checkpoint
@@ -1141,18 +1267,21 @@ segment. Two bounds and one rule keep every checkpoint possible:
   replaces). The charge stays within 512 blocks: a step that would pass
   it waits for a checkpoint, and an `fsync` whose record would pass it
   takes a checkpoint instead. So any checkpoint, a running one or a
-  mount's after a cut, writes at most 512 blocks into the logs, and no
-  log takes more than one free segment for them.
+  mount's after a cut, writes at most 512 blocks into the logs, and,
+  since a section holds at least 512, no log takes more than one free
+  section for them.
 * **`need(State)`**, which the checkpoint planner answers, is the larger
-  of the free segments the next checkpoint takes, from the running logs'
+  of the free sections the next checkpoint takes, from the running logs'
   free tails and the blocks the charge puts in each log, and the free
-  segments the mount checkpoint of the durable view would take, from the
-  committed checkpoint's segments as the running volume has filled them.
-  It is at most six, and zero just after a checkpoint commits.
-* **The rule**: every step leaves at least `need` free segments, and
+  sections the mount checkpoint of the durable view would take, from the
+  committed checkpoint's logs as the running volume has filled them.
+  It is at most six, at most two on a two-log mount, and zero just after
+  a checkpoint commits.
+* **The rule**: every step leaves at least `need` free sections, and
   every step but a cleaning step or a checkpoint leaves at least
   `need + 3`, the three a cleaning step may take (the cold data log's and
-  two node logs' for the dnodes its moves dirty). A step the rule refuses
+  two node logs' for the dnodes its moves dirty; two on a two-log mount,
+  so the rule's three only over-reserves there). A step the rule refuses
   waits while the volume checkpoints, when a checkpoint would free
   segments, or cleans, and answers `enospc` when neither can make room;
   an `fsync` whose record it refuses takes a checkpoint instead.
@@ -1164,56 +1293,52 @@ want of room (F2-R8).
 
 ### The cleaner
 
-The cleaner is steps of the volume process. When free segments fall
+The cleaner is steps of the volume process. When free sections fall
 below `need + 6`, the volume runs cleaning steps between requests; when
 the rule refuses a request, the request waits while cleaning runs first
-(foreground cleaning).
+(foreground cleaning). The cleaner works in sections, whatever their
+size, so a volume of another writer with several segments per section
+(`mkfs.f2fs -s` makes them, and eight of syzkaller's sixteen seeds have
+two) is cleaned as erXos's own are.
 
-The cleaner, the room rule and the logs treat a segment as a section, as
-erXos's format makes one segment per section. A volume of another
-writer with more than one segment per section (`mkfs.f2fs -s` makes
-them, and eight of syzkaller's sixteen seeds have two) therefore mounts
-read-only, with a log line naming the count, as a volume whose main area
-leaves the cleaner no room does ([The space a volume
-offers](#the-space-a-volume-offers)); Linux accepts such a volume within
-the rules of [F 54].
-
-* **Victim**: the **closed** segment, one that is neither free nor any
+* **Victim**: the **closed** section, one that is neither free nor any
   log's, with the fewest valid blocks, whether its log filled it or left
-  it part written (greedy, [R 84]); segments are sections, since the
-  format makes one segment per section. A prefree segment, closed with no
-  valid block, needs no move: a checkpoint frees it.
-* **Move**: the step needs the victim's valid blocks and its summary; a
+  it part written (greedy, [R 84]). It stays the victim in progress until
+  it is empty. A prefree section, closed with no valid block, needs no
+  move: a checkpoint frees it.
+* **Move**: the step needs the valid blocks of one segment of the victim
+  and that segment's summary; a
   data block is live when the dnode its summary names still holds its
   address at the summary's index, and a node block when the NAT still
   maps its nid there ([R 80]). Each live data block is written to a free
-  block of the cold data log and, once answered, installed with
+  block of the cold data log (the warm data log on a two-log mount)
+  and, once answered, installed with
   `set_slot`, which dirties its dnode; each live node block is marked
   dirty, so the next checkpoint writes it afresh, as Linux's cleaner
   re-dirties nodes ([R 81]). The victim, emptied, becomes prefree, and
-  free at the next checkpoint's commit ([R 82]).
-* **Freeing**: when cleaning has emptied segments that are still
+  free at the next checkpoint's commit ([R 82]), which discards it.
+* **Freeing**: when cleaning has emptied sections that are still
   prefree, it asks for a checkpoint.
 
-One step moves one victim, at most 512 blocks, so requests run between
-steps. Cost-benefit victim choice for background cleaning ([R 84]) is
+One step moves the live blocks of one segment of the victim, at most 512
+blocks, whatever the section's size, so requests run between steps. Cost-benefit victim choice for background cleaning ([R 84]) is
 left for a measurement to ask for ([Performance](#performance)).
 
 **Why a victim exists.** No step but a cleaning step or a checkpoint
-takes more than one free segment: a write is split so, and a record's
+takes more than one free section: a write is split so, and a record's
 nodes are held within the charge. So when the rule refuses such a step,
-fewer than `need + 4` free segments remain,
-at most nine, and the six logs hold six more, so at least M - 15
-segments are closed, holding
+fewer than `need + 4` free sections remain,
+at most nine, and the six logs hold six more, written or not, so at
+least M - 15 sections are closed, holding
 every valid block outside the logs. Valid blocks number at most
-(M - 16) x 512, fewer than M - 15 full segments hold, so some closed
-segment has an invalid block, and the greedy victim gains at least one;
+(M - 16) x B, fewer than M - 15 full sections hold, so some closed
+section has an invalid block, and the greedy victim gains at least one;
 the format's 2 % overprovisioning raises that gain to about ten blocks
 on large volumes. Each cleaning-and-checkpoint round frees the victim's
-segment and writes its valid blocks, and the dnodes their moves dirty,
-into the logs' free tails, taking a free segment only when a tail runs
-out, so the rounds gain free segments on balance whenever the victims'
-valid blocks and dirtied dnodes average less than a segment. That holds
+section and writes its valid blocks, and the dnodes their moves dirty,
+into the logs' free tails, taking a free section only when a tail runs
+out, so the rounds gain free sections on balance whenever the victims'
+valid blocks and dirtied dnodes average less than a section. That holds
 for every pattern but the most fragmented, where each moved data block
 dirties a dnode of its own; there the volume answers `enospc` before it
 is full, which loses nothing, and the property tests of
@@ -1278,7 +1403,7 @@ nothing above the callback module changes.
   a write or flush failed.
 * **The inspector.** The volume publishes its state at the storage
   domain's inspection paths: the committed version and flags, the counts,
-  free and prefree segments, `need` and the epoch's charge, the orphans,
+  free and prefree sections, `need` and the epoch's charge, the orphans,
   and the last mount's recovery: chain length, records replayed, blocks
   copied, orphans freed and the mount checkpoint's version.
 
@@ -1380,15 +1505,37 @@ of the medium. It is the same Erlang the guest runs, so the format has
 one implementation; F2FS in fsimg would be a second, and would need the
 clean room's facts too.
 
-* **Geometry.** Blocks of 4096 bytes, segments of 512, one segment per
-  section and per zone; segment 0 at block 512 of the partition, so the
-  first 2 MiB hold the two superblocks, as `mkfs.f2fs` places it
-  ([T 11]); the checkpoint area 2 segments; the SIT and NAT copies sized
-  as [T 12] gives, the SIT bitmap moving to payload blocks when it passes
-  3836 bytes ([F 23]); the SSA one block per main segment and one more,
-  in whole segments ([F 17]). The reserve: `rsvd_segment_count` 8, and
-  overprovisioning of the larger of 16 segments and 2 % of the main
-  area, rounded up ([Space](#space-and-the-cleaner));
+* **Section.** S segments per section and one section per zone, where S
+  is the medium's allocation unit in 2 MiB segments, rounded up, at
+  least 1 and at most 8, and at most the partition's segments over 256,
+  so that the 16 sections the cleaner reserves stay within a sixteenth
+  of the partition. The unit is the `erase_unit` the installation passes
+  in `Options`, which it knows when it reads the card the guest reported
+  or the operator gives it, and 4 MiB otherwise, the size Bergmann found
+  most common ([The medium under the volume](#the-medium-under-the-volume));
+  an image built once for every card takes the default. So the vault's
+  64 MiB and the data partition's 128 MiB as packed have one-segment
+  sections, and a data partition grown to the rest of a card of a few
+  GiB has the card's unit, up to 16 MiB. A larger unit costs reserve:
+  16 sections of 16 MiB are 256 MiB.
+* **Geometry.** Blocks of 4096 bytes, segments of 512; segment 0 at the
+  first absolute section boundary of the medium at or past the
+  partition's start plus 8 KiB, as `mkfs.f2fs` places it at a zone
+  boundary of the device, not of the partition ([F 16]), so the two
+  superblocks fit before it: on the data partition, which starts at
+  590 MiB ([abi/medium.txt](../abi/medium.txt)), segment 0 is 2 MiB in,
+  at 592 MiB, a 16 MiB boundary, whatever S is, and in general the gap
+  is at most one section.
+  `Geometry` carries the partition's start on the medium for this. The
+  checkpoint area 2 segments; the SIT and NAT copies sized as [T 12]
+  gives, the SIT bitmap moving to payload blocks when it passes 3836
+  bytes ([F 23]); the SSA one block per main segment and one more
+  ([F 17]); the four areas padded together to whole sections, as
+  `mkfs.f2fs` pads them to a zone ([T 12]), so the main area starts on an
+  absolute section boundary and every section covers whole units. The
+  reserve: `rsvd_segment_count` 8 sections, and overprovisioning of the
+  larger of 16 sections and 2 % of the main area, rounded up to sections
+  ([Space](#space-and-the-cleaner));
   `user_block_count` is the main area less the overprovisioned segments.
   These satisfy every check of [F 55] and [T 47-48]. The smallest
   partition the format takes has 20 main segments, so that a volume holds
@@ -1468,7 +1615,9 @@ it fails any partition that holds no volume.
 | a structure fails its checks while serving | the codec | the volume; the operation changed nothing | none; `FSCK` is set in later checkpoints | `eio` for the operation; a log line naming the block |
 | the mount's checks or replay fail | `erx_f2fs_mount` | the medium as it was; nothing written | none on erXos; the partition is repaired with `fsck.f2fs`, or mounted once by Linux, elsewhere | `eintegrity`; the storage domain stays ended after its restarts, never formatted |
 | the SIT, the footprint or replay passes the mount's allowance | the mount's admission | the medium as it was; nothing written | none on erXos; the chain is replayed by Linux elsewhere, or the grant is resized | `enomem` and a log line naming the allowance; the storage domain stays ended after its restarts, never formatted |
-| another writer's volume leaves its mount checkpoint no room, or has a main area of 16 segments or fewer or more than one segment per section | the mount's room check; the space a volume offers; the cleaner | the medium as it was | none | a read-only mount and a log line naming the shortfall |
+| another writer's volume leaves its mount checkpoint no room, or has a main area of 16 sections or fewer | the mount's room check; the space a volume offers | the medium as it was | none | a read-only mount and a log line naming the shortfall |
+| a discard fails | the window's answer | the durable view: a discarded section is free in it | as for a failed write | as for a failed write |
+| the volume's sections do not cover the medium's reported unit whole | the mount, from the window's `erase_unit` | everything | none | a log line and the inspector naming both sizes; the volume writes as usual |
 | the volume is full | the space check | everything | the cleaner, when invalid blocks can be reclaimed | `enospc` |
 | the room rule holds a request back | the step's room check | everything | the cleaner and checkpoints | the request waits; `enospc` only when the space check fails or no victim gains |
 | the volume process crashes | its supervisor | the durable view | as for a failed write | as for a failed write |
@@ -1743,7 +1892,12 @@ The harness runs the core and the volume process over the recording test
 window and, for each prefix of a workload's requests, makes the states a
 cut can leave: every write answered before the last answered flush kept,
 and each later write kept, lost or torn at a sector boundary, which
-covers every order in which the medium may complete them. It enumerates
+covers every order in which the medium may complete them. A run of
+several blocks is, to the harness, one write per block, each kept, lost
+or torn on its own, since the medium may complete a multi-block request
+in part. A discard sent after the last answered flush leaves each sector
+of its range reading as its old bytes, zeros, or a fill no write makes,
+in every state made after it was sent. It enumerates
 every subset of up to ten unflushed writes, and each with one kept write
 torn at each of its sector boundaries, and samples beyond ten. Each state
 is mounted read-only and then read-write and checked against the crash
@@ -1776,7 +1930,9 @@ schedule made the writes.
 | a cut during the mount checkpoint replays the same again | a replayed block in a segment valid at the checkpoint adopted, and its SSA block rewritten |
 | a cut after a large truncate's checkpointed step, then an extension, reads zeros | the size raise without its truncate |
 | no stale block after a cut | an address installed before its write is answered |
-| freed blocks stay until the commit is durable | prefree segments freed at the last block's write, before its flush |
+| freed blocks stay until the commit is durable | prefree sections freed at the last block's write, before its flush |
+| a discard reaches only sections free in the durable view | the freed sections discarded at the last block's write, before its flush |
+| a run never carries a block past the flush it must follow | a record's two phases sent as one run, the commit block with its dnodes |
 | no stale chain after a crash and a mount | the mount checkpoint skipped when nothing was replayed |
 | a rename made durable by an `fsync` survives a cut, over generated workloads | the record decision's rename fact ignored: the record replays the file under its old name, which no allowed state holds |
 
@@ -2002,7 +2158,7 @@ mount:
 seeds with no feature or `extra_attr` alone mount read-write and take the
 profiles' workloads; those with the R features mount read-only; those
 with `encrypt` are refused naming `ENCRYPT`; the `-s 2` seeds mount
-read-only with a line naming the two segments per section
+as the others with their features do, cleaned in two-segment sections
 ([The cleaner](#the-cleaner)). Fuchsia's image is refused naming
 `ENCRYPT` and `VERITY`; a copy with those bits cleared, its superblock
 checksum fixed if it has one, mounts read-only, and its plain subtrees
@@ -2095,7 +2251,25 @@ inputs, each paired with the seeded fault it must catch:
 | a read-only mount writes nothing, over a window that fails every write | a read-only mount that writes its mount checkpoint |
 | the walk on a looped chain fails within its bound | the bound removed |
 | filling and churning at every format size keeps `need` covered and the cleaner freeing segments | victims restricted to full segments |
-| repeated mounts of a busy volume keep the room rule | the mount checkpoint moving every log to a free segment |
+| repeated mounts of a busy volume keep the room rule | the mount checkpoint moving every log to a free section |
+| the format's S for every unit from 16 KiB to 64 MiB and every partition from 56 MiB to 64 GiB is the section rule's, and its main area starts on an absolute section boundary for partitions starting at 525 and 590 MiB | segment 0 placed from the partition's start rather than the medium's, which misaligns both partitions |
+| filling and churning with sections of 1, 2, 4 and 8 segments keeps `need` covered and the cleaner freeing sections, no step moving more than 512 blocks | a step that moves the whole victim |
+| on a two-log mount every block written lands in the warm node or warm data log, and the other four logs keep their positions through every workload | a directory's dnode placed in the hot node log |
+| a phase's runs cover exactly its blocks, each run contiguous, at most `max_sectors` and within one phase | two blocks one block apart merged into a run |
+| after each commit exactly the sections it freed are discarded, in requests within the window's `discard`, and none on a window whose `discard` is `none` | a section freed by the epoch's cleaning discarded before the commit |
+
+The oracle guest settles what the facts records leave open about
+sections and logs: erXos's images with 2, 4 and 8 segments per section,
+written and churned by erXos, pass `fsck.f2fs` and Linux's mount, and
+Linux churns them in turn; a two-log image, with directory and indirect
+nodes in the warm node log, passes `fsck.f2fs`, Linux replays its
+records, and Linux then writes all six logs and `fsck.f2fs` still
+passes; `mkfs.f2fs -s 2` and `-s 4` images mount read-write in erXos and
+churn to full; and Linux mounted with `active_logs=2` is observed to
+write its fsync chain to the warm node log, which [R 49] implies and no
+record states. A seeded fault proves the two-log check runs: the chain
+written to the hot node log on a two-log mount, which Linux's replay
+then misses.
 
 ## Performance
 
@@ -2109,7 +2283,18 @@ watch list ([todo-performance.md](todo-performance.md)):
   the whole block out of place, so a stream of short appends rewrites its
   last block each time;
 * the volume process carries every block request and its answer, at 4 KiB
-  per request on virtio;
+  per request on virtio and 32 KiB on an SD card, each phase's
+  contiguous blocks merged into runs;
+* on the Pi's card: whether a section the size of the card's unit beats
+  one-segment sections, whether two logs beat six, what each discard
+  costs, the commit block's rewrite over its pre-image, a backward
+  write a card's controller may handle worst, and the scattered NAT and
+  SIT blocks each checkpoint writes in the metadata area, which journals
+  or a per-file write buffer would turn into fewer writes
+  ([Alternatives considered](#alternatives-considered)); the card
+  profile and the comparison with Linux's F2FS on the same card in
+  [todo-performance.md](todo-performance.md) settle the section size
+  and the number of logs;
 * checkpoint cost: whole NAT and SIT blocks for every changed entry, with
   no journals, a checkpoint per timer tick while anything is dirty, and a
   checkpoint whenever the epoch's charge reaches its 512 blocks;
@@ -2118,7 +2303,7 @@ watch list ([todo-performance.md](todo-performance.md)):
   checkpoint's rewrite of every replayed node, and the copies a Linux
   chain can need;
 * the cleaner's overhead at high utilisation with greedy choice alone,
-  and the overprovisioning;
+  with two logs on an SD card, and the overprovisioning of 16 sections;
 * memory: the SIT, about 150 bytes a segment, 4.6 MiB for 64 GiB, the
   caches' bounds and the freed generations.
 
@@ -2146,10 +2331,26 @@ watch list ([todo-performance.md](todo-performance.md)):
   summaries; rewriting replayed nodes, and copying the rare data block
   whose summary the old checkpoint still needs, makes a cut during
   recovery harmless.
-* **Every log moved to a free segment at the mount checkpoint.**
+* **Every log moved to a free section at the mount checkpoint.**
   Rejected: the touched rule already keeps the mount checkpoint off the
-  chain, and six moves per mount would strand part-written segments and
-  take the free segments the cleaner and later checkpoints need.
+  chain, and six moves per mount would strand part-written sections and
+  take the free sections the cleaner and later checkpoints need.
+* **One-segment sections on every medium.** Rejected: on a card whose
+  allocation unit is 4 MiB, a cleaned 2 MiB section frees half a unit,
+  and the card copies the other half when the section is written again;
+  sections the size of the unit cost only a larger reserve, which the
+  format keeps within a sixteenth of the partition.
+* **Six logs on every medium.** Rejected for SD cards: a card that keeps
+  two units open closes and reopens them under six streams, the pattern
+  Bergmann measured at 33 KB/s; six logs stay where the medium takes
+  them.
+* **Merging writes in the block service's window.** Rejected: the window
+  would have to hold a request back to wait for its neighbour, and it
+  does not know where a flush must fall; the volume's phase is a set
+  whose runs it already knows.
+* **Medium-specific formats.** Rejected: the number of logs is a write
+  policy each mount chooses, not on the medium, so a card's volume moved
+  to another medium needs no conversion.
 * **A mount mode without roll-forward**, as `norecovery`. Rejected: a
   read-only mount that replays in memory writes nothing either, and shows
   the acknowledged `fsync`s; one mount path serves both, a trial's
@@ -2197,6 +2398,20 @@ watch list ([todo-performance.md](todo-performance.md)):
   guest as a disk, and Linux's back out as one; running erXos's F2FS
   inside the guest leaves one input disk and the serial log.
 
+## Open decisions
+
+1. **Two logs or three on an SD card.** A third log, cold data for the
+   cleaner's moves alone, would keep data that survived cleaning apart
+   from new data, the separation the F2FS paper credits for cleaning
+   efficiency (section 3.2.3), at the cost of a third open unit while the
+   cleaner runs. Recommendation: two, Linux's own smallest mode, until
+   the card profile shows the Pi's cards keep three or more units open
+   and the comparison shows two logs cleaning measurably more.
+2. **The default section of an image built for every card.**
+   Recommendation: 4 MiB, the size Bergmann found most common, until the
+   card profile reads the units of the cards erXos is tested on; a
+   larger default costs every volume a larger reserve.
+
 ## Risks
 
 | Risk | Likelihood | Impact | Mitigation |
@@ -2205,6 +2420,8 @@ watch list ([todo-performance.md](todo-performance.md)):
 | A Linux chain shape the records do not describe | low | a replay that fails the mount | the mount fails safely; the oracle's dirty Linux images exercise replay |
 | Linux, extending a file, reads the nodes a cut left mapped past its size | low | after a cut between a large truncate's steps, the file's old bytes in Linux's extension of it | the nodes-past-a-size probe settles it; if Linux reads them, a large truncate frees from the file's end and lowers the size at each step, so no checkpoint commits a slot past a size |
 | A medium that tears within a sector | low | a torn commit block or superblock | the storage design's sector assumption; recorded with the block driver's residual |
+| A cheap card keeps fewer than two units open, as some of Bergmann's did | medium | two logs alternate, and writes fall to tens of KB/s | the card profile of [todo-performance.md](todo-performance.md) measures the open-unit limit before G13; a card below two is a reason to revisit the file system, recorded with the measurement |
+| A card's unit is larger than 16 MiB, or the image's default 4 MiB is not the card's | medium | a cleaned section frees part of a unit, and the card copies the rest | the mount names both sizes; the installation passes the card's unit when it knows it; the measurement compares section sizes |
 | SD cards that ignore flushes | medium | any ordering lost on the Pi | recorded with the block driver's residual; the Pi's half of G13 measures it |
 | Two flushes and a pre-image per `fsync` too slow | medium | commit latency at G13 | the measurement decides; group commit across waiting `fsync`s and a forced-unit-access write are the fixes on the table |
 | A fragmented volume whose cleaner cannot gain | low | `enospc` before the volume is full | the property tests measure it at every format size; the overprovisioning is the knob |
@@ -2234,7 +2451,20 @@ watch list ([todo-performance.md](todo-performance.md)):
   `contrib/pjdfstest/LICENSE` and the header of
   `tools/regression/fsx/fsx.c`.
 * Lee, Sim, Hwang, Cho, "F2FS: A New File System for Flash Storage",
-  FAST '15, the model the format serves.
+  FAST '15, the model the format serves; its sections 2.4 and 3.2.3 on
+  the number of logs. Read as
+  `https://www.usenix.org/system/files/conference/fast15/fast15-paper-lee.pdf`
+  (SHA-256 `d7c9c676720e7c4522f974c5495a89d4570c1653688438c0ada158b08c4baccb`).
+* Linux v6.18's `Documentation/filesystems/f2fs.rst`, documentation
+  only, from git.kernel.org (SHA-256
+  `7dfc49f2166142152db2065c0466b3ddf01652192ec38f024ee3d9818173003c`):
+  the `discard`, `active_logs` and `discard_unit` options (l.129-139,
+  l.348-355), the on-disk layout (l.545-560) and Default Block
+  Allocation (l.785-790).
+* Arnd Bergmann, "Optimizing Linux with cheap flash drives", LWN,
+  2011-02-18, https://lwn.net/Articles/428584/, section "Pages, erase
+  blocks and segments" (SHA-256 of the page read
+  `ad4f19b8af5609f3a2462b668ed8a06f038907bb63e84bc37d988ac603df9923`).
 * [design-storage.md](design-storage.md), [design-files.md](design-files.md),
   [design-system.md](design-system.md#shutting-down),
   [plan.md](plan.md#m13-erxoss-f2fs).

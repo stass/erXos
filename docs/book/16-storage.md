@@ -19,7 +19,8 @@
 > commit, the reset count, the vault's storage domain, drives, whose
 > FAT and EROFS volumes the media domain serves at `/media`, checking
 > and repairing a drive's FAT volume with `fsck_fat` over its raw sectors,
-> and erXos's F2FS as a mounted file system with its power-cut harness.
+> erXos's F2FS as a mounted file system with its power-cut harness and
+> its sections fitted to the card, and the SD driver's discard.
 
 **Background needed.** [Chapter 1](01-operating-systems.md) (block
 devices, file systems, journals), [chapter 10](10-domains.md)
@@ -456,6 +457,31 @@ catch, such as a record's first flush dropped ([design-f2fs.md, The
 power-cut harness](../design-f2fs.md#the-power-cut-harness)). The
 harness is designed and not built.
 
+### 16.4.4 Fitting the card
+
+An SD card is flash behind a small controller that maps and erases in
+large **allocation units**, often 4 MiB, keeps only a few of them open
+for writing at once, and is fastest when each unit is written from start
+to end. F2FS's own unit of cleaning is the **section**, a run of 2 MiB
+segments, and the design makes the section the one unit in which the
+volume meets the card
+([design-f2fs.md, The section is the medium's
+unit](../design-f2fs.md#the-section-is-the-mediums-unit)). The format
+sizes a section to the card's allocation unit and starts every section
+on one; each log fills a whole section before it takes another; the
+cleaner empties whole sections; and when a checkpoint frees a section,
+the volume tells the card with a **discard**, so the card learns of a
+whole free unit. The card also says how many logs to write: six
+streams would make a card that keeps two units open close and reopen
+them, so on an SD card the volume writes two, one for nodes and one for
+data, while every checkpoint still names the six that Linux's format
+requires. The price is cleaning: data of different lifetimes share a
+log, so a section the cleaner empties holds more live blocks. Writes
+that lie next to each other on the medium travel as one request. A
+measurement on the Pi's own card, against Linux's F2FS on the same card,
+chooses the section size and the number of logs. This is designed and
+not built.
+
 ## 16.5 FAT, drives and the SD controller
 
 ### 16.5.1 FAT
@@ -600,7 +626,10 @@ and one table lists the identification commands, so one table and one
 module decide what reaches the card. The driver and its fuzz target
 are built; on a 4 GB board `/data`
 survives a power cycle. Moving data by DMA through the controller's
-descriptor tables is designed and not built.
+descriptor tables is designed and not built, and so is the discard
+that tells the card a range is free: an erase of at most one
+allocation unit, which the driver builds, like every write, after the
+trial check. The card's own write cache stays off.
 
 ## 16.6 Updates through two slots
 
