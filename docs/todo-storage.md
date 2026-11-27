@@ -924,3 +924,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   admits at any length up to the medium's end (docs/design-storage.md, "The boot medium's table"), and grow the
   littlefs volume. It needs its own design first: who may write the table (only the slot writer writes the
   record and slots today), how a power cut midway is recovered, and how littlefs grows in place.
+* [Medium] storage, F2FS read-write volume review residuals: a mount checkpoint that does not fit fails
+  the mount with eio rather than mounting read-only (design-f2fs.md, "Read-write mounts"); writes leave
+  the qid version and data_version 0; the volume keeps a stand-in for the room rule (at most 512 dirty
+  nodes an epoch, three free sections left after a write's claim, else a checkpoint first or enospc),
+  not the epoch's charge; unmount writes an ordinary checkpoint, without UMOUNT or the node summaries,
+  and the design's `checkpoint(Volume, #{freeze := boolean()})` is not built; the write move's
+  allocation and pairing sit in erx_f2fs_volume rather than the pure step; `place_block/5` digs the
+  direct node out of find_slot's decoded map; erx_f2fs_plan's `ino/2` copies erx_f2fs_core's; the walk
+  reruns the whole mount per block it reads; no tests yet for the enotsup refusals, the short write,
+  the tail block's zeros past the size, or a write or flush failure ending the volume
+  ([design-f2fs.md](design-f2fs.md#operations)).

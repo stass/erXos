@@ -57,6 +57,14 @@ checkpoint whole, and the restart mounts it.
 -define(CACHE_BLOCKS, 1024).
 %% The log a write's blocks are claimed in (docs/design-f2fs.md, "Scope: features and forms").
 -define(WARM_DATA, 1).
+%% The dirty nodes an epoch holds at most, so a cut checkpoint leaves no
+%% more than the walk's 512 matching blocks (docs/design-f2fs.md, "The
+%% walk"); the nodes one write step dirties at most, its inode and a
+%% direct node; and the free sections a write leaves the checkpoint after
+%% it, one for each log that checkpoint writes and one more.
+-define(EPOCH_NODES, 512).
+-define(WRITE_NODES, 2).
+-define(CHECKPOINT_SECTIONS, 3).
 
 %% The blocks a request's steps may use: the cache's, by address, the
 %% order they joined it in, oldest first, and how many it keeps.
@@ -157,7 +165,7 @@ refused({error, {walk, {chain, Start, Ino}}}) ->
                  "replays the chain and writes a checkpoint", [Start, Ino]),
     eintegrity;
 refused({error, {walk, long}}) ->
-    logger:error("f2fs: the volume's chain is longer than erXos replays; mount it once in "
+    logger:error("f2fs: the volume holds more than 512 matching node blocks after its checkpoint; mount it once in "
                  "Linux, which replays the chain and writes a checkpoint"),
     eintegrity;
 refused({unread, _Runs}) ->
@@ -170,7 +178,7 @@ refused({error, Failure}) ->
 
 -doc false.
 handle_call(unmount, _From, #{core := _} = State) ->
-    case checkpoint(State) of
+    case committed(State) of
         {ok, Committed} -> {stop, normal, ok, Committed};
         {error, eio} -> {stop, eio, {error, eio}, State}
     end;
@@ -204,26 +212,14 @@ moved({failed, Nid, Failure}, State) ->
     logger:error("f2fs: node ~b failed a check: ~0p", [Nid, Failure]),
     {{error, eio}, State};
 moved(checkpoint, State) ->
-    case checkpoint(State) of
+    case committed(State) of
         {ok, Committed} -> {ok, Committed};
         {error, eio} -> {ended, {error, eio}, State}
     end;
-moved({write, Ino, Placed, Size, Reply}, #{core := Core} = State) ->
-    {Blocks, Bytes} = lists:unzip(Placed),
-    case erx_f2fs_core:allocate(Core, ?WARM_DATA, length(Placed)) of
-        {error, enospc} ->
-            {{error, enospc}, State};
-        {ok, Addresses, Claimed} ->
-            Writes = lists:zip(Addresses, Bytes),
-            case written(Writes, State) of
-                {ok, State1} ->
-                    Time = erlang:system_time(nanosecond),
-                    Set = fun(Given) -> erx_f2fs_core:write(Claimed, Ino, lists:zip(Blocks, Addresses),
-                                                            Size, Time, Given) end,
-                    installed(Set, Reply, State1);
-                {error, eio} ->
-                    {ended, {error, eio}, State}
-            end
+moved({write, _Ino, _Placed, _Size, _Reply} = Write, State) ->
+    case uncrowded(State) of
+        {ok, Roomy} -> claimed(Write, Roomy);
+        {error, eio} -> {ended, {error, eio}, State}
     end;
 moved({then, Step}, #{cache := #{blocks := Cached} = Cache} = State) ->
     Reader = reader(State),
@@ -232,6 +228,48 @@ moved({then, Step}, #{cache := #{blocks := Cached} = Cache} = State) ->
     case Move of
         {unread, _Runs} -> {{error, eio}, State1};
         _ -> moved(Move, State1)
+    end.
+
+%% State, checkpointed first when a write step's nodes would pass the
+%% epoch's bound or only a checkpoint's sections are left.
+uncrowded(#{core := Core} = State) ->
+    #{nodes := Dirty} = erx_f2fs_core:epoch(Core),
+    case length(Dirty) + ?WRITE_NODES > ?EPOCH_NODES orelse
+        length(erx_f2fs_core:free_sections(Core)) =< ?CHECKPOINT_SECTIONS of
+        true -> checkpoint(State);
+        false -> {ok, State}
+    end.
+
+%% A checkpoint when the epoch changed anything, else nothing to write.
+committed(#{core := Core} = State) ->
+    case erx_f2fs_core:epoch(Core) of
+        #{nodes := [], dentries := []} -> {ok, State};
+        #{} -> checkpoint(State)
+    end.
+
+%% A write's blocks claimed in the warm data log, unless the claim would
+%% leave the checkpoint after it too few free sections (enospc), written,
+%% then set in their slots.
+claimed({write, Ino, Placed, Size, Reply}, #{core := Core} = State) ->
+    {Blocks, Bytes} = lists:unzip(Placed),
+    case erx_f2fs_core:allocate(Core, ?WARM_DATA, length(Placed)) of
+        {ok, Addresses, Claimed} ->
+            case length(erx_f2fs_core:free_sections(Claimed)) < ?CHECKPOINT_SECTIONS of
+                true -> {{error, enospc}, State};
+                false -> placed(Ino, lists:zip(Blocks, Addresses), Bytes, Size, Reply, Claimed, State)
+            end;
+        {error, enospc} ->
+            {{error, enospc}, State}
+    end.
+
+placed(Ino, Placed, Bytes, Size, Reply, Claimed, State) ->
+    case written(lists:zip([A || {_, A} <- Placed], Bytes), State) of
+        {ok, State1} ->
+            Time = erlang:system_time(nanosecond),
+            installed(fun(Given) -> erx_f2fs_core:write(Claimed, Ino, Placed, Size, Time, Given) end,
+                      Reply, State1);
+        {error, eio} ->
+            {ended, {error, eio}, State}
     end.
 
 %% A write's second step: Set, the core's write over the blocks read so
@@ -281,7 +319,8 @@ written(Writes, #{window := Window, max_blocks := MaxBlocks, cache := Cache} = S
         [] ->
             #{blocks := Blocks} = Cache,
             Cached = lists:foldl(fun({Address, Block}, Acc) -> Acc#{Address => Block} end, Blocks, Writes),
-            {ok, State#{cache := trimmed(Cache#{blocks := Cached}, [A || {A, _} <- Writes])}};
+            Added = [A || {A, _} <- Writes, not is_map_key(A, Blocks)],
+            {ok, State#{cache := trimmed(Cache#{blocks := Cached}, Added)}};
         Failed ->
             logger:error("f2fs: writing blocks failed, {first, count} each: ~0p", [Failed]),
             {error, eio}

@@ -37,8 +37,8 @@ write's answer, naming the bytes they take, so a write may be short. The volume 
 writes them and sets them in their slots. An fsync answers the move
 checkpoint. A write into an inline file, one that starts past the block
 holding the size (which needs the truncate that raises a size) or one
-whose slot no node holds yet, an open for truncation and the other
-mutations answer enotsup until the operations that do them land.
+whose slot no node holds, an open for truncation or for appending and
+the other mutations answer enotsup.
 
 A readdir's entry offset is the position past the entry's first slot,
 where the next call resumes ("Directories"); "." is listed with the
@@ -191,7 +191,7 @@ opened(Nid, Kind, Flags, Writable) when Flags band ?ERX_P9_O_ACCMODE =/= 0;
     case {Kind, Writable} of
         {directory, _} -> {error, eisdir};
         {_, false} -> {error, erofs};
-        _ when Flags band ?ERX_P9_O_TRUNC =/= 0 -> {error, enotsup};
+        _ when Flags band (?ERX_P9_O_TRUNC bor ?ERX_P9_O_APPEND) =/= 0 -> {error, enotsup};
         _ -> {ok, Nid}
     end;
 opened(Nid, _Kind, _Flags, _Writable) -> {ok, Nid}.

@@ -651,11 +651,11 @@ a_write_survives_fsync_unmount_and_every_cut_test_() ->
              ?assertEqual(New, contents(Volume, Handle)),
              ?assertEqual(ok, erx_f2fs_volume:unmount(Volume)),
              {After, Journal} = gen_server:call(Device, journal),
-             ?assertEqual(V0 + 3, version(After)),
+             ?assertEqual(V0 + 2, version(After)),
              ?assertEqual(New, file_on(After, Path)),
              cuts(Medium, Journal, fun(Crashed) ->
                                            V = version(Crashed),
-                                           ?assert(V >= V0 andalso V =< V0 + 3),
+                                           ?assert(V >= V0 andalso V =< V0 + 2),
                                            Expected = case V >= V0 + 2 of
                                                           true -> New;
                                                           false -> Old

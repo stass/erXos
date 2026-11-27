@@ -966,8 +966,9 @@ replace(List, Index, Value) ->
 -doc """
 The volume as State holds it, for reads (docs/design-f2fs.md, "Inodes"):
 its tables, its dirty nodes and its summaries, which a read takes for a
-segment they hold over the pack's and the SSA's. No operation leaves a
-dentry block dirty between requests yet, so the view holds none.
+segment they hold over the pack's and the SSA's. Only a checkpoint makes
+a dentry block dirty, and it commits it, so between requests the state
+holds none and the view takes none.
 """.
 -spec view(state()) -> volume().
 view(#state{volume = Volume, nodes = Nodes, summaries = Summaries, dentries = Dentries})

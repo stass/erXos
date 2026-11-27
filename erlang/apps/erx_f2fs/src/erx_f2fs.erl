@@ -7,8 +7,8 @@ The erx_fs callback module of an F2FS volume (docs/design-f2fs.md, "The
 interface"): every callback of erx_fs, each one call to the volume
 process, erx_f2fs_volume, which answers it, so nothing is kept in the
 grant that calls it. The tree's handle is the volume's pid; a node is a
-nid and a handle the open node's nid. The volume is read-only, so every
-mutation answers erofs from it; xattr answers enotsup here, as the design
+nid and a handle the open node's nid. A read-only volume answers every
+mutation erofs, a read-write one those it does not offer enotsup; xattr answers enotsup here, as the design
 states for every volume. clunk has nothing to release.
 """.
 -behaviour(erx_fs).
@@ -59,7 +59,8 @@ statfs(Volume) -> erx_f2fs_volume:call(Volume, statfs).
 -spec clunk(nid(), pid()) -> ok.
 clunk(_Handle, _Volume) -> ok.
 -doc false.
--spec write(nid(), non_neg_integer(), binary(), pid()) -> error().
+-spec write(nid(), non_neg_integer(), binary(), pid()) ->
+          {ok, non_neg_integer(), non_neg_integer()} | error().
 write(Handle, Offset, Bytes, Volume) -> erx_f2fs_volume:call(Volume, {write, {Handle, Offset, Bytes}}).
 -doc false.
 -spec make(nid(), binary(), erx_fs:what(), pid()) -> error().
