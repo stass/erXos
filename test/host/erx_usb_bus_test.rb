@@ -24,6 +24,7 @@ class ErxUsbBusTest < Minitest::Test
     test/erlang/stand_in/erx_connections.erl
     test/erlang/stand_in/erx_usb_hid.erl
     test/erlang/erx_usb_desc_tests.erl
+    test/erlang/erx_fault_plan.erl
     test/erlang/erx_usb_fake_stick.erl
     test/erlang/erx_usb_fake_xhci.erl
     test/erlang/erx_usb_bus_tests.erl

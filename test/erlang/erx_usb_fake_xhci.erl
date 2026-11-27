@@ -30,14 +30,15 @@ and puts there the thing the test asked to come back in its place, if any,
 with no connection change: a device that answers its reset as another.
 
 The test plugs and unplugs things, fails a hub's next status transfer,
-plants a fault in a stick, has a thing come back as another at its next
-port reset, or makes a request kind fail, with the calls below.
+plants an erx_fault_plan rule in a stick, wedges a stick, has a thing come
+back as another at its next port reset, or makes a request kind fail, with
+the calls below.
 """.
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/1, init/3, plug/3, unplug/2, replace/3, fail_status_transfer/2, stick_fault/3, swap_on_reset/3, log/1,
-         bus/1]).
+-export([start_link/1, init/3, plug/3, unplug/2, replace/3, fail_status_transfer/2, stick_fault/3, wedge_stick/2,
+         swap_on_reset/3, log/1, bus/1]).
 
 %% The controller start erx_usb_bus_sup takes. The fake registers as Name before its
 %% start returns, so the test reaches each start by it as soon as the start is done, and
@@ -54,6 +55,7 @@ unplug(Name, Place) -> call(Name, {unplug, Place}).
 replace(Name, Place, Thing) -> call(Name, {replace, Place, Thing}).
 fail_status_transfer(Name, Hub) -> call(Name, {fail_status_transfer, Hub}).
 stick_fault(Name, Place, Fault) -> call(Name, {stick_fault, Place, Fault}).
+wedge_stick(Name, Place) -> call(Name, {wedge_stick, Place}).
 swap_on_reset(Name, Place, Thing) -> call(Name, {swap_on_reset, Place, Thing}).
 log(Name) -> call(Name, log).
 bus(Name) -> call(Name, bus).
@@ -113,6 +115,8 @@ test({fail_status_transfer, Hub}, S = #{failing := Failing}) ->
     {ok, deliver(Hub, S#{failing := [Hub | Failing]})};
 test({stick_fault, Place, Fault}, S) ->
     {ok, put_stick(Place, erx_usb_fake_stick:fault(stick(Place, S), Fault), S)};
+test({wedge_stick, Place}, S) ->
+    {ok, put_stick(Place, erx_usb_fake_stick:wedge(stick(Place, S)), S)};
 test({swap_on_reset, Place, Thing}, S = #{swaps := Swaps}) ->
     {ok, S#{swaps := Swaps#{Place => Thing}}};
 test(log, S = #{log := Log}) ->
@@ -313,6 +317,7 @@ transfer(From, Request = {Bulk, Pipe, _Tag, Payload}, S = #{refs := Refs, world 
             Held = put_stick(Place, Stick, S),
             case Answer of
                 hold -> Held#{held := [{Place, From, Request} | maps:get(held, Held)]};
+                {late, Ms, Late} -> erlang:send_after(Ms, From, erx_usb_pipe:reply(Request, Late)), Held;
                 _ -> From ! erx_usb_pipe:reply(Request, Answer), Held
             end;
         #{} ->

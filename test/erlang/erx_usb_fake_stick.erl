@@ -16,22 +16,32 @@ class reset readies it for a CBW whatever it held, and a transfer out of
 turn stalls. A command that fails answers status 1 and keeps the sense
 REQUEST SENSE reads next.
 
-The test plants faults, each taken by the next transfer it fits:
-`stall_data`, a data phase that stalls and fails its command with MEDIUM
-ERROR, as an unreadable sector; `hold_data`, a data phase left
-unanswered, so the device can be unplugged mid-transfer; and
-`short_csw` and `bad_csw`, a CSW of 12 bytes or with a wrong signature;
-and `wedge`, a stick that stalls that transfer and every bulk transfer
-after it, its class reset and its endpoints' clears notwithstanding,
-until its port is reset (port_reset/1), as a stick only a port reset
-revives.
+The test plants faults as erx_fault_plan rules over four kinds of
+transfer, `cbw`, `data_out`, `data_in` and `csw`, which the stick asks
+at each. It acts them as the controller's answers: `silent` is `hold`,
+the transfer left unanswered with the stick's state where it was, so
+the device can be unplugged mid-transfer; `{late, Ms}` is
+`{late, Ms, Answer}`, the right answer and state, delivered late;
+`{wrong_once, Answer}` replaces the right answer, the state moving on
+as for the right one (a CSW of 12 bytes, or one with a wrong signature);
+`gone` is `{error, gone}`. `{error, Reason}` is `{error, Reason}`, and in
+a data phase it also fails the command with MEDIUM ERROR, as an
+unreadable sector does.
 A stick told to lie about residue (lie_about_residue/1) reports FFFFFFFFh
-as every CSW's residue from then on, as a device that cannot count.
+as every CSW's residue from then on, as a device that cannot count; a
+wedged stick (wedge/1) stalls every bulk transfer, its class reset and
+its endpoints' clears notwithstanding, until its port is reset
+(port_reset/1), as a stick only a port reset revives. Both are
+properties of the device, not faults of one transfer.
 """.
 
 -include("generated/erx_abi.hrl").
 
--export([new/1, lie_about_residue/1, units/1, fault/2, reset/1, port_reset/1, bulk_out/2, bulk_in/2]).
+-export([new/1, lie_about_residue/1, wedge/1, units/1, fault/2, reset/1, port_reset/1, bulk_out/2, bulk_in/2]).
+-export_type([answer/0]).
+
+%% A transfer's answer as the controller gives it, or a fault's form of one (the moduledoc).
+-type answer() :: {ok, binary()} | {error, term()} | hold | {late, non_neg_integer(), answer()}.
 
 -define(BLOCKS, 128).
 -define(BLOCK, 512).
@@ -40,13 +50,16 @@ as every CSW's residue from then on, as a device that cannot count.
 
 new(Units) ->
     #{media => maps:from_keys(lists:seq(0, Units - 1), binary:copy(<<0>>, ?BLOCKS * ?BLOCK)), phase => cbw,
-      sense => {0, 0, 0}, faults => [], wedged => false}.
+      sense => {0, 0, 0}, plan => erx_fault_plan:new([]), wedged => false}.
 
 lie_about_residue(Stick) -> Stick#{residue_lie => true}.
 
+wedge(Stick) -> Stick#{wedged := true}.
+
 units(#{media := Media}) -> map_size(Media).
 
-fault(Stick = #{faults := Faults}, Fault) -> Stick#{faults := Faults ++ [Fault]}.
+%% Stick with Rule, an erx_fault_plan rule, after its other rules.
+fault(Stick = #{plan := Plan}, Rule) -> Stick#{plan := erx_fault_plan:add(Rule, Plan)}.
 
 reset(Stick) -> Stick#{phase := cbw}.
 
@@ -57,46 +70,52 @@ port_reset(Stick) -> Stick#{phase := cbw, wedged := false}.
 %% controller's.
 bulk_out(_Data, Stick = #{wedged := true}) ->
     {{error, stall}, Stick};
-bulk_out(_Data, Stick = #{faults := [wedge | Rest]}) ->
-    {{error, stall}, Stick#{faults := Rest, wedged := true}};
 bulk_out(<<?ERX_USB_BOT_CBW_SIGNATURE:32/little, Tag:32/little, Length:32/little, _Flags, Lun, Size, Block:16/binary>>,
          Stick = #{phase := cbw, media := Media}) when Size >= 1, Size =< 16, is_map_key(Lun, Media) ->
-    {{ok, <<>>}, command(Tag, Length, binary_part(Block, 0, Size), Lun, Stick)};
+    exchange(cbw, Stick, fun(S) -> {{ok, <<>>}, command(Tag, Length, binary_part(Block, 0, Size), Lun, S)} end);
 bulk_out(Data, Stick = #{phase := {data_out, Tag, Length, Lun, Sector}, media := Media}) when byte_size(Data) =:= Length ->
     Offset = Sector * ?BLOCK,
     <<Before:Offset/binary, _Old:Length/binary, After/binary>> = maps:get(Lun, Media),
-    {{ok, <<>>}, Stick#{media := Media#{Lun := <<Before/binary, Data/binary, After/binary>>}, phase := {csw, Tag, 0, 0}}};
+    exchange(data_out, Stick,
+             fun(S) -> {{ok, <<>>}, S#{media := Media#{Lun := <<Before/binary, Data/binary, After/binary>>},
+                                       phase := {csw, Tag, 0, 0}}} end);
 bulk_out(_OutOfTurn, Stick) ->
     {{error, stall}, Stick}.
 
-%% A bulk-IN transfer: a command's data, or its CSW; `hold` leaves it unanswered.
+%% A bulk-IN transfer: a command's data, or its CSW.
 bulk_in(_Length, Stick = #{wedged := true}) ->
     {{error, stall}, Stick};
-bulk_in(_Length, Stick = #{faults := [wedge | Rest]}) ->
-    {{error, stall}, Stick#{faults := Rest, wedged := true}};
-bulk_in(_Length, Stick = #{phase := {data_in, Tag, Bytes, Residue}, faults := Faults}) ->
-    case Faults of
-        [stall_data | Rest] ->
-            {{error, stall}, Stick#{phase := {csw, Tag, byte_size(Bytes) + Residue, 1}, sense := ?MEDIUM_ERROR,
-                                    faults := Rest}};
-        [hold_data | Rest] ->
-            {hold, Stick#{faults := Rest}};
-        _ ->
-            {{ok, Bytes}, Stick#{phase := {csw, Tag, Residue, 0}}}
-    end;
-bulk_in(_Length, Stick = #{phase := {csw, Tag, Residue, Status}, faults := Faults}) ->
+bulk_in(_Length, Stick = #{phase := {data_in, Tag, Bytes, Residue}}) ->
+    exchange(data_in, Stick,
+             fun(S) -> {{ok, Bytes}, S#{phase := {csw, Tag, Residue, 0}}} end,
+             fun(S) -> S#{phase := {csw, Tag, byte_size(Bytes) + Residue, 1}, sense := ?MEDIUM_ERROR} end);
+bulk_in(_Length, Stick = #{phase := {csw, Tag, Residue, Status}}) ->
     Reported = case Stick of
                    #{residue_lie := true} -> 16#ffffffff;
                    #{} -> Residue
                end,
     Csw = <<?ERX_USB_BOT_CSW_SIGNATURE:32/little, Tag:32/little, Reported:32/little, Status>>,
-    case Faults of
-        [short_csw | Rest] -> {{ok, binary_part(Csw, 0, 12)}, Stick#{phase := cbw, faults := Rest}};
-        [bad_csw | Rest] -> {{ok, <<0:32, (binary_part(Csw, 4, 9))/binary>>}, Stick#{phase := cbw, faults := Rest}};
-        _ -> {{ok, Csw}, Stick#{phase := cbw}}
-    end;
+    exchange(csw, Stick, fun(S) -> {{ok, Csw}, S#{phase := cbw}} end);
 bulk_in(_Length, Stick) ->
     {{error, stall}, Stick}.
+
+%% A transfer of Kind, as the plan has it meet the stick: Right(Stick) is the right
+%% answer and the stick after it; Failed(Stick) the stick after an `{error, Reason}`,
+%% which in a data phase fails the command.
+exchange(Kind, Stick, Right) ->
+    exchange(Kind, Stick, Right, fun(S) -> S end).
+
+exchange(Kind, Stick = #{plan := Plan0}, Right, Failed) ->
+    {Fault, Plan} = erx_fault_plan:ask(Kind, Plan0),
+    Asked = Stick#{plan := Plan},
+    case Fault of
+        pass -> Right(Asked);
+        silent -> {hold, Asked};
+        gone -> {{error, gone}, Asked};
+        {error, Reason} -> {{error, Reason}, Failed(Asked)};
+        {late, Ms} -> {Answer, Moved} = Right(Asked), {{late, Ms, Answer}, Moved};
+        {wrong_once, Wrong} -> {Answer, Moved} = Right(Asked), {erx_fault_plan:wrong_answer(Wrong, Answer), Moved}
+    end.
 
 %% A command block for unit Lun, by its operation code (sys/cam/scsi/scsi_all.h's layouts).
 command(Tag, _Length, <<?ERX_SCSI_OP_TEST_UNIT_READY, _/binary>>, _Lun, Stick) ->
