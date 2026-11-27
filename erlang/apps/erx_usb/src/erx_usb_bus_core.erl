@@ -515,11 +515,14 @@ enumerated(configuring_endpoints, Ref, Device, Result, _Now, State) ->
     ok = value(Result),
     configured(Ref, Device, State).
 
-%% The value of a step's answer or decoding; a failure leaves through the one
-%% throw device_answered/6 catches.
+%% The value of a step's answer or decoding; a failure leaves through refuse/1.
 value({ok, Value}) -> Value;
 value(ok) -> ok;
-value({error, Reason}) -> throw({?MODULE, refused, Reason}).
+value({error, Reason}) -> refuse(Reason).
+
+%% The one throw device_answered/6 catches, for a step that refuses.
+-spec refuse(term()) -> no_return().
+refuse(Reason) -> throw({?MODULE, refused, Reason}).
 
 %% A full-speed EP0's packet size from bMaxPacketSize0: a power of two from 8 to
 %% usb_ep0_packet_full_max, the sizes FreeBSD's fallback tries
@@ -528,11 +531,11 @@ ep0_packet(Packet) when Packet >= ?ERX_USB_DEVICE_DESCRIPTOR_HEAD, Packet =< ?ER
                         Packet band (Packet - 1) =:= 0 ->
     Packet;
 ep0_packet(_Packet) ->
-    value({error, malformed_descriptor}).
+    refuse(malformed_descriptor).
 
 %% A hub at SuperSpeed is refused at its device descriptor (docs/design-usb.md,
 %% "Outside this design").
-no_superspeed_hub(#{class := ?ERX_USB_CLASS_HUB}, super) -> value({error, superspeed_hub});
+no_superspeed_hub(#{class := ?ERX_USB_CLASS_HUB}, super) -> refuse(superspeed_hub);
 no_superspeed_hub(_Descriptor, _Speed) -> ok.
 
 hub_function(Functions) ->

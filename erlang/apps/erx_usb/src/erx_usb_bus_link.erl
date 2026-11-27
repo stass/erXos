@@ -33,7 +33,8 @@ mailbox only what came this way.
 -doc "What the bus process asks of its controller.".
 -type request() :: attach
                  | {port, root, erx_usb_bus_core:target(), erx_usb_bus_core:op()}
-                 | {control, erx_usb_bus_core:ref(), term(), <<_:64>>, none | {in, pos_integer()}}
+                 | {control, erx_usb_bus_core:ref(), erx_usb_bus_core:step() | port_tag(), <<_:64>>,
+                    none | {in, pos_integer()}}
                  | {enable_slot, erx_usb_bus_core:ref(), erx_usb_bus_core:step()}
                  | {address, erx_usb_bus_core:ref(), erx_usb_bus_core:step(), map()}
                  | {evaluate_context, erx_usb_bus_core:ref(), erx_usb_bus_core:step(), map()}
@@ -41,8 +42,15 @@ mailbox only what came this way.
                  | {reset_pipe, erx_usb_bus_core:ref(), byte(), byte()}
                  | {detach, erx_usb_bus_core:ref()}.
 
--doc "What the controller sends its bus process: the root hub's port count, then core events.".
--type answer() :: {root_ports, 1..255} | erx_usb_bus_core:event().
+-doc "An external hub's port operation, the tag of its control request and of the answer.".
+-type port_tag() :: {port, erx_usb_bus_core:target(), erx_usb_bus_core:op()}.
+
+-doc """
+What the controller sends its bus process: the root hub's port count, then core events,
+and the answers to an external hub's port operations.
+""".
+-type answer() :: {root_ports, 1..255} | erx_usb_bus_core:event()
+                | {control_done, erx_usb_bus_core:ref(), port_tag(), {ok, binary()} | {error, term()}}.
 
 -doc "Attaches the calling bus process to Controller.".
 -spec attach(pid()) -> ok.
@@ -60,7 +68,7 @@ The answer to Request with Result, the event of erx_usb_bus_core that
 names Request's reference and step, or the root hub's target, so the
 controller builds every answer here.
 """.
--spec reply(request(), term()) -> erx_usb_bus_core:event().
+-spec reply(request(), term()) -> answer().
 reply({port, root, Target, _Op}, Result) -> {port_done, root, Target, Result};
 reply({control, Ref, Tag, _Setup, _Data}, Result) -> {control_done, Ref, Tag, Result};
 reply({enable_slot, Ref, Step}, Result) -> {slot, Ref, Step, Result};
