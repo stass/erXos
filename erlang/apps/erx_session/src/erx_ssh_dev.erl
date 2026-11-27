@@ -15,7 +15,8 @@ runtime's release name a development configuration
 release, a session domain's included, and facts it cannot read count as a
 release build's. Root's session runs boot/1 at boot, as the development manifest's
 `-eval` asks, which starts the daemon once the session holds the facets it
-needs, registers it as `erx_ssh_dev`, and then imports root's keys.
+needs, registers the process that started it as `erx_ssh_dev`, and then imports
+root's keys.
 
 Who may log in is `root`, with a key of root's: a line of root's home copy,
 HOME_KEYS, FreeBSD's `.ssh/authorized_keys` in root's home, or the
@@ -119,10 +120,12 @@ through the session's `net` facet and keeps its host key under `/data`,
 through its `data` facet, and their domains install both some time after the
 session is ready (erx:cap/1), so the process waits for the two through the
 registry wait (erx_facets:await/3) for at most GRANT_WAIT_MS from the boot,
-and then calls start/1. A daemon that started is registered as `erx_ssh_dev`,
-by which a shell of the session finds it, and the process then imports root's
-keys from the medium once the session holds its `home` and `login_keys`
-facets, within GRANT_WAIT_MS of the daemon's start; each step logs one line.
+and then calls start/1. Once the daemon listens the process registers itself as
+`erx_ssh_dev`, by which a tool sees that it does, imports root's keys from the
+medium once the session holds its `home` and `login_keys` facets, within
+GRANT_WAIT_MS of the daemon's start, and then stays, keeping the name for the
+session's life; each step logs one line. The daemon itself is OTP's opaque
+ssh:daemon_ref(), which no name can hold.
 """.
 -spec boot(inet:port_number()) -> ok.
 boot(Port) ->
@@ -144,10 +147,12 @@ start_when_granted(Port, Start, Deadline) ->
         {error, _} = Missing -> Missing
     end.
 
-booted(Port, {ok, Daemon}) ->
-    true = register(?MODULE, Daemon),
+booted(Port, {ok, _Daemon}) ->
+    true = register(?MODULE, self()),
     logger:notice("erx_ssh_dev: the daemon listens on port ~b", [Port]),
-    imported(import_when_ready(deadline()));
+    imported(import_when_ready(deadline())),
+    garbage_collect(),
+    timer:sleep(infinity);
 booted(Port, {error, Reason}) ->
     logger:notice("erx_ssh_dev: no daemon on port ~b: ~0p", [Port, Reason]).
 

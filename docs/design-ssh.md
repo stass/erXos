@@ -1177,8 +1177,8 @@ identifier.
    ok=erx_ssh_dev:boot(2222)`, which starts the daemon in a process of
    its own once the session holds its `net` and `data` facets, which
    their domains install after the session is ready, waiting for them
-   with `erx_facets:await/3` within ten minutes, registers the
-   daemon as `erx_ssh_dev` and logs whether it listens. A session
+   with `erx_facets:await/3` within ten minutes, registers itself as
+   `erx_ssh_dev` once the daemon listens and logs whether it does. A session
    channel's callback, `erx_ssh_dev_channel`, is the master of a tty of
    root's session for a channel that asked for one, speaking the tty's
    seven messages

@@ -103,10 +103,10 @@ module Erx
     ].join(', ') + ".\r"
 
     # Typed at root's session's Erlang shell: waits for the daemon the session started at
-    # boot (erx_ssh_dev:boot/1), registered as erx_ssh_dev once it listens, and answers
-    # {ok, Daemon}; `timeout` after 240 polls 500 ms apart.
+    # boot (erx_ssh_dev:boot/1), whose starting process registers as erx_ssh_dev once it
+    # listens, and answers {ok, Pid}; `timeout` after 240 polls 500 ms apart.
     SSH_LINE = '(fun Wait(0) -> timeout; Wait(N) -> case whereis(erx_ssh_dev) of ' \
-               "undefined -> timer:sleep(500), Wait(N - 1); Daemon -> {ok, Daemon} end end)(240).\r"
+               "undefined -> timer:sleep(500), Wait(N - 1); Pid -> {ok, Pid} end end)(240).\r"
     # What root types at rc on the login's tty, ending each line with the CR a terminal
     # sends: ps, then exit, which ends the shell and so the login. ps's header
     # (erx_cmd_ps, FreeBSD's default columns) in what the tty sent back shows that rc ran it;
