@@ -50,8 +50,12 @@ reaches the client as `eio`.
 -export([start_link/3, start_link/4, start_mounted/4, start_mounted/5, reserve_words/2]).
 -export([init/2, loop/2, drain/1, format_status/1]).
 -export([handle_tree/1]).
+-export([open_permitted/3]).
 
 -include("erx_fs_waits.hrl").
+
+-define(OWNER_READ, 8#400).
+-define(OWNER_WRITE, 8#200).
 
 -export_type([qid/0, attr/0, statfs/0, dirent/0, what/0, wait/0, grant_handle/0]).
 
@@ -323,6 +327,30 @@ a grant started for another domain answers its mint with beside its pid
 -spec handle_tree(grant_handle()) -> binary().
 handle_tree({_Pid, Tree, _Rights}) ->
     Tree.
+
+-doc """
+Whether a node of Mode opens for Access, and for a truncation when
+Truncate: the one permission rule of every callback module's `open`. An
+open needs the owner's bits for its access, `r` to read, `w` to write,
+both for both, and `w` for a truncation, whoever opens it; the domain is
+one user who is no superuser (docs/design-tmp.md, "Permissions").
+""".
+-spec open_permitted(Mode :: non_neg_integer(), read | write | read_write, Truncate :: boolean()) ->
+          ok | {error, eacces}.
+open_permitted(Mode, Access, Truncate) ->
+    Bits = case Access of
+               read -> ?OWNER_READ;
+               write -> ?OWNER_WRITE;
+               read_write -> ?OWNER_READ bor ?OWNER_WRITE
+           end,
+    Needed = case Truncate of
+                 true -> Bits bor ?OWNER_WRITE;
+                 false -> Bits
+             end,
+    case Mode band Needed of
+        Needed -> ok;
+        _ -> {error, eacces}
+    end.
 
 -doc """
 What proc_lib's crash report shows of a grant that crashes: its reason's name alone. The

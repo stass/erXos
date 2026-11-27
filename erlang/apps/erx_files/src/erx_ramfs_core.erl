@@ -613,29 +613,19 @@ known_options([Option | Rest])
 known_options(_) -> false.
 
 %% Linux's do_open: a directory opened to write or truncate is EISDIR, a
-%% file asked to be a directory ENOTDIR, both before the permission check.
+%% file asked to be a directory ENOTDIR, both before the permission check,
+%% which is every file server's one rule, erx_fs:open_permitted/3.
 openable(#node{data = {symlink, _}}, _Access, _Options) ->
     {error, eloop};
-openable(#node{data = {directory, _, _, _, _}} = N, Access, Options) ->
+openable(#node{data = {directory, _, _, _, _}, mode = Mode}, Access, Options) ->
     case Access =:= read andalso not lists:member(trunc, Options) of
-        true -> permitted(N, ?R);
+        true -> erx_fs:open_permitted(Mode, read, false);
         false -> {error, eisdir}
     end;
-openable(#node{data = {file, _}} = N, Access, Options) ->
+openable(#node{data = {file, _}, mode = Mode}, Access, Options) ->
     case lists:member(directory, Options) of
         true -> {error, enotdir};
-        false -> permitted(N, access_bits(Access, Options))
-    end.
-
-access_bits(Access, Options) ->
-    Bits = case Access of
-               read -> ?R;
-               write -> ?W;
-               read_write -> ?R bor ?W
-           end,
-    case lists:member(trunc, Options) of
-        true -> Bits bor ?W;
-        false -> Bits
+        false -> erx_fs:open_permitted(Mode, Access, lists:member(trunc, Options))
     end.
 
 handle(Ino, Access, Options) ->

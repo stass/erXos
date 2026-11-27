@@ -73,9 +73,6 @@ one per slot.
 %% The blocks one write takes at most, so a step needs at most one free section.
 -define(WRITE_BLOCKS, 64).
 -define(NAME_MAX, ?ERX_F2FS_NAME_LEN_MAX).
-%% The owner's permission bits an open for writing needs, as erx_ramfs_core checks them.
--define(OWNER_READ, 8#400).
--define(OWNER_WRITE, 8#200).
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK
                         bor ?ERX_P9_GETATTR_MASK_UID bor ?ERX_P9_GETATTR_MASK_GID
                         bor ?ERX_P9_GETATTR_MASK_ATIME bor ?ERX_P9_GETATTR_MASK_MTIME
@@ -148,8 +145,8 @@ start({readlink, Nid}, _Volume) ->
                                  {reply, {ok, Target}}
                              end
                      end)};
-start(statfs, #{superblock := Super, checkpoint := Header}) ->
-    {reply, {ok, statfs(Super, Header)}};
+start(statfs, Volume) ->
+    {reply, {ok, statfs(Volume)}};
 start({fsync, _Handle}, Volume) ->
     case writable(Volume) of
         true -> checkpoint;
@@ -203,26 +200,28 @@ walk(Dir, Name, Volume, Blocks) ->
         Other -> Other
     end.
 
-%% An open's handle, the node's nid and the access it was opened for. An
-%% open for writing or truncation needs the owner's permission bits for
-%% that access, as erx_ramfs_core grants them, root's opens too.
+%% An open's handle, the node's nid and the access it was opened for. The
+%% owner's permission bits decide every open by the one rule of
+%% erx_fs:open_permitted/3, which erx_ramfs_core's opens follow too; a
+%% directory opened for writing or truncation answers eisdir, and a
+%% read-only volume such an open's erofs, before that rule.
 opened(Nid, Inode, Flags, Writable) -> opened(Nid, Inode, kind(Inode), Flags, Writable).
 
 opened(_Nid, _Inode, _Kind, Flags, _Writable) when Flags band ?ERX_P9_O_ACCMODE =:= ?ERX_P9_O_ACCMODE ->
     {error, einval};
 opened(_Nid, _Inode, Kind, _Flags, _Writable) when Kind =:= device; Kind =:= other -> {error, enotsup};
 opened(_Nid, _Inode, symlink, _Flags, _Writable) -> {error, eloop};
-opened(Nid, Inode, Kind, Flags, Writable) when Flags band ?ERX_P9_O_ACCMODE =/= 0;
-                                               Flags band ?ERX_P9_O_TRUNC =/= 0 ->
+opened(Nid, #{i_mode := Mode}, Kind, Flags, Writable) ->
     Access = access(Flags),
-    case {Kind, Writable, permitted(Inode, Access, Flags)} of
-        {directory, _, _} -> {error, eisdir};
-        {_, false, _} -> {error, erofs};
-        {_, _, false} -> {error, eacces};
-        _ when Flags band (?ERX_P9_O_TRUNC bor ?ERX_P9_O_APPEND) =/= 0 -> {error, enotsup};
-        _ -> {ok, {Nid, Access}}
-    end;
-opened(Nid, _Inode, _Kind, _Flags, _Writable) -> {ok, {Nid, read}}.
+    Truncate = Flags band ?ERX_P9_O_TRUNC =/= 0,
+    Writes = Access =/= read orelse Truncate,
+    case {Writes, Kind, Writable, erx_fs:open_permitted(Mode, Access, Truncate)} of
+        {true, directory, _, _} -> {error, eisdir};
+        {true, _, false, _} -> {error, erofs};
+        {_, _, _, {error, eacces} = Refused} -> Refused;
+        {true, _, _, ok} when Flags band (?ERX_P9_O_TRUNC bor ?ERX_P9_O_APPEND) =/= 0 -> {error, enotsup};
+        {_, _, _, ok} -> {ok, {Nid, Access}}
+    end.
 
 %% The access an open's flags ask for.
 access(Flags) ->
@@ -231,19 +230,6 @@ access(Flags) ->
         ?ERX_P9_O_WRONLY -> write;
         ?ERX_P9_O_RDWR -> read_write
     end.
-
-%% Whether Inode's owner bits allow Access, a truncation needing write too.
-permitted(#{i_mode := Mode}, Access, Flags) ->
-    Bits = case Access of
-               read -> ?OWNER_READ;
-               write -> ?OWNER_WRITE;
-               read_write -> ?OWNER_READ bor ?OWNER_WRITE
-           end,
-    Needed = case Flags band ?ERX_P9_O_TRUNC of
-                 0 -> Bits;
-                 _ -> Bits bor ?OWNER_WRITE
-             end,
-    Mode band Needed =:= Needed.
 
 %% Handle's nid, when it was opened for Need, else ebadf.
 opened_for({Nid, Access}, Need) when Access =:= Need; Access =:= read_write -> {ok, Nid};
@@ -398,11 +384,21 @@ dirent_type(?ERX_F2FS_FT_SOCK) -> ?ERX_P9_DT_SOCK;
 dirent_type(?ERX_F2FS_FT_SYMLINK) -> ?ERX_P9_DT_LNK;
 dirent_type(_Unknown) -> ?ERX_P9_DT_UNKNOWN.
 
-%% statfs: the volume's user blocks and the free ones, and the nids that
-%% can hold a node and the free ones, which the mount checked against each
-%% other ([F 55]).
-statfs(Super, #{user_block_count := User, valid_block_count := Valid, valid_node_count := Nodes}) ->
+%% statfs: the volume's blocks and the free ones, and the nids that can
+%% hold a node and the free ones, which the mount checked against each
+%% other ([F 55]). A read-write volume's blocks are the space it offers
+%% writes, so its free blocks run out where a write answers enospc, and
+%% none are free on a volume already past it; a read-only volume's are the
+%% checkpoint's user blocks.
+statfs(#{superblock := Super,
+         checkpoint := #{user_block_count := User, valid_block_count := Valid,
+                         valid_node_count := Nodes}} = Volume) ->
+    Blocks = case writable(Volume) of
+                 true -> erx_f2fs_mount:offered(Volume);
+                 false -> User
+             end,
+    Free = max(0, Blocks - Valid),
     Files = erx_f2fs_codec:node_capacity(Super),
-    #{type => ?ERX_P9_MAGIC_F2FS, fsid => 0, bsize => ?BLOCK_SIZE, blocks => User,
-      bfree => User - Valid, bavail => User - Valid, files => Files, ffree => Files - Nodes,
+    #{type => ?ERX_P9_MAGIC_F2FS, fsid => 0, bsize => ?BLOCK_SIZE, blocks => Blocks,
+      bfree => Free, bavail => Free, files => Files, ffree => Files - Nodes,
       namelen => ?NAME_MAX}.

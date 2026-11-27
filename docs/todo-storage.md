@@ -931,9 +931,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   checkpoint from three free sections may commit a state whose next mount checkpoint does not fit),
   only the write path calls it (every later mutation must adopt its state through it), and no volume
   case drives its checkpoint-and-retry or a write past the space to enospc, only the core's plan
-  cases; statfs reports user_block_count, not the space erx_f2fs_mount:offered/1 gives writes on a
-  read-write mount; a read-only open does not check the owner's read bit, which erx_ramfs_core's
-  does, and the access and permission rules are a second copy of erx_ramfs_core's, not a shared module; unmount writes an ordinary checkpoint, without UMOUNT or the node summaries,
+  cases; unmount writes an ordinary checkpoint, without UMOUNT or the node summaries,
   and the design's `checkpoint(Volume, #{freeze := boolean()})` is not built; the write move's
   allocation and pairing sit in erx_f2fs_volume rather than the pure step; `place_block/5` digs the
   direct node out of find_slot's decoded map; erx_f2fs_plan's `ino/2` copies erx_f2fs_core's; the walk

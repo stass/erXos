@@ -42,8 +42,8 @@ class ErxF2fsVolumeTest < Minitest::Test
              replacement: 'when map_size(Blocks) < 0 ->',
              failure: CORPUS_CASE_FAILED),
     Seed.new(fault: 'an open for truncation admitted', source: REQUEST,
-             anchor: '                                               Flags band ?ERX_P9_O_TRUNC =/= 0 ->',
-             replacement: '                               false ->',
+             anchor: '    Truncate = Flags band ?ERX_P9_O_TRUNC =/= 0,',
+             replacement: '    Truncate = false,',
              failure: /every_mutation_answers_erofs[^\n]*failed/),
     Seed.new(fault: "a readdir's core calls bounded by the volume's blocks, not the directory's",
              source: REQUEST,
@@ -116,9 +116,17 @@ class ErxF2fsVolumeTest < Minitest::Test
              replacement: 'opened_for({Nid, _Access}, _Need) when is_integer(Nid) -> {ok, Nid};',
              failure: case_failed('a_handle_answers_its_access_and_a_write_open_needs_the_owners_bits')),
     Seed.new(fault: "an open for writing admitted without the owner's bits", source: REQUEST,
-             anchor: '        {_, _, false} -> {error, eacces};',
-             replacement: '        {_, _, false} when false -> {error, eacces};',
-             failure: case_failed('a_handle_answers_its_access_and_a_write_open_needs_the_owners_bits'))
+             anchor: 'erx_fs:open_permitted(Mode, Access, Truncate)',
+             replacement: 'erx_fs:open_permitted(Mode, read, false)',
+             failure: case_failed('a_handle_answers_its_access_and_a_write_open_needs_the_owners_bits')),
+    Seed.new(fault: "an open to read admitted without the owner's read bit", source: REQUEST,
+             anchor: 'erx_fs:open_permitted(Mode, Access, Truncate)',
+             replacement: 'erx_fs:open_permitted(Mode bor 8#400, Access, Truncate)',
+             failure: case_failed('an_open_to_read_needs_the_owners_read_bit')),
+    Seed.new(fault: "a read-write volume's statfs counting the checkpoint's user blocks", source: REQUEST,
+             anchor: '                 true -> erx_f2fs_mount:offered(Volume);',
+             replacement: '                 true -> User;',
+             failure: case_failed('statfs_counts_the_space_a_read_write_volume_offers'))
   ].freeze
 
   def test_eunit_cases_pass

@@ -732,6 +732,38 @@ a_handle_answers_its_access_and_a_write_open_needs_the_owners_bits_test() ->
     {ok, Both} = requested(writable(Owned), {open, Ino, ?ERX_P9_O_RDWR}),
     ?assertMatch({ok, <<_>>}, requested(writable(Owned), {read, Both, 0, 1})).
 
+%% An open to read needs the owner's read bit, as erx_ramfs_core's does, on
+%% a read-only volume and a read-write one alike.
+an_open_to_read_needs_the_owners_read_bit_test() ->
+    {Ino, WriteOnly} = erx_f2fs_core_tests:fixture_file_mode(8#100200),
+    [?assertEqual({error, eacces}, requested(View, {open, Ino, Flags}))
+     || View <- [WriteOnly, writable(WriteOnly)], Flags <- [0, ?ERX_P9_O_APPEND]],
+    {Ino, Readable} = erx_f2fs_core_tests:fixture_file_mode(8#100400),
+    ?assertEqual({ok, {Ino, read}}, requested(Readable, {open, Ino, 0})).
+
+%% statfs counts the space the volume offers on a read-write mount, so its
+%% free blocks run out when writes answer enospc, and none are free once
+%% the volume is past it; a read-only mount counts the checkpoint's user
+%% blocks.
+statfs_counts_the_space_a_read_write_volume_offers_test() ->
+    {_Ino, {Volume, Blocks}} = erx_f2fs_core_tests:fixture_file_mode(8#100644),
+    #{superblock := Super, checkpoint := Header} = Volume,
+    Offered = (40 - 16) * 512,
+    Counted = fun(Valid) ->
+                      {Volume#{superblock := Super#{section_count := 40, segs_per_sec := 1},
+                               checkpoint := Header#{user_block_count := Offered + 512,
+                                                     valid_block_count := Valid}}, Blocks}
+              end,
+    ?assertEqual(Offered, erx_f2fs_mount:offered(element(1, Counted(0)))),
+    Space = fun(View) ->
+                    {ok, #{blocks := Total, bfree := Free, bavail := Avail}} = requested(View, statfs),
+                    {Total, Free, Avail}
+            end,
+    ?assertEqual({Offered, Offered - 1000, Offered - 1000}, Space(writable(Counted(1000)))),
+    ?assertEqual({Offered, 0, 0}, Space(writable(Counted(Offered + 100)))),
+    ?assertEqual({Offered + 512, Offered - 488, Offered - 488}, Space(Counted(1000))),
+    ?assertEqual({Offered + 512, 412, 412}, Space(Counted(Offered + 100))).
+
 %% Three writes, each committed by an fsync, read back through the volume
 %% after each, and a medium after unmount whose file holds all three: each
 %% checkpoint reads the tables and nodes the one before it wrote, which the
