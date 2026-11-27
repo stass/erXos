@@ -246,8 +246,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   their two sectors leaves the long entries live without their short entry; once the dirty flag is
   cleared elsewhere, `place/5` can put a new name's run after such an orphan, with nothing or only
   deleted slots between them, the overlap another system's checker reports. Make `place/5` take no run
-  whose nearest earlier entry that is not deleted is a live long-name entry, for every name (open
-  decision 2 of design-fsck-fat.md), with a test that cuts a removal across a sector boundary.
+  whose nearest earlier entry that is not deleted is a live long-name entry, for every name
+  ([design-fsck-fat.md](design-fsck-fat.md#the-fat-servers-side)), with a test that cuts a removal
+  across a sector boundary.
 * [Medium] storage, create-or-open's refused truncate (`erx_media_volume:emptied/3`): a refusal
   after part of the truncate committed forgets the caller's hold of the file outright, though a
   holder is counted once however many fids name the file, so a hold an earlier walk took goes too
@@ -721,6 +722,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
+* [Medium] storage, clearing a FAT volume's dirty flag at mount
+  ([design-fsck-fat.md](design-fsck-fat.md#clearing-the-flag-at-mount)): `erx_fat_check`'s
+  first-finding mode in the volume process, the clean write, and its host test. Build it once
+  `fsck_fat` has run on real sticks.
 * [Medium] storage, `fsck_fat` and `fsck -t fat` ([design-fsck-fat.md](design-fsck-fat.md)):
   `erx_fat_check` (findings, edits, the final ownership check, the steps written at their turn),
   `erx_fat_plan:step/4` taken out of `erx_media_volume`, the admission reasons of `erx_fat` and its
@@ -753,7 +758,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   while idle clean and keep "a volume whose flag is clear has no change half made"; it costs two
   flushes for each burst of writes and wear on the FAT's first sector, neither measured.
 * [Medium] storage, a drive's raw sectors ([design-drives.md](design-drives.md#raw-sectors)): the
-  service `media_raw` of the `media` interface in `abi/services` and the development manifests' grants,
+  service `media_raw` of the `media` interface in `abi/services`, the development manifests' grants and
+  the Raspberry Pi 4 and QEMU release manifests' rows,
   its tree at `/media/raw` with `data` and `sN.data` and the media root's empty `raw` directory,
   `erx_media_raw` and its barrier (no writing open and no unanswered request before the volumes
   return), the flush that admits a writing open, `in_flight` raised to 9, the raw request check with

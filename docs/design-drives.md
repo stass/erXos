@@ -375,7 +375,8 @@ drive.
   reads and changes its drives and no other session of that manifest
   sees them; a development board manifest grants that template a
   `media_raw` facet too, and a release manifest only in a row of its
-  own ([Raw sectors](#raw-sectors)). The
+  own, as erXos's own Raspberry Pi 4 and QEMU release manifests do
+  ([Raw sectors](#raw-sectors)). The
   media domain holds the drives because each drive's window row names
   it, and no other row grants `drive`
   ([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).
@@ -1040,6 +1041,17 @@ alone:
    file could land in another's clusters
    ([design-storage.md](design-storage.md#removable-media-fat)).
 
+**A dirty flag with nothing behind it.** When `dirty` is the only
+condition of 4 that fails, the volume's process runs the FAT checker in
+its first-finding mode before deciding
+([design-fsck-fat.md](design-fsck-fat.md#clearing-the-flag-at-mount)).
+If it finds nothing but the dirty mark, the process writes entry 1's
+clean value, in the other FATs first and the first FAT last, flushes,
+and mounts the volume `rw`. Any other finding, a bound, or a read, write
+or flush that fails leaves it read-only `dirty`, with nothing more
+written. It repairs nothing: a repair can delete entries, and is written
+to a stranger's medium only when the user runs `fsck_fat`.
+
 A writable mount logs one line too, naming the volume, its label and
 the milliseconds the mount took, the check's reading included, so a
 slow medium shows where the wait before its first answer went; the
@@ -1278,7 +1290,9 @@ Two things finish volumes:
   outcome, are the coordinator's
   ([design-system.md](design-system.md#shutting-down)); a medium that
   cannot finish within them loses what its volumes had not written, as
-  on a power cut, and its FAT volumes show `dirty` at their next mount.
+  on a power cut, and its FAT volumes come back dirty at their next
+  mount, which clears the flag only where nothing else is wrong
+  ([The writable rule](#the-writable-rule)).
   A trial reads no drive, so the media service's outcome is recorded
   and logged and does not decide between a trial and a reset.
 
@@ -1523,7 +1537,9 @@ little-endian word; what each volume is, and how large, is its
 drive's `status`.
 
 Reading `/media/disk0/status` is itself a walk of `disk0`, so looking at
-a drive mounts its medium. That writes nothing: a writable FAT volume
+a drive mounts its medium. That writes nothing but, on a FAT volume
+whose only fault is its dirty flag, the flag cleared
+([The writable rule](#the-writable-rule)): a writable FAT volume
 writes nothing before its first change
 ([design-storage.md](design-storage.md#removable-media-fat)), and a
 littlefs volume's mount is held to the same by its owner's write
@@ -1591,6 +1607,9 @@ mounts at `/media/raw`:
   its sectors times 512, the only sector size a drive serves, and both
   are what a program that would ask a FreeBSD disk for its media size
   and sector size reads instead: `stat` and the constant 512.
+  The files lie in a tree of their own, not in each drive's directory
+  beside its volumes, because they must be withheld from a program
+  handed a drive's files and a grant names one tree.
   `sN.data` exists because tools written for FreeBSD's per-partition
   devices (`/dev/da0s1`) expect a volume's boot sector at offset 0. A
   walk of `/media/raw/diskN` asks the drive process for the medium as a
@@ -1604,10 +1623,12 @@ mounts at `/media/raw`:
   grant reaches a sector whatever its rights, and a `media_raw` grant
   reaches every drive's sectors and nothing else. The allow-list is the
   manifest's `media_raw` facet rows: every development board manifest
-  grants one, rights `rw`, to root's session template, and a release
-  manifest grants it only in a row of its own
-  ([design-fsck-fat.md](design-fsck-fat.md#open-decisions), open
-  decision 3). The media tree's root lists one empty directory, `raw`,
+  grants one, rights `rw`, to root's session template. A release
+  manifest grants it only in a row of its own, as erXos's own release
+  manifests for the Raspberry Pi 4 and QEMU do: a program root starts
+  inherits root's namespace unless its starter narrows it, so a blanket
+  grant would hand every such program every drive's sectors
+  ([design-fsck-fat.md](design-fsck-fat.md#security)). The media tree's root lists one empty directory, `raw`,
   beside the drives, so the mount point exists for a session that holds
   no `media_raw` grant too, as the release slice's `/media` does for one
   that holds no `media` grant.
@@ -1825,7 +1846,7 @@ it whose failure the domain's restart intensity counts.
 | the medium removed, changed or failing | the window's end ([design-usb.md](design-usb.md#media-and-drives)) | the medium's supervisor: every volume and port of it | open files answer `eio`; `diskN` empty but for `status` and `ctl`; the next medium mounts at the next walk |
 | a finish whose writes or flush fail | its answer | the medium, as an eject ends it | `eject` answers `eio`; FAT volumes show `dirty` at the next mount |
 | a write on a trial boot | the write path (U4) | that write, `erofs` | a FAT write answers `erofs`; a littlefs volume, whose block write failed, ends |
-| a FAT volume removed while written | its next mount: the dirty flag | nothing | that volume read-only, `sN_ro_reason` naming the dirty flag, until repaired on another machine |
+| a FAT volume removed while written | its next mount: the dirty flag | nothing | that volume writable when the check at mount finds nothing but the dirty flag; otherwise read-only, `sN_ro_reason` naming the dirty flag, until `fsck_fat` repairs it |
 | the drive process ends | `erx_media_sup` | that drive's medium mounts | `eio` on its open files; the next walk mounts the medium afresh, its block service restarted first |
 | the media domain ends | the domain service | every drive's mounts | `/media` answers `eio` until the restarted domain's re-grant; open files keep answering `eio`; each medium mounts afresh at its next walk |
 | the serving domain ends (the USB domain, a block device's driver domain) | the proxies' end, seen as `noconnection` | that domain's drives' media, its facets and proxies with its connection | as a removal, and its drives leave the `/media` listing; the restarted domain's ready report has its drives' facets minted again, and they return, with fresh windows |
@@ -2012,6 +2033,12 @@ computes the GPT's CRC-32 is unverified until those images' tables are
 read.
 
 ## Alternatives considered
+
+**Raw sectors at `/dev/diskN`.** Where a FreeBSD user looks for a
+disk. It would fit only once the raw file answers the disk ioctls
+FreeBSD tools use (`DIOCGMEDIASIZE`, `DIOCGSECTORSIZE`); a file there
+that answers none of them would wear a disk device's name without
+behaving as one, so the raw tree is `/media/raw`.
 
 **A window per partition, the table read in the USB domain.** The
 storage design's first form: the domain that holds the controller reads

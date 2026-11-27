@@ -1737,9 +1737,13 @@ designed. It maps the format onto the file protocol as follows:
   its generations (`uniqdosname`,
   `sys/fs/msdosfs/msdosfs_lookup.c:1056-1062` at `release/14.3.0`), up to
   `~999999`. Tails are numeric only: the server writes no hashed form of a
-  short name. A name stored as its short entry alone is never placed right
-  after a live long-name entry, which a reader would take as its long name;
-  there it gets long-name entries of its own.
+  short name. No name is placed in a slot whose nearest earlier entry that
+  is not deleted is a live long-name entry: a name stored as its short entry
+  alone would be read with that run as its long name, and a name with a run
+  of its own would leave that run an orphan overlapped by the new one, which
+  other systems' checkers report
+  ([design-fsck-fat.md](design-fsck-fat.md#the-fat-servers-side)). Such a
+  slot is passed over as an occupied one is.
 * **Attributes.** FAT has no owners and no permission bits: a file reports
   mode `0644`, or `0444` with the read-only attribute, and a directory
   `0755`; `setattr` of `mode` sets the read-only attribute exactly when the

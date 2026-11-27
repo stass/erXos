@@ -198,7 +198,7 @@ document's "residual risks accepted" paragraph.
 * [Apps and the start service](docs/todo-apps.md#planned-features): applications and packages, the demo apps.
   17 items (1 High, 11 Medium, 5 Low).
 * [Storage](docs/todo-storage.md#planned-features): storage: file systems, the storage domain, file clients, the object store, the image tree.
-  21 items (8 Medium, 13 Low).
+  22 items (10 Medium, 12 Low).
 * [Display and desktop](docs/todo-display.md#planned-features): the display stack, the window system, the desktop and LVGL in apps.
   19 items (8 Medium, 11 Low).
 * [Inspection and logging](docs/todo-inspection.md#planned-features): the inspector, /proc, logging and the live tree.

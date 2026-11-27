@@ -484,9 +484,11 @@ mounts a volume writable only after checking that no two names share a
 cluster and that every directory's `..` names its parent. The FAT server
 is designed and not built.
 
-A volume that fails those conditions, or that a pulled stick left
-marked dirty, mounts read-only, and `fsck_fat` repairs it, finding what
-FreeBSD's checker finds ([design-fsck-fat.md](../design-fsck-fat.md)).
+A volume that fails those conditions mounts read-only. One that a
+pulled stick left marked dirty, and that is otherwise consistent, has
+its flag cleared by a check at mount, which repairs nothing; any other
+fault waits for `fsck_fat`, which repairs it, finding what FreeBSD's
+checker finds ([design-fsck-fat.md](../design-fsck-fat.md)).
 It is an ordinary program. The media domain serves each drive's raw
 sectors as files of a second tree, `/media/raw/disk0/data` for the
 medium whole and `/media/raw/disk0/s1.data` for one volume, to the

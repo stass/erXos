@@ -169,8 +169,8 @@ only deleted slots between them, since it checks the entry before a run
 only for a name stored as its short entry alone (`:524`). That gives
 exactly the stick's pattern. This reading found no path to an orphan
 without a cut, and the stick's history was not recorded. The repair here
-removes such runs; [open decision 2](#open-decisions) is the server's
-side.
+removes such runs, and the FAT server avoids writing next to one
+([The FAT server's side](#the-fat-servers-side)).
 
 ## Requirements
 
@@ -535,6 +535,41 @@ and its writes, as FreeBSD's does. On a drive, no mount writes it while
 the command holds its writing open; another program writing the same
 raw file at the same time is that user's doing.
 
+### Clearing the flag at mount
+
+A stick pulled without `eject` often holds nothing worse than its dirty
+flag. The volume's process clears that flag itself when nothing else is
+wrong ([design-drives.md](design-drives.md#the-writable-rule)): when
+`dirty` is the only writable-rule condition that fails, it runs
+`erx_fat_check` in its **first-finding mode**, which stops at the first
+finding other than the dirty mark. If there is none, the process writes
+a repair whose only steps are `clean_mirrors` and `clean`, through
+`erx_fat_plan:step/4`, and mounts the volume writable. Any other
+finding, a bound, or a read, write or flush that fails keeps the volume
+read-only `dirty`, and nothing more is written. A lost chain is a
+finding, so a volume cut while a file was growing stays read-only for
+`fsck_fat`.
+
+The check repairs nothing, because some repairs delete entries or cut
+files, and those are written to a stranger's medium only when the user
+asks, by running `fsck_fat`. The mode holds no findings and no edits,
+so its bounds are the ownership check's, which a mount already keeps.
+
+### The FAT server's side
+
+An orphan long-name run comes from a cut, and a cut leaves the volume
+dirty, so a repair or the check at mount meets the orphan before erXos
+writes there again. What remains is a volume whose flag another system
+cleared without removing the orphan. For it, `place/5` takes no slot
+whose nearest earlier entry that is not deleted is a live long-name
+entry, for every name, extending the rule that already holds for a name
+stored as its short entry alone. It looks past deleted slots, since a
+deleted entry does not end a run
+([design-storage.md](design-storage.md#removable-media-fat)). A name's
+short entry gets no step of its own: that would keep a cut from ever
+leaving an orphan, but at two more flushes for every batch that removes
+or adds a long name, for a case the dirty flag already covers.
+
 ## The surface
 
 ### Options
@@ -547,7 +582,7 @@ says:
 | `-n` | answer no to every question; open read-only | check, print the repair, write nothing | a user looking before changing anything, and scripts; the file is opened for reading only, so the volume stays mounted |
 | `-y` | answer yes to every question | apply the repair without asking | unattended repair |
 | none | one terminal question per repair | print the whole repair, then one question: apply it all or nothing | FK-R4. Repairs depend on each other, so answering some and not others gives a half repair that leaves the volume dirty, which helps nobody. One repair shown whole and applied whole is what the user can judge |
-| `-p`, `-f` | preen at boot; `-f` preens clean volumes too | dropped, a usage error | nothing preens: no FAT volume is mounted at boot, and the automounter mounts dirty volumes read-only ([open decision 1](#open-decisions)). Checking skips no volume because its flag reads clean, since the stick's damage was on one |
+| `-p`, `-f` | preen at boot; `-f` preens clean volumes too | dropped, a usage error | nothing preens: no FAT volume is mounted at boot, and a dirty volume's own mount clears its flag only when nothing else is wrong, repairing nothing ([Clearing the flag at mount](#clearing-the-flag-at-mount)). Checking skips no volume because its flag reads clean, since the stick's damage was on one |
 | `-B`, `-C`, `-M`, `-F` | ignored, ignored, no `mmap`, exit 5 | dropped, usage errors | they exist for FreeBSD's `fsck(8)` and its memory handling; nothing here uses them |
 
 `-n` and `-y` together are a usage error, not "the later wins".
@@ -717,6 +752,16 @@ to one drive: an Erlang command holds its domain's grants whole. The
 report escapes every name from the medium, so printing it cannot drive
 the user's terminal. Nothing is written without `-y` or a "y".
 
+**Raw access in a release.** Development board manifests grant root's
+session `media_raw`. A release has no blanket grant: native programs
+inherit the session's namespace unless their starter narrows it, so
+every program root starts would reach every drive's sectors. A release
+board manifest that promises local drive repair names `media_raw` for
+root's session in a row of its own, where the manifest check sees it,
+and erXos's own release manifests for the Raspberry Pi 4 and QEMU do,
+since a stick's owner repairing it is the consumer
+([design-drives.md](design-drives.md#raw-sectors)).
+
 ## What is reused and what is new
 
 Reused: `erx_fat_read:boot_sector/1` and `erx_fat`'s admission rules,
@@ -768,6 +813,7 @@ the tree, names, sizes and content hashes, that the repair must give.
 | the order of examination: two files sharing a tail, and a file and a directory naming one chain, repaired as FreeBSD chooses | the FAT walk run from the last cluster down, so the other file is cut |
 | each step computed at its turn: a repair with a cut in the first FAT's first sector, the odd-header fix and an FSInfo signature fix, written over a fake medium that records every write; after each step the first FAT's entry 1 reads dirty, the FSInfo hints read unknown after the `fsinfo` step, and only the last write sets the clean bit | the steps' images computed from the medium before the first write, so the `cutting` step writes back the clean bit the `dirty` step cleared |
 | crash consistency (FK-R3): for each class's repair on a small image with sentinel sectors around the volume, a cut after every step and after every subset of a step's sectors; each result reads dirty unless the cut followed the last write, keeps every cluster allocated in the input allocated, adds no name to a free cluster and no second name to a cluster; then a second run meets FK-R2, every file the uninterrupted repair keeps reads at its path with its content hashes, and the sentinels and the file's length are unchanged | the `publication` step placed before `preparation`, so a cut leaves a lost chain named while its old name stands; the dirty step left out, so a cut leaves a half repair that reads clean; a file's tail freed instead of cut, so a cut and a rerun lose its clusters |
+| clearing the flag at mount: a dirty volume with nothing else wrong mounts `rw` with only entry 1 of each FAT written; one with a lost chain, differing copies or a cross-link stays read-only `dirty` with nothing written | the first-finding mode answering after the dirty mark alone, so the volume with a cross-link mounts `rw` |
 | the FAT server's own cut: `erx_fat_dir`'s removal of a name whose run crosses a sector boundary, cut between the two sectors of its `preparation`, leaves an orphan run that the check reports and the repair removes | a deleted entry ending a run, so the orphan is read as the next name's |
 | lost chains: with a free slot in `LOST.DIR`, named; with no `LOST.DIR`, a full one, a name taken and a chain of 4 GiB, each kept, reported, the volume marked clean and status 8; a free slot after an orphan long-name run passed over | the size stored as its low 32 bits, so the 4 GiB chain is named with size 0 and the second check finds too many clusters |
 | a truncated image: its boot sector claims more sectors than the file holds; refused before any write, the file's length unchanged | admission given the boot sector's count instead of the file's, so the image is checked and written |
@@ -861,55 +907,7 @@ Sticks come from cameras, Windows and macOS too.
 
 ## Open decisions
 
-1. **Preen when a dirty volume mounts.** The volume's process could run
-   the checker when the writable rule finds `dirty`, so a stick pulled
-   without `eject` comes back writable. The cross-stack recovery design
-   proposes the narrowest form: clear the flag of a dirty volume whose
-   check finds nothing else, and repair nothing. That form is this
-   checker run in the volume's process with one more rule: stop at the
-   first finding other than the dirty mark, which keeps the volume
-   read-only, and otherwise write a repair whose only steps are
-   `clean_mirrors` and `clean`. Stopping at the first finding
-   holds no findings and no edits, so its bounds are the ownership
-   check's, which a mount already holds. Recommendation: that narrow
-   form, sharing `erx_fat_check`, once the command has run on real
-   sticks; no repair at mount, since some repairs delete entries and a
-   repair should write a stranger's medium only when the user asks.
-2. **The FAT server's orphan runs.** (a) `place/5` refuses a run whose
-   nearest earlier entry that is not deleted is a live long-name entry,
-   extending the rule that already holds for names stored as a short
-   entry alone, so erXos never turns an orphan into the stick's overlap;
-   it must look past deleted slots, since a deleted entry does not end a
-   run; (b) also give a name's short entry a step of its own, so a cut
-   never leaves an orphan, at two more flushes for a batch that removes
-   or adds a long name. Recommendation: (a) alone. A cut already leaves
-   the volume dirty, so a repair removes the orphan before erXos writes
-   there again, and (a) costs no flush; its consumer is a volume whose
-   dirty flag another system cleared without removing the orphan. This
-   changes [design-storage.md](design-storage.md#removable-media-fat);
-   it is filed in [TODO](todo-storage.md#bugs-by-subsystem).
-3. **Raw access in a release.** Development board manifests grant root's
-   session `media_raw`; whether a release's do too decides whether a
-   user of a released erXos can repair a stick at all. A blanket default
-   has a cost: native programs inherit the session's namespace unless
-   their starter narrows it, so every program root starts would reach
-   every drive's sectors.
-   Recommendation: no default; a release board manifest that promises
-   local drive repair names `media_raw` for root's session in a row of
-   its own, so the grant stays on the manifest's allow-list where a
-   build check sees it, and erXos's own release manifests for the
-   Raspberry Pi 4 and QEMU name it, since a stick's owner repairing it
-   is the consumer.
-4. **Where the raw tree is mounted.**
-   [design-drives.md](design-drives.md#raw-sectors) mounts it at
-   `/media/raw`, beside the drives' files and apart from them. The raw
-   files cannot lie in each drive's own directory, `/media/diskN/data`,
-   because they need a grant of their own to be withheld from a program
-   that gets the files, and a grant names one tree. `/dev` would be
-   where a FreeBSD user looks for a disk, but drives' sectors are
-   served by the media domain, not the device service, and the drives
-   design keeps no drive or volume file under `/dev`. Recommendation:
-   `/media/raw`.
+None.
 
 ## References
 
