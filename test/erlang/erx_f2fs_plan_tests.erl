@@ -338,6 +338,47 @@ a_dirty_dentry_block_goes_to_the_warm_data_log_test() ->
 log_of(A, State) ->
     hd([T || T <- lists:seq(0, 5), lists:nth(T + 1, erx_f2fs_core:logs(State)) =:= A]).
 
+%% set_slot clears a block's valid bit only when the block's summary names
+%% the slot it clears: a crafted second slot of the root naming the root's
+%% dentry block, cleared, leaves the block live and valid_block_count as it
+%% was, the root's i_blocks one less; clearing the owner's slot then frees
+%% the block. The summary is the pack's on the fresh volume, and its SSA
+%% block's once the wide volume's first checkpoint has moved its logs away.
+set_slot_clears_only_what_the_summary_confirms_test_() ->
+    {timeout, 120, fun() ->
+                           confirmed_clears(fresh(), pack),
+                           {Partition, Medium} = Wide = wide(fresh()),
+                           {ok, Mounted} = mount(Wide),
+                           {Plan, _} = checkpoint(state(Mounted, Medium), Medium),
+                           confirmed_clears({Partition, written(Medium, Plan)}, ssa)
+                   end}.
+
+%% Source names where the dentry block's summary lies: in the pack when its
+%% segment is a committed log's, else in the segment's SSA block.
+confirmed_clears({_Partition, Medium} = Image, Source) ->
+    {ok, #{root := #{addresses := [Old, _ | Rest], i_blocks := IBlocks} = Root, logs := Logs} = Mounted} =
+        mount(Image),
+    ?assertEqual(Source =:= pack, lists:keymember((Old - main(Mounted)) div ?SEG, 2, Logs)),
+    Root3 = ?ERX_F2FS_ROOT_INO,
+    State0 = erx_f2fs_core:put_node(state(Mounted, Medium), Root3,
+                                    {inode, Root#{addresses := [Old, Old | Rest]}}),
+    {ok, Kept} = need(fun(B) -> erx_f2fs_core:set_slot(State0, Root3, 1, ?ERX_F2FS_NULL_ADDR, B) end,
+                      Medium),
+    ?assertEqual({1, 0, IBlocks - 1}, slot_effect(Kept, State0, Old)),
+    {ok, Freed} = need(fun(B) -> erx_f2fs_core:set_slot(Kept, Root3, 0, ?ERX_F2FS_NULL_ADDR, B) end,
+                       Medium),
+    ?assertEqual({0, -1, IBlocks - 2}, slot_effect(Freed, State0, Old)).
+
+%% Address's valid bit in State, State's valid_block_count less Before's,
+%% and the root's i_blocks.
+slot_effect(State, Before, Address) ->
+    #{volume := #{superblock := #{main_blkaddr := Main}, sit := Sit},
+      counts := #{valid_block_count := Count}, nodes := Nodes} = erx_f2fs_core:epoch(State),
+    #{counts := #{valid_block_count := Was}} = erx_f2fs_core:epoch(Before),
+    #{valid_map := Map} = element((Address - Main) div ?SEG + 1, Sit),
+    {_, {inode, #{i_blocks := IBlocks}}} = lists:keyfind(?ERX_F2FS_ROOT_INO, 1, Nodes),
+    {erx_f2fs_codec:bit(Map, (Address - Main) rem ?SEG), Count - Was, IBlocks}.
+
 %%% Logs that share a section
 
 %% A volume another writer left with logs sharing sections, as mkfs.f2fs

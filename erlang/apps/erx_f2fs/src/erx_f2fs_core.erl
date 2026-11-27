@@ -20,14 +20,22 @@ in the main area at a block the SIT marks valid in a node log's segment.
 The codec then checks the block's footer against the nid, the inode and
 the node offset the reader expects, so every node of a file is read at its
 one place in that file's tree. A data slot likewise names only a valid
-block of a data log's segment, so no file reads a node as its data.
+block of a data log's segment, so no file reads a node as its data, and
+a data block is read only through the slot its summary entry names, the
+slot's node and its index there ([F 46]): owned/3 alone takes the entry,
+a committed data log's from the pack, else its segment's SSA block, and
+each slot/4, read and directory read checks the slots whose blocks it
+takes there, so a slot naming another file's block, or one of its own
+that another slot owns, reads nothing. A read-write state's set_slot/5
+likewise clears an old block's valid bit only when the block's summary,
+the state's for a segment it holds, names the slot.
 
 Every function takes two arguments besides its own. The first is the
 volume: the map erx_f2fs_mount answers, or at the mount the part of it
 that holds the superblock, the checkpoint, the SIT and the NAT. The other
 is the blocks read so far, a map from address to block, as the mount
 takes them. Each answers {ok, Value}, {need, Addresses} naming the blocks
-it needs next, every one inside the NAT or the main area, or
+it needs next, every one inside the NAT, the SSA or the main area, or
 {error, Failure}. A walk to one file block reads at most one node a level,
 three below the inode, and a read decodes each node it crosses once, so
 its work follows the blocks it covers and the nodes they lie under,
@@ -84,11 +92,15 @@ committed/3, the one place sections join the free set.
 -opaque nat() :: #{non_neg_integer() => erx_f2fs_codec:nat_entry()}.
 -doc """
 The tables a read needs: the superblock, the checkpoint header with its
-version bitmaps, the SIT (element S + 1 for main segment S) and the NAT.
+version bitmaps, the SIT (element S + 1 for main segment S) and the NAT,
+and for a data block's owner the committed logs and their data
+summaries from the pack, as erx_f2fs_mount answers them.
 """.
 -type volume() :: #{superblock := erx_f2fs_codec:superblock(),
                     checkpoint := erx_f2fs_codec:checkpoint(),
-                    sit := tuple(), nat := nat(), atom() => term()}.
+                    sit := tuple(), nat := nat(),
+                    logs => [{0..5, non_neg_integer(), non_neg_integer(), 0 | 1}],
+                    data_summaries => [[erx_f2fs_codec:summary()]], atom() => term()}.
 -doc """
 Where a file block's slot lies: the node holding it (the inode's own nid
 for its address array), the slot's index there, counted after the extra
@@ -104,7 +116,7 @@ the block's index times 214 plus the slot, or its inline slot ([F 59]).
                     hash_code := non_neg_integer(), position := non_neg_integer()}.
 -doc "The table a read broke a rule of, and the rule, or a codec failure.".
 -type failure() :: {nat, nid | free | owner | block_addr | journal_nid | journal_duplicate} |
-                   {data, block_addr} | {file, inline | size | type} | {dir, dot} |
+                   {data, block_addr | owner} | {file, inline | size | type} | {dir, dot} |
                    {space, no_free_section} | {mode, read_only} |
                    {sit, valid_bit | summary} |
                    erx_f2fs_codec:failure().
@@ -140,11 +152,15 @@ inode(#{superblock := Super} = Volume, Ino, Blocks) ->
 The slot of file block Block of Inode, a file with an address array:
 in the array, or in the direct node its node ids lead to ([F 53]). A
 slot's address is NULL_ADDR, NEW_ADDR, or a main area block the SIT marks
-valid in a data log's segment.
+valid in a data log's segment, whose summary entry names the slot ([F 46]).
 """.
 -spec slot(volume(), erx_f2fs_codec:inode(), non_neg_integer(), blocks()) -> result(slot()).
 slot(Volume, Inode, Block, Blocks) ->
-    run(fun() -> element(1, find_slot(Volume, Inode, Block, Blocks, #{})) end).
+    run(fun() ->
+                {Slot, _Nodes} = find_slot(Volume, Inode, Block, Blocks, #{}),
+                owned(Volume, [Slot], Blocks),
+                Slot
+        end).
 
 -doc """
 Length bytes of Inode's file from Offset, cut at its size: inline data
@@ -345,19 +361,19 @@ zeros_for_hole(hole) -> <<0:(?BLOCK_SIZE * 8)>>;
 zeros_for_hole(Bytes) -> Bytes.
 
 %% File blocks Range of Inode, each its bytes, or hole for a hole or a
-%% NEW_ADDR slot. Every slot is found first, each node decoded once, and
-%% the data blocks are then asked at once.
+%% NEW_ADDR slot. Every slot is found first, each node decoded once, its
+%% owner checked, and the data blocks are then asked at once.
 file_blocks(Volume, Inode, Range, Blocks) ->
     {Slots, _Nodes} = lists:mapfoldl(fun(Block, Nodes) ->
                                              find_slot(Volume, Inode, Block, Blocks, Nodes)
                                      end, #{}, Range),
+    owned(Volume, Slots, Blocks),
     Addresses = data_addresses(Slots),
     Data = maps:from_list(lists:zip(Addresses, fetch(Blocks, Addresses))),
     [block_bytes(Slot, Data) || Slot <- Slots].
 
 data_addresses(Slots) ->
-    lists:usort([Address || {_Nid, _Index, Address} <- Slots,
-                            Address =/= ?ERX_F2FS_NULL_ADDR, Address =/= ?ERX_F2FS_NEW_ADDR]).
+    lists:usort([Address || {_Nid, _Index, Address} <- Slots, real(Address)]).
 
 block_bytes({_Nid, _Index, Address}, Data) when is_map_key(Address, Data) ->
     maps:get(Address, Data);
@@ -427,12 +443,13 @@ entries_from(_Volume, #{inline_dentries := _} = Dir, Position, _Blocks) ->
 entries_from(Volume, Dir, Position, Blocks) ->
     {Found, Next} = dentry_blocks(Volume, Dir, Position div ?DENTRY_SLOTS, dir_end(Dir),
                                   ?READDIR_STEPS, Blocks, #{}, []),
-    Bytes = fetch(Blocks, [Address || {_Block, Address} <- Found]),
+    owned(Volume, [Slot || {_Block, Slot} <- Found], Blocks),
+    Bytes = fetch(Blocks, [Address || {_Block, {_Nid, _Index, Address}} <- Found]),
     Entries = [placed(ok(erx_f2fs_codec:dentry_block(Data)), Block * ?DENTRY_SLOTS)
-               || {{Block, _Address}, Data} <- lists:zip(Found, Bytes)],
+               || {{Block, _Slot}, Data} <- lists:zip(Found, Bytes)],
     {from(Position, lists:append(Entries)), Next}.
 
-%% The dentry blocks from Block, {Block, Address} each, that Steps steps
+%% The dentry blocks from Block, {Block, Slot} each, that Steps steps
 %% reach before End, and the position the next readdir starts from, or done
 %% at End. A step takes one block that holds data, or skips a run of empty
 %% slots in one node, so every step moves past Block.
@@ -442,22 +459,23 @@ dentry_blocks(_Volume, _Dir, Block, _End, 0, _Blocks, _Nodes, Found) ->
     {lists:reverse(Found), Block * ?DENTRY_SLOTS};
 dentry_blocks(Volume, Dir, Block, End, Steps, Blocks, Nodes, Found) ->
     case extent(Volume, Dir, Block, Blocks, Nodes) of
-        {{data, Address}, Decoded} ->
+        {{data, Slot}, Decoded} ->
             dentry_blocks(Volume, Dir, Block + 1, End, Steps - 1, Blocks, Decoded,
-                          [{Block, Address} | Found]);
+                          [{Block, Slot} | Found]);
         {{empty, Count}, Decoded} ->
             dentry_blocks(Volume, Dir, Block + Count, End, Steps - 1, Blocks, Decoded, Found)
     end.
 
 %% What file block Block of Inode holds, and Nodes with the nodes this walk
-%% decoded added: {data, Address}, a valid block, or {empty, Count}, the
+%% decoded added: {data, Slot}, the slot of a valid block, or {empty, Count}, the
 %% run of Count blocks from Block that one node leaves empty, all NULL_ADDR
 %% or NEW_ADDR slots of its address array or of one direct node, or the
 %% span under node id 0 and under the node ids 0 that follow it in the same
 %% indirect node ([F 4], [F 53]); each of the inode's five node ids is a run
 %% of its own. Count is at least 1.
-extent(Volume, #{addresses := Addresses}, Block, _Blocks, Nodes) when Block < length(Addresses) ->
-    {slots_extent(Volume, lists:nthtail(Block, Addresses)), Nodes};
+extent(Volume, #{addresses := Addresses, footer := #{ino := Ino}}, Block, _Blocks, Nodes)
+  when Block < length(Addresses) ->
+    {slots_extent(Volume, Ino, Block, lists:nthtail(Block, Addresses)), Nodes};
 extent(Volume, #{addresses := Addresses, i_nid := Nids, footer := #{ino := Ino}}, Block, Blocks,
        Nodes) ->
     %% dir_end/1 keeps Block within the blocks a file addresses.
@@ -472,7 +490,7 @@ extent_under(_Volume, _Ino, 0, Path, _Blocks, Nodes) ->
     {{empty, rest(Path)}, Nodes};
 extent_under(Volume, Ino, Nid, [{Offset, Index}], Blocks, Nodes) ->
     {Addresses, Decoded} = node(direct_node, Volume, Ino, Nid, Offset, Blocks, Nodes),
-    {slots_extent(Volume, lists:nthtail(Index, tuple_to_list(Addresses))), Decoded};
+    {slots_extent(Volume, Nid, Index, lists:nthtail(Index, tuple_to_list(Addresses))), Decoded};
 extent_under(Volume, Ino, Nid, [{Offset, Index} | Path], Blocks, Nodes) ->
     {Children, Decoded} = node(indirect_node, Volume, Ino, Nid, Offset, Blocks, Nodes),
     case lists:nthtail(Index, tuple_to_list(Children)) of
@@ -483,17 +501,13 @@ extent_under(Volume, Ino, Nid, [{Offset, Index} | Path], Blocks, Nodes) ->
             extent_under(Volume, Ino, Child, Path, Blocks, Decoded)
     end.
 
-%% The extent at the head of Slots, a node's slots from the block's on: its
-%% data block, or the run of empty slots it starts.
-slots_extent(Volume, [Address | _] = Slots) ->
-    case length(lists:takewhile(fun empty_slot/1, Slots)) of
-        0 ->
-            checked_slot(Volume, {0, 0, Address}),
-            {data, Address};
+%% The extent at the head of Slots, node Nid's slots from its slot Index on:
+%% its data block's slot, or the run of empty slots it starts.
+slots_extent(Volume, Nid, Index, [Address | _] = Slots) ->
+    case length(lists:takewhile(fun(Slot) -> not real(Slot) end, Slots)) of
+        0 -> {data, checked_slot(Volume, {Nid, Index, Address})};
         Count -> {empty, Count}
     end.
-
-empty_slot(Address) -> Address =:= ?ERX_F2FS_NULL_ADDR orelse Address =:= ?ERX_F2FS_NEW_ADDR.
 
 %% The blocks from a path's block to the end of the node the path starts
 %% at: the rest of its own child's span, and the spans of the later children.
@@ -523,6 +537,51 @@ placed(#{entries := Entries}, Base) ->
 dot_placed(#{name := <<".">>, position := Position}) -> Position =:= 0;
 dot_placed(#{name := <<"..">>, position := Position}) -> Position =:= 1;
 dot_placed(#{}) -> true.
+
+%%% Owners
+
+%% Each of Slots that holds a real address names a block whose summary
+%% entry names that slot, its node and its index there ([F 46]), or the
+%% read fails: the durable view's entry, a committed data log's from the
+%% pack and else the SSA block of the block's segment, every one the
+%% slots' segments lack asked at once. A committed node log's segment
+%% holds no data block, so its entries are empty and name no slot.
+owned(#{superblock := Super, logs := Logs, data_summaries := Data}, Slots, Blocks) ->
+    Held = held(Logs, Data, pad([[] || {Type, _, _, _} <- Logs, Type >= ?ERX_F2FS_LOG_HOT_NODE])),
+    Real = [{Nid, Index, place_in_main(Super, Address)}
+            || {Nid, Index, Address} <- Slots, real(Address)],
+    Summaries = segment_summaries(Super, Held, lists:usort([S || {_, _, {S, _}} <- Real]), Blocks),
+    lists:foreach(fun({Nid, Index, {Segno, Offset}}) ->
+                          require(names(maps:get(Segno, Summaries), Offset, Nid, Index), {data, owner})
+                  end, Real).
+
+%% The summaries a durable view holds outside the SSA, by segment: its
+%% committed logs', the data logs' from the pack and the node logs' as
+%% Nodes gives them, each a tuple of a segment's entries, empty past the
+%% blocks a log has written ([F 45]).
+held(Logs, Data, Nodes) ->
+    maps:from_list(lists:zip([Segno || {_, Segno, _, _} <- Logs], pad(Data) ++ Nodes)).
+
+%% A main area address's segment and its offset there.
+place_in_main(#{main_blkaddr := Main}, Address) ->
+    {(Address - Main) div ?BLOCKS_PER_SEG, (Address - Main) rem ?BLOCKS_PER_SEG}.
+
+%% The summary entries of each of Segments, a tuple by segment: Held's,
+%% the entries a volume holds outside the SSA, else its SSA block's
+%% ([F 45]), every SSA block asked at once.
+segment_summaries(#{ssa_blkaddr := Ssa}, Held, Segments, Blocks) ->
+    Unheld = [Segno || Segno <- Segments, not is_map_key(Segno, Held)],
+    Read = [list_to_tuple(maps:get(entries, ok(erx_f2fs_codec:summary_block(Block))))
+            || Block <- fetch(Blocks, [Ssa + Segno || Segno <- Unheld])],
+    maps:merge(maps:with(Segments, Held), maps:from_list(lists:zip(Unheld, Read))).
+
+%% Whether entry Offset of a segment's Entries names slot Index of node
+%% Nid; an empty entry's nid, 0, is no node's.
+names(Entries, Offset, Nid, Index) ->
+    case element(Offset + 1, Entries) of
+        #{nid := Nid, ofs_in_node := Index} -> true;
+        #{} -> false
+    end.
 
 %%% Blocks and the one failure path
 
@@ -613,9 +672,7 @@ state(#{superblock := #{main_blkaddr := Main, segs_per_sec := S},
                 Held = lists:usort([Sec || Sec <- lists:seq(0, Sections - 1),
                                            not empty_section(Sit, S, Sec)] ++ Footed ++ LogSections),
                 Free = ordsets:subtract(lists:seq(0, Sections - 1), Held),
-                Summaries = maps:from_list(
-                              lists:zip([Segno || {_, Segno, _, _} <- Committed],
-                                        pad(Data) ++ node_summaries(Volume, Committed, Node, Blocks))),
+                Summaries = held(Committed, Data, node_summaries(Volume, Committed, Node, Blocks)),
                 State0 = #state{volume = Volume, logs = #{}, free = Free, summaries = Summaries,
                                 sit_dirty = lists:usort([Segno || #{segno := Segno} <- Journal]),
                                 nodes = #{}, dentries = #{}, orphans = Orphans, allocated = 0,
@@ -741,9 +798,11 @@ put_dentries(#state{dentries = Dentries} = State, Slot, Value) ->
 -doc """
 State with slot Index of dirty node Owner, an inode's address array or a
 direct node, holding Address (docs/design-f2fs.md, "Allocation"): the
-old address's valid bit cleared, the new one's set with its summary
-entry, and valid_block_count and the owning inode's i_blocks moved by
-the slots' weights, a real address or NEW_ADDR one and NULL_ADDR none.
+old address's valid bit cleared when its block's summary names the slot,
+the new one's set with its summary entry, the owning inode's i_blocks
+moved by the slots' weights, a real address or NEW_ADDR one and
+NULL_ADDR none, and valid_block_count by the same less an old block the
+summary does not confirm, which stays its owner's ([F 46]).
 """.
 -spec set_slot(state(), non_neg_integer(), non_neg_integer(), non_neg_integer(), blocks()) ->
           result(state()).
@@ -759,8 +818,15 @@ set_slot(#state{nodes = Nodes} = State, Owner, Index, Address, Blocks) ->
                                    end,
                 #{version := Version} = nat_entry(State, Owner, Blocks),
                 Summary = #{nid => Owner, version => Version, ofs_in_node => Index},
-                State1 = mark(unmark(put_node(State, Owner, Node), Old), Address, Summary),
-                count(State1, Ino, [{valid_block_count, weight(Address) - weight(Old)}])
+                %% The old address the slot gives up: a block its summary does
+                %% not confirm stays its owner's, so the slot clears nothing.
+                Cleared = case not real(Old) orelse confirms(State, Old, Owner, Index, Blocks) of
+                              true -> Old;
+                              false -> ?ERX_F2FS_NULL_ADDR
+                          end,
+                State1 = mark(unmark(put_node(State, Owner, Node), Cleared), Address, Summary),
+                count(State1, Ino, weight(Address) - weight(Old),
+                      [{valid_block_count, weight(Address) - weight(Cleared)}])
         end).
 
 -doc """
@@ -791,11 +857,24 @@ set_node(State, Nid, Ino, Address, Blocks) ->
                 Counts = [{valid_node_count, Delta}, {valid_block_count, Delta}] ++
                     [{valid_inode_count, Delta} || Nid =:= Ino],
                 case Delta of
-                    -1 when Nid =:= Ino -> count(forget(State2, Nid), none, Counts);
-                    -1 -> count(forget(State2, Nid), Ino, Counts);
-                    _ -> count(State2, Ino, Counts)
+                    -1 when Nid =:= Ino -> count(forget(State2, Nid), none, Delta, Counts);
+                    -1 -> count(forget(State2, Nid), Ino, Delta, Counts);
+                    _ -> count(State2, Ino, Delta, Counts)
                 end
         end).
+
+%% Whether Old, the real address slot Index of node Owner held, is a valid
+%% block of a data log's segment whose summary names that slot: the
+%% state's for a segment it holds, else its SSA block's. Any other address
+%% is no block the slot owns.
+confirms(#state{volume = #{superblock := Super} = Volume, summaries = Held}, Old, Owner, Index,
+         Blocks) ->
+    block_kind(Volume, Old) =:= data andalso
+        begin
+            {Segno, Offset} = place_in_main(Super, Old),
+            #{Segno := Entries} = segment_summaries(Super, Held, [Segno], Blocks),
+            names(Entries, Offset, Owner, Index)
+        end.
 
 %% A freed node is no longer dirty, nor any dentry block in its slots, so
 %% no checkpoint writes it back.
@@ -855,9 +934,8 @@ valid_bit(#state{volume = #{superblock := #{main_blkaddr := Main} = Super, sit :
     State#state{volume = Volume#{sit := Sit1}, sit_dirty = ordsets:add_element(Segno, Dirty),
                 summaries = Summaries1}.
 
-%% The counters by Deltas, and Ino's i_blocks by the first delta's, unless
-%% Ino is none.
-count(#state{counts = Counts} = State, Ino, [{_, Delta} | _] = Deltas) ->
+%% The counters by Deltas, and Ino's i_blocks by Delta, unless Ino is none.
+count(#state{counts = Counts} = State, Ino, Delta, Deltas) ->
     Counts1 = lists:foldl(fun({Name, D}, C) -> maps:update_with(Name, fun(V) -> V + D end, C) end,
                           Counts, Deltas),
     State1 = State#state{counts = Counts1},

@@ -8,7 +8,7 @@
 %% Linux wrote for its block.
 -module(erx_f2fs_core_tests).
 -export([fixture_file/0, fixture_nodes/0, fixture_directory/0, fixture_names/0,
-         fixture_node_directory/1, fixture_repeating_directory/1]).
+         fixture_node_directory/1, fixture_repeating_directory/1, summary/3]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
@@ -123,9 +123,66 @@ file(Changes, Replaced, Added) ->
                             %% Block 0 is no zeros, so a hole read from it shows.
                             ++ [{0, data(16#ee)}]),
     Valid = [Address || {_Nid, Address, _} <- Nodes] ++ [?DATA + N || N <- lists:seq(0, 4)],
-    {volume([{Nid, ?INO, Address} || {Nid, Address, _} <- Nodes], Valid), Blocks}.
+    owned(summarized_nodes({volume([{Nid, ?INO, Address} || {Nid, Address, _} <- Nodes], Valid), Blocks},
+                           [{Address, Nid} || {Nid, Address, _} <- Nodes]),
+          [{?DATA, ?INO, 0}, {?DATA + 1, ?DIRECT1, 0}, {?DATA + 2, ?DIRECT1, ?PER - 1},
+           {?DATA + 3, ?CHILD, 2}, {?DATA + 4, ?DOUBLE_DIRECT, 3}]).
 
 file() -> file(#{}, []).
+
+%% Volume and Blocks with each block of Owners, {Address, Nid, Index},
+%% owned by slot Index of node Nid as its summary entry names it ([F 46]):
+%% in the pack's summaries for a segment of a committed data log, else in
+%% its segment's SSA block, over the entries Blocks already gives it
+%% ([F 45]).
+owned({#{superblock := #{main_blkaddr := Main, ssa_blkaddr := Ssa}, logs := Logs,
+         data_summaries := Data} = Volume, Blocks}, Owners) ->
+    BySegment = maps:groups_from_list(
+                  fun({Address, _, _}) -> (Address - Main) div ?SEGMENT end,
+                  fun({Address, Nid, Index}) ->
+                          {(Address - Main) rem ?SEGMENT, #{nid => Nid, version => 0, ofs_in_node => Index}}
+                  end, Owners),
+    DataLogs = [Segno || {_, Segno, _, _} <- lists:sublist(Logs, 3)],
+    Summaries = [entries(Entries, maps:get(Segno, BySegment, []))
+                 || {Segno, Entries} <- lists:zip(DataLogs, Data)],
+    SsaBlocks = #{Ssa + Segno => erx_f2fs_codec:encode_summary_block(
+                                   entries(ssa_entries(maps:find(Ssa + Segno, Blocks)), Set),
+                                   ?ERX_F2FS_SUMMARY_DATA)
+                  || Segno := Set <- BySegment, not lists:member(Segno, DataLogs)},
+    {Volume#{data_summaries := Summaries}, maps:merge(Blocks, SsaBlocks)}.
+
+%% Volume and Blocks with segment 0, which holds those of Nodes, {Address,
+%% Nid} each, that lie in it, no committed log's, the node logs moved to the main area's last
+%% three segments, which hold nothing, and its SSA block naming each node
+%% by its nid, as a node's summary entry does ([F 46]): a data slot naming a
+%% node block then meets an entry that could name the slot, so only the
+%% block's kind refuses it.
+summarized_nodes({#{superblock := #{main_blkaddr := Main, ssa_blkaddr := Ssa}, logs := Logs} = Volume,
+                  Blocks}, Nodes) ->
+    {DataLogs, NodeLogs} = lists:split(3, Logs),
+    Moved = [{Type, Segno, Offset, Alloc}
+             || {{Type, _, Offset, Alloc}, Segno} <- lists:zip(NodeLogs, [21, 22, 23])],
+    Set = [{Address - Main, #{nid => Nid, version => 0, ofs_in_node => 0}}
+           || {Address, Nid} <- Nodes, Address - Main < ?SEGMENT],
+    {Volume#{logs := DataLogs ++ Moved},
+     Blocks#{Ssa => erx_f2fs_codec:encode_summary_block(entries(lists:duplicate(?SEGMENT, no_summary()), Set),
+                                                       ?ERX_F2FS_SUMMARY_NODE)}}.
+
+%% Entries with each of Set, {Offset, Entry}, at its offset, empty entries
+%% filling any gap before it.
+entries(Entries, Set) ->
+    Length = lists:max([length(Entries) | [Offset + 1 || {Offset, _} <- Set]]),
+    Padded = Entries ++ lists:duplicate(Length - length(Entries), no_summary()),
+    tuple_to_list(lists:foldl(fun({Offset, Entry}, T) -> setelement(Offset + 1, T, Entry) end,
+                              list_to_tuple(Padded), Set)).
+
+no_summary() -> #{nid => 0, version => 0, ofs_in_node => 0}.
+
+ssa_entries({ok, Block}) ->
+    {ok, #{entries := Entries}} = erx_f2fs_codec:summary_block(Block),
+    Entries;
+ssa_entries(error) ->
+    lists:duplicate(?SEGMENT, no_summary()).
 
 %% erx_f2fs_fuzz's seeds: the test file's volume and blocks, and each of its
 %% direct and indirect nodes with the nid and node offset its parent gives,
@@ -198,6 +255,37 @@ a_read_gives_data_holes_and_new_addr_as_zeros_test() ->
     ?assertEqual({ok, data(4)}, read(File, (?B_INDIRECT1 + ?PER + 2) * ?BLOCK, ?BLOCK)),
     ?assertEqual({ok, <<5, 5>>}, read(File, (?B_DOUBLE + ?PER + 4) * ?BLOCK - 2, 10)),
     ?assertEqual({ok, <<>>}, read(File, (?B_DOUBLE + ?PER + 4) * ?BLOCK, 10)).
+
+%% A data block is read only through the slot its summary entry names
+%% ([F 46]): the file's slot 0 naming a donor file's data block, in the
+%% hot data log or in a segment whose summary is its SSA block, a block of
+%% its own that another of its slots owns, or a valid block past the
+%% entries the hot data log has written, fails the slot and the read rather
+%% than answer that block's bytes as the file's; a directory block whose
+%% summary names another node fails its lookup and readdir.
+a_block_is_read_only_through_the_slot_its_summary_names_test_() ->
+    Donor = ?DATA + 5,
+    Far = ?MAIN + 6 * ?SEGMENT,
+    Unwritten = ?DATA + 400,
+    #{i_addr := Words} = erx_f2fs_codec_tests:inode_fields(),
+    {Extra, _} = lists:split(3, Words),
+    Slot0 = fun(Address) ->
+                    {#{sit := Sit} = Volume, Blocks} =
+                        file(#{i_addr => Extra ++ [Address, ?NEW | lists:duplicate(?SLOTS - 2, 0)]}, []),
+                    Planted = [Donor, Far, Unwritten],
+                    owned({Volume#{sit := valid(Sit, Planted)},
+                           maps:merge(Blocks, #{A => data(16#dd) || A <- Planted})},
+                          [{Donor, ?ERX_F2FS_ROOT_INO, 0}, {Far, ?ERX_F2FS_ROOT_INO, 0}])
+            end,
+    Owner = {error, {data, owner}},
+    Dir = owned(directory(), [{?DATA + 16, ?ERX_F2FS_ROOT_INO, 0}]),
+    [?_assertEqual(Owner, slot(Slot0(Donor), 0)),
+     ?_assertEqual(Owner, read(Slot0(Donor), 0, ?BLOCK)),
+     ?_assertEqual(Owner, read(Slot0(Far), 0, ?BLOCK)),
+     ?_assertEqual(Owner, read(Slot0(Unwritten), 0, ?BLOCK)),
+     ?_assertEqual(Owner, read(Slot0(?DATA + 1), 0, 2 * ?BLOCK)),
+     ?_assertEqual(Owner, lookup(Dir, <<"zero">>)),
+     ?_assertEqual(Owner, readdir(Dir, 0))].
 
 %% A slot asks for its nodes one at a time, and only the ones its path
 %% crosses.
@@ -300,8 +388,9 @@ inline_xattrs_end_the_address_array_early_test() ->
     Words = [12 bor (?ERX_F2FS_INLINE_XATTR_WORDS bsl 16), W1, W2]
         ++ lists:duplicate(Slots - 1, 0) ++ [?DATA + 4]
         ++ lists:duplicate(?ERX_F2FS_INLINE_XATTR_WORDS, ?DATA + 3),
-    File = file(#{inode => Inode#{i_inline := ?ERX_F2FS_EXTRA_ATTR bor ?ERX_F2FS_INLINE_XATTR},
-                  i_addr => Words}, []),
+    File = owned(file(#{inode => Inode#{i_inline := ?ERX_F2FS_EXTRA_ATTR bor ?ERX_F2FS_INLINE_XATTR},
+                       i_addr => Words}, []),
+                 [{?DATA + 4, ?INO, Slots - 1}]),
     ?assertEqual({ok, {?INO, Slots - 1, ?DATA + 4}}, slot(File, Slots - 1)),
     ?assertEqual({ok, {?DIRECT1, 0, ?DATA + 1}}, slot(File, Slots)).
 
@@ -502,7 +591,8 @@ directory(Dentries) ->
                                                 i_dir_level := 0, i_blocks := 1 + map_size(ByBlock)},
                i_addr => Extra ++ Addresses, i_nid => [0, 0, 0, 0, 0]},
     {#{sit := Sit} = Volume, Blocks} = file(Fields, []),
-    {Volume#{sit := valid(Sit, maps:keys(DentryBlocks))}, maps:merge(Blocks, DentryBlocks)}.
+    owned({Volume#{sit := valid(Sit, maps:keys(DentryBlocks))}, maps:merge(Blocks, DentryBlocks)},
+          [{?DATA + 16 + Block, ?INO, Block} || Block <- maps:keys(ByBlock)]).
 
 directory() -> directory(dir_dentries()).
 
@@ -601,18 +691,24 @@ node_directory(Ino) ->
 %% erx_f2fs_volume_tests' directory in nodes: its nid and volume.
 fixture_node_directory(Ino) -> {?INO, node_directory(Ino)}.
 
-%% A directory whose direct node 1 names one dentry block, which holds no
-%% entry, in every slot, its address array holes and its other node ids 0,
-%% with i_blocks Held: three blocks hold it, though its slots name 1,018.
+%% A directory whose direct node 1 names a dentry block that holds no entry
+%% in every slot, each its own block of segments 6 and 7 and owned by its
+%% slot, its address array holes and its other node ids 0, with i_blocks
+%% Held: 1,020 blocks hold it, the inode, the node and its 1,018 slots.
 fixture_repeating_directory(Held) ->
     #{inode := Inode} = file_inode(#{}),
     #{i_addr := Words} = erx_f2fs_codec_tests:inode_fields(),
     {Extra, _} = lists:split(3, Words),
-    {Volume, Blocks} = file(#{inode => Inode#{i_mode := 8#40755, i_links := 2, i_blocks := Held},
-                              i_addr => Extra ++ lists:duplicate(?SLOTS, 0),
-                              i_nid => [?DIRECT1, 0, 0, 0, 0]},
-                            [{?DIRECT1, direct(?DIRECT1, 1, lists:duplicate(?PER, ?DATA))}]),
-    {?INO, {Volume, Blocks#{?DATA := erx_f2fs_codec_tests:dentry_block([])}}}.
+    Slots = lists:enumerate(0, [?MAIN + 6 * ?SEGMENT + I || I <- lists:seq(0, ?PER - 1)]),
+    {#{sit := Sit} = Volume, Blocks} =
+        file(#{inode => Inode#{i_mode := 8#40755, i_links := 2, i_blocks := Held},
+               i_addr => Extra ++ lists:duplicate(?SLOTS, 0),
+               i_nid => [?DIRECT1, 0, 0, 0, 0]},
+             [{?DIRECT1, direct(?DIRECT1, 1, [Address || {_, Address} <- Slots])}]),
+    Empty = erx_f2fs_codec_tests:dentry_block([]),
+    {?INO, owned({Volume#{sit := valid(Sit, [Address || {_, Address} <- Slots])},
+                  maps:merge(Blocks, #{Address => Empty || {_, Address} <- Slots})},
+                 [{Address, ?DIRECT1, Index} || {Index, Address} <- Slots])}.
 
 %% A directory held in direct, indirect and double indirect nodes lists
 %% every entry once, in position order: under the address array, under

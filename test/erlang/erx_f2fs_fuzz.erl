@@ -33,7 +33,8 @@
 %% reader answers whose record has an encoder must read back from its encoding
 %% in the form erXos writes, an inode's i_ext with len 0 and its checksum aside
 %% (`round_trip`). A file's slot names only a valid main area block of a data
-%% log's segment (`kind`). A run reaches every rule of ?REACHED (failure `unreached`).
+%% log's segment (`kind`), whose summary entry names that slot, its node and
+%% its index (`owner`). A run reaches every rule of ?REACHED (failure `unreached`).
 -module(erx_f2fs_fuzz).
 -export([run/1]).
 
@@ -69,7 +70,7 @@
         ++ [{inline_dentries, Rule} || Rule <- [ok | ?DENTRY_RULES]]
         ++ [{dentry_block, Rule} || Rule <- [ok, block_size | ?DENTRY_RULES]]
         ++ [{Node, Rule} || Node <- [direct_node, indirect_node], Rule <- [ok, block_size, footer]]
-        ++ [{walk, ok}, {data, block_addr}, {nat, free}, {nat, nid}, {file, size}]
+        ++ [{walk, ok}, {data, block_addr}, {data, owner}, {nat, free}, {nat, nid}, {file, size}]
         ++ [{dir, ok}, {dentry_block, name}]
         ++ [{mount, ok}, {allowance, sit}, {nat, block_addr}, {sit, valid_nodes}]).
 %% The mount's allowance in most cases: more than any seed's SIT needs.
@@ -88,7 +89,8 @@
 %% mutated tree.
 -define(DIR_ROUNDS, 32).
 %% The fixture's NAT area, both copies, and its main area's start: every
-%% block a walk asks for lies in one of the two.
+%% block a walk asks for lies in the NAT, the SSA area between them or the
+%% main area.
 -define(FIXTURE_NAT, 2560).
 -define(FIXTURE_MAIN, 4096).
 %% The fixture file's inode (erx_f2fs_core_tests).
@@ -550,16 +552,21 @@ maybe_fix_inode(_Super, Block) ->
     Block.
 
 %% An inode read has a whole number of words of extra attributes, inline
-%% data of its size, dentries within their slots, and, for a directory, at
-%% most 63 hash levels.
-check_inode(#{i_mode := Mode, i_current_depth := Depth})
+%% data of its size and, for a directory, at most 63 hash levels: checked
+%% before its round trip, which a value breaking them cannot pass, so a
+%% fault in one of these rules fails under its own name.
+own_rules(inode, #{i_mode := Mode, i_current_depth := Depth})
   when Mode band ?ERX_F2FS_MODE_TYPE_MASK =:= ?ERX_F2FS_MODE_DIR,
        Depth > ?ERX_F2FS_DIR_HASH_DEPTH_MAX ->
     fail(current_depth, Depth);
-check_inode(#{i_extra_isize := Size}) when Size rem 4 =/= 0 ->
+own_rules(inode, #{i_extra_isize := Size}) when Size rem 4 =/= 0 ->
     fail(extra_isize, Size);
-check_inode(#{inline_data := Data, i_size := Size}) when byte_size(Data) =/= Size ->
+own_rules(inode, #{inline_data := Data, i_size := Size}) when byte_size(Data) =/= Size ->
     fail(size, {Size, byte_size(Data)});
+own_rules(_Structure, _Value) ->
+    ok.
+
+%% An inline directory's dentries lie within their slots.
 check_inode(#{inline_dentries := _} = Inode) ->
     case read(inline_dentries, fun erx_f2fs_codec:inline_dentries/1, [Inode]) of
         {ok, Dentries} -> check_dentries(Dentries), {inline_dentries, ok};
@@ -658,7 +665,7 @@ node_case() ->
 
 %% The fixture file with one of its blocks mutated, by bytes or by a word set
 %% to a nid, an address or a node offset, or with its inode's slot 0 naming
-%% one of its node blocks, then a slot, a read of up to four blocks or the
+%% one of its node blocks or data blocks, then a slot, a read of up to four blocks or the
 %% file read as a symlink's target, through the need loop.
 walk_case() ->
     {#{superblock := Super} = Volume, Blocks} = erx_f2fs_core_tests:fixture_file(),
@@ -688,21 +695,23 @@ walk_case() ->
             fail(size, byte_size(Bytes));
         {ok, {_Nid, _Index, SlotAddress} = Slot}
           when SlotAddress =/= ?ERX_F2FS_NULL_ADDR, SlotAddress =/= ?ERX_F2FS_NEW_ADDR ->
-            data_block(Volume, SlotAddress) orelse fail(kind, Slot);
+            data_block(Volume, SlotAddress) orelse fail(kind, Slot),
+            owned(Volume, Mutated, Slot) orelse fail(owner, Slot);
         _ ->
             ok
     end,
     outcome(walk, Result).
 
 %% A block of the fixture file and its mutation. The inode lies at the main
-%% area's second block and its six nodes after it; its slot 0 follows three
-%% words of extra attributes.
+%% area's second block and its six nodes after it, and its five data blocks
+%% at segment 3's first; its slot 0 follows three words of extra attributes.
 walk_mutation(Blocks) ->
     case rand:uniform(4) of
         4 ->
             Inode = ?FIXTURE_MAIN + 1,
             {Inode, write_word(maps:get(Inode, Blocks), ?ERX_F2FS_INODE_BLOCK_OFF_I_ADDR + 4 * 3,
-                               Inode + rand:uniform(7) - 1)};
+                               pick([Inode + rand:uniform(7) - 1,
+                                     ?FIXTURE_MAIN + 3 * 512 + rand:uniform(5) - 1]))};
         Kind ->
             Address = pick(lists:sort(maps:keys(Blocks))),
             Old = maps:get(Address, Blocks),
@@ -711,6 +720,17 @@ walk_mutation(Blocks) ->
                           2 -> write_word(Old, walk_offset(), walk_value());
                           3 -> Old
                       end}
+    end.
+
+%% Whether Slot's block's summary entry, in the pack or in its segment's SSA
+%% block among Blocks, names Slot's node and index ([F 46]).
+owned(Volume, Blocks, {Nid, Index, Address}) ->
+    try erx_f2fs_core_tests:summary(Volume, Address, fun(As) -> maps:with(As, Blocks) end) of
+        Owner -> Owner =:= {Nid, Index}
+    catch
+        %% No entry the oracle can read, past a log's summaries or in a
+        %% block that does not decode, names no slot.
+        error:_ -> false
     end.
 
 %% Whether Address is a main area block the SIT marks valid in a segment it
@@ -787,15 +807,13 @@ dir_offset() ->
     end.
 
 %% The walk's need loop over Blocks, as mount_loop's: every address inside
-%% the NAT or the main area of the partition and not given before, within
+%% the NAT, the SSA or the main area of the partition and not given before, within
 %% Rounds needs, which bounds a walk's work by the nodes on its paths.
 walk_loop(Step, Blocks, Given, Rounds) ->
     try Step(Given) of
         {need, [_ | _] = Addresses} when Rounds > 0 ->
             [fail(partition, {Address, ?FIXTURE_PARTITION})
              || Address <- Addresses, not is_integer(Address) orelse Address < ?FIXTURE_NAT orelse
-                                          (Address >= ?FIXTURE_NAT + 2 * 512 andalso
-                                               Address < ?FIXTURE_MAIN) orelse
                                           Address >= ?FIXTURE_PARTITION],
             [fail(repeat, Address) || Address <- Addresses, is_map_key(Address, Given)],
             Read = maps:from_list([{A, maps:get(A, Blocks, <<0:(?BLOCK * 8)>>)} || A <- Addresses]),
@@ -870,7 +888,10 @@ nat_entry_address(Block, Value) ->
 
 read(Structure, Read, Arguments) ->
     try apply(Read, Arguments) of
-        {ok, Value} = Result -> checked_round_trip(Structure, Arguments, Value), Result;
+        {ok, Value} = Result ->
+            own_rules(Structure, Value),
+            checked_round_trip(Structure, Arguments, Value),
+            Result;
         {error, {Structure, Rule}} = Result when is_atom(Rule) -> Result;
         Other -> fail(shape, Other)
     catch

@@ -61,7 +61,7 @@ or {space, no_free_section} when a log cannot take a section.
 -doc """
 The checkpoint of State from Blocks, the blocks read so far: {ok, Plan,
 Committed}, the state once Plan's last flush is answered, {need,
-Addresses} naming the NAT blocks it needs, or {error, Failure}.
+Addresses} naming the NAT and SSA blocks it needs, or {error, Failure}.
 """.
 -spec checkpoint(erx_f2fs_core:state(), erx_f2fs_core:blocks()) ->
           {ok, plan(), erx_f2fs_core:state()} | {need, [non_neg_integer()]} |

@@ -17,7 +17,8 @@ A step is a function of the volume and the blocks read so far that
 answers a move or {need, Addresses}, after which the volume reads those
 blocks and runs it again from the start. Each step reads one inode and
 what lies under it, so the blocks it pins in the cache while it runs are
-those of one node's operation.
+those of one node's operation and the summary blocks of the segments its
+data blocks lie in.
 
 A node is its nid. A qid's path is the nid in its low 32 bits and the
 inode's i_generation in its high 32; its version is 0, since nothing on a

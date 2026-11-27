@@ -689,12 +689,13 @@ Every change of a block reference goes through one function,
 inode's address array and the address one of `NULL_ADDR`, `NEW_ADDR` or
 a real address ([F 4]). It clears the old address's valid bit when that
 block's summary names the slot, so a crafted slot never frees another
-file's block, sets the
+file's block: a block its summary gives another slot stays live, its
+owner's. It sets the
 new one's, which makes the new block live, records the new block's
 summary entry ([F 46]) in its segment's unpublished summary, adjusts
-`valid_block_count` by the slots' weights (a real address or `NEW_ADDR`
-counts one, `NULL_ADDR` none; [T 61], [T 75]) and adjusts the inode's
-`i_blocks`. A real address that another slot holds, as the block's
+the inode's `i_blocks` by the slots' weights (a real address or
+`NEW_ADDR` counts one, `NULL_ADDR` none; [T 61], [T 75]) and
+`valid_block_count` by the same, less an old block it left live. A real address that another slot holds, as the block's
 summary names it and that slot confirms, is first cleared from that
 slot, so a block never has two owners; only replaying a Linux chain
 meets that case ([R 57]). Writes, truncates, the cleaner's moves and
@@ -2564,6 +2565,8 @@ inputs, each paired with the seeded fault it must catch:
 | the record decision, over every combination of the epoch's facts | the rename fact ignored |
 | a pre-image differs from its commit block only in `cp_ver` and matches under none of the three rules | the low 32 bits of `cp_ver` left unchanged |
 | `set_slot` keeps one owner per block and the counters | the stale owner not cleared |
+| `set_slot` clears an old block only when its summary names the slot, the pack's or the SSA's | the old block cleared without the summary's confirmation |
+| every data block a walk, a lookup or a readdir takes has a summary naming the slot it came through, over the codec fuzz target's mutated files | the owner check dropped |
 | replay leaves every node it touched dirty and no chain node block live | a replayed dnode adopted at its chain address |
 | an `i_dir_level` 2 inline directory converts with every entry in its hash's bucket | the level kept at conversion |
 | truncating to one byte and extending reads zeros | the kept block's tail left as it was |

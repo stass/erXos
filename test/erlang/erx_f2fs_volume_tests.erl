@@ -440,9 +440,9 @@ a_readdir_reads_on_through_the_core_calls_test() ->
     ?assertMatch({failed, 0, _}, requested(Dir, {readdir, Ino, 0, 256})).
 
 %% A directory's core calls are bounded by its i_blocks: one whose 1,018
-%% slots all name one empty dentry block lists, reading on past every call
-%% that finds nothing, while its i_blocks counts each slot, and fails once
-%% it claims the three blocks that hold it.
+%% slots each name an empty dentry block of its own lists, reading on past
+%% every call that finds nothing, while its i_blocks counts each slot, and
+%% fails once it claims only three blocks.
 a_readdir_is_bounded_by_the_blocks_its_directory_holds_test() ->
     {Ino, Honest} = erx_f2fs_core_tests:fixture_repeating_directory(1020),
     ?assertEqual({ok, []}, requested(Honest, {readdir, Ino, 0, 256})),

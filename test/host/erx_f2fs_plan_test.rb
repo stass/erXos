@@ -36,13 +36,17 @@ class ErxF2fsPlanTest < Minitest::Test
              replacement: '        {ok, [lists:keysort(1, [{Last, Copy} | Phase1])], ',
              case_name: 'set_node_keeps_every_count_a_node_is_in_test_'),
     Seed.new(fault: 'set_node not counting i_blocks', file: CORE,
-             anchor: '                    _ -> count(State2, Ino, Counts)',
-             replacement: '                    _ -> count(State2, none, Counts)',
+             anchor: '                    _ -> count(State2, Ino, Delta, Counts)',
+             replacement: '                    _ -> count(State2, none, Delta, Counts)',
              case_name: 'set_node_keeps_every_count_a_node_is_in_test_'),
     Seed.new(fault: 'a mount resuming within only the committed segment', file: CORE,
              anchor: '            || K <- lists:seq(0, S - 1),',
              replacement: '            || K <- [Segno rem S],',
-             case_name: 'a_log_resumes_past_the_durable_blocks_of_its_whole_section_test')
+             case_name: 'a_log_resumes_past_the_durable_blocks_of_its_whole_section_test'),
+    Seed.new(fault: "an old block's valid bit cleared without its summary's confirmation", file: CORE,
+             anchor: '                Cleared = case not real(Old) orelse confirms(State, Old, Owner, Index, Blocks) of',
+             replacement: '                Cleared = case not real(Old) orelse is_boolean(confirms(State, Old, Owner, Index, Blocks)) of',
+             case_name: 'set_slot_clears_only_what_the_summary_confirms_test_')
   ].freeze
 
   def test_eunit_cases_pass

@@ -80,7 +80,10 @@ module ErxF2fsFuzz
     Seed.new(fault: "a summary block's entry_type written as 0",
              anchor: '                            entry_type => Type, check_sum => 0}).',
              replacement: '                            entry_type => 0 * Type, check_sum => 0}).',
-             failure: 'round_trip')
+             failure: 'round_trip'),
+    Seed.new(fault: "a slot's summary owner check dropped", target: :core,
+             anchor: "                          require(names(maps:get(Segno, Summaries), Offset, Nid, Index), {data, owner})",
+             replacement: "                          require(is_tuple(maps:get(Segno, Summaries)) orelse Offset + Nid + Index < 0, {data, owner})", failure: 'owner')
   ].freeze
 
   module_function

@@ -41,8 +41,8 @@ class ErxF2fsCoreTest < Minitest::Test
              replacement: '    Count = ?ERX_F2FS_ADDRS_PER_INODE - ExtraWords - 0 * XattrWords,',
              failure: /inline_xattrs_end_the_address_array_early[^\n]*failed/),
     Seed.new(fault: 'a hole read as block 0', source: CORE,
-             anchor: '                            Address =/= ?ERX_F2FS_NULL_ADDR, Address =/= ?ERX_F2FS_NEW_ADDR]).',
-             replacement: '                            Address =/= ?ERX_F2FS_NEW_ADDR]).',
+             anchor: '    lists:usort([Address || {_Nid, _Index, Address} <- Slots, real(Address)]).',
+             replacement: '    lists:usort([Address || {_Nid, _Index, Address} <- Slots, Address =/= ?ERX_F2FS_NEW_ADDR]).',
              failure: /a_read_gives_data_holes_and_new_addr_as_zeros[^\n]*failed/),
     Seed.new(fault: "a long name's hash state not carried from one 16-byte chunk to the next", source: CODEC,
              anchor: '        _ -> hash_chunks(Rest, State)',
@@ -53,8 +53,8 @@ class ErxF2fsCoreTest < Minitest::Test
              replacement: 'buckets(N, Depth, _Level, _Start, _Hash, _End) when N >= Depth - 1 ->',
              failure: /each_name_is_found_in_its_bucket[^\n]*failed/),
     Seed.new(fault: 'a readdir stepping over a run of holes a block at a time', source: CORE,
-             anchor: '    case length(lists:takewhile(fun empty_slot/1, Slots)) of',
-             replacement: '    case min(1, length(lists:takewhile(fun empty_slot/1, Slots))) of',
+             anchor: '    case length(lists:takewhile(fun(Slot) -> not real(Slot) end, Slots)) of',
+             replacement: '    case min(1, length(lists:takewhile(fun(Slot) -> not real(Slot) end, Slots))) of',
              failure: /a_readdir_over_holes_is_one_step_a_run[^\n]*failed/),
     Seed.new(fault: "a readdir stepping over a node id 0's span a block at a time", source: CORE,
              anchor: '    {{empty, rest(Path)}, Nodes};',
@@ -79,7 +79,11 @@ class ErxF2fsCoreTest < Minitest::Test
     Seed.new(fault: "the node inode's and meta inode's nids admitted", source: CORE,
              anchor: '    require(erx_f2fs_codec:valid_nid(Super, Nid), {nat, nid}),',
              replacement: '    require(Nid > 0 andalso Nid < erx_f2fs_codec:nat_capacity(Super), {nat, nid}),',
-             failure: /\(node id 1\)[^\n]*failed/)
+             failure: /\(node id 1\)[^\n]*failed/),
+    Seed.new(fault: "a data block read without its summary naming the slot", source: CORE,
+             anchor: "                          require(names(maps:get(Segno, Summaries), Offset, Nid, Index), {data, owner})",
+             replacement: "                          require(is_tuple(maps:get(Segno, Summaries)) orelse Offset + Nid + Index < 0, {data, owner})",
+             failure: /a_block_is_read_only_through_the_slot_its_summary_names[^\n]*failed/)
   ].freeze
 
   def test_eunit_cases_pass
