@@ -325,11 +325,20 @@ findings table below is how the checker gets there, and the final check
 is what makes FK-R2 hold for any volume the table does not foresee.
 
 The directory walk keeps one frame per directory on the current path,
-each holding the directory's first cluster, the place of its entry, and
-the subdirectories found in it and not yet walked. A finding's path is
-built when the finding is made, from the frames, by reading the entries
-of the nearest ancestors again until the path's bound is reached
-([Bounds](#bounds)), so no name is held for longer than one finding.
+each holding the directory's first cluster, its name and the
+subdirectories found in it and not yet walked, each with its first
+cluster and name. A finding's path is built when the finding is made,
+from the frames' names, the nearest first, until the path's bound is
+reached ([Bounds](#bounds)). The frames and the subdirectories waiting
+in them count toward one bound with their names, so holding the names
+costs no reread of an ancestor's entries.
+
+Every walk ends by construction. Phase 1 ends one of every two chains
+that link to one cluster, and a repair only ever writes an end of
+chain, so no cluster is linked to twice; a walk starts only at a
+cluster nothing links to, so it never meets a cluster twice and takes
+at most as many steps as the volume has clusters. A cluster no walk
+reached whose entry links on therefore lies on a loop of lost clusters.
 
 ### Findings and repairs
 
@@ -345,7 +354,7 @@ ownership-check finding the repair removes.
 | `Cluster N continues with out of range cluster number M` | `fat.c:994-1001` | end the chain at N | a link that is no cluster |
 | `Cluster N crossed another chain at M` | `fat.c:1003-1012` | end the chain at N, the later of the two linking entries | a cluster linked to twice |
 | `Root directory doesn't start a cluster chain` | `dir.c:251-255` | none: fatal | |
-| `Cluster chain starting at N ends with cluster marked TYPE`, `... out of range (M)` | `fat.c:1101-1123` | end the chain before the bad link; when no cluster of it is valid, the name's first cluster and size set to 0 | a reached cluster that is free or bad |
+| `Cluster chain starting at N ends with cluster marked TYPE` | `fat.c:1101-1123` | end the chain before the bad link; when no cluster of it is valid, the name's first cluster and size set to 0 | a reached cluster that is free or bad |
 | `PATH has entries after end of directory` | `dir.c:633-660` | turn the end markers before those entries into deleted entries, so the entries are read | |
 | `Invalid long filename entry for NAME`, `... at end of directory PATH`, `... for volume label` | `dir.c:348-380` | delete the run's entries | |
 | `invalid long name`, `long filename too long`, `long filename record cluster start != 0` | `dir.c:686-745` | the run is invalid, deleted as above | |
@@ -353,7 +362,6 @@ ownership-check finding the repair removes.
 | `Directory PATH has size != 0` | `dir.c:886-896` | size set to 0 | |
 | `` `.' entry in PATH has incorrect start cluster `` | `dir.c:900-911` | set to the directory's own | a wrong `.` |
 | `` `..' entry in PATH has non-zero start cluster ``, `` ... incorrect start cluster `` | `dir.c:913-941` | set to 0 under the root, else to the parent's | a wrong `..` |
-| `NAME entry in PATH has incorrect start cluster` (a subdirectory naming its own parent) | `dir.c:947-962` | delete the entry | a first cluster named twice |
 | `check_subdirectory: Incorrect `.' for NAME.`, `... `..' ...` | `dir.c:475-538`, `:964-976` | delete the entry | |
 | `Directory entry PATH of size N referencing invalid cluster M` | `dir.c:400-417` | first cluster and size set to 0 | as for the file case above |
 | `size of PATH is N, should at most be M` | `dir.c:434-445` | size set to the chain's | |
@@ -361,6 +369,16 @@ ownership-check finding the repair removes.
 | `Lost cluster chain at cluster N` / `M Cluster(s) lost` | `fat.c:1285-1300` | named in `LOST.DIR`, or kept ([Lost chains](#lost-chains)) | |
 | `Free space in FSInfo block (N) not correct (M)`, `Next free cluster in FSInfo block (N) invalid` / `not free` | `fat.c:1307-1334` | both hints written unknown | |
 | the volume dirty | `check.c:161-174` | mark the volume clean at the end | |
+
+Two of FreeBSD's messages cannot occur in its own order of examination,
+so the checker has no finding for them: `Cluster chain starting at N
+ends with cluster out of range (M)` (`fat.c:1112-1116`), since phase 1
+has already ended every chain at a link out of range; and `NAME entry
+in PATH has incorrect start cluster` (`dir.c:947-962`), since a
+directory's own chain is walked before its entries are read, so an
+entry naming that chain is found first as `PATH doesn't start a new
+cluster chain`, or, at FAT16's root, whose first cluster is 0, as
+`PATH starts with cluster out of range(0)`.
 
 erXos adds three findings of its own, in [Where the repairs
 differ](#where-the-repairs-differ): FAT copies that differ, loops of
@@ -437,8 +455,8 @@ is a bug, and the fuzz target fails on one.
 
 | What is held | Bound | At most |
 | --- | --- | --- |
-| the clusters some entry links to, and the clusters a walk has reached | one bit per cluster each, at most 4,194,304 clusters, the ownership check's limit; a larger volume is refused before any FAT sector is read | 1 MiB |
-| the directory frames and the subdirectories they wait on | 16,384, the ownership check's stack bound | 1 MiB |
+| the clusters some entry links to, and the clusters a walk has reached | one bit per cluster each, at most 4,194,304 clusters, the ownership check's limit; a larger volume is refused before any FAT sector is read but the one admission reads for the volume's flags | 1 MiB |
+| the directory frames and the subdirectories they wait on, with their names | measured as 64 bytes each plus its name's bytes, within 1 MiB, so at most 16,384, the ownership check's stack bound | 1 MiB |
 | the FAT sector cache | 64 sectors | 32 KiB |
 | edits, and the view's index of them by sector | 12,288 edits | 2 MiB |
 | findings | measured as 64 bytes each plus its path's bytes, within 1 MiB; a path keeps at most its last 1,024 bytes, its earlier names shown as `...` | 1 MiB |
@@ -830,7 +848,7 @@ the tree, names, sizes and content hashes, that the repair must give.
 | lost chains: with a free slot in `LOST.DIR`, named; with no `LOST.DIR`, a full one, a name taken and a chain of 4 GiB, each kept, reported, the volume marked clean and status 8; a free slot after an orphan long-name run passed over | the size stored as its low 32 bits, so the 4 GiB chain is named with size 0 and the second check finds too many clusters |
 | a truncated image: its boot sector claims more sectors than the file holds; refused before any write, the file's length unchanged | admission given the boot sector's count instead of the file's, so the image is checked and written |
 | the first flush: a fake medium whose `fsync` answers `enotsup` is refused with nothing written | the first `fsync` dropped, so the dirty step lands before the failure |
-| bounds: 4,194,305 clusters and 16,385 pending directories refused with nothing read past the boot sector and FAT; findings past their bound and edits past 12,288 refused with nothing written; a repair of 12,288 edits in distinct sectors written with the process's memory, its binaries included, never above a third of its heap; a path of 16,384 levels shown as its last 1,024 bytes | the findings' bound removed, so an image of 100,000 lost chains ends the command at its heap limit, which the test counts as a failure; a step's images built whole, so that repair's memory passes a third of the heap |
+| bounds: 4,194,305 clusters refused with nothing read but the boot sector and the FAT sector admission reads; directories past their bound refused; findings past their bound and edits past 12,288 refused with nothing written; a repair of 12,288 edits in distinct sectors written with the process's memory, its binaries included, never above a third of its heap; a path of 16,384 levels shown as its last 1,024 bytes | the findings' bound removed, so an image of 100,000 lost chains ends the command at its heap limit, which the test counts as a failure; a step's images built whole, so that repair's memory passes a third of the heap |
 | refusals: FAT12, 1,024-byte sectors, mirroring off, each with no write | the mirror test dropped, so a volume whose active FAT is 1 is repaired from FAT 0 |
 | `fsck_fat` over a file and over a fake raw file: `-n` writes nothing and exits 8 on damage, 0 when clean; the question answered `y` writes the repair and exits 0, `n` and end of input write nothing and exit 8; `-y` asks nothing; `-p`, `-f`, `-n -y` and a directory are refused; the report lists every finding before the question | the repair written before the question; the exit status 0 after a declined repair |
 | `fsck`: a volume path mapped to its `sN.data`, the format from `status`, `-t fat` on an unknown format, no volume named refused, a session without `media_raw` told so | the format read from the file's own boot sector instead of `status`, so an EROFS volume reaches `fsck_fat` |
@@ -841,8 +859,10 @@ the tree, names, sizes and content hashes, that the repair must give.
 in a process whose heap limit is the command's: no crash and no kill,
 every bound kept, and wherever a repair is answered, the repair written
 to the image followed by a second check that finds nothing but kept
-lost chains. A copy whose chain walk drops its reached-set test must
-fail by passing its work bound on a looped image.
+lost chains. Each round ends within a deadline and reads at most eight
+times the volume's sectors. A copy whose phase 1 keeps a chain that
+links to a cluster linked to before must fail on a looped image, its
+walk following the loop past the deadline.
 
 ### The oracle
 

@@ -43,7 +43,8 @@ image(Path) ->
                                       S <- [binary:part(Bytes, I * ?SECTOR, ?SECTOR)], S =/= <<0:(?SECTOR * 8)>>])}.
 
 round_of({Sectors, Data}) ->
-    Mutated = lists:foldl(fun(_, D) -> mutated(D) end, Data, lists:seq(1, rand:uniform(?MUTATIONS))),
+    Mutated = lists:foldl(fun(_, D) -> case rand:uniform(2) of 1 -> mutated(D); 2 -> relinked(D) end end,
+                          Data, lists:seq(1, rand:uniform(?MUTATIONS))),
     Volume = {Sectors, Mutated},
     case checked(Volume) of
         {answer, Answer} -> valid(Answer) orelse error({bad_answer, Answer});
@@ -63,6 +64,18 @@ mutated(Data) ->
               3 -> rand:uniform(40) + 1
           end,
     Data#{Sector => <<Before/binary, New:16/little, After/binary>>}.
+
+%% One mutation of the first FAT, as the boot sector places it: a low cluster linked
+%% to a low cluster, often itself or one a chain already holds, so chains cross and
+%% loop.
+relinked(Data) ->
+    <<_:14/binary, Reserved:16/little, _:6/binary, Fat16:16/little, _/binary>> = maps:get(0, Data, <<0:(?SECTOR * 8)>>),
+    Bytes = case Fat16 of 0 -> 4; _ -> 2 end,
+    Cluster = rand:uniform(40) + 1,
+    Sector = Reserved + Cluster * Bytes div ?SECTOR,
+    Offset = Cluster * Bytes rem ?SECTOR,
+    <<Before:Offset/binary, _:Bytes/binary, After/binary>> = maps:get(Sector, Data, <<0:(?SECTOR * 8)>>),
+    Data#{Sector => <<Before/binary, (rand:uniform(40) + 1):(Bytes * 8)/little, After/binary>>}.
 
 %% The check in a process of the command's heap limit, within the deadline; reads
 %% outside the volume or past the work bound end it.
