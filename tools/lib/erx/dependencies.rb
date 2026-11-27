@@ -452,7 +452,8 @@ module Erx
     end
 
     def verify(source, archive:)
-      unless Digest::SHA256.hexdigest(BoundedFile.read(archive, maximum: MAX_ARCHIVE_BYTES)) == source.fetch('sha256')
+      # Hashed as a stream: a cloud image is close to the bound.
+      unless File.size(archive) <= MAX_ARCHIVE_BYTES && Digest::SHA256.file(archive).hexdigest == source.fetch('sha256')
         raise Error, "source SHA-256 mismatch: #{source.fetch('id')}"
       end
     end

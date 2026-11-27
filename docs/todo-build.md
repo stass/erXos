@@ -969,14 +969,31 @@ design does not have, to be deleted so no side-by-side table can show it under s
   needs the high bits of a 64-bit `dev_t` decodes to another number, and on a host file system with
   64-bit inode numbers two inodes equal modulo 2^32 share a link class; trees of F2FS (32-bit nids)
   and devices with small numbers are not affected. The listing module's lines exceed 80 columns.
-* [Medium] test, F2FS oracle: erXos's F2FS is checked against Linux's, which needs a Linux guest under QEMU
-  with Linux v7.3.4 built out of the tree from kernel.org's release, F2FS and the device-mapper targets
-  built in, and Ubuntu 26.04's cloud image with f2fs-tools 1.16.0 as its root disk. Neither the guest nor
-  its pins exist.
+* [Medium] test, F2FS oracle guest's checks (`tools/lib/erx/f2fs_oracle_guest.rb`,
+  [design-f2fs.md](design-f2fs.md#the-linux-oracle-guest)): it runs `fsck.f2fs --dry-run`, an
+  `ro,norecovery` mount and its listing, Linux's own fresh formats and the corpus listing comparison;
+  it has no `fsck.f2fs -l` field comparison, no recovery mount, no device-mapper snapshot under the
+  mount, and no Linux-to-erXos images of its own making. Whether 7.0.0-34-generic loads the
+  `snapshot`, `flakey` and `log-writes` targets is unverified. The design's other sections still name
+  Linux v7.3.4 as the behaviour matched, which is what the facts records read; the guest's kernel is
+  7.0.14, so a fact on which the two differ needs a probe before a check rests on it.
+* [Medium] test, F2FS oracle guest's comparison and channel (`tools/lib/erx/f2fs_oracle_guest.rb`,
+  `test/host/f2fs_oracle_guest_test.rb`): Linux's tree record and erXos's corpus listing are parsed and
+  compared in Ruby beside `erx_f2fs_listing`, so link classes (which names share an inode) are not
+  compared; Linux's record should be an `erx_f2fs_listing` reader (find's `%i` gives the inode) compared
+  with `erx_f2fs_listing:diff`, deleting the Ruby parsers. The guest's lines share the serial console
+  with the kernel and every command's stray output, so an oops on a hostile image mid-line refuses the
+  whole batch; a virtio-serial port of its own would end that by construction. The serial reader has no
+  fuzz target yet (`tools/fuzz/bench_line.rb` is the pattern). `[FSCK] fixing SIT types` is benign by a
+  fixed list; deriving it from the same batch's Linux probe of the same geometry would keep a wrong SIT
+  type in erXos's writer visible.
+* [Low] test, F2FS oracle guest's reader: the UEFI firmware is QEMU's own beside the
+  `qemu-system-aarch64` on `PATH`, not pinned (its SHA-256 is in each history record); the guest test
+  re-formats erXos's three images on every run rather than caching them by the format plan's inputs.
 * [Medium] test, F2FS guest's root disk
   ([design-f2fs.md](design-f2fs.md#the-guests-batches)): the probe booted Ubuntu 26.04's arm64
-  cloud image under Lima with its own kernel, not under the guest's QEMU runner with the pinned kernel.
-  Settle by probe before building on them: that image boots so with a cloud-init seed fsimg makes;
+  cloud image under Lima; the oracle guest boots it under QEMU (history record
+  `notes/f2fs-oracle-2026-11-27`, commit `29fa279`). Settle by probe before building on them: that
   `flakey` drops writes after a chosen point as the Linux cut needs; that Homebrew has no f2fs-tools
   formula and Apple's container kernel has no F2FS, which the design states as unverified; and xfstests'
   `replay-log`: its pinned commit, and that it builds in the guest and replays a `log-writes` log onto a

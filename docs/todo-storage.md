@@ -903,7 +903,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   address another slot already holds; clearing that slot first, as only replaying a Linux chain needs,
   lands with replay ([design-f2fs.md](design-f2fs.md#allocation)).
 * [Low] test, F2FS against more Linux kernels: the guest's batch on other kernels, each a row of image
-  pin, kernel version and f2fs-tools package, only the pinned v7.3.4 kernel's result counting against
+  pin, kernel version and f2fs-tools package, only the pinned 7.0.0-34-generic kernel's result counting against
   erXos, once a difference between kernels matters to a consumer ([design-f2fs.md](design-f2fs.md#the-linux-oracle-guest)).
 * [Low] test, F2FS hostile corpora beyond the fixed ones: syzbot's F2FS images, fetched only on
   explicit request since their license is unknown, never committed, redistributed or attached to a

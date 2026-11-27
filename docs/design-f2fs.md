@@ -2246,21 +2246,25 @@ Linux's mount.
 
 One guest serves every check against Linux. It runs under QEMU under
 HVF, without a network device, with a deadline and its serial log, and
-is killed when it stops answering. Its kernel is Linux v7.3.4 with
-4 KiB pages, the version the facts records read, built out of the tree
-from kernel.org's release at its pinned SHA-256 with a pinned
-configuration that builds in F2FS and the device-mapper targets
-`snapshot`, `flakey` and `log-writes`; another kernel would need a
-baseline of its own, with the facts re-checked. Its root disk is
-Ubuntu 26.04.1 LTS's arm64 cloud image, provisioned once by the fetch
-step, the only boot with a network, with f2fs-tools 1.16.0 and the
-build tools by package version (each package's SHA-256 in `deps.lock`),
-stock OTP 29.1.2 from the oracle's pinned archive, and xfstests'
-`replay-log` from a pinned commit, both built inside the guest, never on
-the host; nobody reads `replay-log`'s source. A run boots a snapshot of
-that disk and fetches nothing. One boot checks many images, attached
-read-only or as snapshots, so Linux's writes never reach the image under
-test.
+is killed when it stops answering. Its root disk is Ubuntu 26.04.1
+LTS's arm64 cloud image and its kernel that release's own,
+7.0.0-34-generic (Linux 7.0.14 with 4 KiB pages), booted with its
+initrd through QEMU's UEFI firmware; the image, kernel and initrd are
+pinned by SHA-256 in `test/f2fs/deps.lock`, and no kernel is built. The
+facts records read Linux v7.3.4, so a fact the design rests on that
+7.0.14 does not share shows as a failing probe, and another kernel would
+need a baseline of its own. Whether that kernel loads the device-mapper
+targets `snapshot`, `flakey` and `log-writes` the later checks use is
+unverified. Packages the checks run come on the batch disk by package
+version, each pinned by SHA-256, and are unpacked in every boot:
+f2fs-tools 1.16.0, and for the later checks stock OTP 29.1.2 from the
+oracle's pinned archive and xfstests' `replay-log` from a pinned commit,
+built in the guest, never on the host; nobody reads `replay-log`'s
+source. No boot has a network: a run boots a snapshot of the pinned
+disk, which QEMU discards at exit, and fetches nothing. One boot checks
+many images, attached read-only or as snapshots, so Linux's writes never
+reach the image under test, and holds images of one origin, so a hostile
+image that ends the guest takes no verdict on erXos's images with it.
 
 **erXos to Linux.** For each image erXos writes (a fresh format, every
 workload's end state and the harness's sampled states):
@@ -2268,7 +2272,9 @@ workload's end state and the harness's sampled states):
 passes only with exit status 0 and no line beginning `[ASSERT]`, `[FIX]`,
 `[Fail]` or `[FSCK] fixing` ([T 75]) and no `Reconnect` line, since
 `fsck.f2fs` repairs some faults silently in check mode and exits 0
-([T 41]); a mount with recovery whose listing must equal erXos's replayed
+([T 41]); the one exception is the whole line `[FSCK] fixing SIT types`,
+which `fsck.f2fs` 1.16.0 prints on every fresh image of Linux's own
+`mkfs.f2fs` as well (`~/erxos-history/notes/f2fs-oracle-2026-11-27/README.md`); a mount with recovery whose listing must equal erXos's replayed
 tree; an `ro,norecovery` mount whose listing must equal erXos's
 checkpoint tree; and `fsck.f2fs -l`, whose superblock and checkpoint
 fields must equal erXos's decode ([T 79]). Each must hold on its own,
@@ -2345,10 +2351,11 @@ its logs beside it): Ubuntu 26.04.1 LTS's arm64 cloud image of release
 `63a93bd5a8d76e33b15ceb5daa3657bd79be804748051ab178e643b0f5da22e7`),
 booted under Lima's VZ driver with its own kernel, 7.0.0-34-generic,
 ran `mkfs.f2fs`, a loop mount, writes and both `fsck.f2fs` modes from
-f2fs-tools 1.16.0-2build1, a package in `universe`. Booting that disk
-with the pinned kernel under the harness's QEMU is unverified. That
-Homebrew has no f2fs-tools formula and that Apple's container kernel is
-built without F2FS are unverified too: no probe record checks them; the
+f2fs-tools 1.16.0-2build1, a package in `universe`. That disk boots
+under the harness's QEMU with its own kernel and initrd through QEMU's
+UEFI firmware (`~/erxos-history/notes/f2fs-oracle-2026-11-27/README.md`
+at history commit `29fa279`). That Homebrew has no f2fs-tools formula and
+that Apple's container kernel is built without F2FS are unverified: no probe record checks them; the
 tools run only in the guest because f2fs-tools is GPL and runs only as
 a black box.
 

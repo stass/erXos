@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "ubuntu-cloudimg-arm64",
+      "kind": "file",
+      "version": "26.04.1 release-20260927",
+      "url": "https://cloud-images.ubuntu.com/releases/resolute/release-20260927/ubuntu-26.04-server-cloudimg-arm64.img",
+      "sha256": "63a93bd5a8d76e33b15ceb5daa3657bd79be804748051ab178e643b0f5da22e7",
+      "filename": "ubuntu-26.04-server-cloudimg-arm64.img",
+      "license": "Ubuntu's",
+      "status": "permanent"
+    },
+    {
+      "id": "ubuntu-cloudimg-arm64-initrd",
+      "kind": "file",
+      "version": "26.04.1 release-20260927",
+      "url": "https://cloud-images.ubuntu.com/releases/resolute/release-20260927/unpacked/ubuntu-26.04-server-cloudimg-arm64-initrd-generic",
+      "sha256": "65fa960053965fbcbba70a36e060965f2f4eb46124e8f0d9c0984250edc61117",
+      "filename": "ubuntu-26.04-server-cloudimg-arm64-initrd-generic",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
+    },
+    {
+      "id": "ubuntu-cloudimg-arm64-vmlinuz",
+      "kind": "file",
+      "version": "26.04.1 release-20260927",
+      "url": "https://cloud-images.ubuntu.com/releases/resolute/release-20260927/unpacked/ubuntu-26.04-server-cloudimg-arm64-vmlinuz-generic",
+      "sha256": "0bad41327e67c7c79d79b7e5f0ee833d0202be2ddf0f7cbbb984b4cb9c94e108",
+      "filename": "ubuntu-26.04-server-cloudimg-arm64-vmlinuz-generic",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
+    },
+    {
+      "id": "ubuntu-f2fs-tools",
+      "kind": "file",
+      "version": "1.16.0-2build1",
+      "url": "https://ports.ubuntu.com/ubuntu-ports/pool/universe/f/f2fs-tools/f2fs-tools_1.16.0-2build1_arm64.deb",
+      "sha256": "b773da54c3ca1eb70fb779c0db5f8bb2476295d9d48e6c90fcdd5b0d3f25a065",
+      "filename": "f2fs-tools_1.16.0-2build1_arm64.deb",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
+    }
+  ]
+}

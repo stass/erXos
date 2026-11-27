@@ -10,8 +10,14 @@
 %% each file's contents and
 %% symlink targets; each callback's refusal; erofs for every mutation; the
 %% mount's refusals; and the cache's bound over a whole tree's reads.
+%% oracle_trees/2 gives the F2FS oracle guest's test
+%% (test/host/f2fs_oracle_guest_test.rb) the corpus images and erXos's
+%% listing of each, so Linux's listing of the same images is compared with
+%% erXos's.
 
 -module(erx_f2fs_volume_tests).
+
+-export([oracle_trees/2]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
@@ -69,11 +75,15 @@ start(Image) ->
 image(Partition, Blocks) ->
     << <<(maps:get(A, Blocks, <<0:(?BLOCK * 8)>>))/binary>> || A <- lists:seq(0, Partition - 1) >>.
 
-corpus_images() ->
+corpus_images() -> [Image || {_Name, Image} <- corpus()].
+
+%% Each corpus image by its deps.lock id, and the cleared Fuchsia image.
+corpus() ->
     [begin
          {ok, Image} = erx_f2fs_corpus:image(Pin, erx_f2fs_corpus:fetched(os:getenv("ERX_F2FS_CORPUS"), Pin)),
-         Image
-     end || Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))] ++ [erx_f2fs_mount_tests:cleared_fuchsia()].
+         {Id, Image}
+     end || #{id := Id} = Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))]
+        ++ [{"f2fs-fuchsia-cleared", erx_f2fs_mount_tests:cleared_fuchsia()}].
 
 %% The image's mount straight from its bytes, as erx_f2fs_core's reader
 %% below reads it.
@@ -123,8 +133,8 @@ resolved(Memo, Root, Child, Path) ->
     end.
 
 %% The bytes of Size from Offset that a reader's fold covers, chunk by
-%% chunk: its first ?FOLD_BYTES.
-chunks(Size) -> [{At, min(?CHUNK, ?FOLD_BYTES - At)} || At <- lists:seq(0, min(Size, ?FOLD_BYTES) - 1, ?CHUNK)].
+%% chunk: its first Limit.
+chunks(Size, Limit) -> [{At, min(?CHUNK, Limit - At)} || At <- lists:seq(0, min(Size, Limit) - 1, ?CHUNK)].
 
 %% The tree through erx_f2fs's callbacks.
 volume_reader(Volume) ->
@@ -198,8 +208,11 @@ folded(Volume, Handle, Offset, Fun, Acc) ->
 %% The tree through erx_f2fs_core alone, every block read straight from
 %% Image: no window, no cache and no volume process. A check of the medium
 %% that fails answers eio, as the volume does, an encrypted directory's
-%% names among them.
-core_reader(Image, #{superblock := #{root_ino := Root}} = Volume) ->
+%% names among them. Its fold covers a file's first ?FOLD_BYTES, or its
+%% first FoldBytes.
+core_reader(Image, Volume) -> core_reader(Image, Volume, ?FOLD_BYTES).
+
+core_reader(Image, #{superblock := #{root_ino := Root}} = Volume, FoldBytes) ->
     Run = fun(Step) ->
                   case direct(Image, Step) of
                       {error, _Failure} -> {error, eio};
@@ -233,7 +246,7 @@ core_reader(Image, #{superblock := #{root_ino := Root}} = Volume) ->
       fold => fun(Path, Fun, Acc) ->
                       On(Path, fun(_Nid, #{i_size := Size} = File) ->
                                        Read = [Run(fun(B) -> erx_f2fs_core:read(Volume, File, At, Count, B) end)
-                                               || {At, Count} <- chunks(Size)],
+                                               || {At, Count} <- chunks(Size, FoldBytes)],
                                        {ok, lists:foldl(fun({ok, Bytes}, A) -> Fun(Bytes, A) end, Acc, Read)}
                                end)
               end,
@@ -449,3 +462,42 @@ the_mount_refuses_what_it_cannot_serve_test() ->
     {ok, _, Root, _} = erx_f2fs:root(Volume),
     ?assertEqual({error, erofs}, erx_f2fs:make(Root, <<"new">>, {file, 8#644, 0}, Volume)),
     stop(Volume).
+
+%%% The oracle's trees
+
+%% Writes each corpus image to Directory as NAME.img and, for each that
+%% erx_f2fs_mount mounts, erXos's listing of its whole tree, each file's
+%% first HashedBytes hashed, as NAME.listing: an entry a line of its path's
+%% bytes in hex ("-" for the root), then either "error" and the reason or
+%% its kind, mode in octal, links, size and content (a regular file's
+%% SHA-256, a symlink's target in hex, or "-"). One that does not mount
+%% gets NAME.refused with the reason.
+oracle_trees(Directory, HashedBytes) ->
+    lists:foreach(
+      fun({Name, Image}) ->
+              File = fun(Suffix) -> filename:join(Directory, Name ++ Suffix) end,
+              ok = file:write_file(File(".img"), Image),
+              case mounted(Image) of
+                  {ok, Mounted} ->
+                      Listing = erx_f2fs_listing:of_tree(core_reader(Image, Mounted, HashedBytes)),
+                      ok = file:write_file(File(".listing"), [oracle_line(Entry) || Entry <- Listing]);
+                  {error, Reason} ->
+                      ok = file:write_file(File(".refused"), io_lib:format("~0p~n", [Reason]))
+              end
+      end, corpus()).
+
+oracle_line({Path, {error, Reason}}) ->
+    io_lib:format("~s error ~0p~n", [oracle_hex(lists:join(<<"/">>, Path)), Reason]);
+oracle_line({Path, #{kind := Kind, mode := Mode, links := Links, size := Size} = Attributes}) ->
+    Content = case Attributes of
+                  #{sha256 := Hash} -> oracle_hex(Hash);
+                  #{target := Target} -> oracle_hex(Target);
+                  #{} -> "-"
+              end,
+    io_lib:format("~s ~s ~.8B ~B ~B ~s~n", [oracle_hex(lists:join(<<"/">>, Path)), Kind, Mode, Links, Size, Content]).
+
+oracle_hex(Bytes) ->
+    case binary:encode_hex(iolist_to_binary(Bytes), lowercase) of
+        <<>> -> "-";
+        Hex -> Hex
+    end.

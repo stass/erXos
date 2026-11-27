@@ -11,7 +11,7 @@ module Erx
   # This is the extraction boundary for fetched and imported source archives.
   # Tar interprets the archive; only a verified, inspected tree is published.
   module Sources
-    MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
+    MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
     MAX_SOURCE_BYTES = 2 * 1024 * 1024 * 1024
     MAX_SOURCE_FILES = 200_000
     TAR_ENV = { 'TAR_OPTIONS' => nil, 'TAR_READER_OPTIONS' => nil,
