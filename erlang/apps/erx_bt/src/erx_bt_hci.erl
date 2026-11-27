@@ -129,7 +129,8 @@ format_status(Status) ->
     erx_report:status(Status, #{state => fun hci_facts/1, message => fun message_kind/1}).
 
 hci_facts(#hci{core = Core, rest = Rest} = State) ->
-    State#hci{core = {facts, erx_bt_hci_core:facts(Core)}, rest = erx_report:bytes(Rest)};
+    erx_report:fields(State, [{#hci.core, {facts, erx_bt_hci_core:facts(Core)}},
+                              {#hci.rest, erx_report:bytes(Rest)}]);
 hci_facts(_State) ->
     hidden.
 

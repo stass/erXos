@@ -26,11 +26,11 @@ and location, the neighbours of a crash report, and every metadata key but `time
 
 The filter never raises and never answers `ignore` for OTP's events: logger removes a
 filter that raises (logger_backend's handle_filter_failed/4), which would let every later
-report through whole, and an `ignore` leaves the event as it was. Each function here
-is total over any term to keep that true.
+report through whole, and an `ignore` leaves the event as it was. Each function the
+filter calls is total over any term to keep that true.
 """.
 
--export([primary_filters/0, filter/2, reason_name/1, bytes/1, status/2]).
+-export([primary_filters/0, filter/2, reason_name/1, bytes/1, fields/2, status/2]).
 -export_type([view/0]).
 
 -type summary() :: #{label => atom() | {atom(), atom()}, process => pid(), name => atom(),
@@ -145,6 +145,18 @@ status/2 shows of bytes from outside.
 -spec bytes(term()) -> {bytes, non_neg_integer()} | hidden.
 bytes(Bytes) when is_binary(Bytes) -> {bytes, byte_size(Bytes)};
 bytes(_Other) -> hidden.
+
+-doc """
+A record as a view of status/2 shows it: a copy with each field at `Position`
+(`#record.field`) replaced by its shown value. The copy is a view, no longer a value
+of the record's declared type, so it is built as a tuple and not as the record.
+Unlike the filter's functions it is not total: a `Position` outside `Record` raises,
+and only format_status callbacks, each over its own record, call it.
+""".
+-spec fields(tuple(), [{pos_integer(), term()}]) -> tuple().
+fields(Record, Shown) ->
+    lists:foldl(fun({Position, Value}, View) -> setelement(Position, View, Value) end,
+                Record, Shown).
 
 -type view() :: keep | fun((term()) -> term()).
 -type shown_key() :: state | data | message.

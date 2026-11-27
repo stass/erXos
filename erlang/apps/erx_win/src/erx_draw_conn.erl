@@ -241,7 +241,8 @@ handle_info(Message, #conn{waits = Waits} = Conn) ->
 format_status(Status) ->
     erx_report:status(Status, #{state => fun conn_facts/1}).
 
-conn_facts(#conn{} = Conn) -> Conn#conn{core = hidden, images = hidden, unread = hidden};
+conn_facts(#conn{} = Conn) ->
+    erx_report:fields(Conn, [{#conn.core, hidden}, {#conn.images, hidden}, {#conn.unread, hidden}]);
 conn_facts(_State) -> hidden.
 
 %% The program's input ---------------------------------------------------------

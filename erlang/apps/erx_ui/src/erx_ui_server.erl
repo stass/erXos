@@ -152,7 +152,8 @@ terminate(Reason, #server{renderer = Renderer, renderer_state = State, window = 
 format_status(Status) ->
     erx_report:status(Status, #{state => fun server_facts/1}).
 
-server_facts(#server{} = S) -> S#server{realised = hidden, renderer_state = hidden};
+server_facts(#server{} = S) ->
+    erx_report:fields(S, [{#server.realised, hidden}, {#server.renderer_state, hidden}]);
 server_facts(_State) -> hidden.
 
 %% Every renderer callback runs through here: whatever it raises, an exit
