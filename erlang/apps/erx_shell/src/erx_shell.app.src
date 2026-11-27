@@ -10,17 +10,22 @@
 %% layer, which runs the shell on the console. It starts nothing of its own:
 %% erx_shell_script:run/2 runs a source in a process of the caller's.
 %%
-%% Its applications are those its modules call. Three are optional: erx_net_client,
+%% Its applications are those its modules call. Four are optional: erx_net_client,
 %% whose sockets ifconfig, ping, host and ntpctl open, ships in every release that
 %% runs a shell but answers eacces where the domain holds no `net` facet; and
 %% erx_domain and erx_starter, whose trees reboot, halt and service reach
-%% directly in the system shell (docs/design-shell.md, "Interfaces"). Only
+%% directly in the system shell (docs/design-shell.md, "Interfaces"); and
+%% erx_bt_client, a library: btpair reads the pairing window through its erx_bt_pair.
+%% Every session release ships it. The system release does not, and there the shell
+%% refuses btpair before it starts, since the system domain holds no `bluetooth`
+%% facet. Only
 %% application:start/1 starts it: ensure_all_started would start each optional
 %% application it can load, the domain service among them.
 {application, erx_shell,
  [{description, "erXos command shell"},
   {vsn, "1"},
   {modules, [erx_cmd,
+             erx_cmd_btpair,
              erx_cmd_cat,
              erx_cmd_cp,
              erx_cmd_date,
@@ -65,6 +70,6 @@
              erx_shell_runner,
              erx_shell_script]},
   {registered, []},
-  {applications, [kernel, stdlib, erx, erx_net_client, erx_domain, erx_starter]},
-  {optional_applications, [erx_net_client, erx_domain, erx_starter]},
+  {applications, [kernel, stdlib, erx, erx_net_client, erx_domain, erx_starter, erx_bt_client]},
+  {optional_applications, [erx_net_client, erx_domain, erx_starter, erx_bt_client]},
   {env, []}]}.

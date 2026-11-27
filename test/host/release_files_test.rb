@@ -138,7 +138,7 @@ class ReleaseFilesTest < Minitest::Test
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
     only = %w[asn1 crypto public_key ssh ssl inets erx_blk erx_fat erx_storage erx_f2fs erx_media erx_memdraw erx_display erx_fb erx_usb erx_win erx_ui
-              erx_desk erx_web erx_net erx_wifi erx_web_line erx_tty_line erx_app erx_bt_client erx_bt erx_bleuart erx_ntpd erx_pcie]
+              erx_desk erx_web erx_net erx_wifi erx_bt_client erx_web_line erx_tty_line erx_app erx_bt erx_bleuart erx_ntpd erx_pcie]
     assert_equal Erx::ReleaseFiles::APPLICATIONS - Erx::ReleaseFiles::SYSTEM_APPLICATIONS, only
     only.each do |application|
       refute_includes release, "{#{application},"
@@ -158,10 +158,12 @@ class ReleaseFilesTest < Minitest::Test
   # init ignores what a boot script's start of an application answers, so an application
   # started before one it requires, or with one it requires only loaded, would silently
   # not run: every application a domain script starts finds each application its
-  # resource file requires started before it.
+  # resource file requires started before it, in the order its boot script starts them,
+  # which is the release's order (ReleaseFiles.domain_boot) and not the script's list.
   def test_every_started_application_finds_what_it_requires_started
     Erx::ReleaseFiles::RELEASE_SCRIPTS.each do |name, applications|
-      started = applications.select { |application| Erx::ReleaseFiles.started?(application, script: name) }
+      started = Erx::ReleaseFiles.domain_boot(name, applications: applications).applications
+                                 .select { |application| Erx::ReleaseFiles.started?(application, script: name) }
       started.each_with_index do |application, index|
         missing = required_applications(application, held: applications) - started.take(index)
         assert_empty missing, "the #{name} script starts #{application} without what it requires"
@@ -326,6 +328,17 @@ class ReleaseFilesTest < Minitest::Test
                  release, 'the session script starts the line and only loads erx_session')
   end
 
+  # btpair, a command of every session's shell, reads the Bluetooth pairing window
+  # through erx_bt_pair (docs/design-bluetooth.md, "The pairing window"), so the session
+  # script carries the Bluetooth client, a library that starts no process, and not
+  # erx_bt, whose start brings up a controller.
+  def test_the_session_script_carries_the_bluetooth_client_and_not_the_stack
+    domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('session')]))
+    release = boot_release_file('session')
+    assert_includes release, "{erx_bt_client,\"#{VERSION}\"}", 'the session script carries erx_bt_pair'
+    refute_match(/\{erx_bt,/, release, 'the session script starts no Bluetooth stack')
+  end
+
   # The ntpd script only loads erx_ntpd, which the ntpd template's -eval starts once
   # init holds the session's facets (docs/design-time.md, "Who does what"), so ntpd's
   # first lookup and sample do not run before the session holds its net and clock facets.
@@ -347,8 +360,8 @@ class ReleaseFilesTest < Minitest::Test
     release = boot_release_file('app')
     %w[compiler asn1 crypto public_key].each { |name| assert_match(/\{#{name},"[^"]+",load\}/, release, "app only loads #{name}") }
     refute_match(/\{ssh,/, release, 'an app runs no ssh daemon')
-    assert_match(/\{erx_ui,"#{VERSION}"\},\{erx_shell,"#{VERSION}"\},
-                  \{erx_session,"#{VERSION}",load\},\{erx_app,"#{VERSION}",load\},\{erx_bt_client,"#{VERSION}"\}\]\}\.\n\z/x,
+    assert_match(/\{erx_ui,"#{VERSION}"\},\{erx_bt_client,"#{VERSION}"\},\{erx_shell,"#{VERSION}"\},
+                  \{erx_session,"#{VERSION}",load\},\{erx_app,"#{VERSION}",load\}\]\}\.\n\z/x,
                  release, 'the app script starts the client side and the Bluetooth client and only loads erx_session and erx_app')
   end
 

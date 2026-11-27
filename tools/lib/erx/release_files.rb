@@ -103,8 +103,12 @@ module Erx
     # shell it depends on. erx_session_sup starts the session's pipe server and terminal
     # relay, and the design places the command server under it too. Every session
     # template's script takes it whole, the session script and the app script alike, so
-    # no session domain lacks the servers a program needs.
-    SESSION_BASE = [*DOMAIN_BASE, 'erx_shell', 'erx_session'].freeze
+    # no session domain lacks the servers a program needs. The shell takes the Bluetooth
+    # client, erx_bt_client, a library that starts no process, before it: its btpair reads
+    # the pairing window through erx_bt_pair (docs/design-bluetooth.md, "The pairing
+    # window"), and an app granted `ble` reaches the facet through erx_gatt
+    # ("The client"). No session script takes erx_bt, the stack.
+    SESSION_BASE = [*DOMAIN_BASE, 'erx_bt_client', 'erx_shell', 'erx_session'].freeze
     # The applications the system release ships, in release order: an allow-list, so an
     # application reaches the system domain only by being named here: OTP's, the base
     # every domain boots, the applications the system domain runs, and erx_session, which
@@ -181,8 +185,7 @@ module Erx
     #   "Releases"), and erx_app (DOMAIN_ONLY), which the template's -eval starts and
     #   which mounts the app's package at /app and starts what it declares. Its .app
     #   file names erx_session, since the design starts a native app's program through
-    #   the session's servers. It also takes the Bluetooth client, erx_bt_client, a
-    #   library, for an app granted `ble` (docs/design-bluetooth.md, "The client").
+    #   the session's servers.
     # * usb, the USB domain's (docs/design-usb.md, "Domains and authority"): the USB
     #   stack, erx_usb, so no other domain parses what a USB device writes, and erx_blk,
     #   a library application, whose erx_blk_usb is a medium's block transport. The script
@@ -231,7 +234,7 @@ module Erx
                         'ssh' => [*DOMAIN_BASE, 'asn1', 'crypto', 'public_key', 'ssh'].freeze,
                         DomainStartup::APP_TEMPLATE.release =>
                           [*SESSION_BASE, 'compiler', 'asn1', 'crypto', 'public_key', 'ssl', 'inets', *DomainStartup::DISPLAY_CLIENT,
-                           'erx_ui', 'erx_app', 'erx_bt_client'].freeze,
+                           'erx_ui', 'erx_app'].freeze,
                         'usb' => [*DOMAIN_BASE, 'erx_blk', 'erx_usb'].freeze,
                         'bt' => [*DOMAIN_BASE, 'crypto', 'erx_bt_client', 'erx_bt'].freeze,
                         'pcie' => [*DOMAIN_BASE, 'erx_pcie'].freeze,

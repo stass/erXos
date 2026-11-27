@@ -3248,7 +3248,11 @@ prints another domain's words, so it prints a line only after
 `erx_bt_pair:parse/1` accepts it, composed again from the parsed
 digits, addresses and words, and `[invalid]` for any other line; a line
 past `bt_pair_line_max` prints `[invalid]` and ends it
-([The client](#the-client)). The rest of the tree needs
+([The client](#the-client)). A `bonded` line followed by the file's
+normal end succeeds; a `failed` line, `closed timeout`, a line that
+does not parse, an overlong line, a file error, or the end of the file
+with no outcome fails it, and no write that failed, or whose answer is
+lost, is written again. The rest of the tree needs
 no command of its own: `cat /svc/bluetooth/bonds`, and `echo forget
 BOND > /svc/bluetooth/ctl` or `service bluetooth forget BOND`, which
 writes the same line through `erx_svc_client:command/3`.

@@ -405,9 +405,11 @@ session_commands_without_facets_test() ->
 %% (docs/design-system.md, property 15); its shell holds `local` for each service
 %% the domain serves (docs/design-shell.md, "Interfaces"), so it refuses exactly
 %% the commands that need `net`, ntpctl among them since a command's needs are
-%% its every form's (docs/design-time.md, "The command"), and no command needs any other facet
-%% it lacks.
-system_facets_refuse_only_the_network_commands_test() ->
+%% its every form's (docs/design-time.md, "The command"), and btpair, which needs the
+%% Bluetooth control tree, `bluetooth`, granted to a session template, not to the system
+%% domain (docs/design-bluetooth.md, "Who is granted it"); no command needs any other
+%% facet it lacks.
+system_facets_refuse_only_the_network_and_bluetooth_commands_test() ->
     Dir = filename:dirname(code:which(erx_cmd)),
     Modules = [list_to_atom(filename:basename(File, ".beam")) || File <- filelib:wildcard("erx_cmd_*.beam", Dir)],
     {Table, []} = erx_shell_namespace:build(
@@ -416,7 +418,8 @@ system_facets_refuse_only_the_network_commands_test() ->
     System = erx_shell_runner:facets(true, [inspect, log, machine, start], #{}),
     Missing = [{Name, Need} || {erlang, #{name := Name, needs := Needs}} <- maps:values(Table),
                                Need <- Needs, not is_map_key(Need, System)],
-    ?assertEqual([{<<"host">>, net}, {<<"ifconfig">>, net}, {<<"ntpctl">>, net}, {<<"ping">>, net}],
+    ?assertEqual([{<<"btpair">>, bluetooth}, {<<"host">>, net}, {<<"ifconfig">>, net}, {<<"ntpctl">>, net},
+                  {<<"ping">>, net}],
                  lists:usort(Missing)).
 
 drain(Acc) ->
