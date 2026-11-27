@@ -944,18 +944,18 @@ set of fault kinds the harness can inject, each with its action:
 | `power_cut` | QEMU's process ended at once, as the block-device suite's power cut after a sync ends it (`tools/lib/erx/block_device.rb`) | in the tree |
 | `line_silent`, `line_late`, `line_garbage`, `line_cut` | a relay the harness owns between a socket chardev and its peer (the Bluetooth line's chardev connects to Bumble on the host's loopback, `tools/lib/erx/qemu.rb:107-116`): stop forwarding, delay, insert bytes, close | our own code; to write |
 | `net_drop`, `net_silent` | the same relay on a socket or datagram network backend | our own code; to write |
-| `link_down`, `link_up` | QMP `set_link` | unverified |
-| `block_error`, `block_stall` | QEMU's `blkdebug` block driver, whose rules are set when the drive is created | unverified |
-| `chardev_stop` | QMP's chardev removal or change | unverified |
+| `link_down`, `link_up` | QMP `set_link` on the NIC's device id | probed: the guest's carrier goes and comes back, nothing else changes |
+| `block_error` | QEMU's `blkdebug` block driver, whose rules are set when the drive is created | unverified |
+| `block_stall` | QMP `block_set_io_throttle` on the disk's device id, reads limited to one byte a second, lifted by removing the limit | probed: a read is held and answers its data at the lift; not yet probed: that a held read stays held across the guest's reset of the device |
+| `chardev_stop` | QMP `chardev-change` to a null backend, lifted by a change back to a socket the harness listens on | probed; needs a target form for the lift's socket |
 
-A kind marked unverified rests on QEMU's documented interface remembered,
-not read; QEMU's source is off limits and its documentation was not
-fetched for this design. A command's presence in the schema does not
-show that it does what the kind needs, so a probe settles each kind by
-its behaviour: a cell boots the pinned QEMU with a scratch device, a
-small guest program issues the operation the kind targets, and the cell
-records that the injected fault stalls or fails exactly that operation
-(a read of the chosen sector fails, a request stays unanswered past a
+QEMU's source is off limits; a command's presence in its documentation
+or schema does not show that it does what the kind needs, so a probe
+(`Erx::FaultProbe`, `tools/erx probe-faults`) settles each kind by its
+behaviour: it boots the pinned QEMU with scratch devices under a stock
+Linux guest whose small program issues the operation the kind targets,
+and records that the injected fault stalls or fails exactly that
+operation (a read of the chosen sector fails, a request stays unanswered past a
 bound, frames stop), that the guest sees nothing else change, and, for a
 kind that can be lifted (`block_stall`, `link_down`, `chardev_stop`),
 that the operation completes once it is. A kind becomes usable only when

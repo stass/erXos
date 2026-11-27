@@ -18,6 +18,7 @@ class FaultsTest < Minitest::Test
     def initialize = @calls = []
     def device_del(id) = (@calls << [:device_del, id]) && {}
     def eject(drive) = (@calls << [:eject, drive]) && {}
+    def set_link(name, up:) = (@calls << [:set_link, name, up]) && {}
   end
 
   # The seeded fault of the injector's guard: a fault counts as declared when its kind is.
@@ -27,7 +28,8 @@ class FaultsTest < Minitest::Test
     def declared?(fault) = @declaration.faults.any? { |declared| declared.kind == fault.kind }
   end
 
-  DECLARED = [[:unplug, { device: 'usb-stick0' }], [:kill_domain, { domain: :'usb@erxos' }], [:power_cut]].freeze
+  DECLARED = [[:unplug, { device: 'usb-stick0' }], [:kill_domain, { domain: :'usb@erxos' }], [:power_cut],
+              [:link_down, { nic: 'nic0' }], [:link_up, { nic: 'nic0' }]].freeze
   UNDECLARED = [[:unplug, { device: 'usb-stick1' }], [:kill_domain, { domain: 'net@erxos' }],
                 [:eject, { drive: 'usb-stick0drive' }]].freeze
 
@@ -49,7 +51,7 @@ class FaultsTest < Minitest::Test
 
   def test_a_kind_not_shown_on_qemu_or_not_written_is_refused_naming_its_status
     assert_match(/block_stall is unverified/,
-                 assert_raises(Faults::Refused) { Faults.declare([[:block_stall, { drive: 'data' }]]) }.message)
+                 assert_raises(Faults::Refused) { Faults.declare([[:block_stall, { device: 'blk0' }]]) }.message)
     assert_match(/line_silent is unwritten/,
                  assert_raises(Faults::Refused) { Faults.declare([[:line_silent, { chardev: 'bt' }]]) }.message)
   end
@@ -81,9 +83,12 @@ class FaultsTest < Minitest::Test
     faults.inject(:unplug, device: :'usb-stick0')
     faults.inject(:kill_domain, domain: 'usb@erxos')
     faults.inject(:power_cut)
-    assert_equal [[:device_del, 'usb-stick0']], qmp.calls
+    faults.inject(:link_down, nic: 'nic0')
+    faults.inject(:link_up, nic: 'nic0')
+    assert_equal [[:device_del, 'usb-stick0'], [:set_link, 'nic0', false], [:set_link, 'nic0', true]], qmp.calls
     assert_equal [:cut], cuts
-    assert_equal ['unplug device=usb-stick0', 'kill_domain domain=usb@erxos', 'power_cut'], faults.record
+    assert_equal ['unplug device=usb-stick0', 'kill_domain domain=usb@erxos', 'power_cut', 'link_down nic=nic0',
+                  'link_up nic=nic0'], faults.record
     line = typed.fetch(0)
     assert line.start_with?('(fun()->PcFind=fun(PcN)->')
     assert line.end_with?("[exit(P,kill)||\#{pid:=P}<-PcFind('usb@erxos')])}]) end)().\r")

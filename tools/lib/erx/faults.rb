@@ -29,12 +29,12 @@ module Erx
     # until the probe shows it; an :unwritten kind is a relay of our own not yet written.
     Kind = Data.define(:name, :targets, :status, :action)
 
-    # A QEMU device or drive id.
+    # A QEMU device or drive id; a link's target is its NIC's device id.
     QEMU_ID = /\A[A-Za-z][A-Za-z0-9_.-]{0,63}\z/
     # A domain's node, NAME@HOST, as erx_domain_core names it.
     NODE = /\A[a-z][a-z0-9_]{0,31}@[a-z][a-z0-9.-]{0,63}\z/
     # The form of each target a :ready kind takes.
-    TARGETS = { device: QEMU_ID, drive: QEMU_ID, domain: NODE }.freeze
+    TARGETS = { device: QEMU_ID, drive: QEMU_ID, nic: QEMU_ID, domain: NODE }.freeze
 
     KINDS = [
       # QMP device_del: the device leaves its bus, as a hand pulls it out.
@@ -52,13 +52,17 @@ module Erx
       end,
       # The same relay on a socket or datagram network backend.
       *%i[net_drop net_silent].map { |name| Kind.new(name: name, targets: %i[netdev], status: :unwritten, action: :relay) },
-      # QMP set_link.
-      Kind.new(name: :link_down, targets: %i[netdev], status: :unverified, action: :set_link),
-      Kind.new(name: :link_up, targets: %i[netdev], status: :unverified, action: :set_link),
-      # QEMU's blkdebug block driver, its rules set when the drive is created.
+      # QMP set_link on the NIC's device id: the guest sees its carrier go and come back; the
+      # probe showed both on QEMU 11.1.3 (Erx::FaultProbe).
+      Kind.new(name: :link_down, targets: %i[nic], status: :ready, action: :link_down),
+      Kind.new(name: :link_up, targets: %i[nic], status: :ready, action: :link_up),
+      # QEMU's blkdebug block driver, its rules set when the drive is created; not probed.
       Kind.new(name: :block_error, targets: %i[drive op nth], status: :unverified, action: :blkdebug),
-      Kind.new(name: :block_stall, targets: %i[drive], status: :unverified, action: :blkdebug),
-      # QMP's chardev change or removal.
+      # QMP block_set_io_throttle: the probe showed a read held and answered at the lift, but
+      # not whether it stays held across the guest's reset of the device.
+      Kind.new(name: :block_stall, targets: %i[device], status: :unverified, action: :throttle),
+      # QMP chardev-change to a null backend and back: the probe showed it, but the lift's
+      # socket is a host path no target form here admits yet.
       Kind.new(name: :chardev_stop, targets: %i[chardev], status: :unverified, action: :chardev)
     ].to_h { |kind| [kind.name, kind] }.freeze
 
@@ -87,7 +91,9 @@ module Erx
 
     # What an injection does, a value the effect layer runs: a QMP command by its Erx::Qmp
     # method and arguments, a line typed at the guest's shell, or QEMU's process ended.
-    QmpCommand = Data.define(:command, :arguments)
+    QmpCommand = Data.define(:command, :arguments, :keywords) do
+      def initialize(command:, arguments:, keywords: {}) = super
+    end
     TypedLine = Data.define(:line)
     EndMachine = Data.define
     # The answer kill_line prints when it killed at least one incarnation.
@@ -118,6 +124,8 @@ module Erx
       case [KINDS.fetch(fault.kind).action, fault.target]
       in [:device_del, { device: }] then QmpCommand.new(command: :device_del, arguments: [device])
       in [:eject, { drive: }] then QmpCommand.new(command: :eject, arguments: [drive])
+      in [:link_down, { nic: }] then QmpCommand.new(command: :set_link, arguments: [nic], keywords: { up: false })
+      in [:link_up, { nic: }] then QmpCommand.new(command: :set_link, arguments: [nic], keywords: { up: true })
       in [:typed_kill, { domain: }] then TypedLine.new(line: kill_line(domain))
       in [:end_machine, _] then EndMachine.new
       end
@@ -135,7 +143,7 @@ module Erx
     def refuse_unready(kind)
       case kind.status
       in :ready then nil
-      in :unverified then raise Refused, "#{kind.name} is unverified: the probe has not shown it on the pinned QEMU"
+      in :unverified then raise Refused, "#{kind.name} is unverified: the probe's record does not show all it needs"
       in :unwritten then raise Refused, "#{kind.name} is unwritten: its relay is not written"
       end
     end
@@ -185,7 +193,7 @@ module Erx
       # The guest's answer to a typed kill is read only against KILLED, never shown.
       def run(fault, action)
         case action
-        in QmpCommand[command:, arguments:] then @qmp.public_send(command, *arguments)
+        in QmpCommand[command:, arguments:, keywords:] then @qmp.public_send(command, *arguments, **keywords)
         in TypedLine[line:]
           answer = @type.call(line)
           raise Refused, "#{fault} killed nothing" unless answer.is_a?(String) && KILLED.match?(answer)
