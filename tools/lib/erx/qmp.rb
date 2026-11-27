@@ -12,8 +12,9 @@ module Erx
   # The harness's end of QEMU's machine protocol (QMP) on a UNIX socket QEMU listens on
   # (QemuPlan::Display): one JSON object per line, a greeting, a capabilities command, then
   # commands answered in order with a reply or an error, among events the client skips. It
-  # sends seven commands: qmp_capabilities, screendump (format ppm), input-send-event,
-  # query-pci, eject, device_del and quit.
+  # sends eleven commands: qmp_capabilities, screendump (format ppm), input-send-event,
+  # query-pci, eject, device_del, set_link, block_set_io_throttle, chardev-change,
+  # chardev-remove and quit.
   #
   # QEMU is the peer, and what it says is untrusted all the same: every read is bounded
   # (MAX_LINE_BYTES a line, MAX_SKIPPED_EVENTS events between a command and its reply, one
@@ -133,6 +134,44 @@ module Erx
       command('device_del', { 'id' => id })
     end
 
+    # Sets the link of the network device QEMU names name down or up, as a cable is pulled
+    # or plugged; the guest sees its carrier follow where the device reports link status.
+    def set_link(name, up:)
+      raise ArgumentError, 'set_link takes up: true or false' unless [true, false].include?(up)
+
+      command('set_link', { 'name' => name, 'up' => up })
+    end
+
+    # Moves the character device QEMU names id to another backend: with no unix_socket, the
+    # null backend, which reads nothing and drops what it is written; with one, a client of
+    # the UNIX socket there, which must be in the connection's own directory, so no change
+    # reaches a file or socket outside it.
+    def chardev_change(id, unix_socket: nil)
+      backend = if unix_socket
+                  check_own_path(unix_socket, 'a chardev socket')
+                  { 'type' => 'socket', 'data' => { 'addr' => { 'type' => 'unix', 'data' => { 'path' => unix_socket } },
+                                                    'server' => false } }
+                else
+                  { 'type' => 'null', 'data' => {} }
+                end
+      command('chardev-change', { 'id' => id, 'backend' => backend })
+    end
+
+    # Removes the character device QEMU names id.
+    def chardev_remove(id)
+      command('chardev-remove', { 'id' => id })
+    end
+
+    # Limits the reads of the block device QEMU names id (its -device id) to bps_rd bytes a
+    # second, every other limit off; bps_rd 0 takes every limit off. A limit of 1 holds every
+    # read after the first, which the throttle lets through, for longer than any run.
+    def block_set_io_throttle(id, bps_rd:)
+      raise ArgumentError, 'block_set_io_throttle takes bps_rd: a count of bytes' unless bps_rd.is_a?(Integer) && bps_rd >= 0
+
+      limits = %w[bps bps_wr iops iops_rd iops_wr].to_h { |name| [name, 0] }
+      command('block_set_io_throttle', { 'id' => id, 'bps_rd' => bps_rd, **limits })
+    end
+
     # One PCI function as QEMU holds it (query-pci): its place on its bus, its identity, and
     # its BARs, each a PciRegion.
     PciFunction = Data.define(:bus, :slot, :function, :vendor, :device, :regions)
@@ -207,9 +246,12 @@ module Erx
                     size: region['size'])
     end
 
-    def check_dump_path(path)
+    def check_dump_path(path) = check_own_path(path, 'a screendump path')
+
+    # path names a file in the connection's own directory, the owner-only one the socket is in.
+    def check_own_path(path, what)
       valid = path.is_a?(String) && path.start_with?('/') && !path.include?("\0") && File.dirname(path) == @directory
-      raise ProtocolError, "a screendump path is a file in #{@directory}" unless valid
+      raise ProtocolError, "#{what} is a file in #{@directory}" unless valid
     end
 
     # path has been checked: the ensure deletes only what this call may have made.

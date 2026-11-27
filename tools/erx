@@ -116,6 +116,8 @@ module Erx
         sysreg(command_arguments)
       when 'check-arch-terms'
         check_arch_terms(command_arguments, **collaborators)
+      when 'probe-faults'
+        probe_faults(command_arguments)
       when 'check-fiasco-downsides'
         check_fiasco_downsides(command_arguments, **collaborators)
       when 'build'
@@ -584,6 +586,34 @@ module Erx
       0
     end
 
+    # The fault probe (tools/lib/erx/fault_probe.rb): boots Linux's guest under HVF with
+    # scratch devices and prints, for each QEMU fault kind it settles, verified or
+    # unsupported with the reason. Unsupported is a result, not a failure of the command.
+    # --fetch fetches the virtio modules its guest loads (test/fault_probe/deps.lock), the
+    # probe's explicit fetch step; Linux's guest's own sources come from `fetch --linux`.
+    def self.probe_faults(arguments)
+      options = {}
+      OptionParser.new do |flags|
+        flags.on('--directory DIR', 'A new directory for the run (default: one under build/fault-probe)') do |value|
+          options[:directory] = File.expand_path(value)
+        end
+        flags.on('--fetch', 'Fetch the guest modules the probe pins') { options[:fetch] = true }
+        flags.on('--cache DIRECTORY', "With --fetch, another checkout's build/fault-probe-sources/build/downloads") do |value|
+          options[:cache] = File.expand_path(value)
+        end
+      end.parse!(arguments)
+      no_arguments(arguments)
+      require_relative 'lib/erx/fault_probe'
+      if options[:fetch]
+        FaultProbe.fetch(root: ROOT, cache: options[:cache]).each { |line| Terminal.puts(line) }
+      else
+        raise OptionParser::InvalidArgument, '--cache goes with --fetch' if options[:cache]
+
+        FaultProbe.run(root: ROOT, directory: options[:directory]).each { |verdict| Terminal.puts(FaultProbe.line(verdict)) }
+      end
+      0
+    end
+
     def self.check_fiasco_downsides(arguments)
       no_arguments(arguments)
       FiascoDownsides.check(root: ROOT)
@@ -835,7 +865,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe|install | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] [--kernel-words LIST] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR... | --kernel-words LIST] | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench NAME --env pi4-4gb-l4re --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] | bench import NAME --env pi4-4gb-l4re --subject FILE LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe|install | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] [--kernel-words LIST] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR... | --kernel-words LIST] | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench NAME --env pi4-4gb-l4re --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] | bench import NAME --env pi4-4gb-l4re --subject FILE LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | probe-faults [--directory DIR] | probe-faults --fetch [--cache DIR] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
       0
     end
 

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "alpine-initramfs-virt",
+      "kind": "tar",
+      "version": "3.24.4",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/netboot-3.24.4/initramfs-virt",
+      "sha256": "189402937646965374ef2df5d37f76467135179ae168c88175df2fe3e264a0b0",
+      "directory": "usr",
+      "members": "lib/modules/6.18.60-0-virt/kernel/drivers/block/virtio_blk.ko lib/modules/6.18.60-0-virt/kernel/drivers/net/net_failover.ko lib/modules/6.18.60-0-virt/kernel/drivers/net/virtio_net.ko lib/modules/6.18.60-0-virt/kernel/drivers/virtio/virtio_mmio.ko lib/modules/6.18.60-0-virt/kernel/net/core/failover.ko",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
+    }
+  ]
+}
