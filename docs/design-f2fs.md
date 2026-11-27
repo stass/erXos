@@ -770,10 +770,29 @@ depends on the inode's `i_dir_level`, d: level n has 2^(n+d) buckets
 while n + d is below 31 and 2^30 from there on, each of two blocks
 while n is below 31 and of four from there on. A lookup searches
 levels 0 to `i_current_depth` - 1, in each only the blocks of the
-name's bucket, and ends at the first level whose bucket starts past
-the largest file block of the paragraph above, since no later level's
-does either. That cutoff is what bounds a lookup's work, whatever depth
-and level the inode claims: at d = 0 it comes by level 28. The codec
+name's bucket, a level at a time, and ends at the first level whose
+bucket starts at or past the directory's end, since no later level's
+bucket starts earlier. The end is the directory's `i_size` in blocks,
+since no block at or past a size is trusted
+([Operations](#operations)), and never past the largest file block of
+the paragraph above. With the depth read as at most 63, that cutoff
+bounds a lookup's work to 29 levels whatever depth, level and size the
+inode claims: at d = 0 it comes by level 28. An entry matches by its stored hash and its name, so a name
+outside the bucket its hash requires, or stored with another hash, is
+not found, as Linux finds neither. "." and ".." are entries like any
+other, found at slots 0 and 1 of block 0 or of the inline area
+([F 61]); an entry named "." or ".." anywhere else fails any read of
+the block or inline area holding it.
+
+**`readdir`** reads from a position, the slot an entry starts at as the
+paragraphs below count it, and answers the entries at or past it and
+the position the next call starts from. A call covers at most eight of
+the directory's blocks below its end, holes included, so its work is
+bounded whatever the directory claims, and the position it answers is
+always past the one it was given, so a listing always advances. A call
+over holes answers no entries and a next position, which is not the
+end: the caller reads on. The entries of an inline directory are
+answered in one call. The codec
 also reads a directory's `i_current_depth` above 63 as 63, as Linux
 does ([F 42]), so the depth an insertion grows from is bounded too, and
 an inode erXos writes back carries the 63, as Linux rewrites it. An
@@ -1632,8 +1651,12 @@ the rules Linux enforces on reads ([F 26], [F 32], [F 42], [F 60],
 [F 66] to [F 70], [T 92]) and adds the bounds Linux leaves out: the
 version bitmaps' room, `i_namelen` against its field, and an inline file's `i_size` against its
 inline area whatever else the inode holds, and a dentry's name against
-what a path can name: an empty name, or one holding a `/` or NUL byte,
-fails its entry. A failed decode is one
+what a path can name: a name holding a `/` or NUL byte fails the read
+of its dentry area, the block or the inline area, as a `name_len` past
+255 does, and an empty one is the unused slot of [F 60]. An inline
+directory's dentries are read when the directory is listed or searched,
+not with its inode, so a bad entry fails the directory's reads and
+never its `getattr`. A failed decode is one
 module-private `throw` caught at the codec's entry, answered as
 `{error, {Structure, Rule}}`.
 
@@ -1669,6 +1692,8 @@ the inode with its inline area, the direct and indirect nodes, a file's
 slots and bytes read through its node tree, run as the need loop with
 every address it asks for checked against the partition and its rounds
 bounded by the nodes on the paths, the dentry block and inline dentries,
+a directory's lookups and readdirs through the same need loop, with no
+readdir answering a position that does not advance,
 and a whole mount, through the walk and replay, of an image with one of
 the blocks a mount of it reads mutated, under an allowance sometimes too
 small for its SIT, run as the mount's need loop: every address it asks
@@ -1692,6 +1717,7 @@ failure named for them:
 | inode | `i_extra_isize`'s multiple-of-4 rule dropped |
 | inode | a directory's `i_current_depth` read past 63 |
 | dentry | a long name's run allowed past the last slot |
+| dentry | a dentry area's slot count running past its block |
 | mount | the walk's footprint check and its bound removed |
 | mount | a NAT entry's node allowed outside the main area |
 | node tree | a slot's data address allowed outside the main area |
@@ -2429,7 +2455,7 @@ inputs, each paired with the seeded fault it must catch:
 
 | Property | Seeded fault |
 | --- | --- |
-| the dentry hash of names of 0 to 255 bytes, against the oracle images' hashes | the length word built from the chunk's own length instead of the bytes left |
+| the dentry hash of names of 0 to 255 bytes, against the oracle images' hashes | the state not carried from one 16-byte chunk to the next |
 | the inode checksum, against Linux-made inodes | the footer left out of the checksum |
 | the CRC, against Linux-made superblocks and checkpoints | zlib's inversions kept |
 | the inode layout for every E and X of [F 48]'s table, and a flexible inline xattr size | the reserved word before inline data dropped |

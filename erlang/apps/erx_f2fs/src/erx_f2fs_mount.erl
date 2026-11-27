@@ -65,9 +65,9 @@ each block from the copy its version bit selects, with the SIT journal
 over it, and checked: the node segments' valid blocks are valid_node_count
 and all segments' at most valid_block_count, and every log's next block is
 free in its segment, with every later block free too for an LFS log. The
-NAT journal is handed to erx_f2fs_core, which alone resolves a nid. The
-root is the inode erx_f2fs_core reads, a directory with blocks, a size and
-links ([F 55]).
+NAT journal is handed to erx_f2fs_core, which checks it and alone resolves
+a nid. The root is the inode erx_f2fs_core reads, a directory with blocks,
+a size and links ([F 55]).
 
 The chain: the warm node log's next block starts the checkpoint's chain of
 fsynced node blocks when its footer carries the checkpoint's version
@@ -413,7 +413,7 @@ contents(#{cp_payload := PayloadBlocks} = Super, Start,
                                || Block <- read(Blocks, Orphans)]),
       data_summaries => DataSummaries,
       node_summaries => node_summaries(NodeLogs, read(Blocks, Node)),
-      nat => erx_f2fs_core:nat(nat_journal(Super, NatJournal)),
+      nat => ok(erx_f2fs_core:nat(Super, ok(erx_f2fs_codec:nat_journal(NatJournal)))),
       sit_journal => sit_journal(Super, SitJournal)}.
 
 %% The data logs' summaries and the NAT and SIT journals' bytes: the
@@ -443,16 +443,6 @@ logs_summaries(Logs, Summaries) ->
 written({_Type, _Segment, _Offset, ?ERX_F2FS_ALLOC_SSR}) -> ?BLOCKS_PER_SEG;
 written({_Type, _Segment, Offset, ?ERX_F2FS_ALLOC_LFS}) -> Offset.
 
-%% The NAT journal's entries by nid, each a nid the NAT can hold, named
-%% once, so no entry hides another.
-nat_journal(Super, Bytes) ->
-    Entries = ok(erx_f2fs_codec:nat_journal(Bytes)),
-    Nids = [Nid || #{nid := Nid} <- Entries],
-    Capacity = erx_f2fs_codec:nat_capacity(Super),
-    require(lists:all(fun(Nid) -> Nid < Capacity end, Nids), {nat, journal_nid}),
-    require(length(lists:usort(Nids)) =:= length(Nids), {nat, journal_duplicate}),
-    maps:from_list([{Nid, Entry} || #{nid := Nid, entry := Entry} <- Entries]).
-
 %% The SIT journal's entries, each for a main segment ([F 39]), named once.
 sit_journal(#{segment_count_main := Main}, Bytes) ->
     Entries = ok(erx_f2fs_codec:sit_journal(Bytes)),
@@ -472,7 +462,7 @@ admit_sit(#{segment_count_main := Main}, Allowance) ->
 sit_addresses(#{sit_blkaddr := First, segment_count_sit := Segments,
                 segment_count_main := Main},
               #{sit_version_bitmap := Bitmap}) ->
-    [First + Index + version_bit(Bitmap, Index) * table_blocks(Segments)
+    [First + Index + erx_f2fs_codec:bit(Bitmap, Index) * table_blocks(Segments)
      || Index <- lists:seq(0, ceil_div(Main, ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK) - 1)].
 
 %% The SIT, whole, as a tuple of the main segments' entries with the
@@ -620,12 +610,6 @@ table_blocks(Segments) -> Segments div 2 * ?BLOCKS_PER_SEG.
 
 %% A version bitmap's bytes: a bit per block of one copy ([F 23]).
 bitmap_bytes(Segments) -> table_blocks(Segments) div 8.
-
-%% Whether a table's block Index is current in its second copy: its bit in
-%% the version bitmap, first bit most significant ([F 23]).
-version_bit(Bitmap, Index) ->
-    <<_:Index, Bit:1, _/bitstring>> = Bitmap,
-    Bit.
 
 ceil_div(A, B) -> (A + B - 1) div B.
 

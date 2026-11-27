@@ -42,9 +42,11 @@ An inode block (inode/3) answers the inode's fields and its body: the
 address words, or with INLINE_DATA the file's bytes, or with INLINE_DENTRY
 its inline dentries, where its geometry puts them ([F 41], [F 48]). A
 dentry block (dentry_block/1) answers its used slots. Both dentry forms
-are read by one walk; their bitmaps are first-bit-least-significant
-([F 5]), and the codec answers each as a bitstring in Erlang's own order,
-first bit most significant. A direct node (direct_node/4) answers its
+are read by one walk, which fails an area holding a name no path can
+hold; their bitmaps are first-bit-least-significant ([F 5]), and the
+codec answers each as a bitstring in Erlang's own order, first bit most
+significant, which bit/2 reads for every bitmap. A name's hash in its
+directory is dentry_hash/1 ([F 57]). A direct node (direct_node/4) answers its
 addresses and an indirect node (indirect_node/4) its node ids, once its
 footer shows it is the node its parent names ([F 43], [F 53]). Any
 block's last bytes read as a node footer (node_footer/1), which is how the
@@ -55,8 +57,10 @@ mount asks whether a log's next block holds a node of the checkpoint
 -export([superblock/1, checkpoint/1, checkpoint_copy/1, checkpoint/3,
          orphan_block/1, nat_block/1, nat_journal/1, sit_block/2,
          sit_journal/1, summary_block/1, compact_summaries/2, inode/3,
-         direct_node/4, indirect_node/4, dentry_block/1, node_footer/1, crc/2,
-         extra_attr_features/0, nat_capacity/1, main_end/1]).
+         direct_node/4, indirect_node/4, dentry_block/1, inline_dentries/1,
+         node_footer/1, crc/2,
+         dentry_hash/1, dentry_slots/1, bit/2, extra_attr_features/0,
+         nat_capacity/1, main_end/1]).
 -export_type([superblock/0, checkpoint/0, nat_entry/0, sit_entry/0,
               summary/0, inode/0, dentries/0, footer/0, failure/0]).
 
@@ -67,6 +71,7 @@ mount asks whether a log's next block holds a node of the checkpoint
 %% A checksum, an address and a node id are each a 32-bit word.
 -define(CHECKSUM_SIZE, 4).
 -define(WORD, 4).
+-define(WORD_MASK, 16#ffffffff).
 %% The features whose inodes Linux reads only with EXTRA_ATTR set ([F 41]).
 -define(NEED_EXTRA_ATTR, (?ERX_F2FS_FEATURE_PRJQUOTA bor
                           ?ERX_F2FS_FEATURE_INODE_CHKSUM bor
@@ -104,7 +109,8 @@ first bit most significant, and its age ([F 37]).
 An inode: erx_abi_packed's map of erx_f2fs_inode with i_name cut to
 i_namelen, and i_nid, footer, i_extra_isize (0 without EXTRA_ATTR),
 inline_xattr_words, and one body: addresses, the 923 - E - X address words
-from word E, or inline_data, or inline_dentries ([F 41], [F 48]).
+from word E, or inline_data, or inline_dentries, the inline content's
+bytes, which inline_dentries/1 reads ([F 41], [F 48]).
 """.
 -type inode() :: #{atom() => term()}.
 -doc """
@@ -125,7 +131,7 @@ used slot's record with its name ([F 59], [F 60]).
 -type failure() :: {superblock | checkpoint | orphan_block | nat_block |
                     nat_journal | sit_block | sit_journal | summary_block |
                     compact_summary | inode | direct_node | indirect_node |
-                    dentry_block | node_footer,
+                    dentry_block | inline_dentries | node_footer,
                     atom()}.
 
 %%% Entries
@@ -300,6 +306,15 @@ dentry_block(Block) ->
     decode(dentry_block, fun() -> require_block(Block), dentries(Block) end).
 
 -doc """
+The slots of an inline directory's dentries, from the inline content
+inode/3 answered ([F 48], [F 59]), as dentry_block/1 answers a block's:
+a bad entry fails the directory's listing, not its inode.
+""".
+-spec inline_dentries(inode()) -> {ok, dentries()} | {error, failure()}.
+inline_dentries(#{inline_dentries := Area}) ->
+    decode(inline_dentries, fun() -> dentries(Area) end).
+
+-doc """
 The nids the NAT of a volume whose superblock is Super holds:
 f2fs_nat_entries_per_block for each block of one of its two copies
 ([F 36]).
@@ -342,6 +357,35 @@ erlang:crc32/2, which has both, runs between two of its own.
 crc(Seed, Data) ->
     Inverted = erlang:crc32((bnot Seed) band 16#ffffffff, Data),
     (bnot Inverted) band 16#ffffffff.
+
+-doc """
+A name's hash in its directory ([F 57]): "." and ".." hash to 0, and any
+other name to the TEA directory hash of its bytes, taken 16 at a time.
+""".
+-spec dentry_hash(binary()) -> 0..16#ffffffff.
+dentry_hash(Name) when Name =:= <<".">>; Name =:= <<"..">> ->
+    0;
+dentry_hash(Name) ->
+    hash_chunks(Name, {16#67452301, 16#efcdab89}).
+
+-doc """
+The slots of a dentry area of Bytes bytes, a block or an inode's inline
+content: as many as fit at a bitmap bit, a slot record and a name slot
+each ([F 48], [F 59]); 214 in a block.
+""".
+-spec dentry_slots(non_neg_integer()) -> non_neg_integer().
+dentry_slots(Bytes) ->
+    8 * Bytes div (8 * (?ERX_F2FS_DIR_ENTRY_SIZE + ?ERX_F2FS_NAME_SLOT_SIZE) + 1).
+
+-doc """
+Bit Index of a first-bit-most-significant bitmap, the order of the SIT
+valid maps and the version bitmaps ([F 5]), and of every bitmap the
+codec answers.
+""".
+-spec bit(bitstring(), non_neg_integer()) -> 0 | 1.
+bit(Bitmap, Index) ->
+    <<_:Index, Bit:1, _/bitstring>> = Bitmap,
+    Bit.
 
 %%% The superblock
 
@@ -802,7 +846,7 @@ inode_body(#{i_inline := Inline, i_size := Size}, Words, ExtraWords,
     Addresses = lists:sublist(Words, ExtraWords + 1, Count),
     if
         Inline band ?ERX_F2FS_INLINE_DENTRY =/= 0 ->
-            #{inline_dentries => dentries(inline_content(Addresses))};
+            #{inline_dentries => inline_content(Addresses)};
         Inline band ?ERX_F2FS_INLINE_DATA =/= 0 ->
             Content = inline_content(Addresses),
             require(Size =< byte_size(Content), inline_data),
@@ -840,7 +884,7 @@ read_node_footer(Block) ->
 %% into Erlang's order, first bit most significant ([F 5]).
 dentries(Area) ->
     SlotBytes = ?ERX_F2FS_DIR_ENTRY_SIZE + ?ERX_F2FS_NAME_SLOT_SIZE,
-    Slots = 8 * byte_size(Area) div (8 * SlotBytes + 1),
+    Slots = dentry_slots(byte_size(Area)),
     BitmapBytes = (Slots + 7) div 8,
     Reserved = byte_size(Area) - BitmapBytes - Slots * SlotBytes,
     <<Bitmap:BitmapBytes/binary, _:Reserved/binary,
@@ -852,7 +896,9 @@ dentries(Area) ->
 
 %% The slots in order, three cursors moving together: a used slot with a
 %% name takes the run of slots its name needs, which must end by the last
-%% slot, and any other slot is passed alone ([F 60]).
+%% slot, and any other slot is passed alone ([F 60]). A name is what a
+%% path can name: never empty, since a slot whose name_len is 0 is passed,
+%% and holding no "/" or NUL byte.
 walk(<<>>, _Records, _Names, _Slot, Read) ->
     lists:reverse(Read);
 walk(<<1:1, Bits/bitstring>>, Records, Names, Slot, Read) ->
@@ -870,6 +916,7 @@ walk(<<1:1, Bits/bitstring>>, Records, Names, Slot, Read) ->
             <<_:(Run - 1), BitsLeft/bitstring>> = Bits,
             <<_:RecordBytes/binary, RecordsLeft/binary>> = Records,
             <<Name:Length/binary, _/binary>> = Names,
+            require(binary:match(Name, [<<"/">>, <<0>>]) =:= nomatch, name),
             <<_:NameBytes/binary, NamesLeft/binary>> = Names,
             Dentry = maps:remove(name_len, Entry#{slot => Slot, name => Name}),
             walk(BitsLeft, RecordsLeft, NamesLeft, Slot + Run, [Dentry | Read])
@@ -881,6 +928,41 @@ pass(Bits, Records, Names, Slot, Read) ->
     <<_:?ERX_F2FS_DIR_ENTRY_SIZE/binary, RecordsLeft/binary>> = Records,
     <<_:?ERX_F2FS_NAME_SLOT_SIZE/binary, NamesLeft/binary>> = Names,
     walk(Bits, RecordsLeft, NamesLeft, Slot + 1, Read).
+
+%%% The dentry hash
+
+%% Each 16-byte chunk, the last one shorter, mixes the state's first two
+%% words with TEA keyed by the chunk's words; the hash is the first word
+%% after the last chunk ([F 57]).
+hash_chunks(Name, {A, B}) ->
+    Left = byte_size(Name),
+    Taken = min(Left, 16),
+    <<Chunk:Taken/binary, Rest/binary>> = Name,
+    {Y, Z} = tea(A, B, hash_words(Chunk, Left band 16#ff, 4), 0, 16),
+    State = {(A + Y) band ?WORD_MASK, (B + Z) band ?WORD_MASK},
+    case Rest of
+        <<>> -> element(1, State);
+        _ -> hash_chunks(Rest, State)
+    end.
+
+%% A chunk's Count key words, each four bytes first byte most significant;
+%% a word short of bytes has Pad, the bytes left counting from this
+%% chunk's, in its high bytes above the ones it has.
+hash_words(_Chunk, _Pad, 0) ->
+    [];
+hash_words(Chunk, Pad, Count) ->
+    Taken = min(byte_size(Chunk), 4),
+    <<Bytes:Taken/binary, Rest/binary>> = Chunk,
+    <<Word:32>> = <<(binary:copy(<<Pad>>, 4 - Taken))/binary, Bytes/binary>>,
+    [Word | hash_words(Rest, Pad, Count - 1)].
+
+tea(Y, Z, _Key, _Sum, 0) ->
+    {Y, Z};
+tea(Y, Z, [K0, K1, K2, K3] = Key, Sum0, Rounds) ->
+    Sum = (Sum0 + 16#9e3779b9) band ?WORD_MASK,
+    Y1 = (Y + ((((Z bsl 4) + K0) bxor (Z + Sum) bxor ((Z bsr 5) + K1)))) band ?WORD_MASK,
+    Z1 = (Z + ((((Y1 bsl 4) + K2) bxor (Y1 + Sum) bxor ((Y1 bsr 5) + K3)))) band ?WORD_MASK,
+    tea(Y1, Z1, Key, Sum, Rounds - 1).
 
 %%% The one failure path
 

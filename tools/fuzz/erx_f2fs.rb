@@ -69,7 +69,11 @@ module ErxF2fsFuzz
              replacement: '    ok,', failure: 'partition'),
     Seed.new(fault: "a slot's data address allowed outside the main area", target: :core,
              anchor: '    require(Address =:= ?ERX_F2FS_NULL_ADDR orelse Address =:= ?ERX_F2FS_NEW_ADDR orelse',
-             replacement: '    require(true orelse', failure: 'partition')
+             replacement: '    require(true orelse', failure: 'partition'),
+    Seed.new(fault: "a dentry area's slot count running past its block",
+             anchor: '    8 * Bytes div (8 * (?ERX_F2FS_DIR_ENTRY_SIZE + ?ERX_F2FS_NAME_SLOT_SIZE) + 1).',
+             replacement: '    8 * Bytes div (8 * (?ERX_F2FS_DIR_ENTRY_SIZE + ?ERX_F2FS_NAME_SLOT_SIZE) + 1) + 1.',
+             failure: 'crash')
   ].freeze
 
   module_function

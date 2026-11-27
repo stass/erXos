@@ -22,7 +22,7 @@
          nat_entry/3, nat_block/1, nat_journal/2, sit_entry/2, sit_block/1,
          sit_journal/2, summary_block/1, compact_blocks/3, inode_fields/0,
          inode_block/2, inode_checksum_applies/2, with_inode_checksum/2,
-         dentry_block/1, dentry_area/3]).
+         dentry_block/1, dentry_area/3, inline_inode/3]).
 
 -define(BLOCK, 4096).
 
@@ -464,21 +464,27 @@ with_inode_checksum(#{uuid := Uuid}, Block) ->
 %% offsets: the bitmap, first bit least significant, at byte 0, slot
 %% records of 11 bytes from byte 30 and name slots of 8 bytes from byte
 %% 2384. A name's run sets every bit and zeroes the later records'
-%% name_len ([F 60]).
+%% name_len ([F 60]). A dentry may carry its stored hash as a fourth
+%% element; without one, the hash is 0x1000 plus the slot.
 dentry_block(Dentries) ->
     dentry_area(?BLOCK, {27, 30, 2384}, Dentries).
 
 dentry_area(Size, {BitmapBytes, RecordsAt, NamesAt}, Dentries) ->
-    Runs = [{Slot, (byte_size(Name) + 7) div 8, Name, Ino} || {Slot, Name, Ino} <- Dentries],
-    Used = lists:append([lists:seq(Slot, Slot + Run - 1) || {Slot, Run, _, _} <- Runs]),
+    Runs = [{Slot, (byte_size(Name) + 7) div 8, Name, Ino, Hash}
+            || Dentry <- Dentries,
+               {Slot, Name, Ino, Hash} <- [case Dentry of
+                                               {S, N, I} -> {S, N, I, 16#1000 + S};
+                                               {_, _, _, _} -> Dentry
+                                           end]],
+    Used = lists:append([lists:seq(Slot, Slot + Run - 1) || {Slot, Run, _, _, _} <- Runs]),
     Bitmap = << <<(lists:sum([1 bsl Bit || Bit <- lists:seq(0, 7),
                                            lists:member(Byte * 8 + Bit, Used)]))>>
                || Byte <- lists:seq(0, BitmapBytes - 1) >>,
     Writes = [{0, Bitmap}]
         ++ [{RecordsAt + 11 * Slot,
-             <<(16#1000 + Slot):32/little, Ino:32/little, (byte_size(Name)):16/little, 1>>}
-            || {Slot, _, Name, Ino} <- Runs]
-        ++ [{NamesAt + 8 * Slot, Name} || {Slot, _, Name, _} <- Runs],
+             <<Hash:32/little, Ino:32/little, (byte_size(Name)):16/little, 1>>}
+            || {Slot, _, Name, Ino, Hash} <- Runs]
+        ++ [{NamesAt + 8 * Slot, Name} || {Slot, _, Name, _, _} <- Runs],
     lists:foldl(fun({At, Bytes}, Area) ->
                         <<Before:At/binary, _:(byte_size(Bytes))/binary, After/binary>> = Area,
                         <<Before/binary, Bytes/binary, After/binary>>
@@ -817,10 +823,12 @@ layout_cases({E, X, Start, Size, Slots, BitmapBytes, Reserved} = Row) ->
      {lists:flatten(io_lib:format("~p data", [Row])),
       ?_assertMatch({ok, #{inline_data := Data, inline_xattr_words := X}}, Read(DataInode))}]
         ++ [{lists:flatten(io_lib:format("~p dentries", [Row])),
-             ?_assertMatch({ok, #{inline_dentries :=
-                                      #{entries := [#{slot := Last, name := Name, ino := 77}],
-                                        bitmap := <<0:Last, 1:1>>}}},
-                           Read(DentryInode))}
+             ?_assertMatch({ok, #{entries := [#{slot := Last, name := Name, ino := 77}],
+                                  bitmap := <<0:Last, 1:1>>}},
+                           begin
+                               {ok, DentryRead} = Read(DentryInode),
+                               erx_f2fs_codec:inline_dentries(DentryRead)
+                           end)}
             || X =:= 50].
 
 %% A volume whose features give an inode E extra words: none for E = 0,
@@ -890,10 +898,19 @@ each_dentry_rule_fails_with_its_name_test_() ->
      ?_assertMatch({ok, #{entries := [#{slot := 213, name := <<"x">>}]}},
                    erx_f2fs_codec:dentry_block(dentry_block([{213, <<"x">>, 5}]))),
      ?_assertEqual({error, {dentry_block, block_size}},
-                   erx_f2fs_codec:dentry_block(<<0:8>>))].
+                   erx_f2fs_codec:dentry_block(<<0:8>>))]
+        ++ [?_assertEqual({error, {dentry_block, name}},
+                          erx_f2fs_codec:dentry_block(dentry_block([{3, Name, 5}])))
+            || Name <- [<<"a/b">>, <<"/">>, <<"a", 0, "b">>, <<0>>, <<"abcdefgh/">>]].
 
-%% A long name past the inline area's last slot fails the inode.
-an_inline_dentry_past_its_last_slot_fails_the_inode_test() ->
+%% "." and ".." hash to 0 ([F 57]); every other name's hash is checked by
+%% erx_f2fs_core_tests' corpus test against the hashes Linux stored.
+the_dots_hash_to_zero_test() ->
+    ?assertEqual({0, 0}, {erx_f2fs_codec:dentry_hash(<<".">>), erx_f2fs_codec:dentry_hash(<<"..">>)}).
+
+%% A long name past the inline area's last slot fails the inline dentries,
+%% not the inode.
+an_inline_dentry_past_its_last_slot_fails_the_dentries_test() ->
     Super = superblock_fields(),
     Area = dentry_area(3476, {23, 37, 37 + 11 * 181}, [{180, <<"x">>, 5}]),
     At = 37 + 11 * 180 + 8,
@@ -902,5 +919,5 @@ an_inline_dentry_past_its_last_slot_fails_the_inode_test() ->
     Fields = inline_inode(Broken, #{i_mode => 8#40755, i_links => 2, i_size => 3476,
                                     i_inline => ?ERX_F2FS_EXTRA_ATTR bor
                                                     ?ERX_F2FS_INLINE_DENTRY}, 3),
-    ?assertEqual({error, {inode, name_run}},
-                 erx_f2fs_codec:inode(Super, 4, inode_block(Super, Fields))).
+    {ok, Inode} = erx_f2fs_codec:inode(Super, 4, inode_block(Super, Fields)),
+    ?assertEqual({error, {inline_dentries, name_run}}, erx_f2fs_codec:inline_dentries(Inode)).

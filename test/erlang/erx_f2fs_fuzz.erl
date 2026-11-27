@@ -62,10 +62,12 @@
                                       xattr_nid, casefold, device_alias, namelen,
                                       mode, links, inline_dentry, inline_data_type,
                                       inline_data_blocks, inline_data_transformed,
-                                      inline_data | ?DENTRY_RULES]]
+                                      inline_data]]
+        ++ [{inline_dentries, Rule} || Rule <- [ok | ?DENTRY_RULES]]
         ++ [{dentry_block, Rule} || Rule <- [ok, block_size | ?DENTRY_RULES]]
         ++ [{Node, Rule} || Node <- [direct_node, indirect_node], Rule <- [ok, block_size, footer]]
         ++ [{walk, ok}, {data, block_addr}, {nat, free}, {nat, nid}, {file, size}]
+        ++ [{dir, ok}, {dentry_block, name}]
         ++ [{mount, ok}, {allowance, sit}, {nat, block_addr}, {sit, valid_nodes}]).
 %% The mount's allowance in most cases: more than any seed's SIT needs.
 -define(ALLOWANCE, (1 bsl 30)).
@@ -77,6 +79,11 @@
 %% NAT block, three nodes and a NAT block for each on each of two paths,
 %% and the data.
 -define(WALK_ROUNDS, 16).
+%% The most needs a lookup or readdir of the fixture directory may answer:
+%% its inode, and a round a hash level for the nine levels whose buckets
+%% start in its address array, or a readdir's blocks, and the nodes of a
+%% mutated tree.
+-define(DIR_ROUNDS, 32).
 %% The fixture's NAT area, both copies, and its main area's start: every
 %% block a walk asks for lies in one of the two.
 -define(FIXTURE_NAT, 2560).
@@ -98,7 +105,7 @@ run([Seed, Cases, ThirdParty, Lock]) ->
              fun sit_case/0, fun sit_journal_case/0, fun summary_case/0,
              fun compact_case/0, fun inode_case/0, fun inode_case/0,
              fun dentry_case/0, fun mount_case/0, fun mount_case/0, fun node_case/0,
-             fun walk_case/0, fun walk_case/0],
+             fun walk_case/0, fun walk_case/0, fun dir_case/0, fun dir_case/0],
     Outcomes = [(pick(Kinds))() || _ <- lists:seq(1, Count)],
     io:format("fuzz: ~b cases ok~n", [Count]),
     %% How often each rule answered, so a run shows which checks the cases reach.
@@ -210,7 +217,8 @@ check_seeds() ->
     [expect(seed, erx_f2fs_codec:inode(Volume, 4, erx_f2fs_codec_tests:inode_block(Volume, Fields)))
      || {Volume, Fields, _NameLengths} <- inodes()],
     {Dentries, _NameLengths} = dentry_block(),
-    expect(seed, erx_f2fs_codec:dentry_block(Dentries)),
+    %% Through read/3, so a decoder that raises on its own seed fails `crash`.
+    expect(seed, read(dentry_block, fun erx_f2fs_codec:dentry_block/1, [Dentries])),
     expect(seed, mount_loop(?FIXTURE_PARTITION, ?ALLOWANCE,
                             erx_f2fs_mount_tests:fixture_volume(), #{}, ?MOUNT_ROUNDS)),
     ok.
@@ -494,11 +502,16 @@ inode_case() ->
               _ -> 4
           end,
     Result = read(inode, fun erx_f2fs_codec:inode/3, [Super, Nid, resize(Block)]),
+    %% An inline directory's outcome is its dentries' read.
     case Result of
-        {ok, Read} -> check_inode(Read);
-        {error, _} -> ok
-    end,
-    outcome(inode, Result).
+        {ok, Read} ->
+            case check_inode(Read) of
+                ok -> outcome(inode, Result);
+                DentriesOutcome -> DentriesOutcome
+            end;
+        {error, _} ->
+            outcome(inode, Result)
+    end.
 
 %% The fixture volume's NAT capacity, of its two NAT segments ([F 36]).
 nid_limit() -> ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK bsl ?ERX_F2FS_LOG_BLOCKS_PER_SEG.
@@ -544,8 +557,11 @@ check_inode(#{i_extra_isize := Size}) when Size rem 4 =/= 0 ->
     fail(extra_isize, Size);
 check_inode(#{inline_data := Data, i_size := Size}) when byte_size(Data) =/= Size ->
     fail(size, {Size, byte_size(Data)});
-check_inode(#{inline_dentries := Dentries}) ->
-    check_dentries(Dentries);
+check_inode(#{inline_dentries := _} = Inode) ->
+    case read(inline_dentries, fun erx_f2fs_codec:inline_dentries/1, [Inode]) of
+        {ok, Dentries} -> check_dentries(Dentries), {inline_dentries, ok};
+        Failed -> outcome(inline_dentries, Failed)
+    end;
 check_inode(_Inode) ->
     ok.
 
@@ -676,6 +692,68 @@ walk_case() ->
             ok
     end,
     outcome(walk, Result).
+
+%% The fixture directory with one of its blocks mutated, by bytes or by a
+%% word set where its bitmap, a dentry record, or the inode's depth, level,
+%% size or address words lie, then a lookup of one of its names or a
+%% readdir from a position, through the need loop: every name answered is
+%% one a path can hold (`name`), and a readdir answers no entry before its
+%% position and a next position past it (`position`).
+dir_case() ->
+    {#{superblock := Super} = Volume, Blocks} = erx_f2fs_core_tests:fixture_directory(),
+    Address = pick(lists:sort(maps:keys(Blocks))),
+    Old = maps:get(Address, Blocks),
+    New = case rand:uniform(3) of
+              1 -> mutate_bytes(Old, ?BLOCK);
+              2 -> write_word(Old, dir_offset(), pick([walk_value(), 0, 1, 2, 31, 63, 64, 255]));
+              3 -> Old
+          end,
+    Mutated = Blocks#{Address := maybe_fix_inode(Super, New)},
+    Name = pick(erx_f2fs_core_tests:fixture_names()),
+    Position = pick([0, 1, 2, 213, 214, 8 * 214, 13 * 214 + 5, rand:uniform(1 bsl 32)]),
+    Op = case rand:uniform(2) of
+             1 -> fun(Dir, Given) -> erx_f2fs_core:lookup(Volume, Dir, Name, Given) end;
+             2 -> fun(Dir, Given) -> erx_f2fs_core:readdir(Volume, Dir, Position, Given) end
+         end,
+    Step = fun(Given) ->
+                   case erx_f2fs_core:inode(Volume, ?FILE_INO, Given) of
+                       {ok, Dir} -> Op(Dir, Given);
+                       Other -> Other
+                   end
+           end,
+    Result = walk_loop(Step, Mutated, #{}, ?DIR_ROUNDS),
+    case Result of
+        {ok, {Entries, Next}} ->
+            [fail(position, {Position, At}) || #{position := At} <- Entries, At < Position],
+            case Next =:= done orelse Next > Position of
+                true -> ok;
+                false -> fail(position, {Position, Next})
+            end,
+            lists:foreach(fun check_name/1, Entries);
+        {ok, #{} = Entry} ->
+            check_name(Entry);
+        _ ->
+            ok
+    end,
+    outcome(dir, Result).
+
+check_name(#{name := Name} = Entry) ->
+    case Name =/= <<>> andalso binary:match(Name, [<<"/">>, <<0>>]) =:= nomatch of
+        true -> ok;
+        false -> fail(name, Entry)
+    end.
+
+%% A byte of a dentry block's bitmap, a record's hash, ino or name_len, the
+%% inode's depth, level, size or first address words, else anywhere.
+dir_offset() ->
+    case rand:uniform(4) of
+        1 -> rand:uniform(27) - 1;
+        2 -> 30 + 11 * (rand:uniform(48) - 1) + pick([0, 4, 8]);
+        3 -> pick([?ERX_F2FS_INODE_OFF_I_CURRENT_DEPTH, ?ERX_F2FS_INODE_OFF_I_DIR_LEVEL,
+                   ?ERX_F2FS_INODE_OFF_I_SIZE, ?ERX_F2FS_INODE_OFF_I_SIZE + 4,
+                   ?ERX_F2FS_INODE_BLOCK_OFF_I_ADDR + 4 * (2 + rand:uniform(14))]);
+        4 -> 4 * (rand:uniform(?BLOCK div 4) - 1)
+    end.
 
 %% The walk's need loop over Blocks, as mount_loop's: every address inside
 %% the NAT or the main area of the partition and not given before, within

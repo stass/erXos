@@ -274,6 +274,14 @@ limit f2fs_mode_sock u32 0xc000
 # A directory's hash levels at most: Linux reads a larger i_current_depth
 # as this [F 42], [F 58].
 limit f2fs_dir_hash_depth_max u32 63
+# Hash level n of a directory whose i_dir_level is d has 2^(n + d) buckets,
+# at most 2^f2fs_dir_buckets_log_max, and each bucket is
+# f2fs_dir_bucket_blocks blocks below level f2fs_dir_wide_level and
+# f2fs_dir_wide_bucket_blocks from it on [F 58].
+limit f2fs_dir_buckets_log_max u32 30
+limit f2fs_dir_wide_level u32 31
+limit f2fs_dir_bucket_blocks u32 2
+limit f2fs_dir_wide_bucket_blocks u32 4
 # i_extra_isize is a multiple of 4, at least the two size words [F 41].
 limit f2fs_extra_isize_min u32 4
 limit f2fs_extra_isize_align u32 4

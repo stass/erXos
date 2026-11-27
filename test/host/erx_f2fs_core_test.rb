@@ -43,7 +43,19 @@ class ErxF2fsCoreTest < Minitest::Test
     Seed.new(fault: 'a hole read as block 0', source: CORE,
              anchor: '                            Address =/= ?ERX_F2FS_NULL_ADDR, Address =/= ?ERX_F2FS_NEW_ADDR]).',
              replacement: '                            Address =/= ?ERX_F2FS_NEW_ADDR]).',
-             failure: /a_read_gives_data_holes_and_new_addr_as_zeros[^\n]*failed/)
+             failure: /a_read_gives_data_holes_and_new_addr_as_zeros[^\n]*failed/),
+    Seed.new(fault: "a long name's hash state not carried from one 16-byte chunk to the next", source: CODEC,
+             anchor: '        _ -> hash_chunks(Rest, State)',
+             replacement: '        _ -> hash_chunks(Rest, {16#67452301, 16#efcdab89})',
+             failure: /corpus_directories_list_and_look_up_as_linux_wrote[^\n]*failed/),
+    Seed.new(fault: 'a lookup that stops one level early', source: CORE,
+             anchor: 'buckets(N, Depth, _Level, _Start, _Hash, _End) when N >= Depth ->',
+             replacement: 'buckets(N, Depth, _Level, _Start, _Hash, _End) when N >= Depth - 1 ->',
+             failure: /each_name_is_found_in_its_bucket[^\n]*failed/),
+    Seed.new(fault: "a name holding '/' accepted", source: CODEC,
+             anchor: '            require(binary:match(Name, [<<"/">>, <<0>>]) =:= nomatch, name),',
+             replacement: '            require(binary:match(Name, [<<0>>]) =:= nomatch, name),',
+             failure: /each_directory_refusal_names_its_rule[^\n]*failed/)
   ].freeze
 
   def test_eunit_cases_pass
