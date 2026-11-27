@@ -20,14 +20,16 @@ blocks first, and the checkpoint area only once a valid copy has bounded
 the volume by the partition and placed both packs inside that area.
 
 The superblock: each copy is valid when the codec reads it, its
-block_count and main area end within the partition, its feature word has
-no bit outside R, the features that extend an inode come with EXTRA_ATTR,
-it names no device list, and its checkpoint area holds both packs, which
-is a bound erXos adds to Linux's ([F 19], [F 54]), as is its lying after
-the superblock's blocks. The first valid copy wins, and every bad copy's
+block_count and main area end within the partition, its checkpoint area
+lies after the superblock's blocks and holds both packs ([F 19], [F 54]),
+and its SSA holds a summary block for every main segment ([F 45]), bounds
+erXos adds to Linux's. The first valid copy wins, and every bad copy's
 failure is answered beside it so the caller can log it. With no valid copy
 the mount fails with copy 0's failure: the copies are written alike, so
-they are normally bad alike.
+they are normally bad alike. Then the chosen copy alone must be one erXos
+admits, its feature word with no bit outside R, the features that extend
+an inode with EXTRA_ATTR, and no device list, or the mount fails: a copy
+erXos refuses never yields to the other, older one.
 
 The checkpoint pack: a pack is valid when the codec reads its header and
 its last block, the header's copy, with the same checkpoint_ver ([F 22]),
@@ -37,10 +39,9 @@ and pass Linux's checks of a checkpoint ([F 55]) in the forms without RO,
 which a mount refuses; then the codec reads its version bitmaps from the
 header and the payload.
 
-The mode is read_write when every feature is in W, the main area has more
-than 16 segments and a section is one segment, and otherwise
-{read_only, Reasons}, naming each shortfall: the R features, the segments
-per section and the main area's segments.
+The mode is read_write when every feature is in W and the main area has
+more than 16 sections, of any size, and otherwise {read_only, Reasons},
+naming each shortfall: the R features and the main area's sections.
 
 A failure is {Structure, Rule}: the codec's, or one of this module's
 rules, reached by one module-private throw caught at mount/2. A rule that
@@ -67,9 +68,9 @@ when the record names none.
 -define(METADATA_SEGMENTS_MIN, 8).
 %% nat_bits' leading version word ([F 27]).
 -define(NAT_BITS_VERSION_BYTES, 8).
-%% The main segments erXos's cleaner keeps back, so a main area of no
+%% The main sections erXos's cleaner keeps back, so a main area of no
 %% more leaves it no room (docs/design-f2fs.md, "The space a volume offers").
--define(CLEANER_RESERVE_SEGMENTS, 16).
+-define(CLEANER_RESERVE_SECTIONS, 16).
 
 -doc "The blocks a mount has read, by address.".
 -type blocks() :: #{non_neg_integer() => binary()}.
@@ -79,8 +80,7 @@ How the volume mounts: read-write, or read-only naming each reason
 """.
 -type mode() :: read_write |
                 {read_only, [{features, [atom()]} |
-                             {segs_per_sec, pos_integer()} |
-                             {segment_count_main, pos_integer()}]}.
+                             {section_count, pos_integer()}]}.
 -doc """
 What the mount's first steps answer: the chosen superblock copy, each bad
 copy's number and failure, the chosen pack's first block and its header
@@ -121,19 +121,25 @@ superblock(Partition, Blocks) ->
                         || Block <- read(Blocks, ?SUPER_COPIES)]),
     BadCopies = [{Copy, Failure} || {Copy, {error, Failure}} <- Copies],
     case [Super || {_Copy, {ok, Super}} <- Copies] of
-        [Super | _] -> {Super, BadCopies};
-        [] -> [{_Copy, First} | _] = BadCopies, fail(First)
+        [Super | _] ->
+            check_features(Super),
+            check_device_list(Super),
+            {Super, BadCopies};
+        [] ->
+            [{_Copy, First} | _] = BadCopies,
+            fail(First)
     end.
 
 %% A copy is valid or fails on its own, so each is checked under a catch of
-%% its own; only the choice between them fails the mount.
+%% its own; only the choice between them fails the mount. Validity is the
+%% copy's structure and geometry; what erXos admits is asked of the chosen
+%% copy alone, above.
 superblock_copy(Partition, Block) ->
     try
         Super = ok(erx_f2fs_codec:superblock(Block)),
         check_partition(Partition, Super),
-        check_features(Super),
-        check_device_list(Super),
         check_checkpoint_area(Super),
+        check_ssa_area(Super),
         {ok, Super}
     catch
         throw:{?MODULE, failure, Failure} -> {error, Failure}
@@ -166,6 +172,12 @@ check_device_list(#{devs := [#{path := <<First, _/binary>>} | _]}) ->
 check_checkpoint_area(#{cp_blkaddr := Start, segment_count_ckpt := Segments}) ->
     require(Start >= length(?SUPER_COPIES) andalso Segments >= ?PACKS,
             {superblock, checkpoint_area}).
+
+%% The SSA holds a summary block for every main segment ([F 45]), so no
+%% segment's summary lies past the area, in the main area itself; Linux
+%% checks the areas' order but not this size.
+check_ssa_area(#{segment_count_ssa := Ssa, segment_count_main := Main}) ->
+    require(Ssa * ?BLOCKS_PER_SEG >= Main, {superblock, ssa_area}).
 
 %%% The checkpoint pack
 
@@ -286,12 +298,10 @@ check_nat_bits(_Super, _Header) ->
 
 %%% The mode
 
-mode(#{feature := Feature, segs_per_sec := SegmentsPerSection,
-       segment_count_main := Main}) ->
+mode(#{feature := Feature, section_count := Sections}) ->
     ReadOnly = names(classify(Feature, features()), read),
     Reasons = [{features, ReadOnly} || ReadOnly =/= []] ++
-        [{segs_per_sec, SegmentsPerSection} || SegmentsPerSection > 1] ++
-        [{segment_count_main, Main} || Main =< ?CLEANER_RESERVE_SEGMENTS],
+        [{section_count, Sections} || Sections =< ?CLEANER_RESERVE_SECTIONS],
     case Reasons of
         [] -> read_write;
         _ -> {read_only, Reasons}

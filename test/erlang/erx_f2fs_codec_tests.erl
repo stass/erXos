@@ -712,6 +712,21 @@ file_type_cases(Read, Valid, InlineFile) ->
      {inline_data_transformed, Inline(#{i_advise => ?ERX_F2FS_ADVISE_VERITY})},
      {inline_data_transformed, Inline(#{i_flags => ?ERX_F2FS_COMPR_FL})}].
 
+%% A directory's i_current_depth above 63 reads as 63, as Linux clamps it
+%% ([F 42], [F 58]), so no lookup walks more levels; a regular file keeps
+%% i_gc_failures in that word, which reads as it is.
+a_directory_depth_past_63_reads_as_63_test_() ->
+    Super = superblock_fields(),
+    Depth = fun(Changes) ->
+                    {ok, #{i_current_depth := Got}} =
+                        erx_f2fs_codec:inode(Super, 4, inode_block(Super, with_inode(inode_fields(), Changes))),
+                    Got
+            end,
+    Directory = #{i_mode => 8#40755, i_links => 2},
+    [?_assertEqual(Want, Depth(Directory#{i_current_depth => Stored}))
+     || {Stored, Want} <- [{1, 1}, {63, 63}, {64, 63}, {16#ffffffff, 63}]]
+        ++ [?_assertEqual(16#ffffffff, Depth(#{i_current_depth => 16#ffffffff}))].
+
 %% What the file type rules allow: every one of the seven types, a
 %% directory of two links, inline data on a symlink, with an xattr node's
 %% block counted, and on an encrypted symlink ([F 70]).

@@ -727,8 +727,16 @@ answers `efbig`.
 Names hash with the TEA directory hash of [F 57], "." and ".." to 0,
 and directories are the multi-level hash table of [F 58], whose geometry
 depends on the inode's `i_dir_level`, d: level n has 2^(n+d) buckets
-while n + d is below 31, each two blocks. A lookup searches levels 0 to
-`i_current_depth` - 1, in each only the blocks of the name's bucket; an
+while n + d is below 31 and 2^30 from there on, each of two blocks
+while n is below 31 and of four from there on. A lookup searches
+levels 0 to `i_current_depth` - 1, in each only the blocks of the
+name's bucket, and ends at the first level whose bucket starts past
+the largest file block of the paragraph above, since no later level's
+does either. That cutoff is what bounds a lookup's work, whatever depth
+and level the inode claims: at d = 0 it comes by level 28. The codec
+also reads a directory's `i_current_depth` above 63 as 63, as Linux
+does ([F 42]), so the depth an insertion grows from is bounded too, and
+an inode erXos writes back carries the 63, as Linux rewrites it. An
 insertion takes the first level whose bucket has a run of free slots and
 grows the depth when it opens a level. erXos keeps d of a block
 directory as it finds it, and writes d = 0 on every directory it creates
@@ -1068,14 +1076,18 @@ structure and the rule, after writing nothing:
 
 1. **The superblock**: both copies, at byte 1024 of blocks 0 and 1
    ([F 7]); a copy is valid under every rule of [F 54], with the
-   checksum when `SB_CHKSUM` is set ([F 13]), under erXos's feature sets
-   and their dependency, and when its `block_count` and the main area's
-   end lie within the partition's window, which bounds every table the
-   mount loads by the partition itself, and when its checkpoint area lies
-   after the superblock's two blocks and has the two segments the two
-   packs start ([F 19]), bounds Linux leaves out, so no pack reaches past
-   the area or over a superblock copy; the first valid copy
-   wins, and a bad copy is logged and left as it is.
+   checksum when `SB_CHKSUM` is set ([F 13]), and when its `block_count`
+   and the main area's end lie within the partition's window, which
+   bounds every table the mount loads by the partition itself, when its
+   checkpoint area lies after the superblock's two blocks and has the
+   two segments the two packs start ([F 19]), and when its SSA has a
+   summary block for every main segment ([F 45]), bounds Linux leaves
+   out, so no pack reaches past the area or over a superblock copy and
+   no summary lies in the main area; the first valid copy wins, and a
+   bad copy is logged and left as it is. Then the chosen copy alone
+   passes erXos's feature sets and their dependency and names no device
+   list, or the mount fails: a copy erXos refuses on these never yields
+   to the other copy, which may be older.
 2. **The checkpoint pack**: both packs' first and last blocks; a pack is
    valid when both pass their CRC, its total is above 2 and at most 512,
    and both carry the same version; the later version under wrap-around
@@ -1546,6 +1558,7 @@ failure named for them:
 | NAT | the journal's count bound off by one |
 | SIT | the count's comparison with the map's set bits dropped |
 | inode | `i_extra_isize`'s multiple-of-4 rule dropped |
+| inode | a directory's `i_current_depth` read past 63 |
 | dentry | a long name's run allowed past the last slot |
 | mount | the walk's step bound removed |
 

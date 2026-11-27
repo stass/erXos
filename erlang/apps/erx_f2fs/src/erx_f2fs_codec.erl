@@ -242,8 +242,10 @@ compact_summaries(Counts, Blocks) ->
 The inode Nid of a volume whose superblock is Super, from its node block:
 valid under every rule of [F 41], [F 42] and [F 50] that concerns one
 inode block and its volume's features, with its body where its geometry
-puts it ([F 48]). Whether its address words and node ids name valid blocks
-and nodes is for the readers of those to check.
+puts it ([F 48]). A directory's i_current_depth above 63 reads as 63, as
+Linux reads it ([F 42]), so an inode written back from the map carries 63.
+Whether its address words and node ids name valid blocks and nodes is for
+the readers of those to check.
 """.
 -spec inode(superblock(), non_neg_integer(), binary()) ->
           {ok, inode()} | {error, failure()}.
@@ -496,9 +498,15 @@ sit_entry(#{vblocks := VBlocks, valid_map := Map, mtime := Age}) ->
     <<Type:(16 - ?ERX_F2FS_SIT_VBLOCKS_BITS),
       Valid:?ERX_F2FS_SIT_VBLOCKS_BITS>> = <<VBlocks:16>>,
     require(Valid =< ?BLOCKS_PER_SEG, valid_blocks),
-    require(Valid =:= lists:sum([Bit || <<Bit:1>> <= Map]), valid_map),
+    require(Valid =:= set_bits(Map), valid_map),
     require(Type < ?ERX_F2FS_SIT_TYPES, type),
     #{valid_blocks => Valid, type => Type, valid_map => Map, mtime => Age}.
+
+%% The bits Bytes sets, a byte at a time, each the sum of its two nibbles'.
+set_bits(Bytes) ->
+    Nibbles = {0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4},
+    lists:sum([element(Byte bsr 4 + 1, Nibbles) + element(Byte band 16#f + 1, Nibbles)
+               || <<Byte>> <= Bytes]).
 
 %%% Segment summaries
 
@@ -561,11 +569,22 @@ read_inode(Super, Nid, Block) ->
                     #{i_extra_isize := Size} -> Size
                 end,
     Body = inode_body(Inode, Words, ExtraSize div ?WORD, XattrWords),
-    maps:merge(Inode#{i_name := binary:part(Name, 0, NameLength),
-                      i_nid => Nids, footer => Footer,
-                      i_extra_isize => ExtraSize,
-                      inline_xattr_words => XattrWords},
+    Bounded = bound_hash_depth(Inode),
+    maps:merge(Bounded#{i_name := binary:part(Name, 0, NameLength),
+                        i_nid => Nids, footer => Footer,
+                        i_extra_isize => ExtraSize,
+                        inline_xattr_words => XattrWords},
                Body).
+
+%% A directory's hash levels, i_current_depth, read as Linux reads them: at
+%% most 63, however large the stored word ([F 42], [F 58]), so the depth an
+%% insertion grows from is bounded. A regular file keeps i_gc_failures in
+%% that word, which reads as it is.
+bound_hash_depth(#{i_mode := Mode, i_current_depth := Depth} = Inode)
+  when Mode band ?ERX_F2FS_MODE_TYPE_MASK =:= ?ERX_F2FS_MODE_DIR ->
+    Inode#{i_current_depth := min(Depth, ?ERX_F2FS_DIR_HASH_DEPTH_MAX)};
+bound_hash_depth(Inode) ->
+    Inode.
 
 %% A nid names a node when it is at least the root's and below the NAT's
 %% capacity, f2fs_nat_entries_per_block for each block of one of the NAT's

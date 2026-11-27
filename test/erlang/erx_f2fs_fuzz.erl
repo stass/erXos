@@ -27,7 +27,8 @@
 %% whose area addresses were moved apart under a fixed-up checksum must fail with
 %% `areas` (failure `areas`). Every SIT entry read must count the bits its map sets
 %% (`valid_map`), every inode read must have a whole number of words of extra
-%% attributes (`extra_isize`) and inline data of its size (`size`), and every
+%% attributes (`extra_isize`) and inline data of its size (`size`), every directory
+%% inode read at most 63 hash levels (`current_depth`), and every
 %% dentry's name must end by its area's last slot (`size`). A run reaches every
 %% rule of ?REACHED (failure `unreached`).
 -module(erx_f2fs_fuzz).
@@ -472,7 +473,8 @@ inode_field() ->
           {i_advise, pick([0, ?ERX_F2FS_ADVISE_ENCRYPT, ?ERX_F2FS_ADVISE_VERITY])},
           {i_inline, rand:uniform(256) - 1},
           {i_namelen, pick([255, 256])},
-          {i_size, pick([0, 3476, 3477])}]).
+          {i_size, pick([0, 3476, 3477])},
+          {i_current_depth, pick([0, 1, 63, 64, 16#ffffffff])}]).
 
 %% i_extra_isize and i_inline_xattr_size around their bounds.
 extra_word() ->
@@ -490,7 +492,12 @@ maybe_fix_inode(_Super, Block) ->
     Block.
 
 %% An inode read has a whole number of words of extra attributes, inline
-%% data of its size and dentries within their slots.
+%% data of its size, dentries within their slots, and, for a directory, at
+%% most 63 hash levels.
+check_inode(#{i_mode := Mode, i_current_depth := Depth})
+  when Mode band ?ERX_F2FS_MODE_TYPE_MASK =:= ?ERX_F2FS_MODE_DIR,
+       Depth > ?ERX_F2FS_DIR_HASH_DEPTH_MAX ->
+    fail(current_depth, Depth);
 check_inode(#{i_extra_isize := Size}) when Size rem 4 =/= 0 ->
     fail(extra_isize, Size);
 check_inode(#{inline_data := Data, i_size := Size}) when byte_size(Data) =/= Size ->

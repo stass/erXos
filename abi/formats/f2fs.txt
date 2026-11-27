@@ -261,6 +261,9 @@ limit f2fs_mode_blk u32 0x6000
 limit f2fs_mode_reg u32 0x8000
 limit f2fs_mode_lnk u32 0xa000
 limit f2fs_mode_sock u32 0xc000
+# A directory's hash levels at most: Linux reads a larger i_current_depth
+# as this [F 42], [F 58].
+limit f2fs_dir_hash_depth_max u32 63
 # i_extra_isize is a multiple of 4, at least the two size words [F 41].
 limit f2fs_extra_isize_min u32 4
 limit f2fs_extra_isize_align u32 4
