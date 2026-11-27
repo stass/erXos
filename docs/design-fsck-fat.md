@@ -250,7 +250,7 @@ fsck_fat /media/raw/disk0/s1.data
    the steps' order means nothing. Then `erx_fat_check:write/4` writes
    the repair step by step, in the order of
    [Writing a repair](#writing-a-repair): it reads the sectors the step
-   changes, patches them, and hands the images to `erx_fat_plan:step/4`,
+   changes, patches them, and hands the images to `erx_fat_plan:apply/3`,
    which writes them and flushes. The FAT server's volume process writes
    each step of its batches through the same function, with the window
    proxy's write and flush, so a step has one writer.
@@ -455,8 +455,8 @@ is a bug, and the fuzz target fails on one.
 
 | What is held | Bound | At most |
 | --- | --- | --- |
-| the clusters some entry links to, and the clusters a walk has reached | one bit per cluster each, at most 4,194,304 clusters, the ownership check's limit; a larger volume is refused before any FAT sector is read but the one admission reads for the volume's flags | 1 MiB |
-| the directory frames and the subdirectories they wait on, with their names | measured as 64 bytes each plus its name's bytes, within 1 MiB: at most 16,384, the ownership check's stack bound, with short names, and about 3,300 with 255-byte long names; a volume past it is refused, with nothing written | 1 MiB |
+| the clusters some entry links to, the clusters a walk has reached, and the numbers `LOST.DIR`'s entries are named | one bit per cluster each, the third made when the first lost chain is named, at most 4,194,304 clusters, the ownership check's limit; a larger volume is refused before any FAT sector is read but the one admission reads for the volume's flags | 1.5 MiB |
+| the directory frames and the subdirectories they wait on, with their names | measured as 64 bytes each plus its name's bytes and six bytes for each slot of its entries, kept so a second name of it can be deleted, within 1 MiB: at most 16,384, the ownership check's stack bound, with short names, and about 2,300 with 255-byte long names; a volume past it is refused, with nothing written | 1 MiB |
 | the FAT sector cache | 64 sectors | 32 KiB |
 | edits, and the view's index of them by sector | 12,288 edits | 2 MiB |
 | findings | measured as 64 bytes each plus its path's bytes, within 1 MiB; a path keeps at most its last 1,024 bytes, its earlier names shown as `...` | 1 MiB |
@@ -487,22 +487,26 @@ the window's deadline, 35 s.
 Each step is computed when its turn comes, from what the medium then
 holds: `erx_fat_check:write/4` reads every sector the step's edits fall
 in, patches the edited bytes, and writes the images through
-`erx_fat_plan:step/4`, which writes them and flushes. The steps:
+`erx_fat_plan:apply/3`, which writes them and flushes. The steps:
 
 1. **`dirty`, `dirty_mirrors`**: `erx_fat_alloc:dirty/1` over the
    medium as it reads: the clean bit cleared in the first FAT, then in
    the other copies; the FSInfo hints written unknown.
-2. **`cutting`**: in the first FAT, every end-of-chain mark a repair
-   sets (a cross-link, an out-of-range link, a link to a free, bad or
-   reserved cluster, a loop, a file's tail past its size), and entry 0
-   when the header is odd. A cut frees nothing: what it cuts off becomes
-   lost.
-3. **`preparation`**: directory entries that come to reach less or that
+2. **`preparation`**: directory entries that come to reach less or that
    lie out of view: entries deleted (invalid long-name runs, a second
    name of a cluster, a subdirectory naming its parent, a `.` or `..`
    out of place, a bad `.` or `..` of a subdirectory), a first cluster
    and size set to 0, sizes shrunk, a directory's size set to 0, and any
    fix to an entry behind an end marker.
+3. **`cutting`**: in the first FAT, every end-of-chain mark a repair
+   sets (a cross-link, an out-of-range link, a link to a free, bad or
+   reserved cluster, a loop, a file's tail past its size), and entry 0
+   when the header is odd. A cut frees nothing: what it cuts off becomes
+   lost. It follows `preparation`, because a cut makes the cluster after
+   it the start of a chain, and a name that started there inside the
+   chain (`PATH doesn't start a new cluster chain`) would take it on a
+   run after a cut between the two; once `preparation` has removed that
+   name, the cluster can only become a lost chain.
 4. **`publication`**: directory entries that come to reach more or are
    corrected in place: the names of lost chains in `LOST.DIR`, the end
    markers turned into deleted entries, and the `.` and `..` fixes.
@@ -541,11 +545,13 @@ nothing to write are skipped. An empty repair writes nothing.
   from the first FAT, never changes.
 * **No name newly reaches a free cluster.** Nothing is freed, and the
   only names added are those of lost chains, which are allocated.
-* **No new sharing.** Step 2 only takes links away and step 3 only takes
-  names away. Step 4 adds names only to lost chains, each named once,
-  after step 3's flush, so the name a chain had before is gone when its
-  new one lands. An entry that becomes readable again had its own fixes
-  written in step 3, while it was still out of view.
+* **No new sharing.** Step 2 only takes names away and step 3 only takes
+  links away, after every name that started inside a chain is gone, so
+  the cluster a cut makes the start of a chain is no name's. Step 4 adds
+  names only to lost chains, each named once, after step 2's flush, so
+  the name a chain had before is gone when its new one lands. An entry
+  that becomes readable again had its own fixes written in step 2,
+  while it was still out of view.
 * **Running again keeps every kept file.** Every finding is derived
   again from the medium, and every partial state is a finding of the
   table: chains cut and their tails lost, names removed, sizes not yet
@@ -576,7 +582,7 @@ wrong ([design-drives.md](design-drives.md#the-writable-rule)): when
 `erx_fat_check` in its **first-finding mode**, which stops at the first
 finding other than the dirty mark. If there is none, the process writes
 a repair whose only steps are `clean_mirrors` and `clean`, through
-`erx_fat_plan:step/4`, and mounts the volume writable. Any other
+`erx_fat_plan:apply/3`, and mounts the volume writable. Any other
 finding, a bound, or a read, write or flush that fails keeps the volume
 read-only `dirty`, and nothing more is written. A lost chain is a
 finding, so a volume cut while a file was growing stays read-only for
@@ -807,9 +813,9 @@ byte, which FreeBSD does not check; `erx_fat_name:checksum/1`;
 files.
 
 New: `erx_fat_check`, which decides the findings and edits and writes
-them step by step; `erx_fat_plan:step/4`, the write of one step's
-sectors and its flush, taken out of `erx_media_volume:applied/2`, which
-then calls it for each step; a reason with each admission refusal of
+them step by step; `erx_fat_plan:apply/3`, the write of a plan's steps, each
+step's sectors and then a flush, taken out of `erx_media_volume:applied/2`, which
+then calls it with its plans; a reason with each admission refusal of
 `erx_fat`, so the checker can print what is wrong; `finish/1`'s value
 for a repair; the commands `fsck_fat` and `fsck`; and the test
 generator of damaged images.
