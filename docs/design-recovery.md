@@ -869,14 +869,21 @@ others.
 already has a stand-in for most devices and transports; each gains the
 same five fault modes instead of a fault vocabulary of its own. A test
 module, `erx_fault_plan` in `test/erlang`, holds a plan: a list of
-`{Match, Fault}`, where `Match` names an exchange (a command, a transfer,
-a request kind, the Nth of them) and `Fault` is one of `silent`,
-`{late, Ms}`, `{error, Reason}`, `{wrong_once, Answer}` and `gone`. A
-`{late, Ms}` exchange takes its effect on the device when it completes,
-even after a `cancel`, a deadline or the caller's answer, which is how
-a write still on the wire lands late. A stand-in asks the plan at each
-exchange and does what it says; with an empty plan it behaves as it
-does now, so no existing test changes.
+`{Match, Fault}`, where `Match` names an exchange by its kind, a term the
+stand-in names it by (a command, a transfer, a request kind), taken by
+the next exchange of that kind, or as `{nth, Kind, N}`, the Nth of them
+counted from the plan's start; and `Fault` is one of `silent`,
+`{late, Ms}`, `{error, Reason}`, `{wrong_once, Answer}` and `gone`. The
+first rule that fits is taken, once. A `silent` exchange is never
+answered and leaves the device's state where it was. A `{late, Ms}`
+exchange takes its effect on the device when it completes, even after a
+`cancel`, a deadline or the caller's answer, which is how a write still
+on the wire lands late. `{wrong_once, Answer}` answers Answer, or, when
+Answer is a function, that function of the right answer. `gone` lasts:
+that exchange and every later one, of any kind, meet it. A stand-in asks
+the plan at each exchange and does what it says, in its own form of an
+answer; with an empty plan it behaves as it does without one, so no
+existing test changes.
 
 Every storage stand-in also keeps its contents in two parts, durable
 and volatile, unless it is set to write through: an answered write
@@ -888,7 +895,7 @@ answered and flushed.
 | Stand-in | Exists as | Gains |
 | --- | --- | --- |
 | xHCI | `test/erlang/erx_usb_fake_xhci.erl` | a command or endpoint stop never answered, a port reset that times out, a transfer error, a device gone from its port |
-| a USB stick over BOT | `test/erlang/erx_usb_fake_stick.erl` | a STALL, a NAK for ever (`silent`), a late CSW, a CSW with a bad signature or tag, a phase error, the stick gone in the middle of a command |
+| a USB stick over BOT | `test/erlang/erx_usb_fake_stick.erl`, which asks the plan at each `cbw`, `data_out`, `data_in` and `csw` transfer | a STALL, a NAK for ever (`silent`), a late CSW, a CSW with a bad signature or tag, a phase error, the stick gone in the middle of a command |
 | an SD card | `test/erlang/erx_blk_sd_card_model.erl` | a CRC error on a read or a write, a command timeout, an R1 error bit, the card gone |
 | a block window, for the volumes above | the fake window proxy of `test/erlang/erx_media_volume_tests.erl`, moved into its own module, serving two volumes of one medium | a request dropped or delayed, `eio`, the window's end |
 | the Bluetooth line | `test/erlang/erx_bt_line_model.erl` | the controller silent, late, garbage bytes, a reset that is not answered |
@@ -933,8 +940,8 @@ set of fault kinds the harness can inject, each with its action:
 | --- | --- | --- |
 | `unplug` | QMP `device_del` | in `tools/lib/erx/qmp.rb` |
 | `eject` | QMP `eject`, forced | in `tools/lib/erx/qmp.rb` |
-| `kill_domain` | the harness's domain kill that the USB suite's restart cell uses (`tools/lib/erx/usb_boot.rb`) | in the tree |
-| `power_cut` | the block-device suite's cut after a sync (`tools/lib/erx/qemu_suites/block_device.rb`) | in the tree |
+| `kill_domain` | a line typed at the guest's Erlang shell that kills the domain's ready incarnations, found as the domain suites find them (`PcieDomain::WAIT`, which the USB suite's restart cell uses) | in the tree |
+| `power_cut` | QEMU's process ended at once, as the block-device suite's power cut after a sync ends it (`tools/lib/erx/block_device.rb`) | in the tree |
 | `line_silent`, `line_late`, `line_garbage`, `line_cut` | a relay the harness owns between a socket chardev and its peer (the Bluetooth line's chardev connects to Bumble on the host's loopback, `tools/lib/erx/qemu.rb:107-116`): stop forwarding, delay, insert bytes, close | our own code; to write |
 | `net_drop`, `net_silent` | the same relay on a socket or datagram network backend | our own code; to write |
 | `link_down`, `link_up` | QMP `set_link` | unverified |
@@ -956,15 +963,20 @@ the probe's record for the pinned QEMU shows all of it; until then the
 module refuses it with a plain message naming the kind.
 
 **How a cell names its faults.** A cell declares the faults it injects
-with its other facts: `faults: [[:block_error, drive: :data, op:
-:read, nth: 3], [:kill_domain, :network]]`. The module derives what the
-boot needs from that declaration (a `blkdebug` drive in place of a plain
-one, a relay chardev in place of a direct socket), so nothing is said
-twice, and a fault the cell did not declare, or a kind outside the set,
-raises `Erx::Error` before QEMU starts. The cell's steps then call
-`faults.inject(kind, ...)` at the moment they choose and check the four
-outcomes of [the rule](#the-rule). A cell's record lists the faults it
-injected, so a result says what was tested.
+with its other facts, each a kind and its named targets: `faults:
+[[:block_error, drive: :data, op: :read, nth: 3], [:kill_domain, domain:
+:network]]`. `Erx::Faults.declare` checks the declaration whole before
+QEMU starts: a kind outside the set, a kind the probe has not shown or
+whose relay is not written, a missing, extra or malformed target (a
+target is a short name the module checks before it reaches a QMP command
+or a typed line), and a fault declared twice each raise `Erx::Error`
+naming it. The module derives what the boot needs from the declaration
+(a QMP socket for a QMP kind, a `blkdebug` drive in place of a plain one,
+a relay chardev in place of a direct socket), so nothing is said twice.
+The cell's steps then call `faults.inject(kind, **targets)` at the moment
+they choose, which refuses a fault the declaration does not hold, and
+check the four outcomes of [the rule](#the-rule). A cell's record lists
+the faults it injected, so a result says what was tested.
 
 The QEMU cases, each with its seed:
 
