@@ -49,7 +49,8 @@ and no chain reaches a free cluster.
   until no chain waits, writes in the last one's release step a next-free hint
   when the mount allocated any cluster, the first cluster the next-fit search
   would allocate from there, which is free once the batch is written, or unknown
-  when none is, and then sets the clean bit. The FAT the server reads is the first copy to lose the
+  when no cluster outside the batch is free before it, and then sets the clean
+  bit. The FAT the server reads is the first copy to lose the
   clean bit and the last to get it back, each in a step of its own, so it reads
   dirty whenever its copies may disagree, and a cut between copies never leaves a
   clean volume whose FATs differ. The hard-error bit is written as it was read. An
@@ -427,7 +428,10 @@ finish(Alloc = #alloc{allocated = Allocated}, Entry) ->
                         {Plan, [_ | _] = Waiting} ->
                             {Plan, Alloc#alloc{batch = #{}, waiting = Waiting}};
                         {Plan, []} ->
-                            Hint = case Allocated of true -> fsinfo_writes(Alloc, keep, next_free(Alloc)); false -> [] end,
+                            Hint = case {Allocated, Alloc#alloc.fsinfo} of
+                                       {true, Sector} when Sector =/= none -> fsinfo_writes(Alloc, keep, next_free(Alloc));
+                                       _ -> []
+                                   end,
                             Last = case Hint of
                                        [] -> Plan;
                                        _ -> lists:keystore(release, 1, Plan,

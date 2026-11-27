@@ -13,7 +13,7 @@
 %% 3. `obligations`: the tree read through erx_fat meets the obligation at the
 %%    state's earliest moment and after each mark between it and the epoch's end.
 %% 4. `fsck`: `fsck_fat`'s checker, erx_fat_check:check/2, finds only what FAT's
-%%    write order lets a cut leave (cut_finding/2): on a clean volume nothing; on a
+%%    write order lets a cut leave (cut_finding/1): on a clean volume nothing; on a
 %%    dirty one the dirty flag, lost chains, a chain longer than its file's size,
 %%    an invalid long-name run, entries after a directory's end, and FAT copies
 %%    that differ. Its repair is not run here.
@@ -184,14 +184,13 @@ mounted(Fat, Read, Sectors, Moments) ->
 fscked(Read, Sectors) ->
     case erx_fat_check:check(Read, Sectors) of
         {ok, Findings, _Repair} ->
-            case lists:member(dirty, Findings) of
-                true ->
-                    case [F || F <- Findings, not cut_finding(F)] of
-                        [] -> pass;
-                        Others -> {fail, fsck, {findings, Others}}
-                    end;
-                false when Findings =:= [] -> pass;
-                false -> {fail, fsck, {findings, Findings}}
+            Unexpected = case lists:member(dirty, Findings) of
+                             true -> [F || F <- Findings, not cut_finding(F)];
+                             false -> Findings
+                         end,
+            case Unexpected of
+                [] -> pass;
+                Others -> {fail, fsck, {findings, Others}}
             end;
         Other ->
             {fail, fsck, Other}

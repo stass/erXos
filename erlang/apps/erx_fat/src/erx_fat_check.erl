@@ -314,7 +314,9 @@ fsinfo_signature(St, Sector) ->
 
 %% FreeBSD's fat.c:865-940: entries 0 and 1 of the first FAT as a clean volume holds
 %% them, in the dirty form Windows writes, or anything else, which is corrected to
-%% the clean form.
+%% the clean form. FAT32's reserved top bits are ignored in the dirty form as in the
+%% clean one, where FreeBSD compares the dirty form exactly (design-fsck-fat, "Where
+%% the repairs differ").
 fat_header(St = #st{type = Type}, Media) ->
     {Sector, St1} = fat_sector(St, 0),
     <<Head:(Type div 4)/binary, _/binary>> = Sector,

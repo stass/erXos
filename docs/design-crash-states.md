@@ -164,7 +164,7 @@ log format is known only from GPL code. It is
   it is a `docs/todo-build.md` item there.
 * The FAT server writes one sector per window write and a flush after
   each step (`erx_fat_plan:apply/3`, called from `erx_media_volume`'s
-  `applied/2`), and ends the volume at the
+  `applied/2`), and ends the volume, by `answered/1` beside `applied/2`, at the
   first request answered with an error (`answered/1`, beside them);
   `erx_fat_dir:commit/1` answers the steps (`erx_fat_dir.erl`, module
   documentation, "Steps").
@@ -612,8 +612,7 @@ The landing gate runs the window recorder's FAT suite as an EUnit
 module, `erx_crash_fat_tests`, through `test/host/erx_crash_states_test.rb`
 in `make check`, within the table's bounds. `erx_crash_run` records
 each workload, runs the checks of one state and writes the failure
-records; step 4 plugs into it as a checker of a state's sectors, which
-`erx_fat_check` supplies when it joins. Everything else,
+records; step 4 calls `erx_fat_check:check/2` on a state's sectors. Everything else,
 `torn`, `seq-2` whole and up, `fsck_fat`'s repair traces and the
 independent readers, runs at the milestone gate.
 
@@ -689,7 +688,7 @@ Each passing case is paired with a seeded fault that must make it fail.
 | --- | --- |
 | a FAT `seq-1` run over FAT16 and FAT32 finds no failing state | the flush after `erx_fat_dir`'s `preparation` step dropped from `erx_fat_plan`'s step loop: a state with a published name whose chain reaches a free cluster fails step 2 |
 | the same run | a publication write sent before the preparation step's flush: a state holding the new name over a zeroed directory cluster fails step 3 |
-| a batch that grows a chain across both FAT copies and creates a long name across a sector boundary: states with differing copies under the dirty flag, and with an invalid long-name run, pass step 4 | the dirty flag cleared in the FAT the server reads before the other copies: a state whose copies differ while that FAT reads clean fails step 4 |
+| the same `seq-1` run, whose cut steps leave differing FAT copies and invalid long-name runs under the dirty flag that pass step 4 | the dirty flag cleared in the FAT the server reads before the other copies: a state whose copies differ while that FAT reads clean fails step 4 |
 | the same `seq-1` run, each workload ended by the finish | the release step dropped from every plan: a state that reads clean with a lost chain fails step 4 |
 | a `fsck_fat` repair of the cross-linked image leaves no failing state | the dirty mark merged into the first repair step: a state that reads clean with half a repair fails FK-R3's rule |
 | a repair that names a lost chain passes step 4's comparison on the repaired copy | the repair naming the chain in the root directory instead of `/LOST.DIR`: an unpromised root name fails the comparison |

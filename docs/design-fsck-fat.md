@@ -350,7 +350,7 @@ ownership-check finding the repair removes.
 | a malformed boot sector or FAT geometry (signature, cluster size, reserved sectors, FAT count, sector counts, exFAT, version, FSInfo sector 0, data area, cluster count, root cluster, FAT size) | `boot.c:56-318` | none: fatal | |
 | `Invalid signature in fsinfo block` | `boot.c:206-236` | write the FSInfo sector's signatures, `RRaA` at 0, `rrAa` at `0x1e4`, `00 00 55 AA` at `0x1fc`, and both hints unknown, `FFFFFFFF` at `0x1e8` and `0x1ec` | |
 | `FAT starts with odd byte sequence (...)` | `fat.c:865-940` | entry 0 written whole, as FreeBSD's "Correct" writes it: the boot sector's media byte, then `FF` on FAT16, `FF FF 0F` on FAT32; entry 1 written whole at the end (step `clean`) | |
-| the first entries in the dirty form | `fat.c:873-886`; on FAT32 the reserved top four bits of entries 0 and 1 are ignored, as in the clean form, since FAT32 keeps an entry's top bits on every write and the FAT server writes the dirty flag so | mark the volume clean at the end | |
+| the first entries in the dirty form | `fat.c:873-886`, which compares FAT32's dirty form exactly; `fsck_fat` ignores its reserved top bits ([Where the repairs differ](#where-the-repairs-differ)) | mark the volume clean at the end | |
 | `Cluster N continues with out of range cluster number M` | `fat.c:994-1001` | end the chain at N | a link that is no cluster |
 | `Cluster N crossed another chain at M` | `fat.c:1003-1012` | end the chain at N, the later of the two linking entries | a cluster linked to twice |
 | `Root directory doesn't start a cluster chain` | `dir.c:251-255` | none: fatal | |
@@ -428,6 +428,7 @@ any lost chain.
 
 | Case | FreeBSD | erXos, and why |
 | --- | --- | --- |
+| FAT32's dirty form with entry 0's or entry 1's reserved top four bits set | `FAT starts with odd byte sequence` and its "Correct" (`fat.c:865-886`), since its dirty form is compared exactly | the dirty form, marked clean at the end: the reserved bits are ignored as both FreeBSD and `fsck_fat` ignore them in the clean form, since a FAT32 entry keeps its top bits on every write, the FAT server's dirty flag among them, so a volume formatted with them set reads dirty to the server and to `fsck_fat` alike |
 | FAT12, sectors other than 512 bytes, mirroring off | checked | refused, nothing read past the boot sector: the FAT server serves none of them, and repairing a volume of one live FAT from the first copy would write from a FAT that may be stale |
 | what a FAT volume and a long-name entry are | FreeBSD's own predicates: a long-name entry has attributes exactly `0x0f`; a boot sector by `boot.c`'s tests | the FAT server's decoders: a boot sector by `erx_fat_read:boot_sector/1`, a long-name entry by attributes `0x0f` under mask `0x3f` (`erx_fat_entry.erl:12`), an FSInfo sector outside the reserved area read as absent. The checker examines the volume erXos reads, so its verdict and the mount's agree; a volume that `erx_fat` does not admit is refused, naming the reason |
 | when writing starts | as it goes, the first FAT through `mmap`, no dirty flag set | after the whole check; each step read, patched and written after the step before it was flushed; the dirty flag first, the clean flag last (FK-R3) |

@@ -2012,14 +2012,14 @@ designed. It maps the format onto the file protocol as follows:
   dirty flag's step writes both hints `0xFFFFFFFF`, the count stays so,
   and the finish's last batch, the one after which no chain waits for its
   release, writes in its release step a next-free hint
-  that is a free cluster of the volume, the first one the allocator's
+  that is a free cluster of the volume (FreeBSD's `fsck_msdosfs` reports one in
+  use while any is free, `sbin/fsck_msdosfs/fat.c:1318-1330`, and `fsck_fat`
+  follows it), the first one the allocator's
   next-fit search would take from the cluster after the last one the
   mount allocated, wrapping past the volume's last cluster to its first,
   which is free once that batch is written since the search counts no
   cluster the batch names; or leaves it unknown if the mount allocated
-  none or no cluster is free. FreeBSD's `fsck_msdosfs` reports a hint
-  naming a cluster in use while any is free
-  (`sbin/fsck_msdosfs/fat.c:1318-1330`), and `fsck_fat` follows it. So every FSInfo sector the server leaves passes fsimg's check, which
+  none or no cluster outside that batch is free before it. So every FSInfo sector the server leaves passes fsimg's check, which
   accepts a count that is unknown or exact and a hint that is unknown or
   names a cluster of the volume (`lib/formats/fat/verify.c:176-180` at
   fsimg `b6c1ea2`), and the next system to mount the volume counts the
