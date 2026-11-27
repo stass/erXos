@@ -8,10 +8,17 @@ require_relative 'abi_emit_packed'
 module Erx
   module ABI
     # Emits erx_abi_layout, the typed codec of every fixed wire_le layout
-    # (docs/design-abi.md, "Layouts in Erlang"), in the shape of
-    # erx_abi_packed: each layout is one clause of record/2, a binary pattern
-    # of exactly its size, and one clause of encode/2, and a nested layout is
-    # a nested map. Beyond erx_abi_packed's shapes, an enum field decodes to
+    # (docs/design-abi.md, "Layouts in Erlang"), on erx_abi_packed's model.
+    # Each layout has a decoder of its own, decode_<layout>/1: a binary
+    # pattern of exactly the layout's size. record/2 dispatches a layout's
+    # name to its decoder, and a nested layout's field calls the nested
+    # decoder directly, so no decoder recurses through record/2, whose result
+    # is the union of every layout's map: Dialyzer would iterate that union
+    # around the recursion, which grows with the number of layouts. encode/2
+    # may recurse through itself, since its result is always a binary. Each
+    # layout is one clause of encode/2, and a nested layout is a nested map.
+    #
+    # Beyond erx_abi_packed's shapes, an enum field decodes to
     # its member's atom and a flags field to the ordset of its bit names, both
     # through erx_abi_enums:name/2, so no input creates an atom; a signed
     # integer is read signed; and the codec refuses what the layout does not
@@ -20,7 +27,7 @@ module Erx
     # map, field for field under its declared names.
     #
     # decode/2 has one failure path: a refused value throws {?MODULE, Error}
-    # out of record/2, and decode/2 catches it once.
+    # out of a decoder, and decode/2 catches it once.
     module LayoutEmitter
       ERLANG_PATH = 'erlang/apps/erx/src/generated/erx_abi_layout.erl'
       # The atoms of decode/2's own errors; no checked type may share one.
@@ -118,9 +125,9 @@ module Erx
         in :coded then "coded(#{atom(field.type.name)}, #{name})"
         in :integers then "[#{element} || <<#{segment(element, integer(field))}>> <= #{name}]"
         in :binaries then "[#{element} || <<#{element}:#{field.type.size}/binary>> <= #{name}]"
-        in :layout then "record(#{atom(field.type.name)}, #{name})"
+        in :layout then "#{decoder(field.type)}(#{name})"
         in :layouts
-          "[record(#{atom(field.type.name)}, #{element})\n          || <<#{element}:#{field.type.size}/binary>> <= #{name}]"
+          "[#{decoder(field.type)}(#{element})\n          || <<#{element}:#{field.type.size}/binary>> <= #{name}]"
         end
       end
 
@@ -146,17 +153,23 @@ module Erx
 
       def wrapped(parts, indent, closing: 0) = PackedEmitter.wrapped(parts, indent, closing: closing)
 
-      # A layout's clauses of record/2: its bytes, and any other binary as a size error.
-      def record_clauses(layout)
+      # A layout's decoder function, decode_<layout>.
+      def decoder(layout) = atom("decode_#{layout.name}")
+
+      # A layout's clause of record/2, which calls its decoder.
+      def record_clause(layout) = "record(#{atom(layout.name)}, Bytes) ->\n    #{decoder(layout)}(Bytes)"
+
+      # A layout's decoder: its bytes, and any other binary as a size error.
+      def decoder_function(layout)
         name = atom(layout.name)
         segments = members(layout).map do |member|
           member.is_a?(Padding) ? "#{member.variable}:#{member.bytes}/binary" : pattern_segment(member)
         end
         checks = paddings(layout).map { |padding| "    padding(#{name}, #{padding.variable}),\n" }
         values = layout.fields.map { |field| "#{atom(field.name)} => #{decoded_value(field)}" }
-        ["record(#{name},\n       <<#{wrapped(segments, 9, closing: 6)}>>) ->\n" \
-         "#{checks.join}    #\{#{values.join(",\n      ")}}",
-         "record(#{name}, _Bytes) ->\n    fail({size, #{name}})"]
+        "#{decoder(layout)}(\n       <<#{wrapped(segments, 9, closing: 6)}>>) ->\n" \
+          "#{checks.join}    #\{#{values.join(",\n      ")}};\n" \
+          "#{decoder(layout)}(_Bytes) ->\n    fail({size, #{name}})."
       end
 
       def encode_clause(layout)
@@ -339,7 +352,9 @@ module Erx
           -spec encode(layout(), \#{atom() => term()}) -> binary().
           #{layouts.map { |layout| encode_clause(layout) }.join(";\n")}.
 
-          #{layouts.flat_map { |layout| record_clauses(layout) }.join(";\n")}.
+          #{layouts.map { |layout| record_clause(layout) }.join(";\n")}.
+
+          #{layouts.map { |layout| decoder_function(layout) }.join("\n\n")}
 
           fail(Error) ->
               throw({?MODULE, Error}).
