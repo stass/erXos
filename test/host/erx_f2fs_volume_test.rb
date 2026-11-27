@@ -17,6 +17,7 @@ class ErxF2fsVolumeTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   VOLUME = 'erlang/apps/erx_f2fs/src/erx_f2fs_volume.erl'
   REQUEST = 'erlang/apps/erx_f2fs/src/erx_f2fs_request.erl'
+  CORE = 'erlang/apps/erx_f2fs/src/erx_f2fs_core.erl'
   TESTS = %w[test/erlang/erx_f2fs_codec_tests.erl test/erlang/erx_f2fs_corpus.erl
              test/erlang/erx_f2fs_mount_tests.erl test/erlang/erx_f2fs_core_tests.erl
              test/erlang/erx_f2fs_listing.erl test/erlang/erx_f2fs_volume_tests.erl].freeze
@@ -27,6 +28,9 @@ class ErxF2fsVolumeTest < Minitest::Test
   # The corpus case's verdict, after the log lines (a header and a message each) its
   # trees write.
   CORPUS_CASE_FAILED = /corpus_trees_list_through_the_volume_as_through_the_core_test_\/0-fun-\d+-\.\.\.(?:=ERROR REPORT[^\n]*\n[^\n]*\n)*\*failed\*/
+
+  # The read-write case's verdict.
+  WRITE_CASE_FAILED = /a_write_survives_fsync_unmount_and_every_cut[^\n]*\*failed\*/m
 
   SEEDS = [
     Seed.new(fault: 'the cache never evicting', source: VOLUME,
@@ -49,7 +53,27 @@ class ErxF2fsVolumeTest < Minitest::Test
     Seed.new(fault: 'a run of blocks one block longer than the window carries', source: VOLUME,
              anchor: 'runs(First, Count, [Next | Rest], Max) when Next =:= First + Count, Count < Max ->',
              replacement: 'runs(First, Count, [Next | Rest], Max) when Next =:= First + Count, Count =< Max ->',
-             failure: CORPUS_CASE_FAILED)
+             failure: CORPUS_CASE_FAILED),
+    Seed.new(fault: 'a written block kept out of the cache', source: VOLUME,
+             anchor: 'Cached = lists:foldl(fun({Address, Block}, Acc) -> Acc#{Address => Block} end, Blocks, Writes),',
+             replacement: 'Cached = lists:foldl(fun({_Address, _Block}, Acc) -> Acc end, Blocks, Writes),',
+             failure: WRITE_CASE_FAILED),
+    Seed.new(fault: "a read judging an owner without the state's summaries", source: CORE,
+             anchor: '    Volume#{dirty => Nodes, held => Summaries}.',
+             replacement: '    Volume#{dirty => Nodes, held => maps:without(maps:keys(Summaries), Summaries)}.',
+             failure: WRITE_CASE_FAILED),
+    Seed.new(fault: "a read taking a dirty node's committed block", source: CORE,
+             anchor: 'node_block(#{superblock := Super, dirty := Dirty}, Nid, Ino, _Blocks) when is_map_key(Nid, Dirty) ->',
+             replacement: 'node_block(#{superblock := Super, dirty := Dirty}, Nid, Ino, _Blocks) when is_map_key(Nid, Dirty), false ->',
+             failure: WRITE_CASE_FAILED),
+    Seed.new(fault: "a checkpoint's phases written without the flush between them", source: VOLUME,
+             anchor: 'fun(Phase, {ok, S}) -> flushed(written(Phase, S));',
+             replacement: 'fun(Phase, {ok, S}) -> written(Phase, S);',
+             failure: WRITE_CASE_FAILED),
+    Seed.new(fault: "a write's first block merged over zeros, not the old bytes", source: REQUEST,
+             anchor: 'Merged = <<(binary:part(Head, 0, Lead))/binary, Bytes/binary,',
+             replacement: 'Merged = <<0:(Lead * 8), Bytes/binary,',
+             failure: WRITE_CASE_FAILED)
   ].freeze
 
   def test_eunit_cases_pass

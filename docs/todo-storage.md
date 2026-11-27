@@ -878,15 +878,15 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   FreeBSD does (`mmc.c:1876-1882`, `mmcreg.h:362-363` at `release/15.1.0`), and discards with TRIM only
   on a device with GB_CL_EN that matches no row of FreeBSD's TRIM exclusions (`mmc.c:115-130`), after its
   board probe shows sectors outside a discarded range unchanged ([design-storage.md](design-storage.md)).
-* [High] storage, F2FS's read-write mount in the volume process: erx_f2fs_core's state and
-  erx_f2fs_plan's checkpoint are pure and tested on the host, but erx_f2fs_volume still mounts read-only
-  and writes nothing; its write path (each phase's runs to the window, a flush after each, the state
-  adopted after the last) and the mount checkpoint at a read-write mount land with the first operation
-  that changes a volume ([design-f2fs.md](design-f2fs.md#read-write-mounts-the-mount-checkpoint)).
-  It waits on the walk: a second checkpoint in one mount writes its first node at the committed walk
-  start with the committed epoch's version, so a cut before its last block leaves a chain that
-  erx_f2fs_mount refuses as `{walk, chain}` until the walk ends a chain of unmarked checkpoint nodes
-  without replaying them ([design-f2fs.md](design-f2fs.md#the-walk)).
+* [High] storage, F2FS's read-write volume beyond overwriting mapped blocks: erx_f2fs_volume mounts
+  read-write, writes the mount checkpoint, and runs a checkpoint at each fsync and at unmount; a write
+  reaches only blocks whose slot a node already holds, below the block that holds the size. Writes that
+  need a new node (nid allocation), a size raise past that block (the truncate that raises a size), inline
+  files, an open for truncation and the namespace operations answer `enotsup` until their packages land
+  ([design-f2fs.md](design-f2fs.md#operations)); statfs reports the committed checkpoint's counts, not the
+  state's; the room rule's charge is not kept, so the walk's 512-block bound is a constant in
+  erx_f2fs_mount rather than derived from it ([design-f2fs.md](design-f2fs.md#the-room-rule)). The walk
+  does not apply the inode-checksum rule, which only replay needs.
 * [Medium] test, F2FS checkpoint writer's remaining table rows and seeds: a property that every valid
   block's summary names its owner after each commit, with the "SSA blocks written only for the
   segments a log left" seed; the shared-section and hot-data-log seeds; an inode created and freed

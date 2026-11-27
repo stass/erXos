@@ -108,17 +108,15 @@ node({Nid, _}, State, Blocks) ->
     {Nid, Value} = lists:keyfind(Nid, 1, Nodes),
     Ino = ino(Nid, Value),
     State2 = result(erx_f2fs_core:set_node(State1, Nid, Ino, Address, Blocks)),
-    {{Address, encode(Super, Value, fun(Footer) -> footer(Footer, Committed, Next) end)}, State2}.
+    {{Address, erx_f2fs_core:encode_node(Super, completed(Value, fun(Footer) -> footer(Footer, Committed, Next) end))},
+     State2}.
 
 ino(_Nid, {inode, #{footer := #{ino := Ino}}}) -> Ino;
 ino(_Nid, {_Kind, _Body, #{ino := Ino}}) -> Ino.
 
-encode(Super, {inode, #{footer := Footer} = Inode}, Complete) ->
-    erx_f2fs_codec:encode_inode(Super, Inode#{footer := Complete(Footer)});
-encode(_Super, {direct, Addresses, Footer}, Complete) ->
-    erx_f2fs_codec:encode_direct_node(Addresses, Complete(Footer));
-encode(_Super, {indirect, Nids, Footer}, Complete) ->
-    erx_f2fs_codec:encode_indirect_node(Nids, Complete(Footer)).
+%% A node's value with its footer completed by Complete.
+completed({inode, #{footer := Footer} = Inode}, Complete) -> {inode, Inode#{footer := Complete(Footer)}};
+completed({Kind, Body, Footer}, Complete) -> {Kind, Body, Complete(Footer)}.
 
 footer(#{flag := Flag} = Footer, #{checkpoint_ver := Version, crc := Crc}, Next) ->
     Footer#{flag := Flag band bnot (?ERX_F2FS_NODE_MARK_FSYNC bor ?ERX_F2FS_NODE_MARK_DENTRY),

@@ -27,6 +27,19 @@ writing or truncation among them, and a directory opened for writing
 eisdir; a symlink is never opened, as the server follows none (eloop),
 and a device, FIFO or socket answers enotsup.
 
+A read-write volume's requests read its view (erx_f2fs_core:view/1), a
+volume map with the state's dirty nodes, and on it a regular file opens
+for writing, a write is the first step of "Operations", answering the move
+{write, Ino, Blocks, Size, Reply}: at most ?WRITE_BLOCKS whole blocks in file
+order, each {Block, Bytes} merged over the old block's bytes below the
+file's size and zeros at and past it, the size once they are set and the
+write's answer, naming the bytes they take, so a write may be short. The volume claims the blocks,
+writes them and sets them in their slots. An fsync answers the move
+checkpoint. A write into an inline file, one that starts past the block
+holding the size (which needs the truncate that raises a size) or one
+whose slot no node holds yet, an open for truncation and the other
+mutations answer enotsup until the operations that do them land.
+
 A readdir's entry offset is the position past the entry's first slot,
 where the next call resumes ("Directories"); "." is listed with the
 directory's own qid and ".." as its slot names it. A readdir calls the
@@ -55,6 +68,8 @@ one per slot.
 -define(BLOCK_SIZE, (1 bsl ?ERX_F2FS_LOG_BLOCK_SIZE)).
 %% getattr's blocks count 512-byte units, as stat's st_blocks does.
 -define(STAT_BLOCK, 512).
+%% The blocks one write takes at most, so a step needs at most one free section.
+-define(WRITE_BLOCKS, 64).
 -define(NAME_MAX, ?ERX_F2FS_NAME_LEN_MAX).
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK
                         bor ?ERX_P9_GETATTR_MASK_UID bor ?ERX_P9_GETATTR_MASK_GID
@@ -76,7 +91,10 @@ handle, which is the open node's nid.
 -doc "A check of the medium a step broke: the core's, or a readdir past its bound.".
 -type failure() :: erx_f2fs_core:failure() | {dir, blocks}.
 -doc "What a request does next.".
--type move() :: {reply, term()} | {then, step()} | {failed, non_neg_integer(), failure()}.
+-type move() :: {reply, term()} | {then, step()} | {failed, non_neg_integer(), failure()} |
+                checkpoint |
+                {write, non_neg_integer(), [{non_neg_integer(), binary()}], non_neg_integer(),
+                 {ok, pos_integer(), non_neg_integer()}}.
 -doc "One step of a request, over the volume and the blocks read so far.".
 -type step() :: fun((erx_f2fs_core:volume(), #{non_neg_integer() => binary()}) ->
                         move() | {need, [non_neg_integer()]}).
@@ -92,8 +110,9 @@ start({walk, Dir, Name}, _Volume) ->
     end;
 start({getattr, Nid}, _Volume) ->
     {then, step(Nid, fun(Inode, _, _) -> {reply, {ok, attr(Inode)}} end)};
-start({open, Nid, Flags}, _Volume) ->
-    {then, step(Nid, fun(Inode, _, _) -> {reply, opened(Nid, kind(Inode), Flags)} end)};
+start({open, Nid, Flags}, Volume) ->
+    Writable = writable(Volume),
+    {then, step(Nid, fun(Inode, _, _) -> {reply, opened(Nid, kind(Inode), Flags, Writable)} end)};
 start({read, Nid, Offset, Count}, _Volume) ->
     {then, step(Nid, fun(Inode, Volume, Blocks) ->
                              maybe
@@ -114,8 +133,16 @@ start({readlink, Nid}, _Volume) ->
                      end)};
 start(statfs, #{superblock := Super, checkpoint := Header}) ->
     {reply, {ok, statfs(Super, Header)}};
-start({fsync, _Nid}, _Volume) ->
-    {reply, ok};
+start({fsync, _Nid}, Volume) ->
+    case writable(Volume) of
+        true -> checkpoint;
+        false -> {reply, ok}
+    end;
+start({write, {Nid, Offset, Bytes}}, #{dirty := _}) ->
+    {then, step(Nid, fun(Inode, Volume, Blocks) -> write(Inode, Offset, Bytes, Volume, Blocks) end)};
+start({Mutation, _Arguments}, #{dirty := _})
+  when Mutation =:= make; Mutation =:= setattr; Mutation =:= unlink; Mutation =:= rename ->
+    {reply, {error, enotsup}};
 start({Mutation, _Arguments}, _Volume)
   when Mutation =:= write; Mutation =:= make; Mutation =:= setattr; Mutation =:= unlink;
        Mutation =:= rename ->
@@ -157,15 +184,68 @@ walk(Dir, Name, Volume, Blocks) ->
     end.
 
 %% An open's handle, the node's nid.
-opened(_Nid, Kind, _Flags) when Kind =:= device; Kind =:= other -> {error, enotsup};
-opened(_Nid, symlink, _Flags) -> {error, eloop};
-opened(_Nid, Kind, Flags) when Flags band ?ERX_P9_O_ACCMODE =/= 0;
-                               Flags band ?ERX_P9_O_TRUNC =/= 0 ->
-    case Kind of
-        directory -> {error, eisdir};
-        _ -> {error, erofs}
+opened(_Nid, Kind, _Flags, _Writable) when Kind =:= device; Kind =:= other -> {error, enotsup};
+opened(_Nid, symlink, _Flags, _Writable) -> {error, eloop};
+opened(Nid, Kind, Flags, Writable) when Flags band ?ERX_P9_O_ACCMODE =/= 0;
+                                         Flags band ?ERX_P9_O_TRUNC =/= 0 ->
+    case {Kind, Writable} of
+        {directory, _} -> {error, eisdir};
+        {_, false} -> {error, erofs};
+        _ when Flags band ?ERX_P9_O_TRUNC =/= 0 -> {error, enotsup};
+        _ -> {ok, Nid}
     end;
-opened(Nid, _Kind, _Flags) -> {ok, Nid}.
+opened(Nid, _Kind, _Flags, _Writable) -> {ok, Nid}.
+
+%% Whether Volume is a read-write volume's view, which holds its dirty
+%% nodes (erx_f2fs_core:view/1).
+writable(Volume) -> is_map_key(dirty, Volume).
+
+%%% write
+
+%% The first step of a write of Bytes at Offset to Inode: the blocks it
+%% covers, at most ?WRITE_BLOCKS of them, merged, each slot checked to be
+%% held by a node.
+write(_Inode, Offset, <<>>, _Volume, _Blocks) ->
+    {reply, {ok, 0, Offset}};
+write(#{i_size := Size, footer := #{ino := Ino}} = Inode, Offset, Bytes0, Volume, Blocks) ->
+    First = Offset div ?BLOCK_SIZE,
+    Bytes = binary:part(Bytes0, 0, min(byte_size(Bytes0), (First + ?WRITE_BLOCKS) * ?BLOCK_SIZE - Offset)),
+    End = Offset + byte_size(Bytes),
+    Last = (End - 1) div ?BLOCK_SIZE,
+    maybe
+        ok ?= readable(kind(Inode)),
+        ok ?= supported(not is_map_key(inline_data, Inode) andalso First =< Size div ?BLOCK_SIZE),
+        ok ?= mapped(Volume, Inode, lists:seq(First, Last), Blocks),
+        {ok, Head} ?= old_block(Volume, Inode, First, Blocks),
+        {ok, Tail} ?= old_block(Volume, Inode, Last, Blocks),
+        Lead = Offset - First * ?BLOCK_SIZE,
+        Trail = (Last + 1) * ?BLOCK_SIZE - End,
+        Merged = <<(binary:part(Head, 0, Lead))/binary, Bytes/binary,
+                   (binary:part(Tail, ?BLOCK_SIZE - Trail, Trail))/binary>>,
+        {write, Ino, [{Block, binary:part(Merged, (Block - First) * ?BLOCK_SIZE, ?BLOCK_SIZE)}
+                 || Block <- lists:seq(First, Last)],
+         max(Size, End), {ok, byte_size(Bytes), Offset}}
+    end.
+
+supported(true) -> ok;
+supported(false) -> {reply, {error, enotsup}}.
+
+%% ok when a node holds the slot of each of Range's blocks.
+mapped(_Volume, _Inode, [], _Blocks) ->
+    ok;
+mapped(Volume, Inode, [Block | Range], Blocks) ->
+    case erx_f2fs_core:slot(Volume, Inode, Block, Blocks) of
+        {ok, none} -> {reply, {error, enotsup}};
+        {ok, _Slot} -> mapped(Volume, Inode, Range, Blocks);
+        Other -> Other
+    end.
+
+%% File block Block's bytes below the size, zeros at and past it.
+old_block(Volume, Inode, Block, Blocks) ->
+    maybe
+        {ok, Bytes} ?= erx_f2fs_core:read(Volume, Inode, Block * ?BLOCK_SIZE, ?BLOCK_SIZE, Blocks),
+        {ok, <<Bytes/binary, 0:((?BLOCK_SIZE - byte_size(Bytes)) * 8)>>}
+    end.
 
 %% ok for a file a read reads; a directory's handle answers eisdir.
 readable(regular) -> ok;

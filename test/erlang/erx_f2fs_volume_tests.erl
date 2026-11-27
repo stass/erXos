@@ -532,3 +532,158 @@ oracle_compared(Name, _ErxosReader, {error, enoent}) ->
 
 oracle_line(Name, {Path, Linux, Erxos}) ->
     io_lib:format("~s: ~0p: Linux ~0p, erXos ~0p~n", [Name, Path, Linux, Erxos]).
+
+%%% Read-write volumes
+
+%% A medium is {Partition, Blocks}: its size in blocks and its blocks by
+%% address, zeros where Blocks has none, so a crash state shares every
+%% block it does not change.
+medium(Image) ->
+    Zero = <<0:(?BLOCK * 8)>>,
+    {byte_size(Image) div ?BLOCK,
+     maps:from_list([{A, B} || A <- lists:seq(0, byte_size(Image) div ?BLOCK - 1),
+                               B <- [binary:part(Image, A * ?BLOCK, ?BLOCK)], B =/= Zero])}.
+
+block({_Partition, Blocks}, A) -> maps:get(A, Blocks, <<0:(?BLOCK * 8)>>).
+
+%% Medium with Writes, {Block, Bytes} each, landed in order.
+landed({Partition, Blocks}, Writes) -> {Partition, maps:merge(Blocks, maps:from_list(Writes))}.
+
+%% A block device over Medium that also writes and flushes, recording every
+%% write and flush in the order it served them, for the crash states.
+recorder(Medium) -> spawn_link(fun() -> recorder_loop(Medium, []) end).
+
+recorder_loop(Medium, Journal) ->
+    receive
+        {'$gen_call', From, {read, Sector, Count}} ->
+            First = Sector * ?SECTOR div ?BLOCK,
+            gen_server:reply(From, {ok, << <<(block(Medium, A))/binary>>
+                                           || A <- lists:seq(First, First + Count * ?SECTOR div ?BLOCK - 1) >>}),
+            recorder_loop(Medium, Journal);
+        {'$gen_call', From, {write, Sector, Bytes}} ->
+            gen_server:reply(From, ok),
+            Blocks = [{Sector * ?SECTOR div ?BLOCK + I, binary:part(Bytes, I * ?BLOCK, ?BLOCK)}
+                      || I <- lists:seq(0, byte_size(Bytes) div ?BLOCK - 1)],
+            recorder_loop(landed(Medium, Blocks), [{write, Blocks} | Journal]);
+        {'$gen_call', From, flush} ->
+            gen_server:reply(From, ok),
+            recorder_loop(Medium, [flush | Journal]);
+        {'$gen_call', From, journal} ->
+            gen_server:reply(From, {Medium, lists:reverse(Journal)}),
+            recorder_loop(Medium, Journal)
+    end.
+
+%% A volume over Medium in Mode, and its device.
+start_on({Partition, _} = Medium, Mode) ->
+    Device = recorder(Medium),
+    {ok, Window} = erx_blk_window:start_link({data, 0, Partition * ?BLOCK div ?SECTOR}, Device, 64),
+    {ok, Volume} = erx_f2fs_volume:start_link(Window, #{allowance => ?ALLOWANCE, mode => Mode}),
+    {Volume, Device}.
+
+%% Medium's checkpoint version, as a mount reads it.
+version({Partition, _} = Medium) -> version(Medium, erx_f2fs_mount:mount(Partition, ?ALLOWANCE, #{}), #{}).
+
+version(_Medium, {ok, #{checkpoint := #{checkpoint_ver := Version}}}, _Given) -> Version;
+version({Partition, _} = Medium, {need, Addresses}, Given) ->
+    Given1 = maps:merge(Given, maps:from_list([{A, block(Medium, A)} || A <- Addresses])),
+    version(Medium, erx_f2fs_mount:mount(Partition, ?ALLOWANCE, Given1), Given1).
+
+%% A file's bytes through a volume's handle, read to its end.
+contents(Volume, Handle) -> contents(Volume, Handle, 0, <<>>).
+
+contents(Volume, Handle, At, Acc) ->
+    case erx_f2fs:read(Handle, At, 65536, Volume) of
+        {ok, <<>>} -> Acc;
+        {ok, Bytes} -> contents(Volume, Handle, At + byte_size(Bytes), <<Acc/binary, Bytes/binary>>)
+    end.
+
+%% A file's bytes on Medium, through a read-only volume.
+file_on(Medium, Path) ->
+    {Volume, _Device} = start_on(Medium, read_only),
+    {ok, Handle} = erx_f2fs:open(node(Volume, Path), 0, Volume),
+    Bytes = contents(Volume, Handle),
+    stop(Volume),
+    Bytes.
+
+%% The first corpus image that mounts read-write with a regular file of
+%% more than two blocks, as a medium, and the file's path.
+writable_file() -> writable_file(corpus_images()).
+
+writable_file([Image | Images]) ->
+    Files = case mounted(Image) of
+                {ok, #{mode := read_write} = Mounted} ->
+                    [Path || {Path, #{kind := regular, size := Size}}
+                                 <- erx_f2fs_listing:of_tree(core_reader(Image, Mounted)),
+                             Size > 2 * ?BLOCK];
+                _ -> []
+            end,
+    case Files of
+        [Path | _] -> {medium(Image), Path};
+        [] -> writable_file(Images)
+    end.
+
+patched(Old, At, Patch) ->
+    <<(binary:part(Old, 0, At))/binary, Patch/binary,
+      (binary:part(Old, At + byte_size(Patch), byte_size(Old) - At - byte_size(Patch)))/binary>>.
+
+%% A read-write volume writes its mount checkpoint, reads a write back
+%% before and after the fsync that commits it, and its unmount checkpoint
+%% leaves a medium whose file holds the write. Every crash state of what
+%% it wrote mounts at one of its checkpoints, with the file's old bytes
+%% before the fsync's and its new bytes from it on: each phase between two
+%% flushes over the medium as the flushes before left it, sampled as none
+%% of its blocks, all, all but each one, each torn in half and random
+%% subsets.
+a_write_survives_fsync_unmount_and_every_cut_test_() ->
+    {timeout, 900,
+     fun() ->
+             {Medium, Path} = writable_file(),
+             V0 = version(Medium),
+             Old = file_on(Medium, Path),
+             {Volume, Device} = start_on(Medium, read_write),
+             {ok, Handle} = erx_f2fs:open(node(Volume, Path), ?ERX_P9_O_RDWR, Volume),
+             Patch = binary:copy(<<16#c3>>, ?BLOCK + 1000),
+             At = ?BLOCK - 500,
+             ?assertEqual({ok, byte_size(Patch), At}, erx_f2fs:write(Handle, At, Patch, Volume)),
+             New = patched(Old, At, Patch),
+             ?assertEqual(New, contents(Volume, Handle)),
+             ?assertEqual(ok, erx_f2fs:fsync(Handle, Volume)),
+             ?assertEqual(New, contents(Volume, Handle)),
+             ?assertEqual(ok, erx_f2fs_volume:unmount(Volume)),
+             {After, Journal} = gen_server:call(Device, journal),
+             ?assertEqual(V0 + 3, version(After)),
+             ?assertEqual(New, file_on(After, Path)),
+             cuts(Medium, Journal, fun(Crashed) ->
+                                           V = version(Crashed),
+                                           ?assert(V >= V0 andalso V =< V0 + 3),
+                                           Expected = case V >= V0 + 2 of
+                                                          true -> New;
+                                                          false -> Old
+                                                      end,
+                                           ?assertEqual({V, Expected}, {V, file_on(Crashed, Path)})
+                                   end)
+     end}.
+
+%% Check over every crash state of Journal's writes on Medium.
+cuts(Medium, Journal, Check) ->
+    rand:seed(exsss, {16#f2f5, 10, length(Journal)}),
+    lists:foldl(fun(Phase, Prefix) ->
+                        Writes = lists:append([Blocks || {write, Blocks} <- Phase]),
+                        [Check(landed(Prefix, Landed)) || Landed <- landings(Writes, Prefix)],
+                        landed(Prefix, Writes)
+                end, Medium, phases(Journal)),
+    ok.
+
+%% The journal's writes between flushes, a list for each.
+phases(Journal) ->
+    {Last, Done} = lists:foldl(fun(flush, {Current, Acc}) -> {[], [lists:reverse(Current) | Acc]};
+                                  (Write, {Current, Acc}) -> {[Write | Current], Acc}
+                               end, {[], []}, Journal),
+    lists:reverse([lists:reverse(Last) | Done]).
+
+landings(Writes, Medium) ->
+    Torn = fun({A, Bytes}) -> {A, <<(binary:part(Bytes, 0, ?BLOCK div 2))/binary,
+                                    (binary:part(block(Medium, A), ?BLOCK div 2, ?BLOCK div 2))/binary>>}
+           end,
+    [[], Writes] ++ [Writes -- [W] || W <- Writes] ++ [[Torn(W) | Writes -- [W]] || W <- Writes] ++
+        [[W || W <- Writes, rand:uniform(2) =:= 1] || _ <- lists:seq(1, 4)].

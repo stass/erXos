@@ -59,14 +59,19 @@ here alone, by state/2 from what the mount answers, and changed only by
 allocate/3, which hands out a log's next blocks within whole sections,
 set_slot/5 and set_node/5, which keep the SIT's valid maps, the
 unpublished summaries and the counters, and put_node/3 and
-put_dentries/3, which make a block dirty. erx_f2fs_plan reads it through
+put_dentries/3, which make a block dirty, and write/6, which sets a
+file's written blocks in their slots. erx_f2fs_plan reads it through
 epoch/1 and hands back the state its checkpoint commits through
-committed/3, the one place sections join the free set.
+committed/3, the one place sections join the free set. Reads of a
+read-write volume take view/1, the volume as the state holds it: a dirty
+node is read as the block the next checkpoint writes for it, and a data
+block's owner is judged against the state's summaries, so a read sees
+every change since the checkpoint and no summary a commit replaced.
 """.
 
 -export([nat/2, inode/3, slot/4, read/5, symlink/3, lookup/4, readdir/4]).
 -export([state/2, allocate/3, set_slot/5, set_node/5, put_node/3, put_dentries/3, logs/1,
-         free_sections/1, epoch/1, committed/3]).
+         free_sections/1, epoch/1, committed/3, view/1, write/6, encode_node/2]).
 -export_type([nat/0, volume/0, slot/0, dentry/0, failure/0, blocks/0, state/0, node_value/0,
               epoch/0]).
 
@@ -118,7 +123,7 @@ the block's index times 214 plus the slot, or its inline slot ([F 59]).
 -type failure() :: {nat, nid | free | owner | block_addr | journal_nid | journal_duplicate} |
                    {data, block_addr | owner} | {file, inline | size | type} | {dir, dot} |
                    {space, no_free_section} | {mode, read_only} |
-                   {sit, valid_bit | summary} |
+                   {sit, valid_bit | summary} | {file, unmapped} |
                    erx_f2fs_codec:failure().
 -type blocks() :: #{non_neg_integer() => binary()}.
 -type result(Value) :: {ok, Value} | {need, [non_neg_integer()]} | {error, failure()}.
@@ -223,6 +228,10 @@ readdir(Volume, Dir, Position, Blocks) ->
 %% Ino and places the node at a valid block of a node log's segment. The
 %% owner is checked here as well as in the node's footer, so another file's
 %% node is refused before its block is asked for.
+node_block(#{superblock := Super, dirty := Dirty}, Nid, Ino, _Blocks) when is_map_key(Nid, Dirty) ->
+    Value = maps:get(Nid, Dirty),
+    require(node_ino(Value) =:= Ino, {nat, owner}),
+    encode_node(Super, Value);
 node_block(#{superblock := Super, checkpoint := Header, nat := Journal} = Volume, Nid, Ino, Blocks) ->
     require(erx_f2fs_codec:valid_nid(Super, Nid), {nat, nid}),
     #{block_addr := Address, ino := Owner} =
@@ -546,8 +555,12 @@ dot_placed(#{}) -> true.
 %% pack and else the SSA block of the block's segment, every one the
 %% slots' segments lack asked at once. A committed node log's segment
 %% holds no data block, so its entries are empty and name no slot.
-owned(#{superblock := Super, logs := Logs, data_summaries := Data}, Slots, Blocks) ->
-    Held = held(Logs, Data, pad([[] || {Type, _, _, _} <- Logs, Type >= ?ERX_F2FS_LOG_HOT_NODE])),
+owned(#{superblock := Super} = Volume, Slots, Blocks) ->
+    Held = case Volume of
+               #{held := Unpublished} -> Unpublished;
+               #{logs := Logs, data_summaries := Data} ->
+                   held(Logs, Data, pad([[] || {Type, _, _, _} <- Logs, Type >= ?ERX_F2FS_LOG_HOT_NODE]))
+           end,
     Real = [{Nid, Index, place_in_main(Super, Address)}
             || {Nid, Index, Address} <- Slots, real(Address)],
     Summaries = segment_summaries(Super, Held, lists:usort([S || {_, _, {S, _}} <- Real]), Blocks),
@@ -949,6 +962,79 @@ count(#state{counts = Counts} = State, Ino, Delta, Deltas) ->
 replace(List, Index, Value) ->
     {Before, [_ | After]} = lists:split(Index, List),
     Before ++ [Value | After].
+
+-doc """
+The volume as State holds it, for reads (docs/design-f2fs.md, "Inodes"):
+its tables, its dirty nodes and its summaries, which a read takes for a
+segment they hold over the pack's and the SSA's. No operation leaves a
+dentry block dirty between requests yet, so the view holds none.
+""".
+-spec view(state()) -> volume().
+view(#state{volume = Volume, nodes = Nodes, summaries = Summaries, dentries = Dentries})
+  when map_size(Dentries) =:= 0 ->
+    Volume#{dirty => Nodes, held => Summaries}.
+
+-doc """
+The block a node's value is written as: its footer and its body, an
+inode's under Super's rules ([F 41], [F 43], [F 53]).
+""".
+-spec encode_node(erx_f2fs_codec:superblock(), node_value()) -> binary().
+encode_node(Super, {inode, Inode}) -> erx_f2fs_codec:encode_inode(Super, Inode);
+encode_node(_Super, {direct, Addresses, Footer}) -> erx_f2fs_codec:encode_direct_node(Addresses, Footer);
+encode_node(_Super, {indirect, Nids, Footer}) -> erx_f2fs_codec:encode_indirect_node(Nids, Footer).
+
+node_ino({inode, #{footer := #{ino := Ino}}}) -> Ino;
+node_ino({_Kind, _Body, #{ino := Ino}}) -> Ino.
+
+-doc """
+State with file blocks Placed of regular file Ino, each {Block, Address}
+a block written at Address of the warm data log, set in its slot
+(docs/design-f2fs.md, "Operations"): the node holding the slot made
+dirty, from the medium when it was clean, then set_slot/5; and the
+inode's size raised to at least Size, its mtime and ctime Time, in
+nanoseconds. A slot no node holds fails {file, unmapped}: the step that
+claimed the blocks checked each slot first, so only a bug reaches it.
+""".
+-spec write(state(), non_neg_integer(), [{non_neg_integer(), non_neg_integer()}], non_neg_integer(),
+            non_neg_integer(), blocks()) -> result(state()).
+write(State0, Ino, Placed, Size, Time, Blocks) ->
+    run(fun() ->
+                State = lists:foldl(fun({Block, Address}, S) -> place_block(S, Ino, Block, Address, Blocks) end,
+                                    dirty_inode(State0, Ino, Blocks), Placed),
+                {inode, #{i_size := Old} = Inode} = maps:get(Ino, State#state.nodes),
+                Seconds = Time div 1000000000,
+                Nanos = Time rem 1000000000,
+                put_node(State, Ino, {inode, Inode#{i_size := max(Old, Size),
+                                                    i_mtime := Seconds, i_mtime_nsec := Nanos,
+                                                    i_ctime := Seconds, i_ctime_nsec := Nanos}})
+        end).
+
+%% State with inode Ino dirty, from the medium when it was clean.
+dirty_inode(#state{nodes = Nodes} = State, Ino, _Blocks) when is_map_key(Ino, Nodes) ->
+    State;
+dirty_inode(#state{volume = #{superblock := Super}} = State, Ino, Blocks) ->
+    Inode = ok(erx_f2fs_codec:inode(Super, Ino, node_block(view(State), Ino, Ino, Blocks))),
+    put_node(State, Ino, {inode, Inode}).
+
+%% File block Block of inode Ino set to Address, its slot's node dirty.
+place_block(#state{nodes = Nodes} = State, Ino, Block, Address, Blocks) ->
+    {inode, Inode} = maps:get(Ino, Nodes),
+    View = view(State),
+    case find_slot(View, Inode, Block, Blocks, #{}) of
+        {none, _} ->
+            fail({file, unmapped});
+        {{Ino, Index, _Old}, _} ->
+            ok(set_slot(State, Ino, Index, Address, Blocks));
+        {{Nid, Index, _Old}, Decoded} ->
+            Dirty = case Nodes of
+                        #{Nid := _} -> State;
+                        #{} ->
+                            [Words] = [W || {N, _Offset} := W <- Decoded, N =:= Nid],
+                            Footer = ok(erx_f2fs_codec:node_footer(node_block(View, Nid, Ino, Blocks))),
+                            put_node(State, Nid, {direct, tuple_to_list(Words), Footer})
+                    end,
+            ok(set_slot(Dirty, Nid, Index, Address, Blocks))
+    end.
 
 -doc "What the next checkpoint writes, from State.".
 -spec epoch(state()) -> epoch().

@@ -108,7 +108,15 @@ class ErxF2fsMountTest < Minitest::Test
     Seed.new(fault: "a chain's footer compared without the checkpoint's CRC",
              anchor: "                   true -> Version bor (Crc bsl 32);",
              replacement: "                   true -> Version;",
-             failure: /\(the version and CRC under CRC_RECOVERY\)[^\n]*failed/)
+             failure: /\(the version and CRC under CRC_RECOVERY\)[^\n]*failed/),
+    Seed.new(fault: 'an fsynced block passed as an interrupted checkpoint\'s',
+             anchor: '            require(not has(Flag, ?ERX_F2FS_NODE_MARK_FSYNC),',
+             replacement: '            require(true orelse has(Flag, ?ERX_F2FS_NODE_MARK_FSYNC),',
+             failure: /a_chain_fails_the_mount[^\n]*failed/),
+    Seed.new(fault: 'the walk ending at its first matching block',
+             anchor: '            walk(Volume, Next, [Address | Read], Blocks)',
+             replacement: '            lists:sort([Address | Read])',
+             failure: /the_walk_passes_unmarked_nodes[^\n]*failed/)
   ].freeze
 
   def test_eunit_cases_pass
