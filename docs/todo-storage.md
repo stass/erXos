@@ -726,12 +726,19 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   ([design-fsck-fat.md](design-fsck-fat.md#clearing-the-flag-at-mount)): `erx_fat_check`'s
   first-finding mode in the volume process, the clean write, and its host test. Build it once
   `fsck_fat` has run on real sticks.
-* [Medium] storage, `fsck_fat` and `fsck -t fat` ([design-fsck-fat.md](design-fsck-fat.md)):
-  `erx_fat_check` (findings, edits, the final ownership check, the steps written at their turn),
-  `erx_fat_plan:step/4` taken out of `erx_media_volume`, the admission reasons of `erx_fat` and its
-  admission given the file's length, `finish/1`'s repair value, the two Erlang commands, the
-  damaged-image generator, the fuzz target, the FreeBSD 15.1 oracle runs and the `usb` suite case. It
-  needs the drives' raw sectors (the item below).
+* [Medium] storage, `fsck_fat` and `fsck -t fat` ([design-fsck-fat.md](design-fsck-fat.md)): the two
+  Erlang commands, the FreeBSD 15.1 oracle runs and the `usb` suite case, over the checker and its
+  repair writer, which are built. It needs the drives' raw sectors (the item below).
+* [Medium] storage, `erx_fat_check` review findings left open: a lost chain is named beside a long
+  name of the same digits, since only short names are noted (keep the chain when a long name of
+  `LOST.DIR` is its decimal name); entry 1's repair value, the FAT32 reserved-bit patch and the
+  FSInfo signature bytes are each written in `erx_fat_check` and in `erx_fat_alloc` (derive them from
+  `erx_fat_alloc`); the crash test compares names' first clusters, not every cluster each reaches;
+  no tests yet of `no_slot`, `name_taken` and `too_large`, of a repair of 12,288 edits within a
+  third of the heap with the commit split removed as its seeded fault, or of a repair removed with
+  its finding kept; the fuzz seeds have no `LOST.DIR`; the departures of deleting a removed
+  directory entry's long name with it and turning every end marker before an entry deleted, and
+  the end-marker spans' bound, are not yet rows of the design's tables.
 * [Low] storage, a drive's `status` and `ctl` at `/svc/media`
   ([design-drives.md](design-drives.md#the-media-tree), [design-app-trees.md](design-app-trees.md)): every
   other service's control tree is at `/svc/NAME`, and `/media/diskN` keeps its `status` and `ctl` beside the

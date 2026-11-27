@@ -14,19 +14,49 @@ require_relative '../fixtures/fat_volumes'
 # which make check supplies) over the volumes erx_fat_damage lays out in memory and
 # the FAT16 and FAT32 volumes fsimg writes of FatVolumes' tree, against
 # erx_fat_check as it is and against each seeded fault below, each of which removes
-# one finding, refusal or bound: the case named in caught_by must fail.
+# one finding, refusal, bound or rule of writing a repair (a fault of more than one
+# passage changes each): the case named in caught_by must fail.
 class ErxFatCheckTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_fat/src/erx_fat_check.erl'
   APPLICATIONS = %w[erx erx_fat].freeze
-  TESTS = %w[test/erlang/erx_fat_damage.erl test/erlang/erx_fat_check_tests.erl].freeze
+  TESTS = %w[test/erlang/erx_fat_damage.erl test/erlang/erx_fat_check_tests.erl
+             test/erlang/erx_fat_repair_tests.erl].freeze
 
   Fault = Data.define(:name, :from, :to, :caught_by)
 
   FAULTS = [
+    Fault.new(name: "the steps' images computed from the medium before the first write",
+              from: "    Writer = \#{read => Read, write => Write, flush => Flush},",
+              to: "    Before = \#{S => element(2, Read(S)) || Step := Edits <- Steps, Step =/= fsinfo, S := _ <- Edits},\n    Writer = \#{read => fun(S) when is_map_key(S, Before) -> {ok, map_get(S, Before)}; (S) -> Read(S) end, write => Write, flush => Flush},",
+              caught_by: "each_step_is_computed_at_its_turn_test"),
+    Fault.new(name: "the fsinfo step writing the signatures alone",
+              from: "{fsinfo, {FsInfo, 16#1e4}, <<16#61417272:32/little, ?UNKNOWN:32, ?UNKNOWN:32>>},",
+              to: "{fsinfo, {FsInfo, 16#1e4}, <<16#61417272:32/little>>},",
+              caught_by: "each_step_is_computed_at_its_turn_test"),
+    Fault.new(name: "the dirty step left out",
+              from: "        planned(erx_fat_alloc:dirty(Alloc()), Writer),\n",
+              to: "",
+              caught_by: "(finding dir_size)"),
+    Fault.new(name: "the cuts written before the names they free are removed",
+              from: "-define(EDIT_STEPS, [preparation, cutting, publication, fsinfo]).",
+              to: "-define(EDIT_STEPS, [cutting, preparation, publication, fsinfo]).",
+              caught_by: "(finding not_new_chain at a trimmed tail)"),
+    Fault.new(name: "lost chains named before their old names are removed",
+              from: "-define(EDIT_STEPS, [preparation, cutting, publication, fsinfo]).",
+              to: "-define(EDIT_STEPS, [publication, preparation, cutting, fsinfo]).",
+              caught_by: "(finding incorrect_dot)"),
+    Fault.new(name: "a file's tail freed instead of cut",
+              from: "            St3 = linked(St2, Last, mask(St2#st.type)),",
+              to: "            St3 = linked(linked(St2, Last, mask(St2#st.type)), Tail, 0),",
+              caught_by: "(finding too_many_clusters)"),
+    Fault.new(name: "the final check skipped, with a row the final check stands behind removed",
+              from: ["        ?DOT when Up =/= [], Slot =/= 0 -> {deleted(finding(St, {dot_out_of_place, dot, path(Path)}), Places), D};\n", "accepted({read_only, Why}) -> answer({refused, {not_writable, Why}});"],
+              to: ["", "accepted({read_only, _Why}) -> ok;"],
+              caught_by: "a_second_dot_is_repaired_test"),
     Fault.new(name: "a new last part not ending the open run",
-              from: "Last -> D\#{invalid := Invalid orelse (Valid andalso Sum =/= none), valid := true, sum := Check,",
-              to: "Last -> D\#{invalid := Invalid orelse (Valid andalso Sum =:= Sum andalso false), valid := true, sum := Check,",
+              from: "                    Last -> opened(invalidated(St, D), Check);",
+              to: "                    Last -> opened({St, D}, Check);",
               caught_by: "(finding invalid_long of an orphan run)"),
     Fault.new(name: "a trimmed tail left for a later entry to take",
               from: "            unreached(St3#st{tails = [Tail | St3#st.tails]}, Tail);",
@@ -85,32 +115,32 @@ class ErxFatCheckTest < Minitest::Test
               to: "{Links + 1, St1}",
               caught_by: "(finding chain_end)"),
     Fault.new(name: "entries after an end marker passed over",
-              from: "    slot(finding(St, {entries_after_end, path(Path)}), D\#{empty := false}, Path, Bytes, Entry);",
-              to: "    slot(St, D\#{empty := false}, Path, Bytes, Entry);",
+              from: "                      end, finding(St, {entries_after_end, path(Path)}), Ends),",
+              to: "                      end, St, Ends),",
               caught_by: "(finding entries_after_end)"),
     Fault.new(name: "an invalid run before a short entry passed over",
-              from: "St1 = found_if(Invalid orelse (Valid andalso not Named), {invalid_long, path(Path, Name)}, St),",
+              from: "St1 = found_if(Invalid orelse (Run =/= none andalso not Named), {invalid_long, path(Path, Name)}, St),",
               to: "St1 = found_if(Invalid andalso Named andalso false, {invalid_long, path(Path, Name)}, St),",
               caught_by: "(finding invalid_long)"),
     Fault.new(name: "a run open at the end passed over",
-              from: "true -> {finding(St, {invalid_long_at_end, path(Path)}), Kids};",
-              to: "true -> {St, Kids};",
+              from: "true -> {deleted(finding(St, {invalid_long_at_end, path(Path)}), Run), Kids};",
+              to: "true -> {deleted(St, Run), Kids};",
               caught_by: "(finding invalid_long_at_end)"),
     Fault.new(name: "a run before a label passed over",
-              from: "{found_if(Valid orelse Invalid, invalid_long_label, St), D\#{valid := false, invalid := false}};",
-              to: "{found_if(Valid andalso Invalid andalso false, invalid_long_label, St), D\#{valid := false, invalid := false}};",
+              from: "{deleted(found_if(Run =/= none orelse Invalid, invalid_long_label, St), Run), Reset};",
+              to: "{deleted(found_if(false, invalid_long_label, St), Run), Reset};",
               caught_by: "(finding invalid_long_label)"),
     Fault.new(name: "order number 0 passed over",
-              from: "{finding(St, invalid_long_name), invalidated(D1\#{lidx := 0})};",
-              to: "{St, invalidated(D1\#{lidx := 0})};",
+              from: "{St3, D3} = invalidated(finding(St2, invalid_long_name), D2),",
+              to: "{St3, D3} = invalidated(St2, D2),",
               caught_by: "(finding invalid_long_name)"),
     Fault.new(name: "a name past the buffer passed over",
-              from: "{St1, D2} = invalid_if(not Fits, long_name_too_long, St, D1),",
-              to: "{St1, D2} = invalid_if(not Fits andalso false, long_name_too_long, St, D1),",
+              from: "{St3, D3} = invalid_if(not Fits, long_name_too_long, St2, D2),",
+              to: "{St3, D3} = invalid_if(not Fits andalso false, long_name_too_long, St2, D2),",
               caught_by: "(finding long_name_too_long)"),
     Fault.new(name: "a long entry's cluster field not read",
-              from: "{St2, D3} = invalid_if(Cluster =/= 0, long_cluster, St1, D2),",
-              to: "{St2, D3} = invalid_if(Cluster =/= Cluster, long_cluster, St1, D2),",
+              from: "{St4, D4} = invalid_if(Cluster =/= 0, long_cluster, St3, D3),",
+              to: "{St4, D4} = invalid_if(Cluster =/= Cluster, long_cluster, St3, D3),",
               caught_by: "(finding long_cluster)"),
     Fault.new(name: "a first cluster out of range taken as claimed",
               from: "false -> {start_out_of_range, path(Path, Name), Head};",
@@ -121,27 +151,27 @@ class ErxFatCheckTest < Minitest::Test
               to: "case not Dots andalso (Size =/= 0 orelse Kind =:= dir) andalso not valid(St, Head) of",
               caught_by: "(finding not_new_chain)"),
     Fault.new(name: "a directory named twice passed over",
-              from: "            descend(released(finding(St, {not_new_chain, path([Child | Path])}), Child), Path);",
-              to: "            descend(released(St, Child), Path);",
+              from: "            St1 = deleted(finding(St, {not_new_chain, path([Child | Path])}),",
+              to: "            St1 = deleted(St,",
               caught_by: "(finding not_new_chain of a directory named twice)"),
     Fault.new(name: "a directory's size passed over",
-              from: "directory_entry(found_if(Size =/= 0, {dir_size, path(Path, Name)}, St), D, Path, Name, Short11, Head);",
-              to: "directory_entry(found_if(Size =/= 0 andalso false, {dir_size, path(Path, Name)}, St), D, Path, Name, Short11, Head);",
+              from: "                      _ -> size_set(finding(St, {dir_size, path(Path, Name)}), Place, 0)",
+              to: "                      _ -> size_set(St, Place, 0)",
               caught_by: "(finding dir_size)"),
     Fault.new(name: "a wrong `.' passed over",
-              from: "?DOT -> {found_if(Head =/= Here, {dot_cluster, path(Path)}, St), D};",
-              to: "?DOT -> {found_if(Head =/= Here andalso false, {dot_cluster, path(Path)}, St), D};",
+              from: "        ?DOT when Head =/= Here -> {first_set(finding(St, {dot_cluster, path(Path)}), Step, Place, Here), D};\n",
+              to: "",
               caught_by: "(finding dot_cluster)"),
     Fault.new(name: "a non-zero `..' under the root passed over",
-              from: "found_if(Head =/= 0, {dotdot_nonzero, path(Path)}, St);",
-              to: "found_if(Head =/= 0 andalso false, {dotdot_nonzero, path(Path)}, St);",
+              from: "    first_set(finding(St, {dotdot_nonzero, path(Path)}), Step, Place, 0);",
+              to: "    first_set(St, Step, Place, 0);",
               caught_by: "(finding dotdot_nonzero)"),
     Fault.new(name: "a wrong `..' passed over",
-              from: "found_if(Head =/= Parent, {dotdot_cluster, path(Path)}, St).",
-              to: "found_if(Head =/= Parent andalso false, {dotdot_cluster, path(Path)}, St).",
+              from: "    first_set(finding(St, {dotdot_cluster, path(Path)}), Step, Place, Parent);",
+              to: "    first_set(St, Step, Place, Parent);",
               caught_by: "(finding dotdot_cluster)"),
     Fault.new(name: "a `.' outside the first two slots passed over",
-              from: "        ?DOT when Up =/= [], Slot =/= 0 -> {finding(St, {dot_out_of_place, dot, path(Path)}), D};\n",
+              from: "        ?DOT when Up =/= [], Slot =/= 0 -> {deleted(finding(St, {dot_out_of_place, dot, path(Path)}), Places), D};\n",
               to: "",
               caught_by: "(finding dot_out_of_place)"),
     Fault.new(name: "a subdirectory's `.' not read",
@@ -153,20 +183,20 @@ class ErxFatCheckTest < Minitest::Test
               to: "DotDotOk = dot_entry(DotDot, ?DOTDOT) orelse true,",
               caught_by: "(finding incorrect_dotdot)"),
     Fault.new(name: "an empty file naming no cluster passed",
-              from: "finding(St, {invalid_cluster, Shown(), Size, Head});",
-              to: "St;",
+              from: "                    emptied(finding(St, {invalid_cluster, Shown(), Size, Head}), Place);",
+              to: "                    emptied(St, Place);",
               caught_by: "(finding invalid_cluster)"),
     Fault.new(name: "a size past the chain passed",
-              from: "Physical < Size -> finding(St, {size_too_large, Path(), Size, Physical});",
-              to: "Physical < Size -> St;",
+              from: "Physical < Size -> size_set(finding(St, {size_too_large, Path(), Size, Physical}), Place, Physical);",
+              to: "Physical < Size -> size_set(St, Place, Physical);",
               caught_by: "(finding size_too_large)"),
     Fault.new(name: "clusters past the size passed",
-              from: "Physical - Size >= ClusterBytes -> trimmed(finding(St, {too_many_clusters, Path()}), Head, Size);",
-              to: "Physical - Size >= ClusterBytes -> trimmed(St, Head, Size);",
+              from: "Physical - Size >= ClusterBytes -> trimmed(finding(St, {too_many_clusters, Path()}), Place, Head, Size);",
+              to: "Physical - Size >= ClusterBytes -> trimmed(St, Place, Head, Size);",
               caught_by: "(finding too_many_clusters)"),
     Fault.new(name: "a lost chain passed over",
-              from: "{Count, St1} -> finding(St1, {lost_chain, Head, Count})",
-              to: "{_Count, St1} -> St1",
+              from: "        {Count, St1} -> named(St1, Head, Count)",
+              to: "        {_Count, St1} -> St1",
               caught_by: "(finding lost_chain)"),
     Fault.new(name: "a loop of lost clusters passed over",
               from: "lost(linked(finding(St, {lost_loop, Lowest}), Cluster, mask(St#st.type)), Lowest);",
@@ -197,8 +227,8 @@ class ErxFatCheckTest < Minitest::Test
               to: "Bytes > 0 orelse answer({refused, {bound, directories}}),",
               caught_by: "too_many_directories_are_refused_test_"),
     Fault.new(name: "the edits bound removed",
-              from: "is_map_key(Cluster, Links) orelse map_size(Links) < ?EDITS_MAX orelse answer({refused, {bound, edits}}),",
-              to: "is_map_key(Cluster, Links) orelse map_size(Links) >= 0 orelse answer({refused, {bound, edits}}),",
+              from: "    is_map_key(Cluster, Links) orelse map_size(Links) + Count < ?EDITS_MAX orelse answer({refused, {bound, edits}}),",
+              to: "    is_map_key(Cluster, Links) orelse map_size(Links) + Count >= 0 orelse answer({refused, {bound, edits}}),",
               caught_by: "too_many_edits_are_refused_test_"),
     Fault.new(name: "the findings bound removed",
               from: "Total =< ?HELD_BYTES_MAX orelse answer({refused, {bound, findings}}),",
@@ -230,8 +260,11 @@ class ErxFatCheckTest < Minitest::Test
   FAULTS.each_with_index do |fault, index|
     define_method(:"test_seeded_fault_#{index}_is_caught") do
       original = File.read(File.join(ROOT, CORE))
-      assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
-      output, status = eunit(original.sub(fault.from) { fault.to })
+      seeded = Array(fault.from).zip(Array(fault.to)).reduce(original) do |text, (from, to)|
+        assert_equal 1, text.scan(from).size, "#{fault.name}: passage not found once"
+        text.sub(from) { to }
+      end
+      output, status = eunit(seeded)
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
       assert_match(/#{Regexp.escape(fault.caught_by)}[^\n]*\*(failed|timed out)\*/, output, fault.name)
     end
@@ -245,7 +278,7 @@ class ErxFatCheckTest < Minitest::Test
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { CORE => core_text })
       Open3.capture2e({ 'ERX_FAT_IMAGES' => self.class.images }, 'gtimeout', '-k', '10', '600', ENV.fetch('ERX_ERL'),
                       '-noshell', '-pa', work,
-                      '-eval', 'halt(case eunit:test(erx_fat_check_tests, [verbose]) of ok -> 0; _ -> 1 end)',
+                      '-eval', 'halt(case eunit:test([erx_fat_check_tests, erx_fat_repair_tests], [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')
     end
   end

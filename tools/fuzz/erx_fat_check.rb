@@ -22,7 +22,8 @@ module ErxFatCheckFuzz
   CORE = 'erlang/apps/erx_fat/src/erx_fat_check.erl'
   SOURCES = %w[erlang/apps/erx_fat/src/erx_fat.erl erlang/apps/erx_fat/src/erx_fat_alloc.erl
                erlang/apps/erx_fat/src/erx_fat_read.erl erlang/apps/erx_fat/src/erx_fat_name.erl
-               erlang/apps/erx_fat/src/erx_fat_entry.erl test/erlang/erx_fat_damage.erl
+               erlang/apps/erx_fat/src/erx_fat_entry.erl erlang/apps/erx_fat/src/erx_fat_plan.erl
+               test/erlang/erx_fat_damage.erl
                test/erlang/erx_fat_check_tests.erl test/erlang/erx_fat_check_fuzz.erl].freeze
   # The case table erx_fat_name reads, which the build generates.
   CASE = 'erlang/apps/erx_fat/src/erx_fat_case.erl'

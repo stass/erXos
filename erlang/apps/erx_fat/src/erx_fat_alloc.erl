@@ -65,7 +65,7 @@ throw, `{erx_fat_alloc, Finding}`, caught at each exported entry, and leaves the
 allocator as it was.
 """.
 
--export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, volume_flags/2, fsinfo/1, entry_place/2,
+-export([new/1, chain/2, grow/3, shrink/3, free/2, held/1, commit/1, dirty/1, finish/1, finish/2, volume_flags/2, fsinfo/1, entry_place/2,
          writable/1, view/1]).
 -export_type([alloc/0, layout/0, plan/0, step/0, finding/0, cluster/0]).
 
@@ -401,7 +401,16 @@ the clean bit set in the other copies and last in the FAT the server reads, and
 `finished`.
 """.
 -spec finish(alloc()) -> {ok, plan(), alloc() | finished} | {error, finding()}.
-finish(Alloc = #alloc{next = Next, allocated = Allocated}) ->
+finish(Alloc) -> finish(Alloc, clean).
+
+-doc """
+finish/1, with the second entry written as Entry says: `clean`, the clean bit set
+and the hard-error bit kept as the medium holds it, as the FAT server writes it;
+or `correct`, the entry written whole as FreeBSD's "Correct" writes it, every bit
+set, which a repair writes (docs/design-fsck-fat.md, "The repair order").
+""".
+-spec finish(alloc(), clean | correct) -> {ok, plan(), alloc() | finished} | {error, finding()}.
+finish(Alloc = #alloc{next = Next, allocated = Allocated}, Entry) ->
     guarded(fun() ->
                     case batch_plan(Alloc) of
                         {Plan, [_ | _] = Waiting} ->
@@ -414,7 +423,7 @@ finish(Alloc = #alloc{next = Next, allocated = Allocated}) ->
                                                            {release, proplists:get_value(release, Plan, []) ++ Hint})
                                    end,
                             {Clean, _} = flag_bits(Alloc#alloc.type),
-                            {Read, Mirrors} = flag_writes(Alloc, fun(Entry) -> Entry bor Clean end, Last),
+                            {Read, Mirrors} = flag_writes(Alloc, entry1(Entry, Clean, Alloc#alloc.type), Last),
                             {Last ++ written_steps([{clean_mirrors, Mirrors}, {clean, Read}]), finished}
                     end
             end).
@@ -521,6 +530,10 @@ flag_writes(Alloc = #alloc{type = Type, fat_start = FatStart}, Change, Plan) ->
     <<First:Offset/binary, Entry:Type/little, After/binary>> = Sector,
     [Read | Mirrors] = copies(Alloc, [{0, <<First/binary, (Change(Entry)):Type/little, After/binary>>}]),
     {[Read], Mirrors}.
+
+entry1(clean, Clean, _Type) -> fun(Old) -> Old bor Clean end;
+entry1(correct, _Clean, 16) -> fun(_Old) -> ?EOC_16 end;
+entry1(correct, _Clean, 32) -> fun(_Old) -> ?EOC_32 end.
 
 flag_bits(16) -> {?CLEAN_16, ?NO_ERROR_16};
 flag_bits(32) -> {?CLEAN_32, ?NO_ERROR_32}.

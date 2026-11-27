@@ -31,7 +31,13 @@ tree() ->
 -define(E, <<"/EMPTY.TXT">>).
 -define(LONG, <<"/DOCS/a long name.txt">>).
 
-check(V) -> erx_fat_check:check(erx_fat_damage:read(V), erx_fat_damage:sectors(V)).
+%% The findings on V, as {ok, Findings}, or the check's other answer; the repairs
+%% are erx_fat_repair_tests'.
+check(V) ->
+    case erx_fat_check:check(erx_fat_damage:read(V), erx_fat_damage:sectors(V)) of
+        {ok, Findings, _Repair} -> {ok, Findings};
+        Other -> Other
+    end.
 
 %% Sector Cluster's first sector.
 cluster_sector(V, Cluster) -> maps:get(data_start, erx_fat_damage:layout(V)) + Cluster - 2.
@@ -74,14 +80,14 @@ cases() ->
      {"finding crossed", 16, fun(V) -> erx_fat_damage:fat(V, first(V, <<"/X.TXT">>), first(V, ?H) + 1) end,
       fun(V) ->
               X = first(V, <<"/X.TXT">>),
-              {ok, [{crossed, X, first(V, ?H) + 1}, {size_too_large, <<"/X.TXT">>, 1000, 512}, {lost_chain, X + 1, 1}]}
+              {ok, [{crossed, X, first(V, ?H) + 1}, {size_too_large, <<"/X.TXT">>, 1000, 512}, {lost_chain, X + 1, 1, no_lost_dir}]}
       end},
      {"fatal root_not_chain", 32, fun(V) -> erx_fat_damage:fat(V, first(V, ?H) + 1, 2) end,
       fun(_) -> {fatal, root_not_chain} end},
      {"finding chain_end", 16, fun(V) -> erx_fat_damage:fat(V, first(V, ?H) + 1, 0) end,
       fun(V) -> {ok, [{chain_end, first(V, ?H), free}, {size_too_large, ?H, 1000, 512}]} end},
      {"finding entries_after_end", 16, fun(V) -> poke_entry(V, ?H, 0, 0, <<0>>) end,
-      fun(V) -> {ok, [{entries_after_end, <<>>}, {lost_chain, first(V, ?H), 2}]} end},
+      fun(V) -> {ok, [{entries_after_end, <<>>}, {lost_chain, first(V, ?H), 2, no_lost_dir}]} end},
      {"finding invalid_long", 16, fun(V) -> poke_entry(V, ?LONG, 0, 7, <<"2">>) end,
       fun(_) -> {ok, [{invalid_long, <<"/DOCS/ALONGN~2.TXT">>}]} end},
      {"finding invalid_long_at_end", 16,
@@ -100,7 +106,7 @@ cases() ->
      {"finding long_cluster", 16, fun(V) -> poke_entry(V, ?LONG, -2, 26, <<5, 0>>) end,
       fun(_) -> {ok, [long_cluster, {invalid_long, <<"/DOCS/ALONGN~1.TXT">>}]} end},
      {"finding start_out_of_range", 16, fun(V) -> erx_fat_damage:start(V, ?H, 5000) end,
-      fun(V) -> {ok, [{start_out_of_range, ?H, 5000}, {lost_chain, first(V, ?H), 2}]} end},
+      fun(V) -> {ok, [{start_out_of_range, ?H, 5000}, {lost_chain, first(V, ?H), 2, no_lost_dir}]} end},
      {"finding not_new_chain", 16, fun(V) -> erx_fat_damage:size(erx_fat_damage:start(V, ?E, first(V, ?H)), ?E, 100) end,
       fun(_) -> {ok, [{not_new_chain, ?E}]} end},
      {"finding not_new_chain of a directory named twice", 16,
@@ -118,21 +124,21 @@ cases() ->
       fun(V) -> poke_entry(V, <<"/DOCS/SUB/NOTE.TXT">>, 1, 0, entry(<<".          ">>, 16#10, first(V, <<"/DOCS/SUB">>))) end,
       fun(_) -> {ok, [{dot_out_of_place, dot, <<"/DOCS/SUB">>}]} end},
      {"finding incorrect_dot", 16, fun(V) -> poke_dir(V, <<"/DOCS/SUB">>, 0, 0, <<"X">>) end,
-      fun(V) -> {ok, [{incorrect_dot, <<"SUB">>}, {lost_chain, first(V, <<"/DOCS/SUB">>), 1},
-                      {lost_chain, first(V, <<"/DOCS/SUB/NOTE.TXT">>), 1}]} end},
+      fun(V) -> {ok, [{incorrect_dot, <<"SUB">>}, {lost_chain, first(V, <<"/DOCS/SUB">>), 1, no_lost_dir},
+                      {lost_chain, first(V, <<"/DOCS/SUB/NOTE.TXT">>), 1, no_lost_dir}]} end},
      {"finding incorrect_dotdot", 16, fun(V) -> poke_dir(V, <<"/DOCS/SUB">>, 1, 11, <<16#20>>) end,
-      fun(V) -> {ok, [{incorrect_dotdot, <<"SUB">>}, {lost_chain, first(V, <<"/DOCS/SUB">>), 1},
-                      {lost_chain, first(V, <<"/DOCS/SUB/NOTE.TXT">>), 1}]} end},
+      fun(V) -> {ok, [{incorrect_dotdot, <<"SUB">>}, {lost_chain, first(V, <<"/DOCS/SUB">>), 1, no_lost_dir},
+                      {lost_chain, first(V, <<"/DOCS/SUB/NOTE.TXT">>), 1, no_lost_dir}]} end},
      {"finding invalid_cluster", 16, fun(V) -> erx_fat_damage:start(V, ?E, 5000) end,
       fun(_) -> {ok, [{invalid_cluster, ?E, 0, 5000}]} end},
      {"finding size_too_large", 32, fun(V) -> erx_fat_damage:size(V, ?H, 5000) end,
       fun(_) -> {ok, [{size_too_large, ?H, 5000, 1024}]} end},
      {"finding too_many_clusters", 16, fun(V) -> erx_fat_damage:size(V, ?H, 100) end,
-      fun(V) -> {ok, [{too_many_clusters, ?H}, {lost_chain, first(V, ?H) + 1, 1}]} end},
+      fun(V) -> {ok, [{too_many_clusters, ?H}, {lost_chain, first(V, ?H) + 1, 1, no_lost_dir}]} end},
      {"finding lost_chain", 16, fun(V) -> poke_entry(V, ?H, 0, 0, <<16#e5>>) end,
-      fun(V) -> {ok, [{lost_chain, first(V, ?H), 2}]} end},
+      fun(V) -> {ok, [{lost_chain, first(V, ?H), 2, no_lost_dir}]} end},
      {"finding lost_loop", 16, fun(V) -> erx_fat_damage:fat(erx_fat_damage:fat(V, 100, 101), 101, 100) end,
-      fun(_) -> {ok, [{lost_loop, 100}, {lost_chain, 100, 2}]} end},
+      fun(_) -> {ok, [{lost_loop, 100}, {lost_chain, 100, 2, no_lost_dir}]} end},
      {"finding fsinfo_free", 32, fun(V) -> erx_fat_damage:poke(V, 1, 488, <<5:32/little>>) end,
       fun(V) -> {ok, [{fsinfo_free, 5, free_count(V)}]} end},
      {"finding fsinfo_next", 32, fun(V) -> erx_fat_damage:poke(V, 1, 492, <<70000:32/little>>) end,
@@ -146,8 +152,8 @@ cases() ->
      {"finding not_new_chain at a trimmed tail", 16,
       fun(V) -> erx_fat_damage:size(erx_fat_damage:start(erx_fat_damage:size(V, ?H, 10), <<"/X.TXT">>, first(V, ?H) + 1),
                                     <<"/X.TXT">>, 512) end,
-      fun(V) -> {ok, [{too_many_clusters, ?H}, {not_new_chain, <<"/X.TXT">>}, {lost_chain, first(V, <<"/X.TXT">>), 2},
-                      {lost_chain, first(V, ?H) + 1, 1}]} end},
+      fun(V) -> {ok, [{too_many_clusters, ?H}, {not_new_chain, <<"/X.TXT">>}, {lost_chain, first(V, <<"/X.TXT">>), 2, no_lost_dir},
+                      {lost_chain, first(V, ?H) + 1, 1, no_lost_dir}]} end},
      {"finding invalid_long of an orphan run", 16,
       fun(V) -> poke_entry(V, ?LONG, -1, 0, erx_fat_entry:long(1, true, erx_fat_name:checksum(<<"ALONGN~1TXT">>),
                                                                 binary:copy(<<"b", 0>>, 13))) end,
@@ -188,7 +194,7 @@ fsimg_volumes_have_no_finding_test() ->
                  Read = fun(I) when I < byte_size(Bytes) div ?SECTOR -> {ok, binary:part(Bytes, I * ?SECTOR, ?SECTOR)};
                            (_) -> {error, eio}
                         end,
-                 ?assertEqual({Image, {ok, []}}, {Image, erx_fat_check:check(Read, byte_size(Bytes) div ?SECTOR)})
+                 ?assertEqual({Image, {ok, [], none}}, {Image, erx_fat_check:check(Read, byte_size(Bytes) div ?SECTOR)})
              end || Image <- filelib:wildcard("*.img", Directory)]
     end.
 

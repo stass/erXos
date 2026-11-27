@@ -10,7 +10,10 @@
 %% it in a process whose heap limit is the command's, -erx_heap(16), within a
 %% deadline. Whatever the volume holds, the check answers its closed set of results,
 %% each finding with a message, is not killed, ends in time, and reads only sectors
-%% of the volume, at most ?READS_PER_SECTOR times its count of sectors.
+%% of the volume, at most ?READS_PER_SECTOR times its count of sectors. Wherever a
+%% repair is answered, it is written to the volume, writing only sectors of the
+%% volume and reading as few as the check may, and a second check finds nothing but
+%% lost chains kept.
 
 -module(erx_fat_check_fuzz).
 
@@ -47,7 +50,7 @@ round_of({Sectors, Data}) ->
                           Data, lists:seq(1, rand:uniform(?MUTATIONS))),
     Volume = {Sectors, Mutated},
     case checked(Volume) of
-        {answer, Answer} -> valid(Answer) orelse error({bad_answer, Answer});
+        {answer, Answer} -> round_valid(Answer) orelse (dump(Volume) =:= ok andalso error({bad_answer, Answer}));
         Failure -> dump(Volume), error(Failure)
     end.
 
@@ -80,16 +83,8 @@ relinked(Data) ->
 %% The check in a process of the command's heap limit, within the deadline; reads
 %% outside the volume or past the work bound end it.
 checked({Sectors, Data}) ->
-    Read = fun(Index) when Index >= 0, Index < Sectors ->
-                   Count = case get(reads) of undefined -> 1; N -> N + 1 end,
-                   Count =< ?READS_PER_SECTOR * Sectors orelse exit(work_bound),
-                   put(reads, Count),
-                   {ok, maps:get(Index, Data, <<0:(?SECTOR * 8)>>)};
-              (Index) ->
-                   exit({read_outside, Index})
-           end,
     Self = self(),
-    {Pid, Ref} = spawn_opt(fun() -> Self ! {self(), erx_fat_check:check(Read, Sectors)} end,
+    {Pid, Ref} = spawn_opt(fun() -> Self ! {self(), repaired(Sectors, Data)} end,
                            [monitor, {max_heap_size, #{size => ?HEAP_BYTES div erlang:system_info(wordsize),
                                                         kill => true, error_logger => false}}]),
     receive
@@ -100,10 +95,47 @@ checked({Sectors, Data}) ->
         hang
     end.
 
-valid({ok, Findings}) -> is_list(Findings) andalso lists:all(fun(F) -> is_binary(erx_fat_check:message(F)) end, Findings);
+%% The check of the volume, held in the process dictionary; where it answers a
+%% repair, the repair written and the second check's answer, else none.
+repaired(Sectors, Data) ->
+    put(data, Data),
+    Read = fun(Index) when Index >= 0, Index < Sectors ->
+                   Count = case get(reads) of undefined -> 1; N -> N + 1 end,
+                   Count =< ?READS_PER_SECTOR * Sectors orelse exit(work_bound),
+                   put(reads, Count),
+                   {ok, maps:get(Index, get(data), <<0:(?SECTOR * 8)>>)};
+              (Index) ->
+                   exit({read_outside, Index})
+           end,
+    Write = fun(Index, <<Bytes:?SECTOR/binary>>) when Index >= 0, Index < Sectors ->
+                    put(data, maps:put(Index, Bytes, get(data))),
+                    ok;
+               (Index, _Bytes) ->
+                    exit({write_outside, Index})
+            end,
+    case erx_fat_check:check(Read, Sectors) of
+        {ok, _Findings, Repair} = Answer when Repair =/= none ->
+            put(reads, 0),
+            ok = erx_fat_check:write(Repair, Read, Write, fun() -> ok end),
+            put(reads, 0),
+            {Answer, erx_fat_check:check(Read, Sectors)};
+        Answer ->
+            {Answer, none}
+    end.
+
+%% A check answered as the checker answers, and a second check, after its repair
+%% was written, finding nothing but lost chains kept.
+round_valid({Answer, none}) -> valid(Answer);
+round_valid({Answer, {ok, Again, _}}) -> valid(Answer) andalso [F || F <- Again, not kept(F)] =:= [];
+round_valid({_Answer, _Again}) -> false.
+
+valid({ok, Findings, _Repair}) -> is_list(Findings) andalso lists:all(fun(F) -> is_binary(erx_fat_check:message(F)) end, Findings);
 valid({fatal, Fatal}) -> is_binary(erx_fat_check:message(Fatal));
 valid({refused, _Reason}) -> true;
 valid(_Other) -> false.
+
+kept({lost_chain, _, _, Fate}) -> Fate =/= named;
+kept(_Finding) -> false.
 
 %% The failing volume, kept in the working directory to reproduce the round.
 dump({Sectors, Data}) ->
