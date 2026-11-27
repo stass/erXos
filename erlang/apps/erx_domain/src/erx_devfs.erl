@@ -268,6 +268,5 @@ qid_type(root) -> ?ERX_P9_QTDIR;
 qid_type({device, _}) -> ?ERX_P9_QTDIR;
 qid_type(_File) -> 0.
 
-dirent_type(root) -> ?ERX_P9_DT_DIR;
 dirent_type({device, _}) -> ?ERX_P9_DT_DIR;
 dirent_type(_File) -> ?ERX_P9_DT_REG.

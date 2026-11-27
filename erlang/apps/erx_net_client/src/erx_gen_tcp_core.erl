@@ -198,7 +198,7 @@ first action grants the connection its target.
 """.
 -spec new(erx_gen_tcp:socket(), own()) -> {core(), [action()]}.
 new(Sock, Own) ->
-    settle(set_own(Own, #core{sock = Sock, waiting = queue:new(), sends = queue:new(), recvs = queue:new()}), []).
+    settle(fresh(Sock, Own), []).
 
 -doc """
 A core for a listener on the node `Node`, presented as `Sock`, whose accepted sockets
@@ -207,8 +207,7 @@ start with `Own` and whose connections with `Nodelay`. It sends nothing until it
 """.
 -spec listener(erx_gen_tcp:socket(), own(), #{nodelay := boolean(), node := node()}) -> core().
 listener(Sock, Own, #{nodelay := Nodelay, node := Node}) ->
-    set_own(Own, #core{sock = Sock, state = listening, nodelay = Nodelay, listener_node = Node,
-                       waiting = queue:new(), sends = queue:new(), recvs = queue:new()}).
+    (fresh(Sock, Own))#core{state = listening, nodelay = Nodelay, listener_node = Node}.
 
 -doc """
 Holds what the core presents while its socket moves to a new owner; `{error, closed}`
@@ -236,9 +235,11 @@ options(Opts) ->
 -doc """
 Splits `gen_tcp`'s options `Opts` into the socket process's own, applied over `Own`,
 and those for the connection, each at most once, a later one replacing an earlier as
-stock takes them; `{error, einval}` for one neither takes.
+stock takes them; `{error, einval}` for one neither takes. `Own` is a TCP socket's
+own(), or the mode and active a datagram socket keeps.
 """.
--spec options([term()], own()) -> {ok, own(), [{nodelay, boolean()}]} | {error, einval}.
+-spec options([term()], Own) -> {ok, Own, [{nodelay, boolean()}]} | {error, einval}
+          when Own :: #{atom() => term()}.
 options(Opts, Own) ->
     options(Opts, Own, []).
 
@@ -412,6 +413,12 @@ send(From, Framed, #core{sends = Q} = C) ->
 
 own(#core{mode = Mode, active = Active, packet = Packet, packet_size = Size, buffer = Buffer}) ->
     #{mode => Mode, active => Active, packet => Packet, packet_size => Size, buffer => Buffer}.
+
+%% A core with nothing held, queued or waiting, presenting as Own says; built whole, so
+%% no field is ever undefined against its declared type.
+fresh(Sock, #{mode := Mode, active := Active, packet := Packet, packet_size := Size, buffer := Buffer}) ->
+    #core{sock = Sock, mode = Mode, active = Active, packet = Packet, packet_size = Size, buffer = Buffer,
+          waiting = queue:new(), sends = queue:new(), recvs = queue:new()}.
 
 set_own(#{mode := Mode, active := Active, packet := Packet, packet_size := Size, buffer := Buffer}, C) ->
     %% A packet in progress is framed again only under new framing options.

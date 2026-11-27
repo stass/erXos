@@ -113,6 +113,7 @@ hold() ->
 
 %% The holder's end: a closed window is recorded by this process's name
 %% for as long as it waits, which is for ever, so closed/0 cannot miss it.
+-spec ended(term()) -> no_return().
 ended(Outcome) ->
     _ = [true = register(?MODULE, self()) || Outcome =:= closed],
     receive after infinity -> ok end.

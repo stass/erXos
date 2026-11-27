@@ -63,6 +63,7 @@ stop(_State) ->
     ok.
 
 -doc false.
+-spec init(pid()) -> no_return().
 init(Parent) ->
     proc_lib:init_ack(Parent, {ok, self()}),
     {ok, Record} = erx:app(),
@@ -195,6 +196,7 @@ window(true, Spec, #{display := Display}) -> Spec#{window => Display}.
 
 %% The program's end, which the handler's monitor alone reports. It never returns:
 %% a native app's end, an exit with status 0 too, is always its session's end.
+-spec ended(reference()) -> no_return().
 ended(Monitor) ->
     receive
         {'DOWN', Monitor, process, _Handler, {shutdown, {program_exit, Status}}} ->

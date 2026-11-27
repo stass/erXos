@@ -144,7 +144,8 @@ with the terminal's first variables, and, for a session with a home, Home
 directory there, as FreeBSD's login(1) sets HOME and changes to the home
 (docs/design-files.md, "A user's home"); without one, from `/`.
 """.
--spec shell_of(shell | {exec, binary()}, erx_shell:terminal(), {ok, {binary(), list()}} | none) -> mfa().
+-spec shell_of(shell | {exec, binary()}, erx_shell:terminal(), {ok, {binary(), list()}} | none)
+              -> {module(), atom(), [term()]}.
 shell_of(Run, Terminal, Home) ->
     run_on(Run, at_home(Home, Terminal)).
 
