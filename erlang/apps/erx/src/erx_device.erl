@@ -76,9 +76,11 @@
 -type open_step() :: spec | {map, window | memory}
                    | {layout, Why :: tuple(), Read :: #{atom() => non_neg_integer()},
                       Entries :: [{Offset :: non_neg_integer(), Id :: byte()}]}.
+%% A device's record; its other keys are its driver's own (a UART's flow and rate),
+%% which open/1 does not read.
 -type spec() :: #{peripheral := atom(), path => binary(), window := window(), lines := [marked_line()],
                   memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()},
-                  clock => Hertz :: non_neg_integer(), coherent => boolean()}.
+                  clock => Hertz :: non_neg_integer(), coherent => boolean(), _ => _}.
 -opaque queue() :: non_neg_integer().
 -opaque region() :: non_neg_integer().
 -opaque framebuffer() :: non_neg_integer().

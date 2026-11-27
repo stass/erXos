@@ -192,6 +192,7 @@ accept_connection(AcceptPid, Connection, MyNode, _Allowed, _SetupTime) ->
 %% ordered end, which it follows (exited/4). It acts on {Kernel, disconnect}, which names
 %% net_kernel by a pid any peer can write; a message from another domain arrives as
 %% {erx_origin, D, Msg} (edit 16) and reaches only its catch-all.
+-spec owner(pid(), pid(), node(), term()) -> no_return().
 owner(Kernel, AcceptPid, MyNode, Connection) ->
     process_flag(trap_exit, true),
     try
@@ -300,6 +301,7 @@ exit_action(other, net_kernel_terminated, false) -> await_kernel;
 exit_action(_Origin, _Reason, _KernelAlive) -> ended.
 
 %% The owner's end, which closes the port it is linked to and takes the entry down.
+-spec ended(map(), term()) -> no_return().
 ended(#{system := true}, Reason) ->
     unavailable(system_connection, Reason);
 ended(#{system := false}, Reason) ->

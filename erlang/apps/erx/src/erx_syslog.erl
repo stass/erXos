@@ -163,7 +163,9 @@ info(_Message, State) ->
 format_status(Status) ->
     erx_report:status(Status, #{state => fun held_back_consumers/1}).
 
-held_back_consumers(#state{} = State) -> State#state{consumers = held_back};
+%% The report's copy of the state holds held_back in the consumers' place, which breaks
+%% the field's declared type, so it is written with setelement/3.
+held_back_consumers(#state{} = State) -> setelement(#state.consumers, State, held_back);
 held_back_consumers(_State) -> hidden.
 
 %% Records of Source, rendered and charged by the core, join the backlogs.

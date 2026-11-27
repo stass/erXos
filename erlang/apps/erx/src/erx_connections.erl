@@ -294,8 +294,7 @@ sides(#{kernel := Kernel, open := Open, installer := Installer} = Env, Sides, Dr
 
 %% A side that ends, or is closed, while opening answers its open_side noconnection; an
 %% open side's call was answered already.
-answer_unopened({opening, From}) -> gen:reply(From, {error, noconnection});
-answer_unopened({open, _Service}) -> ok.
+answer_unopened({opening, From}) -> gen:reply(From, {error, noconnection}).
 
 %% The port's open command, "erx_lane table" and its words, names the system domain's own
 %% side first, the one it writes and whose control table it ends in, then the domain's, the
@@ -749,5 +748,6 @@ down_reason(Reason) -> Reason.
 %% it was told; this rests on that supervision tree, and only a local terminate_child with
 %% no restart would leave the runtime running without its agent. Any other end halts the
 %% runtime.
+-spec kernel_ended(term()) -> no_return().
 kernel_ended(shutdown) -> exit(shutdown);
 kernel_ended(Reason) -> erx_dist:unavailable(net_kernel, Reason).

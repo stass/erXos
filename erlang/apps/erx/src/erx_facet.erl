@@ -263,6 +263,8 @@ is_end(Pid) when is_pid(Pid) -> true;
 is_end(Port) when is_port(Port) -> node(Port) =:= node();
 is_end(_) -> false.
 
+%% The facet's process body ends only by exit, which a fun cannot declare with a spec.
+-dialyzer({no_return, start/4}).
 start(Callback, Grant, Operations, Exports) ->
     Parent = self(),
     Tag = make_ref(),
@@ -328,6 +330,7 @@ operations(Callback, Listed) when is_list(Listed) ->
 operations(_Callback, _Listed) ->
     {error, badarg}.
 
+-spec init(pid(), reference(), module(), map(), term(), term()) -> no_return().
 init(Parent, Tag, Callback, #{grantee := Grantee, ends_with := EndsWith} = Grant, Operations, Exports) ->
     Monitors = maps:from_list([{monitor_end(End), End} || End <- EndsWith]),
     {ok, CbState} = Callback:init(Grant),
@@ -476,6 +479,8 @@ granted(Request, #{callback := Callback, operations := Operations}) ->
 %% A forward to Service whose reply target is the alias of a monitor on it, as gen:call
 %% makes one, so the reply and the service's end both name the forward: a request as a
 %% gen_server call, a message as '$erx_facet_message', which no request can be.
+%% gen's reply tag [alias | Alias] is an improper list by its protocol.
+-dialyzer({no_improper_lists, forward/4}).
 forward(Service, Forward, From, #{forwards := Forwards} = State) ->
     Alias = monitor(process, Service, [{alias, demonitor}]),
     ReplyTo = {self(), [alias | Alias]},

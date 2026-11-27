@@ -303,6 +303,7 @@ init_term(State = #state{ tty = TTY, options = Options }) ->
 
     update_geometry(ReaderState).
 
+-spec init_ssh(map(), {Cols :: non_neg_integer(), Rows :: non_neg_integer()}, unicode | utf8 | latin1) -> state().
 init_ssh(UserOptions, {Cols, Rows}, IOEncoding) ->
     {ok, ANSI_RE_MP} = re:compile(?ANSI_REGEXP, [unicode]),
     Options = options(UserOptions),
@@ -1141,6 +1142,7 @@ update_geometry(State) ->
             State
     end.
 %% Functions for non ttys to update the geometry.
+-spec update_geometry(state(), Cols :: non_neg_integer(), Rows :: non_neg_integer()) -> state().
 update_geometry(State, NewCols, NewRows) ->
     State#state{cols = NewCols, rows = NewRows}.
 

@@ -374,6 +374,10 @@ class(Kind, Key) ->
     {ok, #{visible := Class}} = erx_schema:attribute(Kind, Key),
     Class.
 
+%% system_shell is a class of the inspection spec (abi_inspection.rb's VISIBILITY) that no
+%% attribute of the spec carries, so Dialyzer, reading the generated schema, finds the
+%% clause unreachable; it stays so that such an attribute is never shown here.
+-dialyzer({no_match, visible/3}).
 visible(system_shell, _Owner, _Scope) -> false;
 visible(any, _Owner, _Scope) -> true;
 visible(_Class, _Owner, all) -> true;
@@ -561,9 +565,7 @@ entry(Path, {_Status, Records}) ->
     case [Record || #{path := P} = Record <- Records, P =:= Path] of
         [Record | _] -> {ok, Record};
         [] -> {error, scope}
-    end;
-entry(_Path, Error) ->
-    Error.
+    end.
 
 -doc """
 The record of the listing at Path from its entries: their ids as its
