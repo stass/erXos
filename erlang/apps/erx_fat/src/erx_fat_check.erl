@@ -71,7 +71,7 @@ medium's bytes, which the report escapes. Each answer leaves through one throw,
                  | {fat_header, binary()}
                  | {out_of_range_link, pos_integer(), non_neg_integer()}
                  | {crossed, pos_integer(), pos_integer()}
-                 | {chain_end, pos_integer(), free | bad | reserved}
+                 | {chain_end, pos_integer(), free | bad}
                  | {entries_after_end, path()}
                  | {invalid_long, path()} | {invalid_long_at_end, path()} | invalid_long_label
                  | invalid_long_name | long_name_too_long | long_cluster
@@ -89,7 +89,7 @@ medium's bytes, which the report escapes. Each answer leaves through one throw,
                  | {fsinfo_next, non_neg_integer(), invalid | not_free}
                  | {fat_copy_differs, pos_integer()}
                  | dirty.
--type fatal() :: {boot_sector, erx_fat:refusal()} | root_not_chain.
+-type fatal() :: {boot_sector, erx_fat:refusal() | root} | root_not_chain.
 -type refusal() :: fat12 | sector_size | not_mirrored | {bound, clusters | directories | edits | findings}
                  | {read_failed, non_neg_integer()}.
 -type result() :: {ok, [finding()]} | {fatal, fatal()} | {refused, refusal()}.
@@ -117,6 +117,7 @@ medium's bytes, which the report escapes. Each answer leaves through one throw,
              free = 0 :: non_neg_integer(),
              fsinfo = none :: none | {non_neg_integer(), non_neg_integer()},
              copies = [] :: [pos_integer()],
+             tails = [] :: [pos_integer()],
              dirty = false :: boolean()}).
 
 %% A directory on the walk's path: its first cluster (0 for FAT16's root), its name
@@ -163,6 +164,7 @@ admitted({ok, Fat}) -> Fat;
 admitted({error, {not_its_volume, fat12}}) -> answer({refused, fat12});
 admitted({error, {not_its_volume, sector_size}}) -> answer({refused, sector_size});
 admitted({error, {not_its_volume, Why}}) -> answer({fatal, {boot_sector, Why}});
+admitted({error, does_not_read}) -> answer({fatal, {boot_sector, root}});
 admitted({error, read_failed}) -> answer({refused, {read_failed, 0}}).
 
 answer(Answer) -> throw({?MODULE, Answer}).
@@ -262,7 +264,7 @@ phase1(St = #st{cleared = Cleared}, Cluster, Value) ->
                 false -> St;
                 true -> linked(finding(St, {crossed, Cluster, Next}), Cluster, mask(St#st.type))
             end;
-        _EndOrReserved ->
+        eof ->
             St
     end.
 
@@ -441,15 +443,12 @@ name_or(<<>>, Short11) -> short_text(Short11);
 name_or(Long, _Short11) -> Long.
 
 %% A short name as FreeBSD shows it: the base and the extension, their trailing
-%% spaces dropped, joined by a dot when the extension's first byte is not a space; a
+%% spaces dropped, the dot between them only when the extension's first byte is not a space; a
 %% first byte 0x05 stands for 0xE5.
 short_text(<<First, Base:7/binary, Extension:3/binary>>) ->
     Lead = case First of 16#05 -> 16#e5; _ -> First end,
-    Name = trimmed(<<Lead, Base/binary>>),
-    case Extension of
-        <<$\s, _/binary>> -> Name;
-        _ -> <<Name/binary, $., (trimmed(Extension))/binary>>
-    end.
+    Dot = case Extension of <<$\s, _/binary>> -> <<>>; _ -> <<$.>> end,
+    trimmed(<<(trimmed(<<Lead, Base/binary>>))/binary, Dot/binary, Extension/binary>>).
 
 %% Text without its trailing spaces, byte by byte: a short name is any bytes, not UTF-8.
 trimmed(<<>>) -> <<>>;
@@ -547,16 +546,15 @@ sized(St = #st{cluster_bytes = ClusterBytes}, Path, Size, Count, Head) ->
     end.
 
 %% The chain from Head ended after the cluster that holds byte Size - 1, or after
-%% Head for an empty file; the tail is a lost chain, so it starts a chain no one
-%% has walked and none of it is reached.
+%% Head for an empty file; the tail is a lost chain, which phase 3 walks, and none of
+%% it is reached. It stays out of the chains that start, so no later entry takes it.
 trimmed(St = #st{cluster_bytes = ClusterBytes}, Head, Size) ->
     {Last, St1} = nth(St, Head, max(1, (Size + ClusterBytes - 1) div ClusterBytes) - 1),
     {Next, St2} = entry(St1, Last),
     case kind(St2, Next) of
         {link, Tail} ->
             St3 = linked(St2, Last, mask(St2#st.type)),
-            unmark(St3#st.cleared, Tail),
-            unreached(St3, Tail);
+            unreached(St3#st{tails = [Tail | St3#st.tails]}, Tail);
         _End ->
             St2
     end.
@@ -581,9 +579,9 @@ unreached(St = #st{reached = Reached}, Cluster) ->
 
 %% FreeBSD's checkchain (fat.c:1030-1124): the chain from Head, which no one has
 %% walked, followed to its end, each cluster kept in it reached; the count of its
-%% clusters. A chain that ends at a free, bad or reserved cluster ends before it; a
-%% chain whose first entry is reserved keeps no cluster, and its entry is left as it
-%% reads. No link out of range is met: phase 1 ended the chain at every one.
+%% clusters. A chain that ends at a free or bad cluster ends before it, which keeps
+%% at least Head, whose own entry is neither or Head would not start a chain. No link
+%% out of range is met: phase 1 ended the chain at every one.
 checkchain(St = #st{cleared = Cleared}, Head) ->
     mark(Cleared, Head),
     chain(St, Head, Head, Head, 0).
@@ -597,8 +595,6 @@ chain(St = #st{reached = Reached}, Head, Previous, Cluster, Links) ->
         eof ->
             mark(Reached, Cluster),
             {Links + 1, St1};
-        Marked when Links =:= 0 ->
-            {0, finding(St1, {chain_end, Head, Marked})};
         Marked ->
             {Links, linked(finding(St1, {chain_end, Head, Marked}), Previous, mask(St1#st.type))}
     end.
@@ -608,9 +604,10 @@ chain(St = #st{reached = Reached}, Head, Previous, Cluster, Links) ->
 %% ---------------------------------------------------------------------------
 
 %% FreeBSD's checklost (fat.c:1256-1305): every chain no one has walked, in cluster
-%% order, a word of 64 walked clusters skipped at once.
-lost_chains(St = #st{clusters = Clusters}, Cluster) when Cluster >= Clusters + 2 ->
-    St;
+%% order, a word of 64 walked clusters skipped at once; then the tails cut off files'
+%% chains, in cluster order.
+lost_chains(St = #st{clusters = Clusters, tails = Tails}, Cluster) when Cluster >= Clusters + 2 ->
+    lists:foldl(fun(Tail, S) -> lost(S, Tail) end, St, lists:sort(Tails));
 lost_chains(St = #st{cleared = Cleared}, Cluster) ->
     case word_full(Cleared, Cluster) of
         true -> lost_chains(St, Cluster + 64);
@@ -720,16 +717,16 @@ tuple_list(_Atom) -> [].
 
 item_bytes(Name) -> ?ITEM_BYTES + byte_size(Name).
 
-%% What an entry's value is, as FreeBSD reads it (dosfs.h:85-90): free, a link to a
-%% cluster of the data area, an end of chain, bad, reserved, or out of range.
+%% What an entry's value is, as FreeBSD reads it (dosfs.h:85-90, fat.c:286 and :325,
+%% which widen only values from the bad mark up): free, a link to a cluster of the
+%% data area, an end of chain, bad, or out of range.
 kind(#st{type = Type, clusters = Clusters}, Value) ->
-    Reserved = mask(Type) - 9,
+    Bad = mask(Type) - 8,
     if
         Value =:= 0 -> free;
         Value >= 2, Value < Clusters + 2 -> {link, Value};
-        Value >= Reserved + 2 -> eof;
-        Value =:= Reserved + 1 -> bad;
-        Value =:= Reserved -> reserved;
+        Value > Bad -> eof;
+        Value =:= Bad -> bad;
         true -> out_of_range
     end.
 

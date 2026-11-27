@@ -468,7 +468,9 @@ copy is held.
 
 **Work.** Every read is of a sector the geometry names, within the
 file. The used part of the first FAT, the entries up to the last
-cluster's, is read three times: phase 1, phase 3, and the loop pass.
+cluster's, is read in order three times: phase 1, phase 3, and the loop
+pass; a chain walk reads at most one FAT sector a step past the cache, so
+the walks read at most a few sectors per cluster.
 The used part of each other copy is read once, to compare it. Each
 directory cluster is read once in the walk, and a finding's path reads
 at most 512 more, the nearest ancestors' entries. The final ownership

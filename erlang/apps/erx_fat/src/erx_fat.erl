@@ -184,7 +184,7 @@ mount/2 with the reason a volume is not admitted: the first rule of the module's
 doc that its boot sector fails, which the checker (erx_fat_check) reports.
 """.
 -spec admission(read_sector(), non_neg_integer()) ->
-          {ok, fat()} | {error, {not_its_volume, refusal()} | read_failed}.
+          {ok, fat()} | {error, {not_its_volume, refusal()} | does_not_read | read_failed}.
 admission(Read, Sectors) ->
     guarded(fun() -> admit(Read, Sectors, sector(Read, 0)) end).
 

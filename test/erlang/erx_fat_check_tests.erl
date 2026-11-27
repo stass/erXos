@@ -139,6 +139,19 @@ cases() ->
       fun(_) -> {ok, [{fsinfo_next, 70000, invalid}]} end},
      {"finding fsinfo_next not free", 32, fun(V) -> erx_fat_damage:poke(V, 1, 492, <<3:32/little>>) end,
       fun(_) -> {ok, [{fsinfo_next, 3, not_free}]} end},
+     {"fatal boot_sector root", 32, fun(V) -> erx_fat_damage:poke(V, 0, 44, <<0:32>>) end,
+      fun(_) -> {fatal, {boot_sector, root}} end},
+     {"finding out_of_range_link below the bad mark", 16, fun(V) -> erx_fat_damage:fat(V, first(V, ?H) + 1, 16#fff6) end,
+      fun(V) -> {ok, [{out_of_range_link, first(V, ?H) + 1, 16#fff6}]} end},
+     {"finding not_new_chain at a trimmed tail", 16,
+      fun(V) -> erx_fat_damage:size(erx_fat_damage:start(erx_fat_damage:size(V, ?H, 10), <<"/X.TXT">>, first(V, ?H) + 1),
+                                    <<"/X.TXT">>, 512) end,
+      fun(V) -> {ok, [{too_many_clusters, ?H}, {not_new_chain, <<"/X.TXT">>}, {lost_chain, first(V, <<"/X.TXT">>), 2},
+                      {lost_chain, first(V, ?H) + 1, 1}]} end},
+     {"finding invalid_long of an orphan run", 16,
+      fun(V) -> poke_entry(V, ?LONG, -1, 0, erx_fat_entry:long(1, true, erx_fat_name:checksum(<<"ALONGN~1TXT">>),
+                                                                binary:copy(<<"b", 0>>, 13))) end,
+      fun(_) -> {ok, [{invalid_long, <<"/DOCS/bbbbbbbbbbbbb">>}]} end},
      {"finding fat_copy_differs", 16, fun(V) -> erx_fat_damage:fat_copy(V, 1, 100, 16#ffff) end,
       fun(_) -> {ok, [{fat_copy_differs, 1}]} end}].
 
@@ -252,3 +265,10 @@ a_short_name_of_any_bytes_is_shown_test() ->
     V = erx_fat_damage:size(maps:get(16, volumes()), ?H, 5000),
     Named = poke_entry(V, ?H, 0, 0, <<"A     ", 16#c3, " ", "T", 16#c3, " ">>),
     ?assertEqual({ok, [{size_too_large, <<"/A     ", 16#c3, ".T", 16#c3>>, 5000, 1024}]}, check(Named)).
+
+%% A short name whose extension starts with a space shows the extension's other
+%% bytes, without a dot, as FreeBSD does.
+an_extension_after_a_space_is_shown_test() ->
+    V = erx_fat_damage:size(maps:get(16, volumes()), ?H, 5000),
+    Named = poke_entry(V, ?H, 0, 0, <<"FOO      XY">>),
+    ?assertEqual({ok, [{size_too_large, <<"/FOO XY">>, 5000, 1024}]}, check(Named)).
