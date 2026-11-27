@@ -172,7 +172,8 @@ its own; `max_entries` bounds it (1024 by default).
 -spec new(erx_net_rand:gen(), integer(), #{max_entries => pos_integer()}) -> cache().
 new(Gen, Now, Opts) ->
     Table = erx_lltable:new(?MODULE, maps:get(max_entries, Opts, ?MAX_ENTRIES)),
-    draw_reachable(Now, #cache{table = Table, gen = Gen}).
+    {Reachable, Recalc, Gen1} = draw_reachable_time(Now, Gen),
+    #cache{table = Table, reachable = Reachable, recalc = Recalc, gen = Gen1}.
 
 -doc "The number of entries.".
 -spec count(cache()) -> non_neg_integer().
@@ -464,8 +465,13 @@ hold(Held, Frame) ->
 
 %% ND_COMPUTE_RTIME's interval, drawn uniformly.
 draw_reachable(Now, #cache{gen = Gen} = C) ->
+    {Reachable, Recalc, Gen1} = draw_reachable_time(Now, Gen),
+    C#cache{reachable = Reachable, recalc = Recalc, gen = Gen1}.
+
+%% The drawn reachable time, when it is next drawn, and the generator left.
+draw_reachable_time(Now, Gen) ->
     {Offset, Gen1} = erx_net_rand:uniform(?REACHABLE_TIME, Gen),
-    C#cache{reachable = ?REACHABLE_TIME div 2 + Offset, recalc = Now + ?ND6_RECALC, gen = Gen1}.
+    {?REACHABLE_TIME div 2 + Offset, Now + ?ND6_RECALC, Gen1}.
 
 %% The entry of Ip, or a new incomplete one if there is room or room can be made, with
 %% the actions of the eviction that made it; none if there is no room.

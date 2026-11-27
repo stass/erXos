@@ -323,17 +323,18 @@ repeat_syn(Conn, #entry{ts = Ts0, ecn = Ecn0} = Entry0,
 first_syn(Conn, #tcp{seq = Irs, flags = Flags, opts = Opts}, Listener, Now, Secrets, Cache) ->
     #{rcv_buf := RcvBuf, rcv_scale := RcvScale} = Listener,
     #tcp_opts{mss = PeerMss, wscale = SndScale, sack_permitted = Sack, ts = SynTs} = Opts,
-    Entry0 = #entry{irs = Irs,
-                    rcv_wnd = min(RcvBuf, ?TCP_MAXWIN),
-                    peer_mss = case PeerMss of none -> 0; _ -> PeerMss end,
-                    wscale = case SndScale of none -> none; _ -> {SndScale, RcvScale} end,
-                    sack = Sack,
-                    ts = case SynTs of
-                             none -> none;
-                             {TsVal, _} -> {TsVal, ts_offset(Secrets, Conn)}
-                         end,
-                    ecn = erx_tcp_ecn:syncache_add(Flags)},
-    Entry = Entry0#entry{iss = cookie(Secrets, Conn, Entry0)},
+    Mss = case PeerMss of none -> 0; _ -> PeerMss end,
+    Wscale = case SndScale of none -> none; _ -> {SndScale, RcvScale} end,
+    Entry = #entry{irs = Irs, iss = cookie(Secrets, Conn, Irs, Mss, Wscale, Sack),
+                   rcv_wnd = min(RcvBuf, ?TCP_MAXWIN),
+                   peer_mss = Mss,
+                   wscale = Wscale,
+                   sack = Sack,
+                   ts = case SynTs of
+                            none -> none;
+                            {TsVal, _} -> {TsVal, ts_offset(Secrets, Conn)}
+                        end,
+                   ecn = erx_tcp_ecn:syncache_add(Flags)},
     #syncache{limit = Limit, entries = Entries} = Cache,
     Synack = synack(Conn, Entry, Now),
     case cookies_only(Now, Cache) of
@@ -469,8 +470,7 @@ validate_cookie(Conn, #tcp{seq = Seq, ack = Ack}, Secrets) ->
 
 %% syncookie_generate: the flags byte (MSS index, window-shift index, SACK, which key) in
 %% the low 8 bits XORed with the MAC's top 8, under the MAC's top 24.
-cookie(Secrets, Conn,
-       #entry{irs = Irs, peer_mss = PeerMss, wscale = Wscale, sack = Sack}) ->
+cookie(Secrets, Conn, Irs, PeerMss, Wscale, Sack) ->
     WsIdx = case Wscale of
                 none -> 0;
                 {SndScale, _} -> index(SndScale, ?WSTAB)

@@ -8,7 +8,7 @@
 %% erx_ip4_wire:options/1 lists them. The header checksum is not kept either: a decoded header
 %% has had it checked, and encoding computes it. `rf`, `df` and `mf` are the three flag bits
 %% (reserved, don't fragment, more fragments), and `off` the fragment offset in 8-byte units.
--record(ip4, {tos = 0 :: 0..255, len :: 0..16#FFFF, id = 0 :: 0..16#FFFF,
+-record(ip4, {tos = 0 :: 0..255, len = 0 :: 0..16#FFFF, id = 0 :: 0..16#FFFF,
               rf = 0 :: 0..1, df = 0 :: 0..1, mf = 0 :: 0..1, off = 0 :: 0..16#1FFF,
               ttl :: 0..255, p :: 0..255, src :: <<_:32>>, dst :: <<_:32>>,
               options = <<>> :: binary()}).

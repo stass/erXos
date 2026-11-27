@@ -181,7 +181,7 @@ segment (`tcp_dropwithreset`), which the interface sends only within its RST rat
 -type action() :: {transmit, [outgoing()]}
                 | {deliver, erx_tcp_payload:t()}
                 | {notify, eof | closed | {error, atom()} | {ready, [atom()]}}
-                | {reply, gen_server:from(), term()}
+                | {reply, erx_tcp_user:reply_to(), term()}
                 | {reserve_buffer, snd | rcv, Bytes :: non_neg_integer()}
                 | {reset, outgoing()}
                 | charge_rst

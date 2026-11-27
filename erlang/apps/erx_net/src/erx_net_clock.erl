@@ -14,10 +14,10 @@ The clock is chosen once, by `select/1`, before any process of the stack starts:
 
 * `monotonic`, the default: `erlang:monotonic_time(microsecond)`, `erlang:send_after/4` at
   the deadline rounded up to the millisecond, and `erx_bytes:entropy/1`;
-* `{virtual, Clock}`: a test's clock process served by `erx_net_vclock`, test code that no
-  image or release holds. Where that module is absent, `select/1` refuses with
-  `{error, {seam, clock, erx_net_vclock}}`, so a production build cannot run on a virtual
-  clock.
+* `{virtual, Clock}`: a test's clock process, to be served by `erx_net_vclock`, test code
+  that no image or release holds. That module is not built (docs/todo-network.md), so
+  `select/1` refuses a virtual clock with `{error, {seam, clock, erx_net_vclock}}` and the
+  stack runs only on the monotonic clock.
 
 A hint, the message `{erx_net_clock, hint}`, is only a hint: a process that gets one
 looks at its own deadlines, which may have moved. `arm_by/2` keeps at most one timer per
@@ -42,23 +42,19 @@ the virtual clock sets the time before it sends).
 
 -doc """
 The one timer a process has pending: its deadline and the timer to cancel when an earlier
-one replaces it (`none` under the virtual clock, which keeps the earliest itself), or
-`infinity` when none is pending.
+one replaces it, or `infinity` when none is pending.
 """.
--type armed() :: {integer(), reference() | none} | infinity.
+-type armed() :: {integer(), reference()} | infinity.
 
 -doc """
-Chooses the clock for every process of the stack on this node. Refuses a virtual clock
-when the build holds no `erx_net_vclock`.
+Chooses the clock for every process of the stack on this node. Refuses a virtual clock,
+whose `erx_net_vclock` is not built (docs/todo-network.md).
 """.
 -spec select(source()) -> ok | {error, {seam, clock, erx_net_vclock} | {clock, term()}}.
 select(monotonic) ->
     persistent_term:put(?KEY, monotonic);
-select({virtual, Clock} = Source) when is_pid(Clock) ->
-    case code:ensure_loaded(erx_net_vclock) of
-        {module, erx_net_vclock} -> persistent_term:put(?KEY, Source);
-        {error, _} -> {error, {seam, clock, erx_net_vclock}}
-    end;
+select({virtual, Clock}) when is_pid(Clock) ->
+    {error, {seam, clock, erx_net_vclock}};
 select(Other) ->
     {error, {clock, Other}}.
 
@@ -66,8 +62,7 @@ select(Other) ->
 -spec now() -> integer().
 now() ->
     case source() of
-        monotonic -> erlang:monotonic_time(microsecond);
-        {virtual, Clock} -> erx_net_vclock:now(Clock)
+        monotonic -> erlang:monotonic_time(microsecond)
     end.
 
 -doc """
@@ -76,14 +71,8 @@ microseconds.
 """.
 -spec arm(integer()) -> ok.
 arm(Deadline) when is_integer(Deadline) ->
-    case source() of
-        monotonic ->
-            _ = start(Deadline),
-            ok;
-        {virtual, _} ->
-            _ = start(Deadline),
-            ok
-    end.
+    _ = start(Deadline),
+    ok.
 
 -doc """
 Arms `Next` when no timer is pending or it comes before the pending one, which it then
@@ -116,19 +105,16 @@ hinted(infinity) ->
 
 start(Deadline) ->
     case source() of
-        monotonic -> erlang:send_after(ceil_ms(Deadline), self(), {?MODULE, hint}, [{abs, true}]);
-        {virtual, Clock} -> ok = erx_net_vclock:arm(Clock, self(), Deadline), none
+        monotonic -> erlang:send_after(ceil_ms(Deadline), self(), {?MODULE, hint}, [{abs, true}])
     end.
 
-cancel(none) -> ok;
 cancel(Timer) -> erlang:cancel_timer(Timer, [{async, true}, {info, false}]).
 
 -doc "`N` bytes for a key. Raises when the source fails.".
 -spec entropy(pos_integer()) -> binary().
 entropy(N) ->
     case source() of
-        monotonic -> erx_bytes:entropy(N);
-        {virtual, Clock} -> erx_net_vclock:entropy(Clock, N)
+        monotonic -> erx_bytes:entropy(N)
     end.
 
 %% Microseconds to milliseconds, rounded up: div truncates towards zero.

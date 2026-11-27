@@ -232,22 +232,14 @@ sack_blocks(Blocks, #tcb{maxseg = Maxseg, snd_una = Una}) ->
 
 %% ---------------------------------------------------------------------------------------
 %% 2. timestamps (tcp_input.c:1692-1729): RFC 7323 section 3.2. On a connection that
-%% negotiated timestamps a segment without one is processed when it is a RST or when
-%% tcp_tolerate_missing_ts allows it, and dropped otherwise. On one that did not, a
-%% segment's timestamp is ignored: FreeBSD logs it and still records it as ts_recent and
-%% checks PAWS against it; here the later stages do not see it.
-timestamps(#seg{ts = none, flags = Flags} = Seg, #tcb{ts = #ts{}} = Tcb, _) ->
-    case has(Flags, ?TH_RST) orelse tolerate_missing_ts() of
-        true -> {continue, Tcb, Seg};
-        false -> {done, Tcb, []}
-    end;
+%% negotiated timestamps a segment without one is processed, as FreeBSD's default
+%% tcp_tolerate_missing_ts of 1 (tcp_subr.c:219) has it; the last clause passes it on. On
+%% one that did not, a segment's timestamp is ignored: FreeBSD logs it and still records it
+%% as ts_recent and checks PAWS against it; here the later stages do not see it.
 timestamps(Seg, #tcb{ts = off} = Tcb, _) ->
     {continue, Tcb, Seg#seg{ts = none}};
 timestamps(Seg, Tcb, _) ->
     {continue, Tcb, Seg}.
-
-%% tcp_tolerate_missing_ts (tcp_subr.c:219): FreeBSD's default of 1.
-tolerate_missing_ts() -> true.
 
 %% ---------------------------------------------------------------------------------------
 %% Header prediction (tcp_input.c:1731-1950), FreeBSD's preconditions: ESTABLISHED, the

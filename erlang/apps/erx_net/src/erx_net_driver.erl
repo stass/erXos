@@ -243,11 +243,13 @@ held_in(#state{started = Started}) ->
     (?HOLD_MS * 1000 - Lived + 999) div 1000.
 
 %% A crash report names the frames the driver held by their count, never their bytes, which
-%% are senders' data and the network's.
+%% are senders' data and the network's. The report's copy of the state holds the count in
+%% the backlog's place, which breaks the field's declared type, so it is written with
+%% setelement/3.
 -doc false.
 format_status(Status) ->
     maps:map(fun(state, #state{backlog = Backlog} = S) ->
-                     S#state{backlog = {frames, queue:len(Backlog)}};
+                     setelement(#state.backlog, S, {frames, queue:len(Backlog)});
                 (message, _) -> redacted;
                 (log, _) -> [];
                 (_, Value) -> Value

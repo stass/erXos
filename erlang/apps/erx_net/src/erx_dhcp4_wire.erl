@@ -387,6 +387,6 @@ index(Type, [_ | Rest], At) -> index(Type, Rest, At + 1).
 
 encode_option(Code, Value) when byte_size(Value) > ?OPT_MAX_CHUNK ->
     <<Chunk:?OPT_MAX_CHUNK/binary, Rest/binary>> = Value,
-    [<<Code, ?OPT_MAX_CHUNK, Chunk/binary>> | encode_option(Code, Rest)];
+    [<<Code, ?OPT_MAX_CHUNK, Chunk/binary>>, encode_option(Code, Rest)];
 encode_option(Code, Value) ->
     <<Code, (byte_size(Value)), Value/binary>>.

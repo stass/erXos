@@ -84,7 +84,9 @@ against.
 -type bind_request() :: #{transport := tcp | udp, family := inet | inet6,
                           local := binary() | any, port := 1..16#ffff,
                           reuseaddr := boolean(), reuseport := boolean(), grant := pid(),
-                          allowed := ports(), machine := [binary()]}.
+                          allowed := ports(), machine := [binary()],
+                          %% Port 0's search starts at this port (ephemeral_start/1).
+                          start => port_number()}.
 
 -doc "The first port of a search, drawn from the binding socket's generator.".
 -spec ephemeral_start(erx_net_rand:gen()) -> {port_number(), erx_net_rand:gen()}.

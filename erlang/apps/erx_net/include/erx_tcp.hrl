@@ -150,8 +150,8 @@
 
     %% The callers waiting on the connection: `connect` until it is established or ends;
     %% one `send` with the bytes that did not fit yet, until they are all in the buffer.
-    connect_waiter = none :: none | gen_server:from(),
-    send_waiter = none :: none | {gen_server:from(), Rest :: binary()},
+    connect_waiter = none :: none | erx_tcp_user:reply_to(),
+    send_waiter = none :: none | {erx_tcp_user:reply_to(), Rest :: binary()},
 
     %% The per-connection challenge-ACK limit (tcp_challenge_ack_check): the end of the
     %% current one-second window (t_challenge_ack_end) and the challenge ACKs sent in it,

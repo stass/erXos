@@ -289,27 +289,31 @@ adopt(#{entry := #{grant := Grant}, conn := {Local, _, Remote, _}, segment := Se
     {ConfigGen, Snap} = erx_net_tables:configuration(),
     maybe
         {ok, Path} ?= erx_net_frame:path(Remote, #{src => Local}, Snap),
-        #state{tcb = #tcb{snd_hiwat = Snd, rcv_hiwat = Rcv}} = S0 =
-            accepted_state(Accept, Path, ConfigGen),
+        {#tcb{snd_hiwat = Snd, rcv_hiwat = Rcv}, _Rand} = Made = accepted_tcb(Accept, Path),
         {ok, Token} ?= grant_adopt(Grant, #{snd => Snd, rcv => Rcv}),
-        start_queued(Segment, S0#state{token = Token})
+        start_queued(Segment, accepted_state(Accept, Made, Token, Path, ConfigGen))
     else
         {error, _} -> refuse(Accept)
     end.
 
-%% The accepted connection's state, its token not yet given: the control block made from
-%% the handshake over Path, queued on its listener.
-accepted_state(#{entry := #{pid := Listener, grant := Grant, origin := Origin, accept := Init},
-                 conn := {Local, Lport, Remote, Rport} = Conn, handshake := Handshake,
-                 gen := Rand0, credit := Credit}, Path, ConfigGen) ->
+%% The accepted connection's control block, made from the handshake over Path, and the
+%% generator its state keeps.
+accepted_tcb(#{entry := #{accept := Init}, conn := {Local, Lport, Remote, Rport},
+               handshake := Handshake, gen := Rand0}, Path) ->
     {TcbGen, Rand} = erx_net_rand:split(Rand0),
-    Tcb = erx_tcp_user:accepted(Handshake,
-                                Init#{family => family(Local), local => {Local, Lport},
-                                      remote => {Remote, Rport}, gen => TcbGen},
-                                ctx(Path, ok)),
+    {erx_tcp_user:accepted(Handshake,
+                           Init#{family => family(Local), local => {Local, Lport},
+                                 remote => {Remote, Rport}, gen => TcbGen},
+                           ctx(Path, ok)),
+     Rand}.
+
+%% The accepted connection's state: that control block under the token the grant gave it,
+%% queued on its listener.
+accepted_state(#{entry := #{pid := Listener, grant := Grant, origin := Origin}, conn := Conn,
+                 credit := Credit}, {Tcb, Rand}, Token, Path, ConfigGen) ->
     #state{tcb = Tcb, key = key(Conn), credit = Credit, owner = {listener, Listener},
-           owner_ref = none, origin = Origin, grant = Grant, connect = none, path = Path,
-           config_gen = ConfigGen, gen = Rand}.
+           owner_ref = none, origin = Origin, grant = Grant, token = Token, connect = none,
+           path = Path, config_gen = ConfigGen, gen = Rand}.
 
 %% A refused adoption: the unit released, the refusal's RST handed to the interface under
 %% its sender credit, the key deleted, and the process ended. A grant that has ended is a

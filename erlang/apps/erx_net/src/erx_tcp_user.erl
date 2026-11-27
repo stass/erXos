@@ -115,19 +115,26 @@ calling `tcp_output`.
 
 -export([new/1, accepted/3, request/3, rcvd/2, drop/2, close/1, usrclosed/2, fill/3]).
 
--export_type([request/0, init/0, listener_init/0]).
+-export_type([request/0, reply_to/0, init/0, listener_init/0]).
 
 -doc """
 A request: `connect` (`tcp_connect`), `send` (`tcp_usr_send`), `rcvd` (`Bytes` left the
 receive buffer, read by the owner or held by a waiting recv, `tcp_usr_rcvd`), `shutdown`
 (`tcp_usr_shutdown`), `close` (`tcp_usr_close`) and `abort` (`tcp_usr_abort`).
 """.
--type request() :: {connect, gen_server:from()}
-                 | {send, gen_server:from(), binary()}
+-type request() :: {connect, reply_to()}
+                 | {send, reply_to(), binary()}
                  | {rcvd, Bytes :: non_neg_integer()}
-                 | {shutdown, gen_server:from(), read | write | read_write}
+                 | {shutdown, reply_to(), read | write | read_write}
                  | close
                  | abort.
+
+-doc """
+Whom a request's reply goes to, as the connection process names its caller: a gen_server
+caller, or a numbered call of the socket protocol. The control block only hands it back in
+a `reply` action.
+""".
+-type reply_to() :: gen_server:from() | {call, non_neg_integer()}.
 
 -doc """
 What a new control block is made from: the four-tuple and its family, the initial sequence

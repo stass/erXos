@@ -653,7 +653,7 @@ run(_Path, _Segment, _Cache) ->
 %% store, so a cached template is the one template/2 would build.
 cached_template(Path, {#tcp{sport = Sport, dport = Dport, opts = #tcp_opts{ts = Ts} = Opts},
                        #{ecn := Ecn, df := Df}, _} = Segment, Cache) ->
-    Key = {Path, Sport, Dport, Ecn, Df, Opts#tcp_opts{ts = Ts =/= none}},
+    Key = {Path, Sport, Dport, Ecn, Df, Opts#tcp_opts{ts = none}, Ts =/= none},
     case Cache of
         {Key, Template} ->
             {ok, Template, Cache};
@@ -900,7 +900,8 @@ a delayed packet's `Start` moved past the header and a run's link header set; on
 loopback interface, each finished packet with LinkAddr as its zone, a run's cut, since
 nothing below the loopback finishes or cuts.
 """.
--spec link(iface(), term(), [packet()]) -> [frame()].
+-spec link(#{link := ethernet | none, lladdr := <<_:48>> | none, _ => _}, term(), [packet()]) ->
+          [frame()].
 link(#{link := ethernet, lladdr := Src}, <<_:48>> = Dst, Packets) ->
     [ethernet(erx_net_eth:encode(#eth{dst = Dst, src = Src, type = ethertype(P)}), P)
      || P <- Packets];
