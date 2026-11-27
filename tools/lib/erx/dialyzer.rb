@@ -10,6 +10,7 @@ require_relative 'asn1_specifications'
 require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'oracle'
+require_relative 'output_directory'
 require_relative 'runner'
 require_relative 'serving_set'
 
@@ -25,6 +26,9 @@ module Erx
   # errors. `make check` builds no runtime, so the oracle's erlc compiles the tree's
   # sources with debug_info into build/, and the PLT is cached there under the digest
   # of everything it reads.
+  #
+  # Every directory the step writes or clears is reached through OutputDirectory, so a
+  # link on the output path is refused before anything is removed.
   class Dialyzer
     # What one Dialyzer or erlc command reads: source files, the directories their
     # includes search and the macros they need defined. Paths are relative to the root.
@@ -82,9 +86,7 @@ module Erx
       path = File.join(output, "plt-#{digest(set)}.plt")
       return path if File.file?(path)
 
-      ebin = File.join(output, 'ebin')
-      FileUtils.rm_rf(ebin)
-      FileUtils.mkdir_p(ebin)
+      ebin = OutputDirectory.fresh(root: @root, path: File.join(OUTPUT, 'ebin'))
       compile(set, ebin: ebin)
       partial = "#{path}.partial"
       dialyze([*PLT_OPTIONS, '--output_plt', partial, ebin], name: 'dialyzer-plt')
@@ -148,7 +150,6 @@ module Erx
     end
 
     def run(*argv, name:, chdir:)
-      FileUtils.mkdir_p(output)
       @runner.run(argv, name: name, deadline: DEADLINE, chdir: chdir, env: Oracle::CLEAN_ERLANG_ENV)
     end
 
@@ -163,17 +164,14 @@ module Erx
     SERVING_STAND_IN = File.join(OUTPUT, "#{ServingSet::MODULE}.erl")
 
     def serving_stand_in
-      FileUtils.mkdir_p(output)
-      File.write(File.join(@root, SERVING_STAND_IN), ServingSet.render(ServingSet::SEEDS))
+      File.write(File.join(output, File.basename(SERVING_STAND_IN)), ServingSet.render(ServingSet::SEEDS))
     end
 
     # Writes the sources public_key's Makefiles generate into public_key_output, afresh
     # each run since that takes about a second: the ASN.1 modules and their headers
     # (lib/public_key/asn1/Makefile) and pubkey_moduli.hrl (lib/public_key/src/Makefile).
     def public_key_sources
-      generated = File.join(@root, public_key_output)
-      FileUtils.rm_rf(generated)
-      FileUtils.mkdir_p(generated)
+      generated = OutputDirectory.fresh(root: @root, path: public_key_output)
       asn1 = File.join(@root, PUBLIC_KEY, 'asn1')
       # ./NAME, so that no specification's name reads as an option of erlc's.
       specifications = Asn1Specifications.modules(asn1).map { |name| "./#{File.basename(Asn1Specifications.sources(asn1, name).first)}" }
@@ -201,6 +199,7 @@ module Erx
       Digest::SHA256.hexdigest(JSON.generate([COMPILE_OPTIONS, PLT_OPTIONS, set.flags, files]))
     end
 
-    def output = File.join(@root, OUTPUT)
+    # The step's output directory, made if absent, through OutputDirectory's checks.
+    def output = OutputDirectory.prepare(root: @root, path: OUTPUT)
   end
 end

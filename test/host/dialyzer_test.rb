@@ -87,4 +87,21 @@ class DialyzerTest < Minitest::Test
     refute_equal @plt, changed
     assert_equal [changed], Dir.glob(File.join(@root, Erx::Dialyzer::OUTPUT, 'plt-*'))
   end
+
+  # A checkout whose build/ links elsewhere: the step refuses the link before it
+  # removes anything, so what the link reaches keeps its files.
+  def test_an_output_path_that_crosses_a_link_is_refused_before_anything_is_removed
+    checkout = File.join(@root, 'checkout')
+    outside = File.join(@root, 'outside')
+    kept = %w[ebin public_key].map { |name| File.join(outside, 'dialyzer', name, 'kept') }
+    kept.each { |file| FileUtils.mkdir_p(File.dirname(file)) && File.write(file, '') }
+    FileUtils.mkdir_p(checkout)
+    File.symlink(outside, File.join(checkout, 'build'))
+    runner = Erx::Runner.new(owner_root: checkout, log_dir: File.join(checkout, 'logs'))
+    dialyzer = Erx::Dialyzer.new(root: checkout, runner: runner, erlc: ENV.fetch('ERX_ERLC'))
+
+    assert_match(/symbolic link/, assert_raises(Erx::Error) { dialyzer.plt(SourceSet.new(files: [], includes: [], defines: {})) }.message)
+    assert_match(/symbolic link/, assert_raises(Erx::Error) { dialyzer.generate }.message)
+    kept.each { |file| assert File.file?(file), "#{file} was removed" }
+  end
 end
