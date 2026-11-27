@@ -37,9 +37,11 @@ only the bucket the name's hash gives at each level, and stops at the
 first level whose bucket starts past the directory's end, its size and
 never past the largest block a file addresses, so it reads at most two
 blocks a level for at most 29 levels whatever depth and level the inode
-claims ([F 58]). A readdir covers at most ?READDIR_BLOCKS blocks a call
-and answers the position the next starts from, which is past the one it
-was given.
+claims ([F 58]). A readdir takes at most ?READDIR_STEPS steps a call, each
+a block that holds data or a run of empty slots that one node leaves, the
+span under a node id of 0 among them, and answers the position the next
+call starts from, which is past the one it was given; so its work follows
+the blocks and nodes the directory holds, not the size it claims.
 """.
 
 -export([nat/2, inode/3, slot/4, read/5, symlink/3, lookup/4, readdir/4]).
@@ -54,8 +56,9 @@ was given.
 -define(TREE_DEPTHS, [1, 1, 2, 2, 3]).
 %% A position counts the slots of the blocks before its own ([F 59]).
 -define(DENTRY_SLOTS, erx_f2fs_codec:dentry_slots(?BLOCK_SIZE)).
-%% The blocks of a directory one readdir covers at most, holes included.
--define(READDIR_BLOCKS, 8).
+%% The steps one readdir takes at most, each a dentry block or a run of
+%% empty slots one node leaves.
+-define(READDIR_STEPS, 8).
 
 -doc "The NAT journal's entries by nid, read only by this module.".
 -opaque nat() :: #{non_neg_integer() => erx_f2fs_codec:nat_entry()}.
@@ -390,19 +393,87 @@ dir_end(#{i_size := Size, addresses := Addresses}) ->
     min((Size + ?BLOCK_SIZE - 1) div ?BLOCK_SIZE,
         length(Addresses) + lists:sum([span(Depth) || Depth <- ?TREE_DEPTHS])).
 
-%% The entries from Position on: the inline ones, or those of at most
-%% ?READDIR_BLOCKS blocks from the one holding Position.
+%% The entries from Position on: the inline ones, or those of the dentry
+%% blocks at most ?READDIR_STEPS steps from the block holding Position
+%% reach, each step a block that holds data or a run of empty slots.
 entries_from(_Volume, #{inline_dentries := _} = Dir, Position, _Blocks) ->
     {from(Position, placed(ok(erx_f2fs_codec:inline_dentries(Dir)), 0)), done};
 entries_from(Volume, Dir, Position, Blocks) ->
-    First = Position div ?DENTRY_SLOTS,
-    End = dir_end(Dir),
-    Last = min(End, First + ?READDIR_BLOCKS),
-    Next = case Last < End of
-               true -> Last * ?DENTRY_SLOTS;
-               false -> done
-           end,
-    {from(Position, dentries(Volume, Dir, range(First, Last), Blocks)), Next}.
+    {Found, Next} = dentry_blocks(Volume, Dir, Position div ?DENTRY_SLOTS, dir_end(Dir),
+                                  ?READDIR_STEPS, Blocks, #{}, []),
+    Bytes = fetch(Blocks, [Address || {_Block, Address} <- Found]),
+    Entries = [placed(ok(erx_f2fs_codec:dentry_block(Data)), Block * ?DENTRY_SLOTS)
+               || {{Block, _Address}, Data} <- lists:zip(Found, Bytes)],
+    {from(Position, lists:append(Entries)), Next}.
+
+%% The dentry blocks from Block, {Block, Address} each, that Steps steps
+%% reach before End, and the position the next readdir starts from, or done
+%% at End. A step takes one block that holds data, or skips a run of empty
+%% slots in one node, so every step moves past Block.
+dentry_blocks(_Volume, _Dir, Block, End, _Steps, _Blocks, _Nodes, Found) when Block >= End ->
+    {lists:reverse(Found), done};
+dentry_blocks(_Volume, _Dir, Block, _End, 0, _Blocks, _Nodes, Found) ->
+    {lists:reverse(Found), Block * ?DENTRY_SLOTS};
+dentry_blocks(Volume, Dir, Block, End, Steps, Blocks, Nodes, Found) ->
+    case extent(Volume, Dir, Block, Blocks, Nodes) of
+        {{data, Address}, Decoded} ->
+            dentry_blocks(Volume, Dir, Block + 1, End, Steps - 1, Blocks, Decoded,
+                          [{Block, Address} | Found]);
+        {{empty, Count}, Decoded} ->
+            dentry_blocks(Volume, Dir, Block + Count, End, Steps - 1, Blocks, Decoded, Found)
+    end.
+
+%% What file block Block of Inode holds, and Nodes with the nodes this walk
+%% decoded added: {data, Address}, a valid block, or {empty, Count}, the
+%% run of Count blocks from Block that one node leaves empty, all NULL_ADDR
+%% or NEW_ADDR slots of its address array or of one direct node, or the
+%% span under node id 0 and under the node ids 0 that follow it in the same
+%% node ([F 4], [F 53]). Count is at least 1.
+extent(Volume, #{addresses := Addresses}, Block, _Blocks, Nodes) when Block < length(Addresses) ->
+    {run(Volume, lists:nthtail(Block, Addresses)), Nodes};
+extent(Volume, #{addresses := Addresses, i_nid := Nids, footer := #{ino := Ino}}, Block, Blocks,
+       Nodes) ->
+    %% dir_end/1 keeps Block within the blocks a file addresses.
+    {Tree, Path} = place(Block - length(Addresses)),
+    extent_under(Volume, Ino, lists:nth(Tree + 1, Nids), Path, Blocks, Nodes);
+extent(_Volume, _Inode, _Block, _Blocks, _Nodes) ->
+    fail({file, inline}).
+
+%% The extent at the end of Path below node Nid: a node id of 0 leaves the
+%% rest of its span empty.
+extent_under(_Volume, _Ino, 0, Path, _Blocks, Nodes) ->
+    {{empty, rest(Path)}, Nodes};
+extent_under(Volume, Ino, Nid, [{Offset, Index}], Blocks, Nodes) ->
+    {Addresses, Decoded} = node(direct_node, Volume, Ino, Nid, Offset, Blocks, Nodes),
+    {run(Volume, lists:nthtail(Index, tuple_to_list(Addresses))), Decoded};
+extent_under(Volume, Ino, Nid, [{Offset, Index} | Path], Blocks, Nodes) ->
+    {Children, Decoded} = node(indirect_node, Volume, Ino, Nid, Offset, Blocks, Nodes),
+    case lists:nthtail(Index, tuple_to_list(Children)) of
+        [0 | Later] ->
+            Absent = length(lists:takewhile(fun(Child) -> Child =:= 0 end, Later)),
+            {{empty, rest(Path) + Absent * span(length(Path))}, Decoded};
+        [Child | _] ->
+            extent_under(Volume, Ino, Child, Path, Blocks, Decoded)
+    end.
+
+%% The extent at the head of Slots, a node's slots from the block's on: its
+%% data block, or the run of empty slots it starts.
+run(Volume, [Address | _] = Slots) ->
+    case length(lists:takewhile(fun empty_slot/1, Slots)) of
+        0 ->
+            checked_slot(Volume, {0, 0, Address}),
+            {data, Address};
+        Count -> {empty, Count}
+    end.
+
+empty_slot(Address) -> Address =:= ?ERX_F2FS_NULL_ADDR orelse Address =:= ?ERX_F2FS_NEW_ADDR.
+
+%% The blocks from a path's block to the end of the node the path starts
+%% at: the rest of its own child's span, and the spans of the later children.
+rest([{_Offset, Index}]) ->
+    ?ERX_F2FS_ADDRS_PER_BLOCK - Index;
+rest([{_Offset, Index} | Path]) ->
+    rest(Path) + (?ERX_F2FS_NIDS_PER_BLOCK - 1 - Index) * span(length(Path)).
 
 from(Position, Entries) -> [Entry || #{position := At} = Entry <- Entries, At >= Position].
 

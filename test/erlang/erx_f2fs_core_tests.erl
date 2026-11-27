@@ -504,19 +504,31 @@ each_name_is_found_in_its_bucket_test() ->
                  [lookup(Dir, Name) || Name <- [<<"misplaced">>, <<"badhash">>, <<"absent">>,
                                                binary:part(long_name(), 0, 251)]]).
 
-%% A readdir covers eight blocks a call and answers the position the next
-%% starts from; together the calls give every entry once, in position
-%% order, and a call from a position inside a block skips what lies before.
+%% A readdir takes eight steps a call, each a dentry block or a run of
+%% holes, and answers the position the next starts from; together the
+%% calls give every entry once, in position order, and a call from a
+%% position inside a block skips what lies before. The test directory's
+%% six dentry blocks and the holes between them take two calls.
 readdir_resumes_at_its_position_test() ->
     Dir = directory(),
     {ok, {First, Next}} = readdir(Dir, 0),
-    ?assertEqual(position(8, 0), Next),
+    ?assert(is_integer(Next) andalso Next > 0),
     {ok, {Rest, done}} = readdir(Dir, Next),
     Expected = lists:sort([{position(Block, Slot), Name} || {Block, Slot, Name, _, _} <- dir_dentries()]),
     ?assertEqual(Expected, [{At, Name} || #{position := At, name := Name} <- First ++ Rest]),
     {ok, {After, Next}} = readdir(Dir, 2),
     ?assertEqual([At || {At, _} <- Expected, At >= 2, At < Next], [At || #{position := At} <- After]),
     ?assertEqual({ok, {[], done}}, readdir(Dir, position(1000, 0))).
+
+%% A directory claiming the largest size, with no block in its address
+%% array and no node, lists in one call that reads nothing: each run of
+%% holes, the array's and each node id 0's span, is one step.
+a_readdir_over_holes_is_one_step_a_run_test() ->
+    {Volume, Blocks} = Dir = directory([]),
+    #{addresses := Addresses} = Empty = inode(Dir),
+    Huge = Empty#{i_size := 1 bsl 60, addresses := [0 || _ <- Addresses], i_nid := [0, 0, 0, 0, 0]},
+    ?assertEqual({ok, {[], done}}, erx_f2fs_core:readdir(Volume, Huge, 0, Blocks)),
+    ?assertEqual({ok, {[], done}}, erx_f2fs_core:readdir(Volume, Huge, position(5000000, 3), Blocks)).
 
 %% An inline directory's entries are its inline slots ([F 48]); its bytes
 %% are no file's, so read/5 refuses it.

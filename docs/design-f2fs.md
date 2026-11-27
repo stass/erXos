@@ -786,12 +786,19 @@ the block or inline area holding it.
 
 **`readdir`** reads from a position, the slot an entry starts at as the
 paragraphs below count it, and answers the entries at or past it and
-the position the next call starts from. A call covers at most eight of
-the directory's blocks below its end, holes included, so its work is
-bounded whatever the directory claims, and the position it answers is
-always past the one it was given, so a listing always advances. A call
-over holes answers no entries and a next position, which is not the
-end: the caller reads on. The entries of an inline directory are
+the position the next call starts from. A call takes at most eight steps
+below the directory's end, each a dentry block or a run of empty slots
+that one node leaves: NULL_ADDR and NEW_ADDR slots of the address array
+or of one direct node, or the span under a node id of 0 together with
+the node ids of 0 after it in the same node. Its work therefore follows
+the blocks and nodes the directory holds, never the size it claims, and
+a directory claiming the largest size with no block lists in one call.
+The position it answers is always past the one it was given, so a
+listing always advances. A call over empty dentry blocks answers no
+entries and a next position, which is not the end: the caller reads on.
+The volume lists "." with the directory's own qid, never the inode its
+slot names, and no walk asks for "." or "..", which the grammar refuses
+([design-files.md](design-files.md)). The entries of an inline directory are
 answered in one call. The codec
 also reads a directory's `i_current_depth` above 63 as 63, as Linux
 does ([F 42]), so the depth an insertion grows from is bounded too, and

@@ -937,17 +937,6 @@ design does not have, to be deleted so no side-by-side table can show it under s
   file (incompatible bit 0x4, which the reader refuses) and no regular file in the plain layout with a
   partial last block, so no case reads a shared inode (nlink 2) or checks the chunked refusal or that
   tail; each can be made by patching `compact.img` in the EUnit cases and fixing its superblock checksum.
-* [Medium] storage, F2FS readdir over holes (`erlang/apps/erx_f2fs/src/erx_f2fs_core.erl`, `readdir/4`): a
-  call covers eight file blocks, holes included, and answers no entries and a next position when all
-  eight are holes, which Linux leaves where it removed names. The volume's readdir callback, which
-  `erx_fs` lets answer an empty list only at the end, must read on, so a crafted directory whose
-  `i_size` claims the largest addressable size with no blocks costs about 1.3e8 core calls in one
-  request. Fix with the callback: let the walk skip a node id 0 or a run of NULL slots as one step, so
-  a call's work follows the nodes the image holds, and bound the call by blocks present.
-* [Low] storage, F2FS "." and ".." (`erx_f2fs_core.erl`, `placed/2`): their slots are checked, not
-  their inodes ([F 61]: "." names the directory itself, ".." its parent), so a crafted "." is
-  answered as written. The volume's walk must answer both from its own state, never through
-  `lookup/4`, or the core must check "." against the directory's own inode.
 * [Medium] test, F2FS listing (`test/erlang/erx_f2fs_listing.erl`): cost grows faster than the tree on
   hostile shapes. Each entry of an inode with K names carries its K-path link class, so K names cost
   O(K^2) once the listing is copied or compared (3,000 links to one inode: about 500 MB flattened); a
