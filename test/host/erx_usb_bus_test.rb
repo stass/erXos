@@ -96,7 +96,7 @@ class ErxUsbBusTest < Minitest::Test
              catching_case: 'a_controller_failing_at_every_reset_is_given_up_test'),
     Seed.new(fault: "a BOT function's pipe reset answered without resetting the pipe",
              module_path: BOT,
-             anchor: '    {[{reset_pipe, erx_usb_pipe:reset_pipe(In)}], B};',
+             anchor: '    {[], B#bot{step = {erx_usb_pipe:post_reset_pipe(In), reset_pipe}}};',
              replacement: '    {[{reset_pipe, ok}], B};',
              catching_case: 'a_stalled_data_phase_is_cleared_and_explained_test'),
     Seed.new(fault: 'a bulk-out completion counting none of the bytes written',

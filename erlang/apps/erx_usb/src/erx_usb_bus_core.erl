@@ -618,7 +618,9 @@ function_ended(Ref, Interface, Run, Reason, Now, State) ->
 %% A function that cannot drive its interface ends unusable, which is final: the
 %% run keeps the reason, nothing is reset or started, and the end counts toward no
 %% bound, as a FreeBSD probe that answers ENXIO leaves its interface unattached.
-%% Any other end, a crash or a failed transfer, resets the function's pipes and
+%% Any other end, a crash, a failed transfer or a BOT function's request for a port
+%% reset ({shutdown, {reset_port, Rung, Reason}}, whose port reset is the bus's
+%% planned rung: docs/todo-usb.md), resets the function's pipes and
 %% starts it again, when fewer than usb_function_restarts_max of its ends fell in
 %% the last usb_function_restart_window_ms; past them its device's port is given up,
 %% the failure naming the end that went past them by end_name/1, since a function

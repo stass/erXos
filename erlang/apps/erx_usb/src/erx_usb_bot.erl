@@ -37,12 +37,22 @@ units run on.
 the engine queues under the caller's reply address; the answer is the
 engine's.
 
-**End.** A step of reset recovery that fails ends the function with
-`{shutdown, {reset, Reason}}`, which the bus counts toward its restart
-bound; a Get Max LUN answer above usb_bot_lun_max ends it unusable. The
-device's detach makes every transfer answer `gone`, which reaches reset
-recovery and ends the function so. Each transport monitors the function,
-so it ends with the function.
+**End.** A rung of the recovery ladder that fails, or an operation that
+needs recovery twice, ends the function with
+`{shutdown, {reset_port, Rung, Reason}}`, logged with its rung, which
+asks the bus for a port reset (docs/design-usb.md, "Recovery"); the bus
+answers it as any end, resetting the function's pipes and starting it
+again, the port reset being its planned rung (docs/todo-usb.md). A Get
+Max LUN answer above usb_bot_lun_max ends it unusable. The device's
+detach has the bus stop the function; a transfer answered `gone` before
+that climbs the ladder as any failure does. Each transport monitors the
+function, so it ends with the function.
+
+**Recovery steps.** A pipe reset or class request is posted, not
+awaited, and its answer is fed to the engine only under the reference of
+the one step posted last; the engine bounds the wait itself, so the late
+answer of a step it gave up on, or none at all from a controller that
+ended, changes nothing.
 
 **The block service.** A ready medium's block service is its transport
 and the one window over the whole medium that the transport starts
@@ -91,7 +101,11 @@ transport's `detail`, escaped wherever it is shown.
               places :: pid(),
               engine :: erx_usb_bot_core:state(),
               units = #{} :: #{erx_usb_bot_core:lun() => unit()},
-              tick = none :: none | reference()}).
+              tick = none :: none | reference(),
+              %% The one recovery step the engine waits on, a pipe reset or a class request,
+              %% by the reference its answer will carry; an answer under any other reference
+              %% is a step the engine has given up on, and is dropped.
+              step = none :: none | {reference(), reset_pipe | control}}).
 
 -doc "Starts a function on Start, linked to the caller.".
 -spec start_link(erx_usb_bus:start()) -> {ok, pid()} | {error, term()}.
@@ -126,6 +140,8 @@ handle_info({erx_usb_bus, go}, B) ->
     run([start], B);
 handle_info({usb, Pipe, Tag, Result}, B = #bot{in = In, out = Out}) when Pipe =:= In; Pipe =:= Out ->
     run([{transfer, Tag, Result}], B);
+handle_info({Ref, Answer}, B = #bot{step = {Ref, Kind}}) ->
+    run([{Kind, Answer}], B#bot{step = none});
 handle_info({timeout, Tick, tick}, B = #bot{tick = Tick}) ->
     run([tick], B#bot{tick = none});
 handle_info({timeout, Timer, {poll, Lun}}, B = #bot{units = Units}) ->
@@ -184,9 +200,9 @@ message_kind(Message) -> erx_report:reason_name(Message).
 %% The engine's events and actions
 %% ---------------------------------------------------------------------------
 
-%% Steps the engine through Events in order. An action whose effect answers at once (a
-%% pipe reset, a class request) and a unit's next request each add an event behind the
-%% rest, so every event is stepped once the actions before it are done.
+%% Steps the engine through Events in order. An action that adds an event (a unit's next
+%% request) adds it behind the rest, so every event is stepped once the actions before it
+%% are done.
 run([], B = #bot{engine = Engine}) ->
     {noreply, schedule(erx_usb_bot_core:deadline(Engine), B)};
 run([Event | Events], B = #bot{engine = Engine}) ->
@@ -195,14 +211,19 @@ run([Event | Events], B = #bot{engine = Engine}) ->
 
 perform([], Events, B) ->
     run(Events, B);
-perform([{stop, Reason} | _Actions], _Events, B) ->
+%% A stop is the last action of its step (erx_usb_bot_core); one followed by another
+%% reaches act/2, which has no clause for it, and crashes the function.
+perform([{stop, Reason}], _Events, B) ->
     {stop, stop_reason(Reason), B};
 perform([Action | Actions], Events, B) ->
     {More, Next} = act(Action, B),
     perform(Actions, Events ++ More, Next).
 
 stop_reason({max_lun, Max}) -> erx_usb_bus_core:unusable({max_lun, Max});
-stop_reason(Reset = {reset, _Reason}) -> {shutdown, Reset}.
+stop_reason(Ladder = {reset_port, Rung, Reason}) ->
+    logger:warning("erx_usb_bot: recovery failed at ~ts: ~ts; asking for a port reset",
+                   [Rung, erx_report:reason_name(Reason)]),
+    {shutdown, Ladder}.
 
 act({command, Tag, Command}, B = #bot{out = Out}) ->
     ok = erx_blk_write:bot_command(Out, Tag, Command),
@@ -217,17 +238,17 @@ act({status, Tag}, B = #bot{in = In}) ->
     ok = erx_usb_pipe:bulk_in(In, Tag, ?ERX_USB_BOT_CSW_SIZE),
     {[], B};
 act({reset_pipe, in}, B = #bot{in = In}) ->
-    {[{reset_pipe, erx_usb_pipe:reset_pipe(In)}], B};
+    {[], B#bot{step = {erx_usb_pipe:post_reset_pipe(In), reset_pipe}}};
 act({reset_pipe, out}, B = #bot{out = Out}) ->
-    {[{reset_pipe, erx_usb_pipe:reset_pipe(Out)}], B};
+    {[], B#bot{step = {erx_usb_pipe:post_reset_pipe(Out), reset_pipe}}};
 act(class_reset, B = #bot{control = Control, interface = Interface}) ->
     Setup = erx_usb_setup:packet(?ERX_USB_REQUEST_TYPE_CLASS bor ?ERX_USB_RECIPIENT_INTERFACE,
                                  ?ERX_USB_BOT_REQUEST_RESET, 0, Interface, 0),
-    {[{control, erx_usb_pipe:control(Control, Setup, none)}], B};
+    {[], B#bot{step = {erx_usb_pipe:post_control(Control, Setup, none), control}}};
 act(get_max_lun, B = #bot{control = Control, interface = Interface}) ->
     Setup = erx_usb_setup:packet(?ERX_USB_REQUEST_DIR_IN bor ?ERX_USB_REQUEST_TYPE_CLASS
                                  bor ?ERX_USB_RECIPIENT_INTERFACE, ?ERX_USB_BOT_REQUEST_GET_MAX_LUN, 0, Interface, 1),
-    {[{control, erx_usb_pipe:control(Control, Setup, {in, 1})}], B};
+    {[], B#bot{step = {erx_usb_pipe:post_control(Control, Setup, {in, 1}), control}}};
 act({answer, {call, From}, Reply}, B) ->
     gen_server:reply(From, Reply),
     {[], B};

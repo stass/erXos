@@ -198,20 +198,21 @@ a_medium_is_logged_as_ready_and_as_ended_test() ->
     end).
 
 %% A data phase that stalls is cleared, its CSW read, and its failure explained by the
-%% REQUEST SENSE the same operation sends; the medium stays and the next read succeeds.
+%% REQUEST SENSE the same operation sends; MEDIUM ERROR sends the read again, which
+%% succeeds, and the medium stays.
 a_stalled_data_phase_is_cleared_and_explained_test() ->
     with_bus(#{[1] => stick}, fun() ->
         Ref = configured([1]),
         Transport = transport(),
         Cleared = pipe_resets(Ref, 16#81),
         ok = erx_usb_fake_xhci:stick_fault(?FAKE, [1], stall_data),
-        ?assertEqual({error, {device, {sense, 3, 16#11, 0}}}, erx_blk:read(Transport, 4, 1)),
+        ?assertEqual({ok, binary:copy(<<0>>, 512)}, erx_blk:read(Transport, 4, 1)),
         ?assertEqual(Cleared + 1, pipe_resets(Ref, 16#81)),
         ?assertEqual({ok, binary:copy(<<0>>, 512)}, erx_blk:read(Transport, 4, 1))
     end).
 
-%% A CSW that is short, or signed wrongly, is refused: the command is answered reset,
-%% reset recovery readies the device, and the function and its medium run on.
+%% A CSW that is short, or signed wrongly, is refused: reset recovery readies the device,
+%% the read is sent again and succeeds, and the function and its medium run on.
 a_short_or_malformed_csw_is_refused_with_a_reset_test() ->
     with_bus(#{[1] => stick}, fun() ->
         configured([1]),
@@ -219,9 +220,9 @@ a_short_or_malformed_csw_is_refused_with_a_reset_test() ->
         Transport = transport(),
         Resets = class_resets(),
         ok = erx_usb_fake_xhci:stick_fault(?FAKE, [1], short_csw),
-        ?assertEqual({error, {device, reset}}, erx_blk:read(Transport, 0, 1)),
+        ?assertEqual({ok, binary:copy(<<0>>, 512)}, erx_blk:read(Transport, 0, 1)),
         ok = erx_usb_fake_xhci:stick_fault(?FAKE, [1], bad_csw),
-        ?assertEqual({error, {device, reset}}, erx_blk:read(Transport, 0, 1)),
+        ?assertEqual({ok, binary:copy(<<0>>, 512)}, erx_blk:read(Transport, 0, 1)),
         ?assertEqual(Resets + 2, class_resets()),
         ?assertEqual({ok, binary:copy(<<0>>, 512)}, erx_blk:read(Transport, 0, 1)),
         ?assertEqual([Function], functions(erx_usb_bot)),

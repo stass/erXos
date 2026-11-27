@@ -18,15 +18,19 @@ receive. bulk_in/3 and bulk_out/3 post one bulk transfer the same way,
 each completion carrying what the controller reports moved: the bytes
 read, or the count written. reset_pipe/1 brings both sides of a pipe back
 to the start of its data toggle, as one operation of the controller, and
-waits for its answer, `ok` or the error that ended it. The controller
-answers a pipe whose device is detached `{error, gone}`.
+waits for its answer, `ok` or the error that ended it. post_control/3
+and post_reset_pipe/1 send the same requests without waiting: the answer
+arrives as `{Ref, Answer}` under the reference they return, and the
+sender bounds the wait itself. The controller answers a pipe whose
+device is detached `{error, gone}`.
 
 Each request reaches the controller as `{erx_usb_pipe, From, Request}`,
 and reply/2 builds the message that answers it; this module is the one
 that spells both.
 """.
 
--export([new/3, endpoint/1, control/3, interrupt_in/3, bulk_in/3, bulk_out/3, reset_pipe/1, reply/2,
+-export([new/3, endpoint/1, control/3, post_control/3, interrupt_in/3, bulk_in/3, bulk_out/3, reset_pipe/1,
+         post_reset_pipe/1, reply/2,
          from_function/1]).
 
 -export_type([pipe/0, request/0]).
@@ -61,6 +65,25 @@ control(Pipe, Setup, Data) ->
 -spec reset_pipe(pipe()) -> ok | {error, term()}.
 reset_pipe(Pipe) ->
     await(Pipe, fun(Monitor) -> {reset_pipe, Pipe, Monitor} end).
+
+-doc """
+Sends the control request Setup as control/3 does, without waiting: its answer arrives as
+`{Ref, Answer}`, Ref the reference this returns. The sender bounds the wait itself; a
+controller that ends first sends no answer.
+""".
+-spec post_control(pipe(), <<_:64>>, none | {in, pos_integer()} | {out, binary()}) -> reference().
+post_control(Pipe, Setup, Data) ->
+    post(Pipe, fun(Ref) -> {control, Pipe, Setup, Data, Ref} end).
+
+-doc "Resets Pipe as reset_pipe/1 does, without waiting: its answer arrives as `{Ref, Answer}`.".
+-spec post_reset_pipe(pipe()) -> reference().
+post_reset_pipe(Pipe) ->
+    post(Pipe, fun(Ref) -> {reset_pipe, Pipe, Ref} end).
+
+post({pipe, Controller, _Ref, _Address}, Build) ->
+    Ref = make_ref(),
+    Controller ! {?MODULE, self(), Build(Ref)},
+    Ref.
 
 %% Sends the request Build makes under a monitor of the controller and waits for its answer.
 await({pipe, Controller, _Ref, _Address}, Build) ->
