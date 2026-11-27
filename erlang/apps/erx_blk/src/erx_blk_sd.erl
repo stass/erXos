@@ -108,25 +108,21 @@ capacity_name(block) -> "high".
 
 start(Spec) ->
     maybe
-        {ok, Dev} ?= tagged(open, erx_device:open(Spec)),
-        {ok, Irq} ?= tagged(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
-        ok ?= tagged(signalling, erx_blk_sd_host:signalling(erx_device:read(Dev, control2))),
+        {ok, Dev} ?= erx_step:step(open, erx_device:open(Spec)),
+        {ok, Irq} ?= erx_step:step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
+        ok ?= erx_step:step(signalling, erx_blk_sd_host:signalling(erx_device:read(Dev, control2))),
         ok = dat0(Dev),
         {ok, Reset} ?= reset(#state{dev = Dev, regs = erx_blk_sd_regs:new(Dev), irq = Irq}, reset_all),
-        ok ?= tagged(version, erx_blk_sd_host:version(erx_device:read(Dev, slotisr_ver))),
-        {ok, Base} ?= tagged(base_clock, erx_blk_sd_host:base_clock(erx_device:read(Dev, capabilities),
-                                                                  maps:get(clock, Spec, 0))),
+        ok ?= erx_step:step(version, erx_blk_sd_host:version(erx_device:read(Dev, slotisr_ver))),
+        {ok, Base} ?= erx_step:step(base_clock,
+                                    erx_blk_sd_host:base_clock(erx_device:read(Dev, capabilities),
+                                                               maps:get(clock, Spec, 0))),
         {ok, Powered} ?= power(Reset#state{base = Base}),
         {ok, Clocked} ?= clock(Powered, ?IDENTIFICATION_HZ),
         ok = timer:sleep(?CLOCK_WAIT_MS),
         Enabled = enable(Clocked),
         identify(Enabled, erx_blk_sd_card:start())
     end.
-
-%% A step's own answer, its error tagged with the step's name.
-tagged(_Name, ok) -> ok;
-tagged(_Name, {ok, Value}) -> {ok, Value};
-tagged(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
 %% A card still programming holds DAT0 low, and the CMD0 ahead would end its programming;
 %% past 1 s the start goes on and says so.
@@ -427,14 +423,11 @@ reply(_Job, {error, _} = Refused, _Read) -> Refused.
 %% The card or the controller failed: the request in flight and every waiting one are
 %% answered {device, Detail}, one line names the request and the detail, and the process
 %% ends (moduledoc).
-fail(Detail, State = #state{current = Current, waiting = Waiting}) ->
-    InFlight = case Current of
-                   {Job, _T, _Read, Timer} -> _ = cancel(Timer), [Job];
-                   none -> []
-               end,
-    Jobs = InFlight ++ queue:to_list(Waiting),
+fail(Detail, State = #state{current = {Job, _T, _Read, Timer}, waiting = Waiting}) ->
+    _ = cancel(Timer),
+    Jobs = [Job | queue:to_list(Waiting)],
     lists:foreach(fun(#job{from = From}) -> gen_server:reply(From, {error, {device, Detail}}) end, Jobs),
-    Op = case InFlight of [#job{op = O, sector = Sector}] -> {O, Sector}; [] -> none end,
+    Op = {Job#job.op, Job#job.sector},
     log("the SD card failed ~0P: ~0P; the storage domain ends", [Op, ?DEPTH, Detail, ?DEPTH]),
     {stop, {shutdown, sd_failed}, State#state{current = none, waiting = queue:new()}}.
 

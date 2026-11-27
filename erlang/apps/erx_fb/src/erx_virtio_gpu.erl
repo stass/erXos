@@ -58,8 +58,10 @@
 
 %% dev, irq, queue, screen and info are fixed once init/1 returns; geometry and resource are
 %% the core's ready(); tag is the next request's tag and fence the next frame's fence_id.
--record(state, {dev, irq, queue, screen, info :: erx_display:info(),
-                geometry :: erx_virtio_gpu_core:geometry(), resource :: pos_integer(),
+%% info, geometry and resource stay undefined until the bring-up has set the screen.
+-record(state, {dev, irq, queue, screen, info :: erx_display:info() | undefined,
+                geometry :: erx_virtio_gpu_core:geometry() | undefined,
+                resource :: pos_integer() | undefined,
                 tag = 0 :: 0..?U64_MAX, fence = 1 :: 0..?U64_MAX}).
 
 %% The driver of the display record Spec, registered as erx_fb.
@@ -90,12 +92,13 @@ init(Spec) ->
 %% each step's refusal is the sequence's error and stops it.
 start_device(Spec) ->
     maybe
-        {ok, Dev} ?= step(open, erx_device:open(Spec)),
+        {ok, Dev} ?= erx_step:step(open, erx_device:open(Spec)),
         ok ?= erx_virtio:identify(fun(Register) -> erx_device:read(Dev, Register) end, ?ERX_VIRTIO_ID_GPU),
-        {ok, Queue} ?= step(queue_create, erx_device:queue_create(Dev, ?QUEUE, ?QUEUE_SIZE,
-                                                                  erx_virtio_gpu_core:buffer_size())),
-        {ok, _Features} ?= step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
-        {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
+        {ok, Queue} ?= erx_step:step(queue_create,
+                                     erx_device:queue_create(Dev, ?QUEUE, ?QUEUE_SIZE,
+                                                             erx_virtio_gpu_core:buffer_size())),
+        {ok, _Features} ?= erx_step:step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
+        {ok, Irq} ?= erx_step:step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
         State0 = #state{dev = Dev, irq = Irq, queue = Queue},
         {Setup, [Action]} = erx_virtio_gpu_core:setup_start(?ERX_MEM_CONTIGUOUS_MAX),
         {ok, Ready, State1} ?= setup(Action, Setup, State0),
@@ -135,9 +138,6 @@ screen(#{geometry := Geometry = #{width := Width, height := Height}, region := R
         {error, Reason} ->
             {error, {wrap, Reason}}
     end.
-
-step(_Name, {ok, Value}) -> {ok, Value};
-step(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
 %% erx_display's requests (erx_display:request()) and info. A frame's answer is ok, or
 %% {error, Reason} for a frame the device failed, after which the driver ends, as the

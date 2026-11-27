@@ -85,12 +85,14 @@ init({#{path := Path} = Spec, Owner}) ->
 %% each step's refusal is the sequence's error and stops it.
 start_device(Spec, Owner) ->
     maybe
-        {ok, Dev} ?= step(open, erx_device:open(Spec)),
+        {ok, Dev} ?= erx_step:step(open, erx_device:open(Spec)),
         ok ?= erx_virtio:identify(fun(Register) -> erx_device:read(Dev, Register) end, ?ERX_VIRTIO_ID_CONSOLE),
-        {ok, Rx} ?= step(queue_create, erx_device:queue_create(Dev, ?RX, ?QUEUE_SIZE, ?BUFFER)),
-        {ok, Tx} ?= step(queue_create, erx_device:queue_create(Dev, ?TX, ?QUEUE_SIZE, ?BUFFER)),
-        {ok, _Features} ?= step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
-        {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
+        {ok, Rx} ?= erx_step:step(queue_create,
+                                  erx_device:queue_create(Dev, ?RX, ?QUEUE_SIZE, ?BUFFER)),
+        {ok, Tx} ?= erx_step:step(queue_create,
+                                  erx_device:queue_create(Dev, ?TX, ?QUEUE_SIZE, ?BUFFER)),
+        {ok, _Features} ?= erx_step:step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
+        {ok, Irq} ?= erx_step:step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
         State = #state{dev = Dev, irq = Irq, rx = Rx, tx = Tx, owner = Owner,
                        core = erx_virtio_console_core:new(?QUEUE_SIZE, ?BUFFER)},
         ok ?= try lists:foreach(fun(Tag) -> post_receive(State, Tag) end, lists:seq(0, ?QUEUE_SIZE - 1))
@@ -98,10 +100,6 @@ start_device(Spec, Owner) ->
               end,
         {ok, State}
     end.
-
-step(_Name, ok) -> ok;
-step(_Name, {ok, Value}) -> {ok, Value};
-step(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
 -doc false.
 handle_call(_Request, _From, State) ->
@@ -206,7 +204,7 @@ written(Done, #state{owner = Owner}) ->
 format_status(Status) ->
     erx_report:status(Status, #{state => fun state/1, message => fun message/1}).
 
-state(#state{} = State) -> State#state{core = redacted};
+state(#state{} = State) -> erx_report:fields(State, [{#state.core, redacted}]);
 state(_State) -> hidden.
 
 message({erx_console_output, From, Bytes}) when is_binary(Bytes) ->

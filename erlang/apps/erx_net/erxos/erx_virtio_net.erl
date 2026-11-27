@@ -120,12 +120,14 @@ init(#{record := Spec}) ->
 %% and the receive buffers, in that order; each step's refusal stops the sequence.
 start(Spec) ->
     maybe
-        {ok, Dev} ?= step(open, erx_device:open(Spec)),
+        {ok, Dev} ?= erx_step:step(open, erx_device:open(Spec)),
         ok ?= erx_virtio:identify(fun(Register) -> erx_device:read(Dev, Register) end, ?ERX_VIRTIO_ID_NET),
-        {ok, Rx} ?= step(queue_create, erx_device:queue_create(Dev, ?RXQ, ?QUEUE_SIZE, ?BUFFER)),
-        {ok, Tx} ?= step(queue_create, erx_device:queue_create(Dev, ?TXQ, ?QUEUE_SIZE, ?BUFFER)),
-        {ok, Features} ?= step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
-        {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
+        {ok, Rx} ?= erx_step:step(queue_create,
+                                  erx_device:queue_create(Dev, ?RXQ, ?QUEUE_SIZE, ?BUFFER)),
+        {ok, Tx} ?= erx_step:step(queue_create,
+                                  erx_device:queue_create(Dev, ?TXQ, ?QUEUE_SIZE, ?BUFFER)),
+        {ok, Features} ?= erx_step:step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
+        {ok, Irq} ?= erx_step:step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
         {ok, Config} ?= config(Dev, ?GENERATION_TRIES),
         {ok, Mtu} ?= mtu(Features, Config),
         T0 = #t{dev = Dev, irq = Irq, rx = Rx, tx = Tx, features = Features, mtu = Mtu},
@@ -173,10 +175,6 @@ link_state(Features, #{link_status := Status}) ->
         true -> down;
         false -> up
     end.
-
-step(_Name, ok) -> ok;
-step(_Name, {ok, Value}) -> {ok, Value};
-step(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
 %% Posts N empty receive buffers.
 refill(0, T) ->

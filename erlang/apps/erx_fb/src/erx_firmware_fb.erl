@@ -63,18 +63,14 @@ start(Record) ->
     maybe
         {ok, #{chan := Chan, code := Code, width := Width, height := Height, stride := Stride}} ?=
             erx_firmware_fb_core:plan(Record),
-        {ok, Fb} ?= step(framebuffer, erx_device:framebuffer()),
+        {ok, Fb} ?= erx_step:step(framebuffer, erx_device:framebuffer()),
         Rect = {0, 0, Width, Height},
-        {ok, Screen} ?= step(alloc, erx_memdraw:alloc(Code, Rect, Rect, false, ?BLACK)),
-        ok ?= step(store, erx_memdraw:store(Screen, Fb, Stride, [Rect])),
+        {ok, Screen} ?= erx_step:step(alloc, erx_memdraw:alloc(Code, Rect, Rect, false, ?BLACK)),
+        ok ?= erx_step:step(store, erx_memdraw:store(Screen, Fb, Stride, [Rect])),
         Info = #{width => Width, height => Height, chan => Chan, screen => Screen, partial => true,
                  direct => false},
         {ok, #state{fb = Fb, stride = Stride, info = Info}}
     end.
-
-step(_Name, ok) -> ok;
-step(_Name, {ok, Value}) -> {ok, Value};
-step(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
 %% erx_display's requests (erx_display:request()) and info. A frame's answer is ok once its
 %% rectangles are stored, or {error, einval} for a frame that is not of the screen image or

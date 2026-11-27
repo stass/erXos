@@ -63,18 +63,13 @@ start_link(Spec) ->
 -doc false.
 init(Spec) ->
     maybe
-        ok ?= tagged(pci_open, pci(Spec, open)),
-        {ok, Dev} ?= tagged(open, erx_device:open(Spec)),
-        {ok, Irq} ?= tagged(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
+        ok ?= erx_step:step(pci_open, pci(Spec, open)),
+        {ok, Dev} ?= erx_step:step(open, erx_device:open(Spec)),
+        {ok, Irq} ?= erx_step:step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
         {ok, #controller{place = place(Spec), dev = Dev, irq = Irq, core = erx_xhci_core:new()}, {continue, start}}
     else
         {error, Reason} -> {stop, Reason}
     end.
-
-tagged(_Step, ok) -> ok;
-
-tagged(_Step, {ok, Value}) -> {ok, Value};
-tagged(Step, {error, Reason}) -> {error, {Step, Reason}}.
 
 -doc false.
 handle_continue(start, C) ->

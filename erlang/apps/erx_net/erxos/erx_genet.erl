@@ -143,15 +143,17 @@ init(#{record := Spec}) ->
 start(Spec) ->
     maybe
         ok = log_phase(open),
-        {ok, Dev} ?= step(open, erx_device:open(Spec)),
+        {ok, Dev} ?= erx_step:step(open, erx_device:open(Spec)),
         ok = log_phase(identify),
         ok ?= erx_genet_core:identify(read_logged(Dev, sys_rev_ctrl, major)),
         ok = log_phase(address),
         Lladdr = address(Dev, erx_genet_core:lladdr(maps:get(mac, Spec, none))),
         ok = log_phase(queue_rx),
-        {ok, Rx} ?= step(queue_create, erx_device:queue_create(Dev, ?RXQ, ?QUEUE_SIZE, ?BUFFER)),
+        {ok, Rx} ?= erx_step:step(queue_create,
+                                  erx_device:queue_create(Dev, ?RXQ, ?QUEUE_SIZE, ?BUFFER)),
         ok = log_phase(queue_tx),
-        {ok, Tx} ?= step(queue_create, erx_device:queue_create(Dev, ?TXQ, ?QUEUE_SIZE, ?BUFFER)),
+        {ok, Tx} ?= erx_step:step(queue_create,
+                                  erx_device:queue_create(Dev, ?TXQ, ?QUEUE_SIZE, ?BUFFER)),
         ok = log_phase(reset),
         ok ?= apply_steps(Dev, erx_genet_core:reset()),
         ok ?= check_buffers(Dev),
@@ -162,7 +164,7 @@ start(Spec) ->
         ok = log_phase(hold),
         ok = apply_steps(Dev, erx_genet_core:start()),
         ok = log_phase(attach),
-        {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
+        {ok, Irq} ?= erx_step:step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
         {Phy, Request} = erx_phy_c22:start(),
         self() ! {?MODULE, phy_begin},
         T = #t{dev = Dev, irq = Irq, rx = Rx, tx = Tx, phy = Phy, phy_first = Request},
@@ -209,10 +211,6 @@ retry_busy(Name, Call, Dev, Tries) ->
     end.
 
 log_phase(Name) -> log("phase ~s", [Name]).
-
-step(_Name, ok) -> ok;
-step(_Name, {ok, Value}) -> {ok, Value};
-step(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
 %% Carries out erx_genet_core's steps in order, to the end or to the first refusal, which
 %% only a `dma_stop` makes.

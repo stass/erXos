@@ -1,18 +1,17 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% erXos's runtime services (docs/design-runtime.md): the carrier between domains and
-%% its connection agent, the console, its line discipline (erx_tty, erx_tty_modes) and
-%% hosted mode's console driver, the log sink's
-%% handler and the report filter, the kernel log, the namespace, the watchdog's petter, a driver's view
-%% of its device and its device record, the hold on a header pin, chip select or PWM
-%% channel, the decisions of a shared interrupt line's owner, the inspector and its
-%% collectors, the tracer and its ring reader, the pipe server's decisions, a
-%% keeper's set of waiting file requests (erx_fs_waits), the loop of a session's line
-%% to a front-end domain (erx_session_line), erx's shell functions,
-%% the package decoder and its hash tree layout, and the modules tools/gen_abi.rb
-%% and tools/gen_terminal.rb generate, the 9P2000.L codec erx_9p and the input records'
-%% codec erx_input_codec among them.
+%% erXos's runtime services (docs/design-runtime.md): the carrier between domains and its
+%% connection agent, the console, its line discipline (erx_tty, erx_tty_modes) and hosted
+%% mode's console driver, the log sink's handler and the report filter, the kernel log,
+%% the namespace, the watchdog's petter, a driver's view of its device, its device record
+%% and the named steps of its start (erx_step), the hold on a header pin, chip select or
+%% PWM channel, the decisions of a shared interrupt line's owner, the inspector and its
+%% collectors, the tracer and its ring reader, the pipe server's decisions, a keeper's set
+%% of waiting file requests (erx_fs_waits), the loop of a session's line to a front-end
+%% domain (erx_session_line), erx's shell functions, the package decoder and its hash tree
+%% layout, and the modules tools/gen_abi.rb and tools/gen_terminal.rb generate, the
+%% 9P2000.L codec erx_9p and the input records' codec erx_input_codec among them.
 %%
 %% It starts nothing of its own; kernel starts what must run, and the boot script's
 %% code path finds the modules here:
@@ -106,6 +105,7 @@
              erx_session_line,
              erx_source,
              erx_stdio,
+             erx_step,
              erx_svc_client,
              erx_syslog,
              erx_syslog_core,

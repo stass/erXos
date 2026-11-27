@@ -87,15 +87,16 @@ init(#{path := Path} = Spec) ->
 %% order; each step's refusal is the sequence's error and stops it.
 start_device(#{path := Path} = Spec) ->
     maybe
-        {ok, Dev} ?= step(open, erx_device:open(Spec)),
+        {ok, Dev} ?= erx_step:step(open, erx_device:open(Spec)),
         ok ?= erx_virtio:identify(fun(Register) -> erx_device:read(Dev, Register) end, ?ERX_VIRTIO_ID_INPUT),
-        {ok, Queue} ?= step(queue_create, erx_device:queue_create(Dev, ?QUEUE, ?QUEUE_SIZE,
-                                                                  ?ERX_VIRTIO_INPUT_EVENT_SIZE)),
-        {ok, _Features} ?= step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
+        {ok, Queue} ?= erx_step:step(queue_create,
+                                     erx_device:queue_create(Dev, ?QUEUE, ?QUEUE_SIZE,
+                                                             ?ERX_VIRTIO_INPUT_EVENT_SIZE)),
+        {ok, _Features} ?= erx_step:step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
         {ok, Reads} ?= reads(Dev, erx_virtio_input_core:queries(), #{}),
-        {ok, Fold} ?= step(configuration, erx_virtio_input_core:new(Reads)),
-        {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
-        ok ?= step(post, post_all(Dev, Queue, ?QUEUE_SIZE)),
+        {ok, Fold} ?= erx_step:step(configuration, erx_virtio_input_core:new(Reads)),
+        {ok, Irq} ?= erx_step:step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
+        ok ?= erx_step:step(post, post_all(Dev, Queue, ?QUEUE_SIZE)),
         {ok, #state{dev = Dev, irq = Irq, queue = Queue, path = Path, fold = Fold}}
     end.
 
@@ -135,10 +136,6 @@ post_all(Dev, Queue, N) ->
 
 post(Dev, Queue, Tag) ->
     erx_device:post(Dev, Queue, Tag, [{in, ?ERX_VIRTIO_INPUT_EVENT_SIZE}]).
-
-step(_Name, ok) -> ok;
-step(_Name, {ok, Value}) -> {ok, Value};
-step(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
 %% The driver answers no call and takes no cast: it only sends.
 handle_call(_Request, _From, State) ->

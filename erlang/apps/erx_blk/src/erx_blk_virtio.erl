@@ -86,12 +86,13 @@ init(Spec) ->
 %% step's refusal is the sequence's error and stops it.
 start_device(Spec) ->
     maybe
-        {ok, Dev} ?= step(open, erx_device:open(Spec)),
+        {ok, Dev} ?= erx_step:step(open, erx_device:open(Spec)),
         ok ?= erx_virtio:identify(fun(Register) -> erx_device:read(Dev, Register) end, ?ERX_VIRTIO_ID_BLOCK),
-        {ok, Queue} ?= step(queue_create, erx_device:queue_create(Dev, ?QUEUE, ?QUEUE_SIZE,
-                                                                  erx_blk_request:buffer_size())),
-        {ok, Features} ?= step(negotiate, negotiate(Dev)),
-        {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
+        {ok, Queue} ?= erx_step:step(queue_create,
+                                     erx_device:queue_create(Dev, ?QUEUE, ?QUEUE_SIZE,
+                                                             erx_blk_request:buffer_size())),
+        {ok, Features} ?= erx_step:step(negotiate, negotiate(Dev)),
+        {ok, Irq} ?= erx_step:step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
         {ok, Capacity} ?= capacity(Dev, ?GENERATION_TRIES),
         {ok, #state{dev = Dev, irq = Irq, queue = Queue, capacity = Capacity, features = Features}}
     end.
@@ -117,10 +118,6 @@ capacity(Dev, Tries) ->
         Before -> {ok, erx_blk_request:capacity(Low, High)};
         _Changed -> capacity(Dev, Tries - 1)
     end.
-
-step(_Name, ok) -> ok;
-step(_Name, {ok, Value}) -> {ok, Value};
-step(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
 handle_call(info, _From, State = #state{capacity = Capacity, features = Features}) ->
     {reply, {ok, #{transport => virtio_mmio, capacity => Capacity, max_sectors => erx_blk_request:max_sectors(),
