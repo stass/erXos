@@ -19,6 +19,8 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: ec_prime_field()'s prime is integer() | binary(), since
+%% ec_curve/1 answers the curves' primes as binaries.
 
 %% Purpose : Main Crypto API module.
 
@@ -503,7 +505,7 @@ dh_params() = [P, G] | [P, G, MaxPrivateKeyBitLength]
 -type ec_field() ::  ec_prime_field() | ec_characteristic_two_field() .
 
 -doc(#{group => <<"Elliptic Curves">>,equiv => ec_basis()}).
--type ec_prime_field()              :: {prime_field, Prime :: integer()} .
+-type ec_prime_field()              :: {prime_field, Prime :: integer() | binary()} .
 -doc(#{group => <<"Elliptic Curves">>,equiv => ec_basis()}).
 -type ec_characteristic_two_field() :: {characteristic_two_field, M :: integer(), Basis :: ec_basis()} .
 
