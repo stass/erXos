@@ -526,7 +526,8 @@ in, patches the edited bytes, and writes the images through
    bit too.
 
 Every step is written in **commits** of at most 256 sectors, 128 KiB,
-a raw file's largest request: a commit reads its sectors, writes their
+each read and written in requests of at most a raw file's largest,
+64 KiB, the file protocol's `p9_io_max`: a commit reads its sectors, writes their
 patched images and flushes, and its images are dropped before the next
 commit reads. A commit is a subset of its step's sectors made durable
 early, a state the crash argument below already allows for any subset,
@@ -717,7 +718,7 @@ native. What it needs:
   a program to one volume: an entry's root is a directory, and a drive's
   directory holds its `data`;
 * offsets and counts that are multiples of 512, a count of at most
-  128 KiB, and writes within the file's size, which `stat` gives; a read
+  64 KiB, the file protocol's `p9_io_max`, and writes within the file's size, which `stat` gives; a read
   that runs past the end answers the sectors up to it. erXos's POSIX
   layer offers no disk `ioctl`, so a port replaces FreeBSD's
   `DIOCGMEDIASIZE` and `DIOCGSECTORSIZE` with `stat` and 512;
@@ -795,9 +796,9 @@ session `media_raw`. A release has no blanket grant: native programs
 inherit the session's namespace unless their starter narrows it, so
 every program root starts would reach every drive's sectors. A release
 board manifest that promises local drive repair names `media_raw` for
-root's session in a row of its own, where the manifest check sees it,
-and erXos's own release manifests for the Raspberry Pi 4 and QEMU do,
-since a stick's owner repairing it is the consumer
+root's session in a row of its own, and the manifest check refuses a
+`media_raw` row to any grantee but the system domain and root's session
+template, since a stick's owner repairing it is the consumer
 ([design-drives.md](design-drives.md#raw-sectors)).
 
 ## What is reused and what is new
