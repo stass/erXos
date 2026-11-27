@@ -64,7 +64,8 @@ window(Grant, From, #{grantee := Grantee, exports := Exports} = Limits) ->
             WindowMonitor = monitor(process, Window),
             ok = Exports:export(self(), [send], Grantee),
             gen:reply(From, {ok, self()}),
-            loop(Limits#{window => Window, window_monitor => WindowMonitor, outstanding => #{}});
+            loop(Limits#{window => Window, window_monitor => WindowMonitor,
+                         requests => gen_server:reqids_new()});
         Answer ->
             gen:reply(From, Answer)
     end.
@@ -73,6 +74,12 @@ window(Grant, From, #{grantee := Grantee, exports := Exports} = Limits) ->
 %% may hold the ask until a medium ends, and a facet that ends meanwhile, or a grant
 %% that ends before it answers, ends the proxy unexported. The facet answers the
 %% grant's end, as any forward's, `{error, failed}`.
+%%
+%% OTP's call API waits on a request's monitor alone (gen_server:receive_response/2),
+%% and a receive of every message would drop what is not the answer, so this one call
+%% is spelled in gen's call protocol: the request's alias as `[alias | Alias]`, the
+%% improper list gen:call/3 itself sends, which Dialyzer flags.
+-dialyzer({no_improper_lists, grant_answer/2}).
 grant_answer(Grant, #{facet_monitor := FacetMonitor}) ->
     Alias = monitor(process, Grant, [{alias, demonitor}]),
     Grant ! {'$gen_call', {self(), [alias | Alias]}, window},
@@ -86,43 +93,51 @@ grant_answer(Grant, #{facet_monitor := FacetMonitor}) ->
             exit(normal)
     end.
 
+%% Each forwarded request is one of the collection Requests, labelled with its
+%% caller's From: the window's answer goes back to that caller, or {error, failed}
+%% when the request's own monitor sees the window end before the proxy's does. The
+%% window is of this domain, so its answers never arrive enveloped: a message in an
+%% `erx_origin` envelope goes to admission whole, and no other domain can answer a
+%% forwarded request, whatever reference it names.
 loop(#{window := Window, window_monitor := WindowMonitor, facet_monitor := FacetMonitor,
-       outstanding := Outstanding} = State) ->
+       requests := Requests} = State) ->
     receive
-        {[alias | Alias], Reply} when is_map_key(Alias, Outstanding) ->
-            loop(replied(Alias, Reply, State));
-        {'DOWN', Alias, process, Window, _Reason} when is_map_key(Alias, Outstanding) ->
-            loop(replied(Alias, {error, failed}, State));
         {'DOWN', WindowMonitor, process, Window, _Reason} ->
             exit(normal);
         {'DOWN', FacetMonitor, process, _Facet, _Reason} ->
             exit(normal);
+        {erx_origin, _Domain, _Payload} = Message ->
+            loop(request(erx_facet:admitted(Message, State), State));
         Message ->
-            loop(request(erx_facet:admitted(Message, State), State))
+            case gen_server:check_response(Message, Requests, true) of
+                {{reply, Reply}, From, Rest} ->
+                    loop(replied(From, Reply, Rest, State));
+                {{error, {_Reason, Window}}, From, Rest} ->
+                    loop(replied(From, {error, failed}, Rest, State));
+                NotAnswer when NotAnswer =:= no_reply; NotAnswer =:= no_request ->
+                    loop(request(erx_facet:admitted(Message, State), State))
+            end
     end.
 
-request({call, From, Request}, #{window := Window, in_flight := InFlight, outstanding := Outstanding} = State) ->
+request({call, From, Request}, #{window := Window, in_flight := InFlight, requests := Requests} = State) ->
+    Full = gen_server:reqids_size(Requests) >= InFlight,
     case is_window_request(Request) of
         false ->
             gen:reply(From, {error, einval}),
             State;
-        true when map_size(Outstanding) >= InFlight ->
+        true when Full ->
             gen:reply(From, {error, busy}),
             State;
         true ->
-            Alias = monitor(process, Window, [{alias, demonitor}]),
-            Window ! {'$gen_call', {self(), [alias | Alias]}, Request},
-            State#{outstanding := Outstanding#{Alias => From}}
+            State#{requests := gen_server:send_request(Window, Request, From, Requests)}
     end;
 %% A message in no call's shape, or one the admission path drops: no answer.
 request(_Dropped, State) ->
     State.
 
-replied(Alias, Reply, #{outstanding := Outstanding} = State) ->
-    {From, Rest} = maps:take(Alias, Outstanding),
-    demonitor(Alias, [flush]),
+replied(From, Reply, Rest, State) ->
     gen:reply(From, Reply),
-    State#{outstanding := Rest}.
+    State#{requests := Rest}.
 
 %% The window's four requests (docs/design-storage.md, "Data model"); the window checks
 %% their ranges.
