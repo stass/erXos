@@ -219,7 +219,7 @@ module Erx
 
       ENCODER_REPORTS = <<~'ERLANG'
           body({event, Node, Event, Detail}, _Texts) when ?IS_NODE(Node) ->
-              [<<?EVENT, Node:32/little, (event_number(Event))>> | detail(Detail)];
+              [<<?EVENT, Node:32/little, (event_number(Event))>>, detail(Detail)];
           body({damage, Width, Height, Rects}, _Texts)
             when ?IS_U16(Width), ?IS_U16(Height), is_list(Rects), length(Rects) >= 1, length(Rects) =< ?DAMAGE_MAX ->
               [<<?DAMAGE, Width:16/little, Height:16/little, (length(Rects))>>
@@ -288,7 +288,7 @@ module Erx
               end.
 
           %% A text or bytes as a u32 length and the bytes.
-          bytes(Value, Max, _Name) when is_binary(Value), byte_size(Value) =< Max -> [<<(byte_size(Value)):32/little>> | Value];
+          bytes(Value, Max, _Name) when is_binary(Value), byte_size(Value) =< Max -> [<<(byte_size(Value)):32/little>>, Value];
           bytes(_Value, _Max, Name) -> error({bad_value, Name}).
 
           %% A text in the form Texts writes texts in: Form takes the text and its
@@ -314,14 +314,14 @@ module Erx
           presentation({Type, Value}, {Present, _Form} = Texts, Name) when is_atom(Type) ->
               TypeName = atom_to_binary(Type),
               byte_size(TypeName) =< ?NAME_MAX orelse error({bad_value, Name}),
-              [byte_size(TypeName), TypeName | text_bytes(Present(Type, Value), ?PRESENT_MAX, Texts, Name)];
+              [byte_size(TypeName), TypeName, text_bytes(Present(Type, Value), ?PRESENT_MAX, Texts, Name)];
           presentation(_Value, _Texts, Name) -> error({bad_value, Name}).
 
           detail(none) -> <<0>>;
           detail(true) -> <<1, 1>>;
           detail(false) -> <<1, 0>>;
           detail(Value) when is_integer(Value), Value >= -16#80000000, Value =< 16#7fffffff -> <<2, Value:32/little-signed>>;
-          detail(Value) when is_binary(Value) -> [<<3, (byte_size(Value)):32/little>> | Value];
+          detail(Value) when is_binary(Value) -> [<<3, (byte_size(Value)):32/little>>, Value];
           detail(Value) -> error({bad_value, Value}).
         ERLANG
 
