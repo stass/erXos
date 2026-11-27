@@ -248,9 +248,9 @@ class ManifestCheckTest < Minitest::Test
   def test_accepted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
     # The development manifest's own, clock, code_objects, data, display, home, inspect, install, line,
-    # log, login, login_keys, machine, media, net, network_ctl, packages, pci, pci_bus, pcie, start, storage_ctl,
+    # log, login, login_keys, machine, media, media_raw, net, network_ctl, packages, pci, pci_bus, pcie, start, storage_ctl,
     # system, usb_input and web, and this one.
-    assert_equal %w[clock code_objects data display home inspect install line log login login_keys machine media net network_ctl packages pci pci_bus pcie probe start storage_ctl system usb_input web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    assert_equal %w[clock code_objects data display home inspect install line log login login_keys machine media media_raw net network_ctl packages pci pci_bus pcie probe start storage_ctl system usb_input web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 
@@ -378,6 +378,23 @@ class ManifestCheckTest < Minitest::Test
   def test_a_media_service_of_another_interface_is_refused
     usb_refused('service.interface', /the service named media is of the media interface/,
                 media_source.sub("interface media\n", "interface files\n") + drive_window('disk0'))
+    usb_refused('service.interface', /the service named media_raw is of the media interface/,
+                media_source.sub("media_raw\n  server @domain.media\n  interface media\n",
+                                 "media_raw\n  server @domain.media\n  interface files\n") + drive_window('disk0'))
+  end
+
+  # Raw sectors (docs/design-drives.md, "Raw sectors"): the media domain serves media_raw
+  # beside media, and a grant of it reaches every drive's sectors, so only the system
+  # domain or root's session template holds one.
+  def test_media_raw_is_granted_to_root_s_session_alone
+    usb_admit(media_source + drive_window('disk0') + files_facet('media_raw', '@session.system'))
+    usb_refused('facet.grantee', /grants media_raw, whose tree reaches every drive's sectors, to another grantee/,
+                media_source + drive_window('disk0') + files_facet('media_raw', '@domain.web'))
+  end
+
+  def test_a_drive_window_without_media_raw_is_refused
+    usb_refused('service.name', /a manifest with a drive window holds one service named media_raw/,
+                media_source.sub(MEDIA_RAW_SERVICE, '') + drive_window('disk0'))
   end
 
   def test_the_pcie_domain_holding_a_window_or_a_service_is_refused
@@ -566,7 +583,8 @@ class ManifestCheckTest < Minitest::Test
   # development manifest's usb domain, renamed media, without its usb_input service and
   # that service's facet (usb_source has taken its unit and its pci facet already), so it
   # holds nothing and serves the media service alone.
-  MEDIA_SERVICE = "service media\n  server @domain.media\n  interface media\n"
+  MEDIA_RAW_SERVICE = "service media_raw\n  server @domain.media\n  interface media\n"
+  MEDIA_SERVICE = "service media\n  server @domain.media\n  interface media\n#{MEDIA_RAW_SERVICE}"
 
   def media_source(holders = USB_HOLDERS)
     bare = usb_source(holders).sub(/^service usb_input\n(?:  .*\n)*/, '').sub(/^facet usb_input\n(?:  .*\n)*/, '')
@@ -829,14 +847,15 @@ class ManifestCheckTest < Minitest::Test
 
   # The system domain serves no media: a crafted volume reaches a configured domain alone.
   def test_a_media_service_of_the_system_domain_is_refused
-    served = changed(media_source).sub("server @domain.media\n  interface media", "server system\n  interface media")
+    served = changed(media_source).gsub("server @domain.media\n  interface media", "server system\n  interface media")
     usb_refused('service.server', /the media service is served by a configured domain/,
                 served + drive_window('disk0', holder: 'system'))
   end
 
   # The media domain holds an allow-list (docs/design-drives.md, "Manifest rows"): drive
-  # windows, log facets and the media service; every other row that names it is refused.
-  MEDIA_HOLDS = /the media domain, media, holds nothing but drive windows, log facets and the media service, and its/
+  # windows, log facets and the media and media_raw services; every other row that names
+  # it is refused.
+  MEDIA_HOLDS = /the media domain, media, holds nothing but drive windows, log facets and the media and media_raw services, and its/
 
   def test_a_media_domain_holds_drive_windows_log_facets_and_the_media_service
     usb_admit(media_source + drive_window('disk0') + log_facet('@domain.media'))

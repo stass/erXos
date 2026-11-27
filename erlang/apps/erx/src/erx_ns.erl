@@ -212,7 +212,8 @@ declared(Name) ->
 %% a resolution lowers to the rights the facet's grant
 %% carries (erx_facets:table/1), so a domain writes there only through an rw grant:
 %% data, the storage domain's tree, at /data; media, the media domain's tree of every
-%% drive, at /media (docs/design-drives.md, "Mounting it"); the system domain's trees
+%% drive, at /media (docs/design-drives.md, "Mounting it"), and media_raw, its tree of
+%% every drive's sectors, at /media/raw ("Raw sectors"); the system domain's trees
 %% of the files interface: the package application's apps tree at /apps
 %% (docs/design-packaging.md, "/apps"), and the line service's tree, line, at /line
 %% (docs/design-bluetooth.md, "The controller's line"); and the storage domain's bt_state
@@ -233,6 +234,7 @@ declared(Name) ->
 -spec place(atom()) -> {binary(), [option()]} | none.
 place(data) -> {<<"/data">>, [rw]};
 place(media) -> {<<"/media">>, [rw]};
+place(media_raw) -> {<<"/media/raw">>, [rw]};
 place(apps) -> {<<"/apps">>, [rw]};
 place(line) -> {<<"/line">>, [rw]};
 place(bt_state) -> {<<"/data/bt">>, [rw]};

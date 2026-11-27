@@ -284,12 +284,12 @@ apps
 # A domain's quota counts every connection naming it but its system connection
 # (life_connections, liberx/system/dom_life.c): the web and PCIe domains hold none and
 # a quota of one, the USB domain two, the display's to its input tree and the media
-# domain's that carries its drive grant, and the media domain three, that one and root's
-# session's media with its replacement's.
-# max_connections, 38, holds the sixteen of the four apps' sessions (each its system
-# connection, packages, the display and net) and the fourteen rows at rest (the system connections of root's
-# session and of the seven configured domains, the session's data, net, display and media, the
-# display's usb_input and the media domain's drive grant), the five
+# domain's that carries its drive grant, and the media domain five, that one and root's
+# session's media and media_raw with its replacement's.
+# max_connections, 40, holds the sixteen of the four apps' sessions (each its system
+# connection, packages, the display and net) and the fifteen rows at rest (the system connections of root's
+# session and of the seven configured domains, the session's data, net, display, media and media_raw, the
+# display's usb_input and the media domain's drive grant), the six
 # a replacement session makes beside its predecessor's closing rows, and the three at most a
 # restarted configured domain makes beside its own closing rows, which keep their pages until
 # the disconnect: the USB domain's three, its system connection, usb_input and the drive
@@ -306,7 +306,7 @@ machine
   users_share @share.users
   system_principal @principal.system
   max_domains 12
-  max_connections 38
+  max_connections 40
   system_lane 4096
   system_queue 16384
   peer_held 4096
@@ -529,8 +529,9 @@ facet usb_input
 # are sized as the PCIe domain's, an interpreter domain with nothing started beyond the
 # base: 25 MiB and 50 mcpu on CPU 0, a share of its own, out of what the system share's
 # reserve leaves; it runs in the interactive band, as the domains that serve people do,
-# and its three connections beside its system connection are the USB domain's drive
-# grant and root's session's media facet with one more while that session is replaced.
+# and its five connections beside its system connection are the USB domain's drive
+# grant and root's session's media and media_raw facets with one more of each while that
+# session is replaced.
 runtime_limits media
   max_frame 131072
   max_message_heap 131072
@@ -558,7 +559,7 @@ limits media
   grant @share.media
   spaces none
   lane 4096
-  connections 3
+  connections 5
   crash 0
   flags none
   runtime_limits @runtime_limits.media
@@ -578,6 +579,9 @@ domain media
 service media
   server @domain.media
   interface media
+service media_raw
+  server @domain.media
+  interface media
 # media: every drive's files, which root's session mounts at /media (docs/design-drives.md,
 # DR-R8 and "Mounting it"): the system principal's session template holds the one media
 # facet, with the default rights rw, so root may read and change a stick and nothing runs
@@ -585,6 +589,19 @@ service media
 facet media
   grantee @session.system
   service @service.media
+  operations none
+  max_request 131072
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 262144
+# media_raw: every drive's raw sectors, which root's session mounts at /media/raw
+# (docs/design-drives.md, "Raw sectors"; docs/design-fsck-fat.md), rights rw, so root
+# runs fsck_fat and dd on a stick; only a development manifest grants root's session
+# template this service. Its quantities are the media facet's.
+facet media_raw
+  grantee @session.system
+  service @service.media_raw
   operations none
   max_request 131072
   in_flight 16

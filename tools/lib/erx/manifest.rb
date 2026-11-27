@@ -601,7 +601,14 @@ module Erx
         # drive's volumes. Any grantee may hold a row of it, and none runs what a drive
         # holds, since media_rights has no rx (abi/services/media.txt).
         WellKnown.new(constant: 'media_service', interface: 'media', needs: nil, window: 'drive', derived: [],
-                      source: :any)
+                      source: :any),
+        # Property 8's raw clause (docs/design-drives.md, "Raw sectors"): the media domain
+        # serves every drive's raw sectors as a tree of their own, so no media grant reaches
+        # a sector; a grant of it reaches every drive's sectors, so only the system domain
+        # or root's session template holds one, each in a row of its own.
+        WellKnown.new(constant: 'media_raw_service', interface: 'media', needs: nil, window: 'drive', derived: [],
+                      source: SourceGrants.new(root: :always, read_only: false,
+                                               why: "tree reaches every drive's sectors"))
       ])
 
       # The interface, and the name, of the facet the domain service grants every session
@@ -3854,7 +3861,8 @@ module Erx
       # its medium"), each held to an allow-list (holds_only), so that what parses a medium
       # never sits with a device or a stored file, and what drives a medium's device parses
       # nothing. The media domain, the configured domain that serves the service named
-      # media, is named by nothing but its drive windows, its log facets and that service:
+      # media, is named by nothing but its drive windows, its log facets, that service and
+      # the one named media_raw:
       # its drives' grants come through the windows, by introduction. The holder of a block
       # device's drive, a configured domain, is named by nothing but the unit that places
       # that device alone, its driver-control service, its pci facet and its log facets
@@ -3863,14 +3871,15 @@ module Erx
       # check_window_services'.
       def check_drive_domains(tables)
         media_name = @codec.fixed_bytes('media_service')
+        raw_name = @codec.fixed_bytes('media_raw_service')
         tables.fetch('services').select { |service| service.fetch('name') == media_name }.each do |media|
           domain = media.fetch('server')
           invalid('the media service is served by a configured domain', 'service.server') if domain == @codec.constant('mf_none')
-          what = "the media domain, #{domain_name(tables, domain)}, holds nothing but drive windows, log facets and the media service"
+          what = "the media domain, #{domain_name(tables, domain)}, holds nothing but drive windows, log facets and the media and media_raw services"
           holds_only(tables, domain, what) do |scope, row|
             case scope
             when 'windows' then row.fetch('role') == drive_role
-            when 'services' then row.equal?(media)
+            when 'services' then row.equal?(media) || row.fetch('name') == raw_name
             else drive_domain_reference?(scope, row, tables)
             end
           end

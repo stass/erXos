@@ -103,10 +103,10 @@ principal system
 # the card's one app, the dashboard, so the display domain's outer budget pays for one
 # pixel area; and the display and net, which the build grants the app template. The app
 # is a principal with a domains quota of one, so max_domains is the system principal's
-# nine, the one app, ntpd and bleuart. max_connections, 35, holds ntpd's session's two
+# nine, the one app, ntpd and bleuart. max_connections, 37, holds ntpd's session's two
 # connections and bleuart's three (their comments), the 24 of the network domain's comment and the app's session's four: its system connection, packages,
-# the display and net, and two more for root's session's display connection and its
-# replacement's.
+# the display and net, two more for root's session's display connection and its
+# replacement's, and two for its media_raw connection and its replacement's.
 apps
   memory 69206016
   max 1
@@ -123,7 +123,7 @@ machine
   users_share @share.users
   system_principal @principal.system
   max_domains 12
-  max_connections 35
+  max_connections 37
   system_lane 4096
   system_queue 16384
   peer_held 4096
@@ -418,9 +418,9 @@ facet usb_input
 # the bridge's place, so a stick put in takes disk0 (docs/design-usb.md, "Mass storage
 # reaches the file servers"). Its 25 MiB and its share's 50 mcpu on CPU 0 are QEMU virt's, measured on
 # neither board; with them the configured domains' grants take 2,150 mcpu of the 2,325
-# the system share's reserve leaves them. Its three connections beside its system
-# connection are the USB domain's drive grant and root's session's media facet with one
-# more while that session is replaced; the USB domain's quota of two holds the drive grant
+# the system share's reserve leaves them. Its five connections beside its system
+# connection are the USB domain's drive grant and root's session's media and media_raw
+# facets with one more of each while that session is replaced; the USB domain's quota of two holds the drive grant
 # beside the display's usb_input.
 runtime_limits media
   max_frame 131072
@@ -449,7 +449,7 @@ limits media
   grant @share.media
   spaces none
   lane 4096
-  connections 3
+  connections 5
   crash 0
   flags none
   runtime_limits @runtime_limits.media
@@ -469,12 +469,28 @@ domain media
 service media
   server @domain.media
   interface media
+service media_raw
+  server @domain.media
+  interface media
 # media: every drive's files, which root's session mounts at /media (docs/design-drives.md,
 # DR-R8 and "Mounting it"), with the default rights rw, so root may read and change a
 # stick and nothing runs from it, as on QEMU virt.
 facet media
   grantee @session.system
   service @service.media
+  operations none
+  max_request 131072
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 262144
+# media_raw: every drive's raw sectors, which root's session mounts at /media/raw
+# (docs/design-drives.md, "Raw sectors"; docs/design-fsck-fat.md), rights rw, so root
+# runs fsck_fat and dd on a stick; only a development manifest grants root's session
+# template this service. Its quantities are the media facet's.
+facet media_raw
+  grantee @session.system
+  service @service.media_raw
   operations none
   max_request 131072
   in_flight 16
