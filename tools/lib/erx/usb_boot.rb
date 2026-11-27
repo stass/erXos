@@ -94,7 +94,7 @@ module Erx
     # The keyboard's five stages, in order; the stick's, read at the USB domain; and those
     # the harness reads after the boot. Each is a side cell.
     STAGES = %w[started connected addressed described typed].freeze
-    STICK_STAGES = %w[reported sized read written read_back flushed listed file_read status_read created appended
+    STICK_STAGES = %w[reported sized read written read_back flushed listed file_read raw_read raw_written raw_remounted status_read created appended
                       made_dir moved removed removed_dir ejected status_ejected mounts_ended ended unplugged].freeze
     HOST_STAGES = %w[persisted logged_served logged_ended clean verified extracted].freeze
     # The restart boot's cells, by the stage of its answers each is: the first key typed;
@@ -421,6 +421,30 @@ MEDIA_BODY = [
       'binary:part(RtText,0,min(byte_size(RtText),1000))'
     ].join(',').freeze
 
+    # The stick's first volume as raw sectors in root's session's namespace
+    # (docs/design-drives.md, "Raw sectors").
+    STICK_RAW = '/media/raw/disk0/s1.data'
+
+    # The body of the fun the third line runs after root_body, in root's session: whether
+    # a writing open of raw, the volume's raw sectors, reads the volume's boot sector
+    # (raw_read, its last two bytes 0x55 0xaa), writes it back and closes (raw_written),
+    # and whether the volume, taken out of service by that open, mounts again at its last
+    # close and reads Stick::FILE as Stick::FILE_TEXT within ten seconds (raw_remounted).
+    def self.raw_body(raw: STICK_RAW, volume: STICK_VOLUME) = [
+      "RwOpen=file:open(#{chars(raw)},[read,write,binary])",
+      'RwRead=case RwOpen of {ok,RwFd}->file:pread(RwFd,0,512);_->RwOpen end',
+      'RwWrite=case {RwOpen,RwRead} of {{ok,RwFd2},{ok,RwB}}->file:pwrite(RwFd2,0,RwB);_->skipped end',
+      'RwClose=case RwOpen of {ok,RwFd3}->file:close(RwFd3);_->skipped end',
+      "RwUntil=fun RwU(0)->false;RwU(RwK)->case file:read_file(#{chars("#{volume}/#{Stick::FILE}")}) of " \
+      "{ok,<<#{Stick::FILE_TEXT.bytes.join(',')}>>}->true;_->timer:sleep(200),RwU(RwK-1) end end",
+      'RwBack=RwUntil(50)',
+      'RwAnswer={[{raw_read,case RwRead of {ok,<<_:510/binary,85,170>>}->true;_->false end},' \
+      '{raw_written,RwWrite=:=ok andalso RwClose=:=ok},{raw_remounted,RwBack}],' \
+      '{RwOpen,case RwRead of {ok,RwB2}->{ok,byte_size(RwB2)};RwOther->RwOther end,RwWrite,RwClose}}',
+      'RwText=iolist_to_binary(io_lib:format("~0kP",[RwAnswer,40]))',
+      'binary:part(RwText,0,min(byte_size(RwText),1000))'
+    ].join(',').freeze
+
     # The body of the fun the fourth line runs first, in root's session: RC_STEPS in
     # order, each line through erx_shell_script:run/2, the command shell's own evaluator,
     # with its output collected from a terminal descriptor (RtRc); a step's stage passes
@@ -573,7 +597,7 @@ MEDIA_BODY = [
     def self.retyped_line = typed_line(tag: 'usb_retyped')
 
     # The third line's calls, in order: each a node and the body of the fun UbAt runs there.
-    STICK_CALLS = [[NODE, STICK_BODY], [MEDIA_NODE, MEDIA_BODY], [ROOT_NODE, root_body]].freeze
+    STICK_CALLS = [[NODE, STICK_BODY], [MEDIA_NODE, MEDIA_BODY], [ROOT_NODE, root_body], [ROOT_NODE, raw_body]].freeze
     # The fourth line's calls, both in root's session: the rc steps, then the drive's eject,
     # which finishes the volume. A line of its own, since the terminal holds at most
     # tty_max_input bytes of one line.
