@@ -719,17 +719,20 @@ gives a new inode E = 3 (`i_extra_isize` 12) on a volume with
 `INODE_CHKSUM`, E = 1 with `EXTRA_ATTR` alone and E = 0 without, as
 `mkfs.f2fs` does ([F 41]), and X = 0.
 
-The inode encoder takes the footer as an argument and computes the
-inode checksum last, over the whole block with the footer in place
-([F 50]): the checksum covers the footer, so a block whose footer changes
-after it was sealed cannot be built. It writes the checksum whenever the
-volume has `INODE_CHKSUM`, the inode has `EXTRA_ATTR` and
-`i_extra_isize` reaches the field, which is when Linux checks it
-([T 92]). It writes `i_ext` with `len` 0, `i_name`, `i_namelen` and
-`i_pino` at a new inode's link and at every rename of an inode with one
-link ([F 40]), and leaves `i_advise`, `i_flags`, `i_gc_failures`,
+The inode encoder builds the block from the inode's value, its footer
+included, and computes the inode checksum last, over the whole block
+with the footer in place ([F 50]): the checksum covers the footer, so a
+block whose footer changes after it was sealed cannot be built. It
+writes the checksum whenever the volume has `INODE_CHKSUM`, the inode
+has `EXTRA_ATTR` and `i_extra_isize` reaches the field, which is when
+Linux checks it ([T 92]), and `i_ext` with `len` 0 whatever the value
+holds. The core sets `i_name`, `i_namelen` and `i_pino` at a new
+inode's link and at every rename of an inode with one link ([F 40]),
+and leaves `i_advise`, `i_flags`, `i_gc_failures`,
 `i_inline_xattr_size`, the projid and the inline xattr bytes as it found
-them.
+them: the codec's value of an inode holds every byte of its extra
+attributes and of its inline xattr area, and the encoder writes them
+back unchanged.
 
 **A new inode's `i_generation`** is one more, modulo 2^32, than the
 generation of the last inode freed at its nid since the mount, which the
@@ -2477,6 +2480,7 @@ inputs, each paired with the seeded fault it must catch:
 | --- | --- |
 | the dentry hash of names of 0 to 255 bytes, against the oracle images' hashes | the state not carried from one 16-byte chunk to the next |
 | the inode checksum, against Linux-made inodes | the footer left out of the checksum |
+| each encoder decodes back to the value it was given, over generated values and every value the codec's fuzz target reads, and encodes every block of the corpus images that erXos writes in that form back to Linux's bytes, but for the bytes no value holds, which it writes as zeros | the checkpoint CRC taken over the bytes before its checksum alone, which a hand-built header with its checksum short of the block end catches; a node footer's `nid` and `ino` swapped; a dentry block's reserved bytes left nonzero |
 | the CRC, against Linux-made superblocks and checkpoints | zlib's inversions kept |
 | the inode layout for every E and X of [F 48]'s table, and a flexible inline xattr size | the reserved word before inline data dropped |
 | the record decision, over every combination of the epoch's facts | the rename fact ignored |

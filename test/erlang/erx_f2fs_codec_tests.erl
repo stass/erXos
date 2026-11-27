@@ -613,10 +613,11 @@ a_valid_inode_reads_as_its_fields_test() ->
     #{inode := Fixed} = Fields = inode_fields(),
     {ok, Inode} = inode(Fields),
     ?assertMatch(#{i_name := <<"file">>, i_size := 8192, i_extra_isize := 12,
-                   inline_xattr_words := 0, i_nid := [0, 0, 0, 0, 0],
-                   footer := #{nid := 4, ino := 4}}, Inode),
-    ?assertEqual(lists:sort(maps:keys(Fixed) ++ [addresses, footer, i_extra_isize, i_nid,
-                                                 inline_xattr_words]),
+                   inline_xattr := <<>>, i_projid := 0, i_crtime := 0,
+                   i_nid := [0, 0, 0, 0, 0], footer := #{nid := 4, ino := 4}}, Inode),
+    Extra = maps:keys(erx_abi_packed:decode(erx_f2fs_inode_extra,
+                                            <<0:(?ERX_F2FS_INODE_EXTRA_SIZE * 8)>>)),
+    ?assertEqual(lists:sort(maps:keys(Fixed) ++ Extra ++ [addresses, footer, i_nid, inline_xattr]),
                  lists:sort(maps:keys(Inode))),
     #{addresses := Addresses} = Inode,
     ?assertEqual(?ERX_F2FS_ADDRS_PER_INODE - 3, length(Addresses)),
@@ -821,7 +822,8 @@ layout_cases({E, X, Start, Size, Slots, BitmapBytes, Reserved} = Row) ->
     [{lists:flatten(io_lib:format("~p start", [Row])),
       ?_assertMatch(<<_:Start/binary, Data:Size/binary, _/binary>>, DataBlock)},
      {lists:flatten(io_lib:format("~p data", [Row])),
-      ?_assertMatch({ok, #{inline_data := Data, inline_xattr_words := X}}, Read(DataInode))}]
+      ?_assertMatch({ok, #{inline_data := Data, inline_xattr := <<_:(4 * X)/binary>>}},
+                    Read(DataInode))}]
         ++ [{lists:flatten(io_lib:format("~p dentries", [Row])),
              ?_assertMatch({ok, #{entries := [#{slot := Last, name := Name, ino := 77}],
                                   bitmap := <<0:Last, 1:1>>}},
@@ -854,7 +856,7 @@ a_flexible_inline_xattr_size_moves_the_inline_area_test() ->
                                              ?ERX_F2FS_ADDRS_PER_INODE, 0)},
     Data = with_inode(Fields, #{i_inline => ?ERX_F2FS_EXTRA_ATTR bor ?ERX_F2FS_INLINE_DATA,
                                 i_size => 4 * (923 - 1 - 10 - 1), i_blocks => 1}),
-    {ok, #{inline_data := Bytes, inline_xattr_words := 10}} =
+    {ok, #{inline_data := Bytes, inline_xattr := <<_:40/binary>>}} =
         erx_f2fs_codec:inode(Super, 4, inode_block(Super, Data)),
     ?assertMatch(<<"abcd", 0:(4 * (923 - 1 - 10 - 2) * 8)>>, Bytes),
     ?assertMatch({ok, #{addresses := Addresses}} when length(Addresses) =:= 923 - 1 - 10,
@@ -921,3 +923,300 @@ an_inline_dentry_past_its_last_slot_fails_the_dentries_test() ->
                                                     ?ERX_F2FS_INLINE_DENTRY}, 3),
     {ok, Inode} = erx_f2fs_codec:inode(Super, 4, inode_block(Super, Fields)),
     ?assertEqual({error, {inline_dentries, name_run}}, erx_f2fs_codec:inline_dentries(Inode)).
+
+%%% Encoders: each fixture, built by hand to [F n]'s offsets, decodes and
+%%% encodes back to its own bytes
+
+a_superblock_encodes_to_its_block_test_() ->
+    [?_assertEqual(Block, begin {ok, Super} = erx_f2fs_codec:superblock(Block),
+                                erx_f2fs_codec:encode_superblock(Super) end)
+     || Fields <- [superblock_fields(), (superblock_fields())#{feature => 0, crc => 16#1234}],
+        Block <- [superblock_block(Fields)]].
+
+%% Both placements of the version bitmaps ([F 23]): in the header, and the
+%% SIT bitmap in two payload blocks.
+a_checkpoint_pack_encodes_to_its_blocks_test_() ->
+    Sit = binary:copy(<<16#81>>, 64),
+    Nat = binary:copy(<<16#18>>, 64),
+    Header = checkpoint_block(checkpoint_fields(), <<Sit/binary, Nat/binary>>),
+    Long = binary:copy(<<16#42>>, 5000),
+    Paid = checkpoint_block((checkpoint_fields())#{sit_ver_bitmap_bytesize => 5000}, Nat),
+    <<First:4096/binary, Rest/binary>> = <<Long/binary, 0:(3192 * 8)>>,
+    [?_assertEqual({Block, Payload},
+                   begin
+                       {ok, Checkpoint} = pack(Block, Payload),
+                       Super = (superblock_fields())#{cp_payload => length(Payload)},
+                       erx_f2fs_codec:encode_checkpoint(Super, Checkpoint)
+                   end)
+     || {Block, Payload} <- [{Header, []}, {Paid, [First, Rest]}]].
+
+%% The checksum is computed, whatever crc the value carries, and at an
+%% offset short of the block's end the bytes after it are zeros.
+a_checkpoint_checksum_is_computed_at_its_offset_test() ->
+    Fields = (checkpoint_fields())#{checksum_offset => 4000, sit_ver_bitmap_bytesize => 0,
+                                    nat_ver_bitmap_bytesize => 0},
+    Super = (superblock_fields())#{cp_payload => 0},
+    {Block, []} = erx_f2fs_codec:encode_checkpoint(
+                    Super, Fields#{crc => 0, sit_version_bitmap => <<>>, nat_version_bitmap => <<>>}),
+    ?assertEqual(checkpoint_block(Fields, <<>>), Block).
+
+an_orphan_block_encodes_to_its_block_test() ->
+    Inodes = [7, 8, 1000],
+    ?assertEqual(orphan_block(Inodes, 3), erx_f2fs_codec:encode_orphan_block(Inodes, 1, 1)).
+
+a_nat_block_encodes_to_its_block_test() ->
+    Block = nat_block([nat_entry(1, 3, 4096), nat_entry(255, 9, 4100)]),
+    {ok, Entries} = erx_f2fs_codec:nat_block(Block),
+    ?assertEqual(Block, erx_f2fs_codec:encode_nat_block(Entries)).
+
+%% A SIT block's entries past those given are zeros; the valid block count
+%% is the one its map gives.
+a_sit_block_encodes_to_its_block_test() ->
+    Entries = [sit_entry(3, [0, 1, 2]), sit_entry(5, lists:seq(0, 511, 3))],
+    Zero = #{vblocks => 0, valid_map => <<0:512>>, mtime => 0},
+    Block = erx_abi_packed:encode(erx_f2fs_sit_block,
+                                  #{entries => pad(Entries, ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK, Zero)}),
+    {ok, Read} = erx_f2fs_codec:sit_block(Block, 2),
+    ?assertEqual(Block, erx_f2fs_codec:encode_sit_block(Read)),
+    ?assertEqual(Block, erx_f2fs_codec:encode_sit_block([Entry#{valid_blocks := 0} || Entry <- Read])).
+
+%% check_sum, which no one computes, is written as 0.
+a_summary_block_encodes_to_its_block_test() ->
+    Journal = binary:copy(<<16#3c>>, ?ERX_F2FS_NAT_JOURNAL_SIZE),
+    <<Head:(?BLOCK - 4)/binary, _:32>> = summary_block(Journal),
+    {ok, Summary} = erx_f2fs_codec:summary_block(summary_block(Journal)),
+    ?assertEqual(<<Head/binary, 0:32>>, erx_f2fs_codec:encode_summary_block(Summary)).
+
+%% Inodes of every layout erXos writes: the fixture's E = 3 under
+%% INODE_CHKSUM, E = 9 with every extra attribute set and an inline xattr
+%% area, E = 1 under EXTRA_ATTR alone, and none without it.
+an_inode_encodes_to_its_block_test_() ->
+    Xattr = [16#a0000000 + K || K <- lists:seq(1, 50)],
+    Full = with_inode((inode_fields())#{i_addr := [36 bor (50 bsl 16), 16#77, 0, 16#c0ffee,
+                                                   16#11, 16#22, 16#33, 16#44, 16#55]
+                                                  ++ lists:duplicate(923 - 9 - 50, 6000)
+                                                  ++ Xattr},
+                      #{i_inline => ?ERX_F2FS_EXTRA_ATTR bor ?ERX_F2FS_INLINE_XATTR,
+                        i_xattr_nid => 9, i_blocks => 4}),
+    Bare = fun(E) -> (inode_fields())#{i_addr := extra_words(4 * E, 0)
+                                                 ++ lists:duplicate(923 - E, 7000)} end,
+    Cases = [{superblock_fields(), inode_fields()}, {superblock_fields(), Full},
+             {layout_super(1), Bare(1)},
+             {layout_super(0), with_inode((inode_fields())#{i_addr := lists:duplicate(923, 8000)},
+                                          #{i_inline => 0})}],
+    [?_assertEqual(Block, begin {ok, Inode} = erx_f2fs_codec:inode(Super, 4, Block),
+                                erx_f2fs_codec:encode_inode(Super, Inode) end)
+     || {Super, Fields} <- Cases, Block <- [inode_block(Super, Fields)]].
+
+%% i_ext is written with len 0 ([F 44]), and the checksum covers it.
+an_inode_is_written_without_its_extent_test() ->
+    Super = superblock_fields(),
+    {ok, Inode} = erx_f2fs_codec:inode(Super, 4, inode_block(Super, inode_fields())),
+    Block = erx_f2fs_codec:encode_inode(Super, Inode#{i_ext := #{fofs => 1, blk => 5000, len => 2}}),
+    ?assertMatch({ok, #{i_ext := #{fofs := 1, blk := 5000, len := 0}}},
+                 erx_f2fs_codec:inode(Super, 4, Block)).
+
+%% An inline body is a form erXos only reads, and has no encoder.
+an_inline_inode_has_no_encoder_test() ->
+    Super = superblock_fields(),
+    Fields = inline_inode(<<"data">>, #{i_inline => ?ERX_F2FS_EXTRA_ATTR bor ?ERX_F2FS_INLINE_DATA,
+                                        i_size => 4, i_blocks => 1}, 3),
+    {ok, Inode} = erx_f2fs_codec:inode(Super, 4, inode_block(Super, Fields)),
+    ?assertError(function_clause, erx_f2fs_codec:encode_inode(Super, Inode)).
+
+%% A node's footer names another nid than its inode's, and carries marks
+%% and a version in every field ([F 43]).
+direct_and_indirect_nodes_encode_to_their_blocks_test_() ->
+    Footer = #{nid => 40, ino => 4, flag => (7 bsl 3) bor 2#011, cp_ver => 16#0102030405060708,
+               next_blkaddr => 5123},
+    Words = [K * 3 || K <- lists:seq(1, 1018)],
+    Direct = erx_abi_packed:encode(erx_f2fs_direct_node, #{addr => Words, footer => Footer}),
+    {ok, Addresses} = erx_f2fs_codec:direct_node(40, 4, 7, Direct),
+    {ok, Indirect} = erx_f2fs_codec:indirect_node(40, 4, 7, Direct),
+    {ok, Read} = erx_f2fs_codec:node_footer(Direct),
+    [?_assertEqual(Direct, erx_f2fs_codec:encode_direct_node(Addresses, Read)),
+     ?_assertEqual(Direct, erx_f2fs_codec:encode_indirect_node(Indirect, Read))].
+
+%% Dots, a name that fills its slot, one that runs on, one at the last
+%% slots, and a hash other than the fixture's.
+a_dentry_block_encodes_to_its_block_test() ->
+    Block = dentry_block([{0, <<".">>, 3, 0}, {1, <<"..">>, 3, 0}, {2, <<"eightchr">>, 10},
+                          {3, <<"ninechars">>, 11}, {9, <<"x">>, 12, 16#89abcdef},
+                          {181, binary:copy(<<"n">>, 255), 13}]),
+    {ok, Dentries} = erx_f2fs_codec:dentry_block(Block),
+    ?assertEqual(Block, erx_f2fs_codec:encode_dentry_block(Dentries)).
+
+%%% Encoders: decoding what an encoder builds answers what it was given,
+%%% over generated values in the forms erXos writes
+
+-define(ROUNDS, 200).
+
+%% Rounds of Check over values Generate makes, from a fixed seed.
+generated(Generate, Check) ->
+    rand:seed(exsss, {20, 26, 7}),
+    [Check(Generate()) || _ <- lists:seq(1, ?ROUNDS)],
+    ok.
+
+uniform(Bits) -> rand:uniform(1 bsl Bits) - 1.
+
+random_bytes(Size) -> << <<(uniform(8))>> || _ <- lists:seq(1, Size) >>.
+
+%% Count bits, each set with odds of one in Odds.
+random_bits(Count, Odds) ->
+    << <<(case rand:uniform(Odds) of 1 -> 1; _ -> 0 end):1>> || _ <- lists:seq(1, Count) >>.
+
+generated_tables_decode_to_their_values_test() ->
+    generated(fun() -> [nat_entry(uniform(8), uniform(32), uniform(32)) || _ <- lists:seq(1, 455)] end,
+              fun(Entries) ->
+                      ?assertEqual({ok, Entries},
+                                   erx_f2fs_codec:nat_block(erx_f2fs_codec:encode_nat_block(Entries)))
+              end),
+    generated(fun() ->
+                      [#{valid_blocks => set_count(Map), type => rand:uniform(6) - 1,
+                         valid_map => Map, mtime => uniform(64)}
+                       || _ <- lists:seq(1, rand:uniform(55)), Map <- [random_bits(512, rand:uniform(9))]]
+              end,
+              fun(Entries) ->
+                      Block = erx_f2fs_codec:encode_sit_block(Entries),
+                      ?assertEqual({ok, Entries}, erx_f2fs_codec:sit_block(Block, length(Entries)))
+              end),
+    generated(fun() ->
+                      #{entries => [#{nid => uniform(32), version => uniform(8), ofs_in_node => uniform(16)}
+                                    || _ <- lists:seq(1, 512)],
+                        journal => random_bytes(?ERX_F2FS_NAT_JOURNAL_SIZE), entry_type => uniform(1)}
+              end,
+              fun(Summary) ->
+                      ?assertEqual({ok, Summary},
+                                   erx_f2fs_codec:summary_block(erx_f2fs_codec:encode_summary_block(Summary)))
+              end),
+    generated(fun() -> [uniform(32) || _ <- lists:seq(1, rand:uniform(1021) - 1)] end,
+              fun(Inodes) ->
+                      ?assertEqual({ok, Inodes},
+                                   erx_f2fs_codec:orphan_block(erx_f2fs_codec:encode_orphan_block(Inodes, 2, 3)))
+              end).
+
+set_count(Map) -> length([B || <<B:1>> <= Map, B =:= 1]).
+
+generated_nodes_decode_to_their_values_test() ->
+    generated(fun() ->
+                      {[uniform(32) || _ <- lists:seq(1, 1018)],
+                       #{nid => uniform(32), ino => uniform(32), flag => uniform(32), cp_ver => uniform(64),
+                         next_blkaddr => uniform(32)}}
+              end,
+              fun({Words, #{nid := Nid, ino := Ino, flag := Flag} = Footer}) ->
+                      Direct = erx_f2fs_codec:encode_direct_node(Words, Footer),
+                      Offset = Flag bsr 3,
+                      ?assertEqual({ok, Words}, erx_f2fs_codec:direct_node(Nid, Ino, Offset, Direct)),
+                      ?assertEqual({ok, Footer}, erx_f2fs_codec:node_footer(Direct)),
+                      Indirect = erx_f2fs_codec:encode_indirect_node(Words, Footer),
+                      ?assertEqual({ok, Words}, erx_f2fs_codec:indirect_node(Nid, Ino, Offset, Indirect))
+              end).
+
+%% Slots in order, each entry starting after the last one's run, names of
+%% any length and of any bytes but "/" and NUL, and bits set beyond the
+%% runs, which read as passed slots.
+generated_dentry_blocks_decode_to_their_values_test() ->
+    generated(fun random_dentries/0,
+              fun(Dentries) ->
+                      ?assertEqual({ok, Dentries},
+                                   erx_f2fs_codec:dentry_block(erx_f2fs_codec:encode_dentry_block(Dentries)))
+              end).
+
+random_dentries() ->
+    Entries = random_entries(rand:uniform(4) - 1, []),
+    Runs = lists:append([lists:seq(Slot, Slot + (byte_size(Name) + 7) div 8 - 1)
+                         || #{slot := Slot, name := Name} <- Entries]),
+    Passed = [Bit || <<Bit:1>> <= random_bits(214, 20)],
+    Bitmap = << <<(case lists:member(Slot, Runs) of true -> 1; false -> Bit end):1>>
+                || {Slot, Bit} <- lists:zip(lists:seq(0, 213), Passed) >>,
+    #{bitmap => Bitmap, entries => Entries}.
+
+random_entries(Slot, Entries) ->
+    Name = << <<(rand:uniform(254) + 1)>> || _ <- lists:seq(1, rand:uniform(255)) >>,
+    Clean = binary:replace(Name, <<"/">>, <<"-">>, [global]),
+    End = Slot + (byte_size(Clean) + 7) div 8,
+    case End =< 214 andalso rand:uniform(8) =/= 1 of
+        true ->
+            Entry = #{slot => Slot, hash_code => uniform(32), ino => uniform(32),
+                      file_type => uniform(8), name => Clean},
+            random_entries(End + rand:uniform(4) - 1, [Entry | Entries]);
+        false ->
+            lists:reverse(Entries)
+    end.
+
+%% Inodes of each layout erXos writes, with every field it carries random:
+%% the extra attributes' size, the inline xattr area, the name, the times.
+generated_inodes_decode_to_their_values_test() ->
+    generated(fun random_inode/0,
+              fun({Super, Inode}) ->
+                      Block = erx_f2fs_codec:encode_inode(Super, Inode),
+                      {ok, Read} = erx_f2fs_codec:inode(Super, 4, Block),
+                      ?assertEqual(maps:remove(i_inode_checksum, Inode),
+                                   maps:remove(i_inode_checksum, Read)),
+                      ?assertEqual(Block, erx_f2fs_codec:encode_inode(Super, Read))
+              end).
+
+random_inode() ->
+    {Super, Size} = lists:nth(rand:uniform(5), [{layout_super(0), 0}, {layout_super(1), 4},
+                                                 {layout_super(1), 36}, {superblock_fields(), 12},
+                                                 {superblock_fields(), 36}]),
+    Xattr = lists:nth(rand:uniform(2), [0, ?ERX_F2FS_INLINE_XATTR]),
+    Extra = case Size of 0 -> 0; _ -> ?ERX_F2FS_EXTRA_ATTR end,
+    XattrWords = case Xattr of 0 -> 0; _ -> ?ERX_F2FS_INLINE_XATTR_WORDS end,
+    Attributes = random_extra(Size),
+    Name = random_bytes(rand:uniform(256) - 1),
+    #{inode := Fixed} = inode_fields(),
+    Fields = Fixed#{i_inline := Extra bor Xattr, i_uid := uniform(32), i_gid := uniform(32),
+                    i_size := uniform(40), i_blocks := rand:uniform(1000),
+                    i_atime := uniform(40), i_mtime_nsec := uniform(30),
+                    i_generation := uniform(32), i_pino := uniform(20),
+                    i_namelen := byte_size(Name), i_name := Name,
+                    i_ext := #{fofs => uniform(32), blk => uniform(32), len => 0}},
+    {Super, maps:merge(maps:merge(Fields, Attributes),
+                       #{addresses => [uniform(32) || _ <- lists:seq(1, 923 - Size div 4 - XattrWords)],
+                         inline_xattr => random_bytes(4 * XattrWords),
+                         i_nid => [uniform(32) || _ <- lists:seq(1, 5)],
+                         footer => #{nid => 4, ino => 4, flag => uniform(3),
+                                     cp_ver => uniform(64), next_blkaddr => uniform(32)}})}.
+
+%% Extra attributes of Size bytes, random where they lie within it and 0
+%% past it, as the codec reads them ([F 41]).
+random_extra(Size) ->
+    Random = erx_abi_packed:encode(erx_f2fs_inode_extra,
+                                   #{i_extra_isize => Size, i_inline_xattr_size => uniform(16),
+                                     i_projid => uniform(32), i_inode_checksum => uniform(32),
+                                     i_crtime => uniform(64), i_crtime_nsec => uniform(32),
+                                     i_compr_blocks => uniform(64), i_compress_algorithm => uniform(8),
+                                     i_log_cluster_size => uniform(8), i_compress_flag => uniform(16)}),
+    <<Held:Size/binary, _/binary>> = Random,
+    erx_abi_packed:decode(erx_f2fs_inode_extra,
+                          <<Held/binary, 0:((?ERX_F2FS_INODE_EXTRA_SIZE - Size) * 8)>>).
+
+generated_superblocks_and_packs_decode_to_their_values_test() ->
+    generated(fun() ->
+                      (superblock_fields())#{uuid => random_bytes(16), volume_name => random_bytes(1024),
+                                             version => random_bytes(256), crc => uniform(32),
+                                             feature => lists:nth(rand:uniform(2),
+                                                                  [?ERX_F2FS_FEATURE_SB_CHKSUM, 0])}
+              end,
+              fun(Super) ->
+                      {ok, Read} = erx_f2fs_codec:superblock(erx_f2fs_codec:encode_superblock(Super)),
+                      ?assertEqual(maps:remove(crc, Super), maps:remove(crc, Read))
+              end),
+    generated(fun() ->
+                      Payload = rand:uniform(3) - 1,
+                      SitBytes = case Payload of 0 -> rand:uniform(1000); _ -> rand:uniform(4096 * Payload) end,
+                      {Payload,
+                       (checkpoint_fields())#{checkpoint_ver => uniform(64), valid_node_count => uniform(32),
+                                              sit_ver_bitmap_bytesize => SitBytes,
+                                              nat_ver_bitmap_bytesize => rand:uniform(1000),
+                                              sit_version_bitmap => random_bytes(SitBytes),
+                                              nat_version_bitmap => random_bytes(rand:uniform(1000))}}
+              end,
+              fun({Payload, #{nat_version_bitmap := Nat} = Checkpoint}) ->
+                      Super = (superblock_fields())#{cp_payload => Payload},
+                      {Block, Blocks} = erx_f2fs_codec:encode_checkpoint(Super, Checkpoint),
+                      {ok, Read} = erx_f2fs_codec:checkpoint(Super, Block, Blocks),
+                      ?assertEqual(Checkpoint#{nat_ver_bitmap_bytesize := byte_size(Nat)},
+                                   maps:remove(crc, Read))
+              end).

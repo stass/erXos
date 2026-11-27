@@ -54,13 +54,13 @@ module ErxF2fsFuzz
              failure: 'size'),
     Seed.new(fault: "the SIT count's comparison with the map's set bits dropped",
              anchor: "    require(Valid =:= set_bits(Map), valid_map),\n",
-             replacement: '', failure: 'valid_map'),
+             replacement: '', failure: 'round_trip'),
     Seed.new(fault: "a directory's hash depth read past 63",
              anchor: '    Inode#{i_current_depth := min(Depth, ?ERX_F2FS_DIR_HASH_DEPTH_MAX)};',
              replacement: '    Inode#{i_current_depth := Depth};', failure: 'current_depth'),
     Seed.new(fault: "i_extra_isize's multiple-of-4 rule dropped",
              anchor: '    require(Size rem ?ERX_F2FS_EXTRA_ISIZE_ALIGN =:= 0 andalso',
-             replacement: '    require(true andalso', failure: 'extra_isize'),
+             replacement: '    require(true andalso', failure: 'round_trip'),
     Seed.new(fault: "a long name's run allowed past the last slot",
              anchor: '            require(Run =< 1 + bit_size(Bits), name_run),',
              replacement: '            ok,', failure: 'crash'),
@@ -73,7 +73,11 @@ module ErxF2fsFuzz
     Seed.new(fault: "a dentry area's slot count running past its block",
              anchor: '    8 * Bytes div (8 * (?ERX_F2FS_DIR_ENTRY_SIZE + ?ERX_F2FS_NAME_SLOT_SIZE) + 1).',
              replacement: '    8 * Bytes div (8 * (?ERX_F2FS_DIR_ENTRY_SIZE + ?ERX_F2FS_NAME_SLOT_SIZE) + 1) + 1.',
-             failure: 'crash')
+             failure: 'crash'),
+    Seed.new(fault: "a summary block's entry_type written as 0",
+             anchor: '                          #{entries => Entries, journal => Journal, entry_type => Type,',
+             replacement: '                          #{entries => Entries, journal => Journal, entry_type => 0 * Type,',
+             failure: 'round_trip')
   ].freeze
 
   module_function

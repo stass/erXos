@@ -29,8 +29,10 @@
 %% (`valid_map`), every inode read must have a whole number of words of extra
 %% attributes (`extra_isize`) and inline data of its size (`size`), every directory
 %% inode read at most 63 hash levels (`current_depth`), and every
-%% dentry's name must end by its area's last slot (`size`). A run reaches every
-%% rule of ?REACHED (failure `unreached`).
+%% dentry's name must end by its area's last slot (`size`). Every value a
+%% reader answers whose record has an encoder must read back from its encoding
+%% in the form erXos writes, an inode's i_ext with len 0 and its checksum aside
+%% (`round_trip`). A run reaches every rule of ?REACHED (failure `unreached`).
 -module(erx_f2fs_fuzz).
 -export([run/1]).
 
@@ -839,12 +841,64 @@ nat_entry_address(Block, Value) ->
 
 read(Structure, Read, Arguments) ->
     try apply(Read, Arguments) of
-        {ok, _} = Result -> Result;
+        {ok, Value} = Result -> checked_round_trip(Structure, Arguments, Value), Result;
         {error, {Structure, Rule}} = Result when is_atom(Rule) -> Result;
         Other -> fail(shape, Other)
     catch
         Class:Reason:Stack -> fail(crash, {Structure, Class, Reason, hd(Stack)})
     end.
+
+%% A value read decodes back from its encoding, for each reader of a record
+%% that has an encoder, read with the arguments it was read with. A
+%% checksum is derived: the encoder computes it over the block it builds,
+%% which holds zeros where a mutated block held bytes no value describes, so
+%% it is left out of the comparison. An inode is written in the form erXos
+%% writes, i_ext with len 0. An encoder that cannot build a value read fails
+%% the round trip too.
+checked_round_trip(Structure, Arguments, Value) ->
+    try
+        round_trip(Structure, Arguments, Value)
+    catch
+        error:Reason:Stack -> fail(round_trip, {Structure, Reason, hd(Stack)})
+    end.
+
+round_trip(superblock, [_Block], Super) ->
+    same(Super, erx_f2fs_codec:superblock(erx_f2fs_codec:encode_superblock(Super)), crc);
+round_trip(checkpoint, [Super, _Block, _Payload], Checkpoint) ->
+    {Header, Payload} = erx_f2fs_codec:encode_checkpoint(Super, Checkpoint),
+    same(Checkpoint, erx_f2fs_codec:checkpoint(Super, Header, Payload), crc);
+round_trip(orphan_block, [_Block], Inodes) ->
+    same(Inodes, erx_f2fs_codec:orphan_block(erx_f2fs_codec:encode_orphan_block(Inodes, 1, 1)));
+round_trip(nat_block, [_Block], Entries) ->
+    same(Entries, erx_f2fs_codec:nat_block(erx_f2fs_codec:encode_nat_block(Entries)));
+round_trip(sit_block, [_Block, Used], Entries) ->
+    same(Entries, erx_f2fs_codec:sit_block(erx_f2fs_codec:encode_sit_block(Entries), Used));
+round_trip(summary_block, [_Block], Summary) ->
+    same(Summary, erx_f2fs_codec:summary_block(erx_f2fs_codec:encode_summary_block(Summary)));
+round_trip(inode, [Super, Nid, _Block], #{addresses := _, i_ext := Extent} = Inode) ->
+    Written = Inode#{i_ext := Extent#{len := 0}},
+    same(Written, erx_f2fs_codec:inode(Super, Nid, erx_f2fs_codec:encode_inode(Super, Written)),
+         i_inode_checksum);
+round_trip(Node, [Nid, Ino, Offset, Block], Words)
+  when Node =:= direct_node; Node =:= indirect_node ->
+    {ok, Footer} = erx_f2fs_codec:node_footer(Block),
+    Encoded = case Node of
+                  direct_node -> erx_f2fs_codec:encode_direct_node(Words, Footer);
+                  indirect_node -> erx_f2fs_codec:encode_indirect_node(Words, Footer)
+              end,
+    same(Words, erx_f2fs_codec:Node(Nid, Ino, Offset, Encoded)),
+    same(Footer, erx_f2fs_codec:node_footer(Encoded));
+round_trip(dentry_block, [_Block], Dentries) ->
+    same(Dentries, erx_f2fs_codec:dentry_block(erx_f2fs_codec:encode_dentry_block(Dentries)));
+round_trip(_Structure, _Arguments, _Value) ->
+    ok.
+
+same(Value, {ok, Value}) -> ok;
+same(Value, Other) -> fail(round_trip, {Value, Other}).
+
+%% The same, but for the checksum a map holds at Checksum.
+same(Value, {ok, Read}, Checksum) -> same(maps:remove(Checksum, Value), {ok, maps:remove(Checksum, Read)});
+same(Value, Other, _Checksum) -> same(Value, Other).
 
 outcome(Structure, {ok, _}) -> {Structure, ok};
 outcome(_Structure, {error, {Failed, Rule}}) when is_tuple(Rule) -> {Failed, element(1, Rule)};

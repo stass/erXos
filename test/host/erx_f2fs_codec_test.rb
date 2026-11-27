@@ -66,7 +66,21 @@ class ErxF2fsCodecTest < Minitest::Test
     Seed.new(fault: "inline data's block bound off by one",
              anchor: '    require(Blocks - 1 =< XattrBlocks andalso',
              replacement: '    require(Blocks - 1 =< XattrBlocks + 1 andalso',
-             failure: /each_inode_rule_fails_with_its_name[^\n]*inline_data_blocks[^\n]*failed/)
+             failure: /each_inode_rule_fails_with_its_name[^\n]*inline_data_blocks[^\n]*failed/),
+    Seed.new(fault: "the checkpoint's CRC over the bytes before its checksum alone",
+             anchor: '    crc(?ERX_F2FS_MAGIC, [Before, After]).',
+             replacement: '    crc(?ERX_F2FS_MAGIC, [Before]).',
+             failure: /a_checkpoint_checksum_is_computed_at_its_offset_test[^\n]*failed/),
+    Seed.new(fault: "a direct node's footer written with its nid and ino swapped",
+             anchor: '    erx_abi_packed:encode(erx_f2fs_direct_node, #{addr => Addresses, footer => Footer}).',
+             replacement: "    \#{nid := Nid, ino := Ino} = Footer,\n" \
+                          '    erx_abi_packed:encode(erx_f2fs_direct_node, ' \
+                          '#{addr => Addresses, footer => Footer#{nid := Ino, ino := Nid}}).',
+             failure: /direct_and_indirect_nodes_encode_to_their_blocks[^\n]*failed/),
+    Seed.new(fault: "a dentry block's reserved bytes left nonzero",
+             anchor: '    iolist_to_binary([Stored, <<0:(Reserved * 8)>>,',
+             replacement: '    iolist_to_binary([Stored, <<1:(Reserved * 8)>>,',
+             failure: /a_dentry_block_encodes_to_its_block_test[^\n]*failed/)
   ].freeze
 
   def test_eunit_cases_pass
