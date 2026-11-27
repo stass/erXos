@@ -43,11 +43,14 @@ class ErxFatTest < Minitest::Test
               from: 'andalso not lists:any(fun(C) -> C < 16#20 end, unicode:characters_to_list(Text))', to: '',
               caught_by: 'a_label_holding_a_control_is_not_shown_test'),
     Fault.new(name: 'a FAT too small for its clusters admitted',
-              from: 'andalso FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)', to: '',
+              from: '{fat_size, FatSectors * ?SECTOR >= (Clusters + 2) * (Type div 8)},',
+              to: '{fat_size, FatSectors >= 0},',
               caught_by: 'a_boot_sector_the_server_does_not_admit_is_refused_test'),
     Fault.new(name: 'a FAT32 volume of a later version or past the largest count of clusters admitted',
-              from: '             andalso (Type =:= 16 orelse (Version =:= ?VERSION_32 andalso Clusters =< ?CLUSTERS_MAX_32))),',
-              to: '             andalso (Type =:= 16 orelse Version + Clusters >= 0)),',
+              from: "{version, Type =:= 16 orelse Version =:= ?VERSION_32},\n" \
+                    "              {cluster_count, Type =:= 16 orelse Clusters =< ?CLUSTERS_MAX_32}]),",
+              to: "{version, Type =:= 16 orelse Version >= 0},\n" \
+                  "              {cluster_count, Type =:= 16 orelse Clusters >= 0}]),",
               caught_by: 'fat32s_version_and_largest_count_of_clusters_are_checked_test'),
     Fault.new(name: 'an FSInfo sector outside the reserved area written',
               from: 'fsinfo = case FsInfo of N when N >= 1, N < Reserved -> N; _ -> none end,',
