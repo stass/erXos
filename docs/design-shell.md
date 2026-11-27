@@ -340,9 +340,9 @@ shell and for `erx:` functions that run commands:
    ([design-network-stack.md](design-network-stack.md)); `reboot` and
    `halt`, which follow FreeBSD's reboot(8), need the `machine` grant and
    write one end to `/svc/machine/ctl`
-   ([design-system.md](design-system.md#a-sessions-request)); `fsck_msdosfs`
-   and `fsck`, which follow FreeBSD's fsck_msdosfs(8) and fsck(8) over a
-   check the media domain runs ([design-fsck-msdosfs.md](design-fsck-msdosfs.md));
+   ([design-system.md](design-system.md#a-sessions-request)); `fsck_fat`
+   and `fsck`, which make the repairs FreeBSD's fsck_msdosfs(8) makes, with
+   options of their own, over a drive's raw sectors ([design-fsck-fat.md](design-fsck-fat.md));
    and erXos's own `i`, `domains`, `source`, `trace`,
    `attach`, `mount` and `umount` ([Interfaces](#interfaces)), and `load`, which loads code
    into a domain through the session's install or code facet

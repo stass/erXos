@@ -18,7 +18,7 @@
 > **Designed:** the slot writer, updates with a trial boot and a
 > commit, the reset count, the vault's storage domain, drives, whose
 > FAT and EROFS volumes the media domain serves at `/media`, checking
-> and repairing a drive's FAT volume with `fsck_msdosfs`,
+> and repairing a drive's FAT volume with `fsck_fat` over its raw sectors,
 > and erXos's F2FS as a mounted file system with its power-cut harness.
 
 **Background needed.** [Chapter 1](01-operating-systems.md) (block
@@ -485,19 +485,21 @@ cluster and that every directory's `..` names its parent. The FAT server
 is designed and not built.
 
 A volume that fails those conditions, or that a pulled stick left
-marked dirty, mounts read-only, and `fsck_msdosfs` repairs it as
-FreeBSD's does, with the same flags, messages and exit statuses
-([design-fsck-msdosfs.md](../design-fsck-msdosfs.md)). The check is a
-**remount**: the command writes `fsck s1 -y` to the drive's `ctl`, and
-the media domain ends the volume's mount and starts the volume's process
-again with a check to run first. That process decides every repair in
-memory, then writes them all in one ordered plan that marks the volume
-dirty first and clean last, takes references away before adding new
-ones and frees clusters last, so a stick pulled during a repair is left
-no worse and the next run finishes it. It then mounts the volume as any
-volume mounts, writable once the repair has made it consistent. The
-report comes back as a file beside the volume, `s1.fsck`, so no session
-ever reads a stick's sectors. This is designed and not built.
+marked dirty, mounts read-only, and `fsck_fat` repairs it, making the
+repairs FreeBSD's checker makes ([design-fsck-fat.md](../design-fsck-fat.md)).
+It is an ordinary program. The media domain serves each drive's raw
+sectors as files, `/media/disk0/data` for the medium whole and
+`/media/disk0/s1.data` for one volume, to the sessions a manifest allows,
+root's among them; opening one for writing takes the volumes it covers
+out of service, and the last close puts them back under the ordinary
+mount rule ([design-drives.md, Raw sectors](../design-drives.md#raw-sectors)).
+`fsck_fat` reads `s1.data` through the FAT server's own decoders, used
+as a library, decides every repair in memory, shows them all, asks once,
+and writes them in one ordered plan that marks the volume dirty first
+and clean last, takes references away before adding new ones and frees
+clusters last, so a stick pulled during a repair is left no worse and
+the next run finishes it. Any other program, a `dd` or a user's own
+repairer, can open the same files. This is designed and not built.
 
 ### 16.5.2 Drives
 

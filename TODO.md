@@ -184,7 +184,7 @@ document's "residual risks accepted" paragraph.
 * [Domains and the system manifest](docs/todo-domains.md#planned-features): the domain service, domains, the code service, facets, the system manifest and its checks, the funnel.
   14 items (6 Medium, 8 Low).
 * [Network](docs/todo-network.md#planned-features): the network stack (`erx_net`), WiFi and HTTPS clients.
-  21 items (8 Medium, 13 Low).
+  21 items (9 Medium, 12 Low).
 * [USB](docs/todo-usb.md#planned-features): the USB stack and its class drivers.
   8 items (4 Medium, 4 Low).
 * [Bluetooth](docs/todo-bluetooth.md#planned-features): the Bluetooth host and controller, GATT and the security manager.

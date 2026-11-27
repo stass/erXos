@@ -1859,7 +1859,7 @@ designed. It maps the format onto the file protocol as follows:
   their short name alone, so that a file the cut batch renames may be
   under its old name, its new name or none, and a name found missing
   may leave its long-name entries live without their short entry, which
-  `fsck_msdosfs` removes ([design-fsck-msdosfs.md](design-fsck-msdosfs.md)); and leaves at most lost
+  `fsck_fat` removes ([design-fsck-fat.md](design-fsck-fat.md)); and leaves at most lost
   clusters, the clusters of a name found missing among them, and chains
   longer than their files' sizes, whose clusters past the size are the
   file's own, allocated and reached by no other chain or name. A volume
@@ -1871,7 +1871,7 @@ designed. It maps the format onto the file protocol as follows:
   and the medium mounts read-only as dirty when it next mounts. A volume
   found dirty, or whose FAT records a hard error, mounts read-only and
   reports it, so the files can be copied off and the volume repaired by
-  `fsck_msdosfs`, on erXos ([design-fsck-msdosfs.md](design-fsck-msdosfs.md))
+  `fsck_fat`, on erXos ([design-fsck-fat.md](design-fsck-fat.md))
   or on another machine, never by a guess of the server's. Every guarantee above rests
   on the medium's flushes, and on the volume's chains and names starting
   as the batches keep them, so a FAT volume mounts writable only under the
