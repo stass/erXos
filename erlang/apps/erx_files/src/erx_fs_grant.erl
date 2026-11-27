@@ -149,9 +149,10 @@ check rejected, a clunk, an owner's end.
                 %% callbacks and replaces with their next tree.
                 fs :: {ok, term()} | {own, term()},
                 %% The tree the grant reaches files of and the step a walk from NOFID
-                %% starts at, the root the start admitted (new/1).
-                tree :: binary(),
-                root :: place(),
+                %% starts at, the root the start admitted (new/1); undefined only inside
+                %% new/1, while the grant asks its tree for the root.
+                tree :: binary() | undefined,
+                root :: place() | undefined,
                 rights :: rights(),
                 client :: client(),
                 self :: pid(),
@@ -1151,7 +1152,7 @@ new_fid_admissible(Fid, #grant{fids = Fids, closing = Closing, pool = Pool}) ->
 %% and their monitors: an owner is recorded, and monitored, exactly while it
 %% owns a fid and lives.
 add_fid(Fid, Owner, At, Grant) ->
-    #grant{owners = Owners, effects = Effects} = Grant1 = place(Fid, #fid{owner = Owner}, At, Grant),
+    #grant{owners = Owners, effects = Effects} = Grant1 = place(Fid, #fid{owner = Owner, at = At}, At, Grant),
     case Owners of
         #{Owner := #owner{fids = Owned} = Record} ->
             Grant1#grant{owners = Owners#{Owner := Record#owner{fids = Owned#{Fid => []}}}};
