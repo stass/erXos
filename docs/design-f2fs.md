@@ -2272,9 +2272,13 @@ workload's end state and the harness's sampled states):
 passes only with exit status 0 and no line beginning `[ASSERT]`, `[FIX]`,
 `[Fail]` or `[FSCK] fixing` ([T 75]) and no `Reconnect` line, since
 `fsck.f2fs` repairs some faults silently in check mode and exits 0
-([T 41]); the one exception is the whole line `[FSCK] fixing SIT types`,
-which `fsck.f2fs` 1.16.0 prints on every fresh image of Linux's own
-`mkfs.f2fs` as well (`~/erxos-history/notes/f2fs-oracle-2026-11-27/README.md`); a mount with recovery whose listing must equal erXos's replayed
+([T 41]), except a line the same boot's control, a fresh image of Linux's
+own `mkfs.f2fs` of the same size, printed verbatim: `fsck.f2fs` 1.16.0
+prints `[FSCK] fixing SIT types` on those too
+(`~/erxos-history/notes/f2fs-oracle-2026-11-27/README.md`), so such a line
+says nothing about the image, while one only erXos's image prints fails
+it (a fault `fsck.f2fs` reports with a line the control prints too stays
+hidden); a mount with recovery whose listing must equal erXos's replayed
 tree; an `ro,norecovery` mount whose listing must equal erXos's
 checkpoint tree; and `fsck.f2fs -l`, whose superblock and checkpoint
 fields must equal erXos's decode ([T 79]). Each must hold on its own,
@@ -2332,7 +2336,44 @@ kernel, and fails the suite when the fact changes:
 
 ### The guest's batches
 
-The guest runs erXos's F2FS, the harness and the generator on its OTP,
+A batch is one boot, and the host alone judges it. Its one input is a
+read-only batch disk the host writes (`tools/lib/erx/f2fs_oracle_guest.rb`):
+the guest script `test/f2fs/oracle_guest.sh` with the batch's calls
+appended, f2fs-tools' package and the images, each at a MiB-aligned
+offset. The kernel command line has systemd run the script from the
+disk's start as its one service and power the machine off at its end.
+Each image is a read-only loop device over its extent of that disk, so
+nothing the guest runs writes it. Per image the guest runs `fsck.f2fs -f
+--dry-run`, answering "n" to every prompt, an `ro,norecovery` mount, a
+record of the mounted tree and the kernel's messages; per probe it first
+formats a blank image of the asked size with Linux's own `mkfs.f2fs` on
+a scratch `tmpfs`, then examines it as erXos's images are.
+
+Its one output is its lines on the serial console, which it shares with
+the kernel. Each begins `erx-f2fs: `: a step's output as base64 chunks
+followed by a line of its size and SHA-256, each step's exit status, the
+kernel's release and a last line `done`. The host's reader refuses the
+whole batch on any line with that prefix outside the grammar, the prefix
+inside a line, a line after `done`, a name the batch never asked for, a
+step or status printed twice, and a step whose chunks do not decode to
+the bytes its size line states, so a line the console lost or broke
+never passes as a shorter output. The serial log is read up to a bound.
+
+The verdicts are the host's. `fsck.f2fs` passes an image as [The Linux
+oracle guest](#the-linux-oracle-guest) states, a failing line passing
+only if the same boot's control, Linux's own fresh format of the same
+size, printed it verbatim. A tree's record (path, kind, permission bits,
+link count, inode, size, and a file's SHA-256 over its first 64 MiB or a
+symlink's target) is read by `erx_f2fs_listing:record_reader/1` and
+compared with erXos's listing by `erx_f2fs_listing:diff/2`, the
+comparison every F2FS test uses ([Testing on the host](#testing-on-the-host)),
+link classes included. The boot and the batch each have a deadline, the
+batch's growing with the names it holds; a batch that passes one is
+reported timed out, never passed.
+
+The host-judged batch above is the current implementation of the
+target batch.
+In the target batch the guest runs erXos's F2FS, the harness and the generator on its OTP,
 so an image is written, checked and read back without leaving it. Its
 one input is a read-only EROFS disk of the compiled modules, seeds and
 tree declarations; its one output is the serial log, with verdicts,

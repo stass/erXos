@@ -44,20 +44,21 @@ tools() {
 	dmesg -C
 }
 
-# record: the tree under the current directory, each name as six NUL-terminated fields:
-# its path, its type and permission bits as find prints them (%y, %m), its link count,
-# its size, and the SHA-256 of a regular file's first $hashed bytes, a symlink's target,
-# a device's major and minor in hex, or nothing; `!` for content Linux does not let it
-# read, an encrypted file without its key or a path past PATH_MAX among them. find
-# walks by directory, so no path length stops it, and a failing find fails the record.
+# record: the tree under the current directory, each name as seven NUL-terminated
+# fields, the form erx_f2fs_listing:record_reader/1 reads: its path, its type and
+# permission bits as find prints them (%y, %m), its link count, its inode, its size, and
+# `=` and the SHA-256 of a regular file's first $hashed bytes or a symlink's target, `!`
+# for content Linux does not let it read (an encrypted file without its key or a path
+# past PATH_MAX among them), or nothing for any other kind. find walks by directory, so
+# no path length stops it, and a failing find fails the record.
 record() {
-	find . -printf '%p\0%y\0%m\0%n\0%s\0' 2>/dev/null | while IFS= read -r -d '' path; do
-		IFS= read -r -d '' type && IFS= read -r -d '' mode && IFS= read -r -d '' links && IFS= read -r -d '' size || exit 1
-		printf '%s\0%s\0%s\0%s\0%s\0' "$path" "$type" "$mode" "$links" "$size"
+	find . -printf '%p\0%y\0%m\0%n\0%i\0%s\0' 2>/dev/null | while IFS= read -r -d '' path; do
+		IFS= read -r -d '' type && IFS= read -r -d '' mode && IFS= read -r -d '' links &&
+			IFS= read -r -d '' inode && IFS= read -r -d '' size || exit 1
+		printf '%s\0%s\0%s\0%s\0%s\0%s\0' "$path" "$type" "$mode" "$links" "$inode" "$size"
 		case $type in
-		f) sum=$(head -c "$hashed" 2>/dev/null <"$path" | sha256sum) && printf '%.64s' "$sum" || printf '!' ;;
-		l) readlink -n -- "$path" 2>/dev/null || printf '!' ;;
-		c | b) stat --printf='%t,%T' -- "$path" 2>/dev/null || printf '!' ;;
+		f) sum=$(head -c "$hashed" 2>/dev/null <"$path" | sha256sum) && printf '=%.64s' "$sum" || printf '!' ;;
+		l) target=$(readlink -n -- "$path" 2>/dev/null && printf x) && printf '=%s' "${target%x}" || printf '!' ;;
 		esac
 		printf '\0'
 	done

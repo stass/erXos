@@ -25,6 +25,10 @@ class F2fsOracleGuestTest < Minitest::Test
   GUEST = Erx::F2fsOracleGuest
   NAMES = %w[vault].freeze
   ORACLE_OFF = 'the F2FS oracle guest boots Linux under QEMU for minutes; set ERX_F2FS_ORACLE=1 to run it'
+  # What the guest printed for an image it never reached.
+  NOTHING = Erx::F2fsOracleGuest::Result.new(outputs: {}, statuses: {})
+  # A record (erx_f2fs_listing:record_reader/1) of the root alone: an empty file system.
+  ROOT_ONLY = /\A\.\0d\0[0-7]{1,6}\0[0-9]{1,20}\0[0-9]{1,20}\0[0-9]{1,20}\0\0\z/n
   TESTS = %w[test/erlang/erx_f2fs_codec_tests.erl test/erlang/erx_f2fs_corpus.erl test/erlang/erx_f2fs_mount_tests.erl
              test/erlang/erx_f2fs_core_tests.erl test/erlang/erx_f2fs_listing.erl
              test/erlang/erx_f2fs_volume_tests.erl].freeze
@@ -46,7 +50,7 @@ class F2fsOracleGuestTest < Minitest::Test
     result = batch.results.fetch('vault')
     assert_equal({ 'fsck' => "Info: ok\n[FSCK] done\n", 'mount' => '' }, result.outputs)
     assert_equal({ 'fsck' => 0, 'mount' => 32 }, result.statuses)
-    assert_equal :pass, GUEST.fsck_verdict(result)
+    assert_equal :pass, GUEST.fsck_verdict(result, control: result)
   end
 
   def test_read_refuses_a_line_of_no_known_form
@@ -96,34 +100,33 @@ class F2fsOracleGuestTest < Minitest::Test
     end
   end
 
-  # fsck.f2fs repairs some faults in check mode and exits 0, so its lines decide too.
+  # fsck.f2fs repairs some faults in check mode and exits 0, so its lines decide too; a
+  # failing line passes only if the same boot's control printed it verbatim.
   def test_fsck_fails_on_a_repair_line_or_a_status
     result = ->(output, code) { GUEST::Result.new(outputs: { 'fsck' => output }, statuses: { 'fsck' => code }.compact) }
-    assert_equal :pass, GUEST.fsck_verdict(result.call("Info: clean\n", 0))
-    assert_equal :pass, GUEST.fsck_verdict(result.call("[FSCK] fixing SIT types\n", 0))
-    ["[FIX] (fsck_chk_inode_blk: 1)\n", "[ASSERT] (sanity_check_nid)\n", "[FSCK] fixing SIT types and more\n",
-     "[FSCK] fixing SIT\n", "[FSCK] fixing NAT\n", "Info: Reconnect 1 files\n"].each do |output|
-      refute_equal :pass, GUEST.fsck_verdict(result.call(output, 0)), output
+    clean = result.call("Info: clean\n", 0)
+    assert_equal :pass, GUEST.fsck_verdict(clean, control: clean)
+    ["[FIX] (fsck_chk_inode_blk: 1)\n", "[ASSERT] (sanity_check_nid)\n", "[FSCK] fixing SIT types\n", "[FSCK] fixing NAT\n",
+     "Info: Reconnect 1 files\n"].each do |output|
+      refute_equal :pass, GUEST.fsck_verdict(result.call(output, 0), control: clean), output
     end
-    refute_match(/\e/, GUEST.fsck_verdict(result.call("[FIX] \e[2J\n", 0)))
-    assert_equal 'fsck.f2fs exited 255', GUEST.fsck_verdict(result.call('', 255))
-    assert_equal 'fsck.f2fs did not report its exit status', GUEST.fsck_verdict(result.call('', nil))
+    refute_match(/\e/, GUEST.fsck_verdict(result.call("[FIX] \e[2J\n", 0), control: clean))
+    assert_equal 'fsck.f2fs exited 255', GUEST.fsck_verdict(result.call('', 255), control: clean)
+    assert_equal 'fsck.f2fs did not report its exit status', GUEST.fsck_verdict(result.call('', nil), control: clean)
   end
 
-  def test_listing_reads_each_kind
-    record = ['.', 'd', '755', '3', '4096', '', './a', 'f', '644', '1', '3', 'ab' * 32, './l', 'l', '777', '1', '1', 'a',
-              './d/c', 'c', '620', '1', '0', '1,3', './e', 'f', '4755', '1', '2', '!', ''].join("\0")
-    listing = GUEST.listing(record)
-    assert_equal({ kind: 'directory', mode: 0o755, links: 3, size: 4096, content: '' }, listing.fetch(''))
-    assert_equal 'regular', listing.fetch('a').fetch(:kind)
-    assert_equal 'a', listing.fetch('l').fetch(:content)
-    assert_equal({ kind: 'character', mode: 0o620, links: 1, size: 0, content: [1, 3] }, listing.fetch('d/c'))
-    assert_equal({ kind: 'regular', mode: 0o4755, links: 1, size: 2, content: '!' }, listing.fetch('e'))
-    assert_raises(Erx::Error) { GUEST.listing("./a\0zz\0") }
-    assert_raises(Erx::Error) { GUEST.listing(['./a', 'x', '644', '1', '0', '', ''].join("\0")) }
-    assert_raises(Erx::Error) { GUEST.listing(['./a', 'f', '9', '1', '0', '', ''].join("\0")) }
-    assert_raises(Erx::Error) { GUEST.listing(['./a', 'f', '644', '-1', '0', '', ''].join("\0")) }
-    assert_raises(Erx::Error) { GUEST.listing((['./a', 'f', '644', '1', '0', ''] * 2).join("\0") + "\0") }
+  # A failing line the control printed verbatim says nothing about the image; the seeded
+  # fault is the first case: a line only the image prints, which must fail.
+  def test_fsck_benign_lines_are_the_controls
+    result = ->(output) { GUEST::Result.new(outputs: { 'fsck' => output }, statuses: { 'fsck' => 0 }) }
+    control = result.call("Info: ok\n[FSCK] fixing SIT types\n")
+    { "[FSCK] fixing SIT types\n" => GUEST::Result.new(outputs: {}, statuses: {}),
+      "[FSCK] fixing SIT types and more\n" => control, "[FSCK] fixing SIT\n" => control,
+      "[FSCK] fixing SIT types\n[FIX] (nat)\n" => control }.each do |output, against|
+      refute_equal :pass, GUEST.fsck_verdict(result.call(output), control: against), output
+    end
+    assert_equal :pass, GUEST.fsck_verdict(result.call("Info: other\n[FSCK] fixing SIT types\n"), control: control)
+    assert_equal :pass, GUEST.fsck_verdict(control, control: control)
   end
 
   # The script fills the first MiB; each file follows at a MiB-aligned offset, as the
@@ -160,54 +163,67 @@ class F2fsOracleGuestTest < Minitest::Test
   end
 
   # erXos's format, one segment a section (docs/design-f2fs.md, "Formatting a volume"),
-  # at the vault's size, the packed data partition's and 1 GiB, and Linux's own
-  # mkfs.f2fs at the same sizes: fsck.f2fs finds nothing to repair, and
-  # Linux mounts each read-only and lists only the empty root.
+  # at the vault's size, the packed data partition's and 1 GiB, each beside its control,
+  # Linux's own mkfs.f2fs at the same size: fsck.f2fs finds nothing to repair that the
+  # control does not show too, and Linux mounts each read-only and lists only the empty
+  # root.
   def test_erxos_and_linux_formats_pass_fsck_and_mount_empty
     runner, directory = guest('formats')
     images = { 'vault' => 64 << 11, 'data' => Erx::MediumImage::PACKED_DATA_SECTORS,
                'large' => 1 << 21 }.map do |name, sectors|
       GUEST::Image.new(name: name, path: format(directory, name, sectors: sectors, runner: runner))
     end
-    probes = [GUEST::Probe.new(name: 'linux-vault', mib: 64), GUEST::Probe.new(name: 'linux-data', mib: 128),
-              GUEST::Probe.new(name: 'linux-large', mib: 1024)]
-    batch, = GUEST.run(root: ROOT, runner: runner, images: images, probes: probes, directory: directory)
+    controls = images.to_h do |image|
+      [image.name, GUEST::Probe.new(name: "linux-#{image.name}", mib: File.size(image.path) >> 20)]
+    end
+    batch, = GUEST.run(root: ROOT, runner: runner, images: images, probes: controls.values, directory: directory)
     keep(directory, batch)
     assert batch.done, 'the guest did not reach its end'
-    results = [*images, *probes].to_h { |image| [image.name, batch.results.fetch(image.name)] }
-    probes.each { |probe| assert_equal 0, results.fetch(probe.name).statuses['mkfs'], escaped(results.fetch(probe.name), 'mkfs') }
+    results = [*images, *controls.values].to_h { |image| [image.name, batch.results.fetch(image.name, NOTHING)] }
+    controls.each_value { |probe| assert_equal 0, results.fetch(probe.name).statuses['mkfs'], escaped(results.fetch(probe.name), 'mkfs') }
     results.each do |name, result|
       assert_equal 0, result.statuses['mount'], "#{name}:\n#{escaped(result, 'mount')}#{escaped(result, 'dmesg')}"
       assert_equal 0, result.statuses['list'], name
-      assert_equal [''], GUEST.listing(result.outputs.fetch('list')).keys, name
+      assert_match ROOT_ONLY, result.outputs.fetch('list'), name
     end
-    failed = results.reject { |_name, result| GUEST.fsck_verdict(result) == :pass }
-    assert_empty failed.keys, failed.map { |name, result| "#{name}: #{GUEST.fsck_verdict(result)}\n#{escaped(result, 'fsck')}" }.join("\n")
+    # Each image is judged against its control, and each control against itself.
+    control_of = controls.to_h { |name, probe| [name, probe.name] }
+    verdicts = results.to_h do |name, result|
+      [name, GUEST.fsck_verdict(result, control: results.fetch(control_of.fetch(name, name)))]
+    end
+    failed = verdicts.reject { |_name, verdict| verdict == :pass }
+    assert_empty failed.keys, failed.map { |name, verdict| "#{name}: #{verdict}\n#{escaped(results.fetch(name), 'fsck')}" }.join("\n")
   end
 
   # Every corpus image erXos mounts, listed by Linux's ro,norecovery mount, equals erXos's
-  # listing of its whole tree: names, kinds, modes, links, sizes, the SHA-256 of each file's
-  # first GUEST::HASHED_BYTES and
-  # each symlink's target (a device's number is not compared: erXos's core reader states
-  # none). The corpus is hostile, so it boots on its own.
+  # listing of its whole tree by erx_f2fs_listing:diff/2: names, kinds, modes, links, link
+  # classes, sizes, the SHA-256 of each file's first GUEST::HASHED_BYTES and each
+  # symlink's target. Linux's record of each image it mounted and listed goes to
+  # NAME.linux beside the image for erx_f2fs_volume_tests:oracle_compare/1, which reads it
+  # with erx_f2fs_listing:record_reader/1. The corpus is hostile, so it boots on its own.
   def test_linux_lists_the_corpus_as_erxos_does
     runner, directory = guest('corpus')
     trees = File.join(directory, 'trees')
     Dir.mkdir(trees)
-    erxos_trees(trees)
-    images = Dir.glob(File.join(trees, '*.img')).sort.map do |path|
-      GUEST::Image.new(name: File.basename(path, '.img'), path: path, origin: :foreign)
+    Dir.mktmpdir('erx-f2fs-oracle-erlang') do |work|
+      ErlangBuild.compile(work, applications: %w[erx erx_files erx_blk erx_f2fs], tests: TESTS)
+      erxos(work, 'oracle_images', trees, seconds: 60)
+      images = Dir.glob(File.join(trees, '*.img')).sort.map do |path|
+        GUEST::Image.new(name: File.basename(path, '.img'), path: path, origin: :foreign)
+      end
+      batch, = GUEST.run(root: ROOT, runner: runner, images: images, directory: directory)
+      keep(directory, batch)
+      assert batch.done, 'the guest did not reach its end'
+      batch.results.each do |name, result|
+        next unless result.statuses['mount'] == 0 && result.statuses['list'] == 0
+
+        File.binwrite(File.join(trees, "#{name}.linux"), result.outputs.fetch('list'))
+      end
+      erxos(work, 'oracle_compare', trees, GUEST::HASHED_BYTES.to_s, seconds: 180)
     end
-    batch, = GUEST.run(root: ROOT, runner: runner, images: images, directory: directory)
-    keep(directory, batch)
-    assert batch.done, 'the guest did not reach its end'
-    listed = images.select { |image| File.file?(File.join(trees, "#{image.name}.listing")) }
-    assert_operator listed.size, :>=, 2
-    compared = listed.to_h { |image| [image.name, compare(image.name, batch.results.fetch(image.name), trees)] }
-    File.write(File.join(directory, 'uncompared.txt'), compared.values.flat_map(&:last).map { |line| "#{line}\n" }.join)
-    differences = compared.values.flat_map(&:first)
-    File.write(File.join(directory, 'differences.txt'), differences.map { |line| "#{line}\n" }.join)
-    assert_empty differences, differences.first(40).join("\n")
+    assert_operator File.readlines(File.join(trees, 'compared.txt')).size, :>=, 2
+    differences = File.binread(File.join(trees, 'differences.txt')).lines
+    assert_empty differences, differences.first(40).map { |line| Erx::LineEscape.escape(line.chomp) }.join("\n")
   end
 
   private
@@ -229,7 +245,7 @@ class F2fsOracleGuestTest < Minitest::Test
   def keep(directory, batch)
     results = File.join(directory, 'results')
     Dir.mkdir(results)
-    File.write(File.join(results, 'kernel'), "#{Erx::LineEscape.escape(batch.kernel)}\n")
+    File.write(File.join(results, 'kernel'), "#{Erx::LineEscape.escape(batch.kernel.to_s)}\n")
     batch.results.each do |name, result|
       result.outputs.each { |step, bytes| File.binwrite(File.join(results, "#{name}.#{step}"), bytes) }
       File.write(File.join(results, "#{name}.statuses"), result.statuses.map { |step, code| "#{step} #{code}\n" }.join)
@@ -252,60 +268,15 @@ class F2fsOracleGuestTest < Minitest::Test
     path
   end
 
-  # The corpus images and erXos's listing of each, written to directory by
-  # erx_f2fs_volume_tests:oracle_trees/2 on stock's emulator.
-  def erxos_trees(directory)
-    Dir.mktmpdir('erx-f2fs-oracle-trees') do |work|
-      ErlangBuild.compile(work, applications: %w[erx erx_files erx_blk erx_f2fs], tests: TESTS)
-      output, status = Open3.capture2e(
-        { 'ERX_F2FS_CORPUS' => File.join(ROOT, 'build/third_party'), 'ERX_DEPS_LOCK' => File.join(ROOT, 'deps.lock') },
-        'gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
-        "erx_f2fs_volume_tests:oracle_trees(\"#{directory}\", #{GUEST::HASHED_BYTES}), halt(0).", chdir: work, stdin_data: ''
-      )
-      assert status.success?, Erx::LineEscape.escape(output)
-    end
-  end
-
-  # The differences between Linux's listing of the image named name and erXos's, and the
-  # paths not compared: each where erXos answers an error (an encrypted directory, which
-  # erXos does not read), and everything beneath it.
-  def compare(name, result, trees)
-    line = ->(text) { Erx::LineEscape.escape("#{name}: #{text}") }
-    return [[line.("Linux does not mount it: #{result.outputs.fetch('mount', '')}")], []] unless result.statuses['mount'].zero?
-    return [[line.("Linux's listing failed with status #{result.statuses['list'].inspect}")], []] unless result.statuses['list']&.zero?
-
-    linux = GUEST.listing(result.outputs.fetch('list')).transform_values { |entry| comparable(entry) }
-    erxos = erxos_listing(File.binread(File.join(trees, "#{name}.listing")))
-    refused = erxos.select { |_path, entry| entry.key?(:error) }.keys
-    skipped, paths = (linux.keys | erxos.keys).sort.partition do |path|
-      refused.any? { |root| path == root || path.start_with?("#{root}/") }
-    end
-    [paths.reject { |path| linux[path] == erxos[path] }.map { |path| line.("#{path.inspect}: Linux #{linux[path].inspect}, erXos #{erxos[path].inspect}") },
-     skipped.map { |path| line.("#{path.inspect}: not compared, erXos answers #{erxos.dig(path, :error) || 'an error above it'}") }]
-  end
-
-  # erXos's listing lines as path to entry, in the form comparable/1 gives Linux's.
-  def erxos_listing(text)
-    lines = text.b.lines(chomp: true)
-    assert_equal lines.size, lines.map { |line| line.split(' ').first }.uniq.size, 'erXos lists a path twice'
-    lines.to_h do |line|
-      path, word, *fields = line.split(' ')
-      name = path == '-' ? '' : [path].pack('H*')
-      next [name, { error: fields.join(' ') }] if word == 'error'
-
-      mode, links, size, content = fields
-      [name, { kind: word, mode: Integer(mode, 8), links: Integer(links, 10), size: Integer(size, 10),
-               content: content == '-' ? '' : content }]
-    end
-  end
-
-  # Linux's entry with a symlink's target in hex, as erXos's listing writes it, and a
-  # device's number left out.
-  def comparable(entry)
-    case entry
-    in { kind: 'symlink', content: } then entry.merge(content: content.unpack1('H*'))
-    in { kind: 'character' | 'block' } then entry.merge(content: '')
-    else entry
-    end
+  # Runs erx_f2fs_volume_tests:FUNCTION on stock's emulator over the modules compiled in
+  # work, the arguments reaching it as plain arguments after -extra.
+  def erxos(work, function, *arguments, seconds:)
+    output, status = Open3.capture2e(
+      { 'ERX_F2FS_CORPUS' => File.join(ROOT, 'build/third_party'), 'ERX_DEPS_LOCK' => File.join(ROOT, 'deps.lock') },
+      'gtimeout', '-k', '10', seconds.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
+      "erx_f2fs_volume_tests:#{function}(init:get_plain_arguments()), halt(0).", '-extra', *arguments,
+      chdir: work, stdin_data: ''
+    )
+    assert status.success?, Erx::LineEscape.escape(output)
   end
 end

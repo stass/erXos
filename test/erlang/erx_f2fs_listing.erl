@@ -29,12 +29,14 @@ time by its inode is directory_reached_twice, so a listing of a damaged tree
 ends and the later path in path order is the one that carries the error; a
 name a directory lists more than once is duplicate_name; and a name no path
 can hold (empty, ".", "..", or holding "/" or NUL) is bad_name, so no reader
-is ever asked about a path that would step outside its tree. A regular
-file's bytes are hashed as the reader folds them in chunks, so a sparse or
-damaged file of any size takes no more memory than one chunk.
+is ever asked about a path that would step outside its tree. A reader that
+holds a file's bytes hashes them with sha256_of/1 as it folds them in
+chunks, so a sparse or damaged file of any size takes no more memory than
+one chunk. record_reader/1 is the reader over the Linux oracle guest's
+record of a mounted tree, which states each file's digest.
 """.
 
--export([of_tree/1, of_tree/2, file_reader/1, diff/2]).
+-export([of_tree/1, of_tree/2, sha256_of/1, file_reader/1, record_reader/1, diff/2]).
 -export_type([listing/0, entry/0, reader/0, stat/0, device/0]).
 
 -include_lib("kernel/include/file.hrl").
@@ -64,12 +66,12 @@ for a device its number, and the owner and the times where it knows them.
 -type answer(Value) :: {ok, Value} | {error, term()}.
 -doc """
 A reader of one tree: a directory's names, without "." and "..", a name's
-stat, a fold of a function over a regular file's bytes in chunks of the
-reader's choosing, in order, and a symlink's target.
+stat, a regular file's SHA-256 (sha256_of/1 hashes a reader's bytes) and a
+symlink's target.
 """.
 -type reader() :: #{list := fun((path()) -> answer([binary()])),
                     stat := fun((path()) -> answer(stat())),
-                    fold := fun((path(), fun((binary(), Acc) -> Acc), Acc) -> answer(Acc)),
+                    sha256 := fun((path()) -> answer(binary())),
                     read_link := fun((path()) -> answer(binary()))}.
 -type entry() :: {path(), #{atom() => term()} | {error, term()}}.
 -type listing() :: [entry()].
@@ -97,6 +99,17 @@ answers with an error changes no other entry.
 diff(Left, Right) ->
     Stated = maps:intersect(stated(Left), stated(Right)),
     merge(comparable(Left, Stated), comparable(Right, Stated)).
+
+-doc """
+The SHA-256 of the bytes Fold gives, for a reader's sha256: Fold folds a
+function over a file's bytes in chunks of its choosing, in order.
+""".
+-spec sha256_of(fun((fun((binary(), Acc) -> Acc), Acc) -> answer(Acc))) -> answer(binary()).
+sha256_of(Fold) ->
+    case Fold(fun(Chunk, State) -> crypto:hash_update(State, Chunk) end, crypto:hash_init(sha256)) of
+        {ok, State} -> {ok, crypto:hash_final(State)};
+        {error, _} = Error -> Error
+    end.
 
 %%% The walk
 
@@ -170,10 +183,9 @@ describe(Reader, Path, {ok, Stat}, Classes, Depth) ->
     end.
 
 %% By kind: a regular file's SHA-256, a symlink's target, a device's number.
-content(#{fold := Fold}, Path, #{kind := regular}) ->
-    Hash = fun(Chunk, State) -> crypto:hash_update(State, Chunk) end,
-    case Fold(Path, Hash, crypto:hash_init(sha256)) of
-        {ok, State} -> #{sha256 => crypto:hash_final(State)};
+content(#{sha256 := Sha256}, Path, #{kind := regular}) ->
+    case Sha256(Path) of
+        {ok, Hash} -> #{sha256 => Hash};
         {error, _} = Error -> Error
     end;
 content(#{read_link := ReadLink}, Path, #{kind := symlink}) ->
@@ -244,7 +256,7 @@ file_reader(Root) ->
       stat => fun(Path) ->
                       file_stat(OsType, file:read_link_info(Absolute(Path), [{time, posix}]))
               end,
-      fold => fun(Path, Fun, Acc) -> fold_file(Absolute(Path), Fun, Acc) end,
+      sha256 => fun(Path) -> sha256_of(fun(Fun, Acc) -> fold_file(Absolute(Path), Fun, Acc) end) end,
       read_link => fun(Path) -> target(file:read_link_all(Absolute(Path))) end}.
 
 names({ok, Names}) -> {ok, [bytes(Name) || Name <- Names]};
@@ -320,3 +332,116 @@ device({unix, freebsd}, Rdev) ->
     {ok, {(Rdev bsr 8) band 16#ff, ((Rdev bsr 24) band 16#ff00) bor (Rdev band 16#ffff00ff)}};
 device(OsType, _Rdev) ->
     {error, {device_encoding, OsType}}.
+
+%%% The reader over the Linux oracle guest's record
+
+-doc """
+The reader of the tree the Linux oracle guest's record describes
+(test/f2fs/oracle_guest.sh's `record`), or the rule the record breaks. The
+record is untrusted bytes: per name seven NUL-terminated fields, its path as
+find prints it ("." for the root, else "./" and the names joined by "/"),
+find's type letter, the permission bits in octal, the link count, the inode,
+the size and the content: "=" and a regular file's SHA-256 in hex or a
+symlink's target, "!" where Linux would not let the guest read it, which the
+reader answers as {error, unreadable}, or nothing for any other kind. A
+device's number is not recorded, since erXos's core reader states none.
+Refused: a record that is not whole entries (partial_entry), names a path
+twice (duplicate_path) or a path of no known form (bad_path), names a path
+whose parent it does not name as a directory (orphan), holds a field of no
+known form (bad_type, bad_number, bad_content) or has no root (no_root).
+""".
+-spec record_reader(binary()) -> {ok, reader()} | {error, {record, atom()}}.
+record_reader(Record) ->
+    try
+        Entries = record_entries(binary:split(Record, <<0>>, [global]), #{}),
+        is_map_key([], Entries) orelse throw(no_root),
+        Children = maps:fold(fun(Path, _Entry, Found) -> record_child(Path, Entries, Found) end,
+                             #{}, Entries),
+        Lookup = fun(Path, Answer) ->
+                         case Entries of
+                             #{Path := Entry} -> Answer(Entry);
+                             #{} -> {error, enoent}
+                         end
+                 end,
+        Content = fun(Kind) ->
+                          fun(Path) ->
+                                  Lookup(Path, fun({#{kind := Of}, Value}) when Of =:= Kind -> Value;
+                                                  (_Entry) -> {error, einval}
+                                               end)
+                          end
+                  end,
+        {ok, #{list => fun(Path) -> Lookup(Path, fun(_) -> {ok, maps:get(Path, Children, [])} end) end,
+               stat => fun(Path) -> Lookup(Path, fun({Stat, _Value}) -> {ok, Stat} end) end,
+               sha256 => Content(regular),
+               read_link => Content(symlink)}}
+    catch
+        throw:Rule -> {error, {record, Rule}}
+    end.
+
+%% Each path to its stat and its content's answer; the record's last field
+%% ends with its NUL, so the split leaves one empty binary after it.
+record_entries([<<>>], Entries) ->
+    Entries;
+record_entries([Path, Type, Mode, Links, Inode, Size, Content | Rest], Entries) ->
+    Names = record_path(Path),
+    is_map_key(Names, Entries) andalso throw(duplicate_path),
+    Kind = record_kind(Type),
+    Stat = #{kind => Kind, mode => record_number(Mode, 8) band ?PERMISSION_MASK,
+             links => record_number(Links, 10), inode => record_number(Inode, 10),
+             size => record_number(Size, 10)},
+    record_entries(Rest, Entries#{Names => {Stat, record_content(Kind, Content)}});
+record_entries(_Fields, _Entries) ->
+    throw(partial_entry).
+
+record_path(<<".">>) ->
+    [];
+record_path(<<"./", Path/binary>>) ->
+    Names = binary:split(Path, <<"/">>, [global]),
+    lists:any(fun(Name) -> lists:member(Name, [<<>>, <<".">>, <<"..">>]) end, Names)
+        andalso throw(bad_path),
+    Names;
+record_path(_Path) ->
+    throw(bad_path).
+
+%% find's %y letters.
+record_kind(<<"f">>) -> regular;
+record_kind(<<"d">>) -> directory;
+record_kind(<<"l">>) -> symlink;
+record_kind(<<"c">>) -> character;
+record_kind(<<"b">>) -> block;
+record_kind(<<"p">>) -> fifo;
+record_kind(<<"s">>) -> socket;
+record_kind(_Type) -> throw(bad_type).
+
+%% Digits of Base only, no sign, at most 20 of them.
+record_number(Field, Base) when byte_size(Field) >= 1, byte_size(Field) =< 20 ->
+    case lists:all(fun(Digit) -> Digit >= $0 andalso Digit < $0 + Base end, binary_to_list(Field)) of
+        true -> binary_to_integer(Field, Base);
+        false -> throw(bad_number)
+    end;
+record_number(_Field, _Base) ->
+    throw(bad_number).
+
+record_content(Kind, <<"!">>) when Kind =:= regular; Kind =:= symlink ->
+    {error, unreadable};
+record_content(regular, <<"=", Hex:64/binary>>) ->
+    try {ok, binary:decode_hex(Hex)} catch error:badarg -> throw(bad_content) end;
+record_content(symlink, <<"=", Target/binary>>) ->
+    {ok, Target};
+record_content(Kind, <<>>) when Kind =/= regular, Kind =/= symlink ->
+    none;
+record_content(_Kind, _Content) ->
+    throw(bad_content).
+
+%% Path among its parent's children; the parent must be a directory the
+%% record names, so the walk from the root reaches every name it holds.
+record_child([], _Entries, Found) ->
+    Found;
+record_child(Path, Entries, Found) ->
+    {Parent, [Name]} = lists:split(length(Path) - 1, Path),
+    case Entries of
+        #{Parent := {#{kind := directory}, _}} ->
+            maps:update_with(Parent, fun(Names) -> [Name | Names] end, [Name], Found);
+        #{} ->
+            throw(orphan)
+    end.

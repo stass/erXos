@@ -23,8 +23,8 @@ module Erx
   # answering no to every question, an `ro,norecovery` mount and a record of the
   # mounted tree, and prints each step's output, its size and SHA-256 and its status on
   # the serial console; per probe it first formats a blank image with Linux's own
-  # `mkfs.f2fs` and prints the image too. Judge and listing here decide what the lines
-  # mean. A batch holds images of one origin, so a hostile image that ends the guest
+  # `mkfs.f2fs` and prints the image too. The reader and judge here decide what the
+  # lines mean; erx_f2fs_listing reads a mounted tree's record (record_reader/1). A batch holds images of one origin, so a hostile image that ends the guest
   # never takes erXos's verdicts with it. Linux and f2fs-tools are GPL and run
   # only as black boxes in the guest. Its pins are its own lock, test/f2fs/deps.lock,
   # fetched on demand (`tools/erx fetch --f2fs-oracle`).
@@ -52,11 +52,13 @@ module Erx
     MEMORY_MIB = 2048
     CPUS = 2
     # A batch's deadlines: the boot, then each image's and probe's checks. A boot takes
-    # under a minute and a batch of 19 corpus images under one more, so the guest test's
-    # two batches end, even at their deadlines, within the test runner's 900 s for one
-    # file (TEST_FILE_DEADLINE in tools/erx).
+    # under a minute and a batch of 19 corpus images under one more. The guest test's
+    # files fit the test runner's 900 s for one file (TEST_FILE_DEADLINE in tools/erx)
+    # even at every deadline: its formats batch of six names 180 s, its corpus batch of
+    # 19 images 310 s and its two runs of erXos's side 60 s and 180 s, 730 s in all,
+    # leaving the rest for compiling and formatting.
     BOOT_SECONDS = 120
-    IMAGE_SECONDS = 15
+    IMAGE_SECONDS = 10
     # The serial log read, at most: a 1 GiB probe's gzipped image is about 1.5 MiB of lines.
     SERIAL_BYTES = 64 << 20
     # A regular file's SHA-256 in a listing covers its first HASHED_BYTES, so a sparse file
@@ -75,13 +77,6 @@ module Erx
     # fsck.f2fs repairs some faults in check mode and still exits 0, so its output is
     # judged too (docs/design-f2fs.md, "The Linux oracle guest").
     FSCK_FAILURE = /\A(\[ASSERT\]|\[FIX\]|\[Fail\]|\[FSCK\] fixing)|Reconnect/
-    # Lines of that form fsck.f2fs 1.16.0 prints on every fresh image of Linux's own
-    # mkfs.f2fs too, each whole, so they say nothing about the image; the history record
-    # notes/f2fs-oracle-2026-11-27 holds the probe.
-    FSCK_BENIGN = ['[FSCK] fixing SIT types'].freeze
-    # find's file type letters (its %y) by kind.
-    KINDS = { 'f' => 'regular', 'd' => 'directory', 'l' => 'symlink', 'c' => 'character', 'b' => 'block', 'p' => 'fifo',
-              's' => 'socket' }.freeze
 
     # One image of a batch: its name in the guest's lines, its file and its origin.
     Image = Data.define(:name, :path, :origin) do
@@ -291,38 +286,22 @@ module Erx
       raise Error, "f2fs oracle: the guest printed a line #{why}: #{LineEscape.escape(line[0, 200])}"
     end
 
-    # fsck.f2fs's verdict on one image: :pass, or the reason it fails.
-    def fsck_verdict(result)
+    # fsck.f2fs's verdict on one image against its control, the same boot's fresh image of
+    # Linux's own mkfs.f2fs at the same size: :pass, or the reason it fails. A failing
+    # line passes only if the control printed it verbatim too: fsck.f2fs 1.16.0 prints
+    # `[FSCK] fixing SIT types` on Linux's own fresh images (history record
+    # notes/f2fs-oracle-2026-11-27), so such a line says nothing about the image, while one
+    # only the image prints fails it. A fault fsck reports with a line the control prints
+    # too stays hidden. A control judged against itself is judged by its exit status alone.
+    def fsck_verdict(result, control:)
       code = result.statuses['fsck']
       return 'fsck.f2fs did not report its exit status' if code.nil?
       return "fsck.f2fs exited #{code}" unless code.zero?
 
-      failed = result.outputs.fetch('fsck').split("\n").grep(FSCK_FAILURE) - FSCK_BENIGN
+      failed = failing_lines(result) - failing_lines(control)
       failed.empty? ? :pass : "fsck.f2fs printed #{failed.size} failing lines, the first #{LineEscape.escape(failed.first[0, 200])}"
     end
 
-    # The guest's record of a mounted tree as a listing: path (names joined by "/", the
-    # root "") to kind, mode (the low 12 bits), links, size and content: the SHA-256 of
-    # the regular file's first HASHED_BYTES, the symlink's target, the device's [major,
-    # minor], or `!` where Linux would not let the guest read it.
-    def listing(record)
-      fields = record.b.split("\0", -1)
-      raise Error, 'f2fs oracle: a tree record is not whole entries' unless fields.pop == '' && (fields.size % 6).zero?
-
-      paths = fields.each_slice(6).map(&:first)
-      raise Error, 'f2fs oracle: a tree record names a path twice' unless paths.uniq.size == paths.size
-
-      fields.each_slice(6).to_h do |path, type, mode, links, size, content|
-        kind = KINDS.fetch(type) { raise Error, "f2fs oracle: a file type of no known kind: #{LineEscape.escape(type)}" }
-        device = %w[character block].include?(kind) && content != '!'
-        raise Error, 'f2fs oracle: a tree record holds a number of no known form' unless [mode, links, size].all?(/\A[0-9]{1,20}\z/)
-
-        [path == '.' ? '' : path.delete_prefix('./'),
-         { kind: kind, mode: Integer(mode, 8) & 0o7777, links: Integer(links, 10), size: Integer(size, 10),
-           content: device ? content.split(',').map { |part| Integer(part, 16) } : content }]
-      end
-    rescue ArgumentError, TypeError => e
-      raise Error, "f2fs oracle: a tree record holds a field of no known form: #{LineEscape.escape(e.message[0, 200])}"
-    end
+    def failing_lines(result) = result.outputs.fetch('fsck', '').split("\n").grep(FSCK_FAILURE)
   end
 end

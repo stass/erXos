@@ -62,13 +62,13 @@ map_reader(Tree) ->
                            {_Stat, Value} -> {ok, Value}
                        end
                end,
-    Fold = fun(Path, Fun, Acc) ->
-                   case Contents(Path) of
-                       {ok, Bytes} -> {ok, Fun(Bytes, Acc)};
-                       {error, _} = Error -> Error
-                   end
-           end,
-    #{list => Contents, fold => Fold, read_link => Contents,
+    Sha256 = fun(Path) ->
+                     case Contents(Path) of
+                         {ok, Bytes} -> {ok, crypto:hash(sha256, Bytes)};
+                         {error, _} = Error -> Error
+                     end
+             end,
+    #{list => Contents, sha256 => Sha256, read_link => Contents,
       stat => fun(Path) ->
                       case maps:get(Path, Tree) of
                           {error, _} = Error -> Error;
@@ -150,7 +150,8 @@ a_large_file_hashes_in_bounded_memory_test() ->
                    {ok, lists:foldl(fun(_, A) -> Fun(binary:copy(Chunk), A) end, Acc,
                                     lists:seq(1, Chunks))}
            end,
-    Reader = (map_reader(Tree))#{fold := Fold},
+    Sha256 = fun(Path) -> erx_f2fs_listing:sha256_of(fun(Fun, Acc) -> Fold(Path, Fun, Acc) end) end,
+    Reader = (map_reader(Tree))#{sha256 := Sha256},
     Expected = crypto:hash_final(lists:foldl(fun(_, S) -> crypto:hash_update(S, Chunk) end,
                                              crypto:hash_init(sha256), lists:seq(1, Chunks))),
     Self = self(),
@@ -231,3 +232,108 @@ a_sparse_host_file_lists_in_bounded_memory_test() ->
     receive {listed, Listing} ->
             ?assertMatch({_, #{size := 268435457}}, lists:keyfind([<<"sparse">>], 1, Listing))
     end.
+
+%%% Over the Linux oracle guest's record
+
+%% A record as the guest's `record` prints it: seven NUL-terminated fields
+%% per name.
+record(Entries) ->
+    iolist_to_binary([[Field, 0] || Entry <- Entries, Field <- Entry]).
+
+guest_record() ->
+    Hello = binary:encode_hex(crypto:hash(sha256, <<"hello">>), lowercase),
+    record([[".", "d", "755", "3", "2", "4096", ""],
+            ["./a", "d", "700", "2", "3", "4096", ""],
+            ["./a/x", "f", "640", "2", "7", "5", ["=", Hello]],
+            ["./a/y", "f", "640", "2", "7", "5", ["=", Hello]],
+            ["./d", "c", "620", "1", "8", "0", ""],
+            ["./e", "f", "4755", "1", "9", "2", "!"],
+            ["./s", "l", "777", "1", "10", "3", "=a/x"]]).
+
+a_guest_record_lists_as_its_tree_test() ->
+    {ok, Reader} = erx_f2fs_listing:record_reader(guest_record()),
+    Entries = maps:from_list(erx_f2fs_listing:of_tree(Reader)),
+    X = [<<"a">>, <<"x">>],
+    ?assertEqual([[], [<<"a">>], X, [<<"a">>, <<"y">>], [<<"d">>], [<<"e">>], [<<"s">>]],
+                 lists:sort(maps:keys(Entries))),
+    ?assertEqual(#{kind => regular, mode => 8#640, links => 2, size => 5,
+                   link_class => [X, [<<"a">>, <<"y">>]], sha256 => crypto:hash(sha256, <<"hello">>)},
+                 maps:get(X, Entries)),
+    ?assertEqual(#{kind => directory, mode => 8#755, links => 3, size => 4096}, maps:get([], Entries)),
+    ?assertEqual(#{kind => character, mode => 8#620, links => 1, size => 0, link_class => [[<<"d">>]]},
+                 maps:get([<<"d">>], Entries)),
+    ?assertEqual({error, unreadable}, maps:get([<<"e">>], Entries)),
+    ?assertMatch(#{kind := symlink, target := <<"a/x">>}, maps:get([<<"s">>], Entries)).
+
+%% Linux's record and another reader's listing of the same tree compare
+%% through diff/2, link classes included: a hard link Linux sees that the
+%% other reader does not is a difference.
+a_guest_record_compares_link_classes_test() ->
+    {ok, Reader} = erx_f2fs_listing:record_reader(guest_record()),
+    Linux = erx_f2fs_listing:of_tree(Reader),
+    Split = [case Entry of
+                 {[<<"a">>, <<"y">>] = Path, Attributes} -> {Path, Attributes#{link_class := [Path]}};
+                 {[<<"a">>, <<"x">>] = Path, Attributes} -> {Path, Attributes#{link_class := [Path]}};
+                 Other -> Other
+             end || Entry <- Linux],
+    ?assertEqual([], erx_f2fs_listing:diff(Linux, Linux)),
+    ?assertMatch([{[<<"a">>, <<"x">>], _, _}, {[<<"a">>, <<"y">>], _, _}], erx_f2fs_listing:diff(Linux, Split)).
+
+each_malformed_record_is_refused_by_its_rule_test() ->
+    Root = [".", "d", "755", "2", "2", "4096", ""],
+    File = fun(Path, Content) -> [Path, "f", "644", "1", "5", "0", Content] end,
+    Cases = [{partial_entry, <<".", 0, "d", 0>>},
+             {partial_entry, binary:part(record([Root]), 0, 14)},
+             {no_root, record([])},
+             {duplicate_path, record([Root, Root])},
+             {bad_path, record([Root, File("a", "!")])},
+             {bad_path, record([Root, File("./a//b", "!")])},
+             {bad_path, record([Root, File("./..", "!")])},
+             {orphan, record([Root, File("./a/b", "!")])},
+             {orphan, record([Root, File("./a", "!"), File("./a/b", "!")])},
+             {bad_type, record([[".", "x", "755", "2", "2", "4096", ""]])},
+             {bad_number, record([[".", "d", "9", "2", "2", "4096", ""]])},
+             {bad_number, record([[".", "d", "755", "-1", "2", "4096", ""]])},
+             {bad_number, record([[".", "d", "755", "2", "", "4096", ""]])},
+             {bad_number, record([[".", "d", "755", "2", "2", lists:duplicate(21, $9), ""]])},
+             {bad_content, record([Root, File("./a", "")])},
+             {bad_content, record([Root, File("./a", ["=", lists:duplicate(64, $g)])])},
+             {bad_content, record([Root, File("./a", "=ab")])},
+             {bad_content, record([[".", "d", "755", "2", "2", "4096", "!"]])}],
+    [?assertEqual({error, {record, Rule}}, erx_f2fs_listing:record_reader(Record), Record)
+     || {Rule, Record} <- Cases].
+
+%% The record is untrusted: every mutation of a valid one, bytes changed,
+%% cut or inserted (NULs, slashes and the content marks among them), either
+%% is refused by a rule or reads into a reader whose whole listing builds.
+a_mutated_record_is_refused_or_lists_test() ->
+    Seed = guest_record(),
+    State = rand:seed_s(exsss, {1, 2, 3}),
+    lists:foldl(fun(_, Random0) ->
+                        {Record, Random} = mutate(Seed, Random0),
+                        case erx_f2fs_listing:record_reader(Record) of
+                            {ok, Reader} -> ?assert(is_list(erx_f2fs_listing:of_tree(Reader)));
+                            {error, {record, Rule}} -> ?assert(is_atom(Rule))
+                        end,
+                        Random
+                end, State, lists:seq(1, 4000)).
+
+mutate(Record, Random0) ->
+    {Times, Random1} = rand:uniform_s(3, Random0),
+    lists:foldl(fun(_, {Bytes, R0}) ->
+                        {Kind, R1} = rand:uniform_s(3, R0),
+                        {At, R2} = rand:uniform_s(byte_size(Bytes) + 1, R1),
+                        {Byte, R3} = rand:uniform_s(256, R2),
+                        {Token, R4} = rand:uniform_s(5, R3),
+                        Before = binary:part(Bytes, 0, At - 1),
+                        After = binary:part(Bytes, At - 1, byte_size(Bytes) - At + 1),
+                        Mutated = case Kind of
+                                      1 when After =/= <<>> -> <<Before/binary, (Byte - 1), (tail(After))/binary>>;
+                                      2 -> Before;
+                                      _ -> <<Before/binary, (lists:nth(Token, [<<0>>, <<"/">>, <<"=">>, <<"!">>, <<"./">>]))/binary,
+                                             After/binary>>
+                                  end,
+                        {Mutated, R4}
+                end, {Record, Random1}, lists:seq(1, Times)).
+
+tail(<<_, Rest/binary>>) -> Rest.

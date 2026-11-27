@@ -10,14 +10,13 @@
 %% each file's contents and
 %% symlink targets; each callback's refusal; erofs for every mutation; the
 %% mount's refusals; and the cache's bound over a whole tree's reads.
-%% oracle_trees/2 gives the F2FS oracle guest's test
-%% (test/host/f2fs_oracle_guest_test.rb) the corpus images and erXos's
-%% listing of each, so Linux's listing of the same images is compared with
-%% erXos's.
+%% oracle_images/1 and oracle_compare/1 give the F2FS oracle guest's test
+%% (test/host/f2fs_oracle_guest_test.rb) the corpus images, and compare
+%% Linux's listing of each with erXos's through erx_f2fs_listing:diff/2.
 
 -module(erx_f2fs_volume_tests).
 
--export([oracle_trees/2]).
+-export([oracle_images/1, oracle_compare/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
@@ -165,7 +164,11 @@ volume_reader(Volume) ->
                                        end
                                end)
               end,
-      fold => fun(Path, Fun, Acc) -> On(Path, fun(Node) -> folded(Volume, Node, Fun, Acc) end) end,
+      sha256 => fun(Path) ->
+                        On(Path, fun(Node) ->
+                                         erx_f2fs_listing:sha256_of(fun(Fun, Acc) -> folded(Volume, Node, Fun, Acc) end)
+                                 end)
+                end,
       read_link => fun(Path) -> On(Path, fun(Node) -> erx_f2fs:readlink(Node, Volume) end) end}.
 
 %% Every name of directory Node, "." and ".." left out, a readdir of at
@@ -243,13 +246,16 @@ core_reader(Image, #{superblock := #{root_ino := Root}} = Volume, FoldBytes) ->
                                               inode => Nid, size => Size}}
                                end)
               end,
-      fold => fun(Path, Fun, Acc) ->
-                      On(Path, fun(_Nid, #{i_size := Size} = File) ->
-                                       Read = [Run(fun(B) -> erx_f2fs_core:read(Volume, File, At, Count, B) end)
-                                               || {At, Count} <- chunks(Size, FoldBytes)],
-                                       {ok, lists:foldl(fun({ok, Bytes}, A) -> Fun(Bytes, A) end, Acc, Read)}
-                               end)
-              end,
+      sha256 => fun(Path) ->
+                        On(Path, fun(_Nid, #{i_size := Size} = File) ->
+                                         Read = [Run(fun(B) -> erx_f2fs_core:read(Volume, File, At, Count, B) end)
+                                                 || {At, Count} <- chunks(Size, FoldBytes)],
+                                         erx_f2fs_listing:sha256_of(
+                                           fun(Fun, Acc) ->
+                                                   {ok, lists:foldl(fun({ok, Bytes}, A) -> Fun(Bytes, A) end, Acc, Read)}
+                                           end)
+                                 end)
+                end,
       read_link => fun(Path) ->
                            On(Path, fun(_Nid, Link) -> Run(fun(B) -> erx_f2fs_core:symlink(Volume, Link, B) end) end)
                    end}.
@@ -465,39 +471,48 @@ the_mount_refuses_what_it_cannot_serve_test() ->
 
 %%% The oracle's trees
 
-%% Writes each corpus image to Directory as NAME.img and, for each that
-%% erx_f2fs_mount mounts, erXos's listing of its whole tree, each file's
-%% first HashedBytes hashed, as NAME.listing: an entry a line of its path's
-%% bytes in hex ("-" for the root), then either "error" and the reason or
-%% its kind, mode in octal, links, size and content (a regular file's
-%% SHA-256, a symlink's target in hex, or "-"). One that does not mount
-%% gets NAME.refused with the reason.
-oracle_trees(Directory, HashedBytes) ->
-    lists:foreach(
-      fun({Name, Image}) ->
-              File = fun(Suffix) -> filename:join(Directory, Name ++ Suffix) end,
-              ok = file:write_file(File(".img"), Image),
-              case mounted(Image) of
-                  {ok, Mounted} ->
-                      Listing = erx_f2fs_listing:of_tree(core_reader(Image, Mounted, HashedBytes)),
-                      ok = file:write_file(File(".listing"), [oracle_line(Entry) || Entry <- Listing]);
-                  {error, Reason} ->
-                      ok = file:write_file(File(".refused"), io_lib:format("~0p~n", [Reason]))
-              end
-      end, corpus()).
+%% oracle_images([Directory]) writes each corpus image to Directory as
+%% NAME.img, for the F2FS oracle guest to list.
+oracle_images([Directory]) ->
+    lists:foreach(fun({Name, Image}) -> ok = file:write_file(filename:join(Directory, Name ++ ".img"), Image) end,
+                  corpus()).
 
-oracle_line({Path, {error, Reason}}) ->
-    io_lib:format("~s error ~0p~n", [oracle_hex(lists:join(<<"/">>, Path)), Reason]);
-oracle_line({Path, #{kind := Kind, mode := Mode, links := Links, size := Size} = Attributes}) ->
-    Content = case Attributes of
-                  #{sha256 := Hash} -> oracle_hex(Hash);
-                  #{target := Target} -> oracle_hex(Target);
-                  #{} -> "-"
-              end,
-    io_lib:format("~s ~s ~.8B ~B ~B ~s~n", [oracle_hex(lists:join(<<"/">>, Path)), Kind, Mode, Links, Size, Content]).
+%% oracle_compare([Directory, HashedBytes]) compares, for each corpus image
+%% erx_f2fs_mount mounts, Linux's listing with erXos's listing of the whole
+%% tree, each file's first HashedBytes hashed. Linux's listing is read from
+%% NAME.linux, the guest's record, which the host writes only for an image
+%% Linux mounted and listed. Writes to Directory the names compared
+%% (compared.txt), a line per difference or per image Linux did not list or
+%% whose record is refused (differences.txt), and a line per difference not
+%% compared (uncompared.txt): each beneath, or at, a path other than the root
+%% where Linux states a directory and erXos answers an error (an encrypted
+%% directory, which erXos does not read). An error at the root, or at a name
+%% Linux states as anything but a directory, is a difference.
+oracle_compare([Directory, HashedBytes]) ->
+    Results = [oracle_compared(Name, core_reader(Image, Mounted, list_to_integer(HashedBytes)),
+                               file:read_file(filename:join(Directory, Name ++ ".linux")))
+               || {Name, Image} <- corpus(), {ok, Mounted} <- [mounted(Image)]],
+    Write = fun(File, Lines) -> ok = file:write_file(filename:join(Directory, File), Lines) end,
+    Write("compared.txt", [[Name, $\n] || {Name, _, _} <- Results]),
+    Write("differences.txt", [Lines || {_, Lines, _} <- Results]),
+    Write("uncompared.txt", [Lines || {_, _, Lines} <- Results]).
 
-oracle_hex(Bytes) ->
-    case binary:encode_hex(iolist_to_binary(Bytes), lowercase) of
-        <<>> -> "-";
-        Hex -> Hex
-    end.
+oracle_compared(Name, ErxosReader, {ok, Record}) ->
+    case erx_f2fs_listing:record_reader(Record) of
+        {ok, LinuxReader} ->
+            Erxos = erx_f2fs_listing:of_tree(ErxosReader),
+            Linux = erx_f2fs_listing:of_tree(LinuxReader),
+            Directories = #{Path => true || {Path, #{kind := directory}} <- Linux},
+            Refused = [Path || {Path, {error, _}} <- Erxos, Path =/= [], is_map_key(Path, Directories)],
+            Beneath = fun({Path, _, _}) -> lists:any(fun(Root) -> lists:prefix(Root, Path) end, Refused) end,
+            {Uncompared, Differences} = lists:partition(Beneath, erx_f2fs_listing:diff(Linux, Erxos)),
+            {Name, [oracle_line(Name, Entry) || Entry <- Differences],
+             [oracle_line(Name, Entry) || Entry <- Uncompared]};
+        {error, Reason} ->
+            {Name, [io_lib:format("~s: Linux's record is refused: ~0p~n", [Name, Reason])], []}
+    end;
+oracle_compared(Name, _ErxosReader, {error, enoent}) ->
+    {Name, [io_lib:format("~s: Linux did not list it~n", [Name])], []}.
+
+oracle_line(Name, {Path, Linux, Erxos}) ->
+    io_lib:format("~s: ~0p: Linux ~0p, erXos ~0p~n", [Name, Path, Linux, Erxos]).

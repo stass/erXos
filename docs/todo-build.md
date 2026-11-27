@@ -977,16 +977,21 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `snapshot`, `flakey` and `log-writes` targets is unverified. The design's other sections still name
   Linux v7.3.4 as the behaviour matched, which is what the facts records read; the guest's kernel is
   7.0.14, so a fact on which the two differ needs a probe before a check rests on it.
-* [Medium] test, F2FS oracle guest's comparison and channel (`tools/lib/erx/f2fs_oracle_guest.rb`,
-  `test/host/f2fs_oracle_guest_test.rb`): Linux's tree record and erXos's corpus listing are parsed and
-  compared in Ruby beside `erx_f2fs_listing`, so link classes (which names share an inode) are not
-  compared; Linux's record should be an `erx_f2fs_listing` reader (find's `%i` gives the inode) compared
-  with `erx_f2fs_listing:diff`, deleting the Ruby parsers. The guest's lines share the serial console
-  with the kernel and every command's stray output, so an oops on a hostile image mid-line refuses the
-  whole batch; a virtio-serial port of its own would end that by construction. The serial reader has no
-  fuzz target yet (`tools/fuzz/bench_line.rb` is the pattern). `[FSCK] fixing SIT types` is benign by a
-  fixed list; deriving it from the same batch's Linux probe of the same geometry would keep a wrong SIT
-  type in erXos's writer visible.
+  The target batch of [design-f2fs.md](design-f2fs.md#the-guests-batches) is unbuilt: erXos's F2FS,
+  the harness and the generator on the guest's OTP from an EROFS disk, Linux's mounts through a
+  device-mapper snapshot, Linux's own churned and `flakey`-cut images, and Linux's own cuts.
+  An erXos error at a directory Linux lists leaves its subtree uncompared
+  (`erx_f2fs_volume_tests:oracle_compare/1`) because erXos's core reader answers `eio` for an
+  encrypted directory and for a read failure alike; a reason of its own for the first would let
+  every other error count as a difference. Whether `fsck.f2fs` reports a wrong SIT type in
+  erXos's writer with a line other than the controls' `[FSCK] fixing SIT types` is unverified;
+  an erXos image with one planted wrong SIT type in the formats batch would settle it.
+* [Medium] test, F2FS oracle guest's channel (`test/f2fs/oracle_guest.sh`,
+  `tools/lib/erx/f2fs_oracle_guest.rb`): the guest's lines share the serial console with the kernel and
+  every command's stray output, so an oops on a hostile image mid-line refuses the whole batch; a
+  virtio-serial port of its own would end that by construction. Linux's tree record is read by
+  `erx_f2fs_listing:record_reader/1`, whose malformed and mutated records an eunit property covers
+  (`erx_f2fs_listing_tests`), not a `check-fuzz` target of its own.
 * [Low] test, F2FS oracle guest's reader: the UEFI firmware is QEMU's own beside the
   `qemu-system-aarch64` on `PATH`, not pinned (its SHA-256 is in each history record); the guest test
   re-formats erXos's three images on every run rather than caching them by the format plan's inputs.
