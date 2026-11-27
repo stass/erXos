@@ -35,9 +35,9 @@ class ErxF2fsFormatTest < Minitest::Test
              anchor: "                ?WARM_DATA -> 1;\n",
              replacement: '',
              failure: VALID),
-    Seed.new(fault: "the NAT's first copy written as the area's first half",
-             anchor: '        [{NatAddress + ?BLOCKS_PER_SEG * 2 * (Index div ?BLOCKS_PER_SEG) + Index rem ?BLOCKS_PER_SEG,',
-             replacement: '        [{NatAddress + Index,',
+    Seed.new(fault: "the NAT written as the copy its zero version bits do not select",
+             anchor: '        [{erx_f2fs_codec:table_block(nat, Super, 0, Index),',
+             replacement: '        [{erx_f2fs_codec:table_block(nat, Super, 1, Index),',
              failure: VALID)
   ].freeze
 

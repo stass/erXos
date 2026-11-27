@@ -224,20 +224,19 @@ summary(Block, Acc) ->
 
 %% The NAT and SIT blocks the newest pack's version bitmaps select, and the
 %% SSA ([F 34], [F 38], [F 45]).
-tables(#{nat_blkaddr := Nat, segment_count_nat := NatSegments, sit_blkaddr := Sit,
-         segment_count_sit := SitSegments, ssa_blkaddr := Ssa,
+tables(#{segment_count_nat := NatSegments, ssa_blkaddr := Ssa,
          segment_count_main := Main} = Super, Image, Acc) ->
-    #{nat_version_bitmap := NatBits, sit_version_bitmap := SitBits} = newest(Super, Image),
+    Newest = newest(Super, Image),
     Natted = lists:foldl(
                fun(Index, In) ->
-                       Block = block(Image, nat_block(Nat, NatBits, Index)),
+                       Block = block(Image, erx_f2fs_codec:current_block(nat, Super, Newest, Index)),
                        round_trip(nat_block, Block, erx_f2fs_codec:nat_block(Block),
                                   fun erx_f2fs_codec:encode_nat_block/1,
                                   fun erx_f2fs_codec:nat_block/1, In)
-               end, Acc, lists:seq(0, copy_blocks(NatSegments) - 1)),
+               end, Acc, lists:seq(0, erx_f2fs_codec:copy_blocks(NatSegments) - 1)),
     Sitted = lists:foldl(
                fun(Index, In) ->
-                       Block = block(Image, table_block(Sit, SitSegments, SitBits, Index)),
+                       Block = block(Image, erx_f2fs_codec:current_block(sit, Super, Newest, Index)),
                        Used = min(?ERX_F2FS_SIT_ENTRIES_PER_BLOCK,
                                   Main - ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK * Index),
                        round_trip(sit_block, Block, erx_f2fs_codec:sit_block(Block, Used),
@@ -246,18 +245,6 @@ tables(#{nat_blkaddr := Nat, segment_count_nat := NatSegments, sit_blkaddr := Si
                end, Natted, lists:seq(0, (Main - 1) div ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK)),
     lists:foldl(fun(Segment, In) -> summary(block(Image, Ssa + Segment), In) end,
                 Sitted, lists:seq(0, Main - 1)).
-
-%% Block Index of the SIT's current copy: copy 1 is the area's second half
-%% ([F 38]).
-table_block(First, Segments, Bitmap, Index) ->
-    First + Index + erx_f2fs_codec:bit(Bitmap, Index) * copy_blocks(Segments).
-
-copy_blocks(Segments) -> Segments div 2 * 512.
-
-%% NAT block Index of the current copy: the copies interleave a segment at a
-%% time, copy 1 the second segment of each pair ([F 34]).
-nat_block(First, Bitmap, Index) ->
-    First + 1024 * (Index div 512) + Index rem 512 + erx_f2fs_codec:bit(Bitmap, Index) * 512.
 
 newest(Super, Image) ->
     {ok, Super, Packs} = erx_f2fs_corpus:metadata(Image),
@@ -270,12 +257,13 @@ newest(Super, Image) ->
 %% inode, read as its nid's, or a direct or indirect node, which share one
 %% layout; and the dentry blocks each block directory's inode addresses.
 %% An inode with an inline body is a form erXos only reads.
-nodes(#{nat_blkaddr := Nat, segment_count_nat := NatSegments} = Super, Image, Acc) ->
-    #{nat_version_bitmap := NatBits} = newest(Super, Image),
+nodes(#{segment_count_nat := NatSegments} = Super, Image, Acc) ->
+    Newest = newest(Super, Image),
     Entries = [{Index * ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK + Slot, Entry}
-               || Index <- lists:seq(0, copy_blocks(NatSegments) - 1),
+               || Index <- lists:seq(0, erx_f2fs_codec:copy_blocks(NatSegments) - 1),
                   {ok, Read} <- [erx_f2fs_codec:nat_block(
-                                   block(Image, nat_block(Nat, NatBits, Index)))],
+                                   block(Image, erx_f2fs_codec:current_block(nat, Super, Newest,
+                                                                             Index)))],
                   {Slot, Entry} <- lists:enumerate(0, Read)],
     lists:foldl(fun({Nid, #{ino := Ino, block_addr := Address}}, In) ->
                         case Nid >= ?ERX_F2FS_ROOT_INO andalso in_main(Super, Image, Address) of

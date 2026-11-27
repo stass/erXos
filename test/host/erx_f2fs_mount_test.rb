@@ -17,12 +17,14 @@ class ErxF2fsMountTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   MOUNT = 'erlang/apps/erx_f2fs/src/erx_f2fs_mount.erl'
   CORE = 'erlang/apps/erx_f2fs/src/erx_f2fs_core.erl'
+  CODEC = 'erlang/apps/erx_f2fs/src/erx_f2fs_codec.erl'
   TESTS = %w[test/erlang/erx_f2fs_codec_tests.erl test/erlang/erx_f2fs_corpus.erl
              test/erlang/erx_f2fs_mount_tests.erl].freeze
   CORPUS = File.join(ROOT, 'build/third_party')
   LOCK = File.join(ROOT, 'deps.lock')
 
-  # A seeded fault in the mount, or in erx_f2fs_core, whose NAT lookup the root's read uses.
+  # A seeded fault in the mount, or in erx_f2fs_core, whose NAT lookup the root's read uses,
+  # or in erx_f2fs_codec, which places the tables' copies.
   Seed = Data.define(:fault, :anchor, :replacement, :failure, :source) do
     def initialize(source: MOUNT, **fields) = super
   end
@@ -92,14 +94,13 @@ class ErxF2fsMountTest < Minitest::Test
     Seed.new(fault: "the SIT admitted only after it is read",
              anchor: "        admit_sit(Super, Allowance),\n", replacement: "",
              failure: /the_sit_is_admitted_before_it_is_read[^\n]*failed/),
-    Seed.new(fault: "a table block always read from copy 0",
-             anchor: "    [First + Index + erx_f2fs_codec:bit(Bitmap, Index) * table_blocks(Segments)",
-             replacement: "    [First + Index + 0 * table_blocks(Segments)",
+    Seed.new(fault: "a table block always read from copy 0", source: CODEC,
+             anchor: '    table_block(Table, Super, bit(version_bitmap(Table, Checkpoint), Index), Index).',
+             replacement: '    table_block(Table, Super, 0, Index).',
              failure: /the_fixture_mounts_read_write_from_pack_1[^\n]*failed/),
-    Seed.new(fault: "the NAT's copy 1 placed a whole interleave further", source: CORE,
-             anchor: "    First + Index div ?BLOCKS_PER_SEG * 2 * ?BLOCKS_PER_SEG + Index rem ?BLOCKS_PER_SEG +\n" \
-                     "        erx_f2fs_codec:bit(Bitmap, Index) * ?BLOCKS_PER_SEG.",
-             replacement: "    First + Index + erx_f2fs_codec:bit(Bitmap, Index) * 2 * ?BLOCKS_PER_SEG.",
+    Seed.new(fault: "the NAT's copy 1 placed a whole interleave further", source: CODEC,
+             anchor: '    First + Index div ?BLOCKS_PER_SEG * 2 * ?BLOCKS_PER_SEG + Copy * ?BLOCKS_PER_SEG +',
+             replacement: '    First + Index div ?BLOCKS_PER_SEG * 2 * ?BLOCKS_PER_SEG + Copy * 2 * ?BLOCKS_PER_SEG +',
              failure: /the_fixture_mounts_read_write_from_pack_1[^\n]*failed/),
     Seed.new(fault: "the compact form allowed the normal form's three blocks",
              anchor: "DataBlocks < ?LOGS_PER_KIND;", replacement: "DataBlocks =< ?LOGS_PER_KIND;",
@@ -123,7 +124,7 @@ class ErxF2fsMountTest < Minitest::Test
   end
 
   def test_each_seeded_fault_fails_its_case
-    texts = [MOUNT, CORE].to_h { |path| [path, File.read(File.join(ROOT, path))] }
+    texts = [MOUNT, CORE, CODEC].to_h { |path| [path, File.read(File.join(ROOT, path))] }
     SEEDS.each do |seed|
       text = texts.fetch(seed.source)
       assert_equal 1, text.scan(seed.anchor).size, "the seed no longer applies: #{seed.fault}"

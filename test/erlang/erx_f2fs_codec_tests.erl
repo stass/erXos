@@ -140,6 +140,25 @@ pack(Block, Payload) ->
 
 %%% The CRC
 
+%% Each table's two copies, from the facts alone: the NAT's interleave a
+%% segment at a time ([F 34]), the SIT's are halves ([F 38]), here of four
+%% segments each, so the NAT's second pair of segments is reached.
+the_table_copies_lie_where_the_format_places_them_test() ->
+    Super = #{nat_blkaddr => 2560, sit_blkaddr => 1536,
+              segment_count_nat => 4, segment_count_sit => 4},
+    ?assertEqual([{2560, 3072}, {3071, 3583}, {3584, 4096}, {4095, 4607}],
+                 [{erx_f2fs_codec:table_block(nat, Super, 0, B),
+                   erx_f2fs_codec:table_block(nat, Super, 1, B)} || B <- [0, 511, 512, 1023]]),
+    ?assertEqual([{1536, 2560}, {2047, 3071}, {2048, 3072}, {2559, 3583}],
+                 [{erx_f2fs_codec:table_block(sit, Super, 0, B),
+                   erx_f2fs_codec:table_block(sit, Super, 1, B)} || B <- [0, 511, 512, 1023]]),
+    Checkpoint = #{nat_version_bitmap => <<16#80, 0>>, sit_version_bitmap => <<16#40, 0>>},
+    ?assertEqual([3072, 2561, 1536, 2561],
+                 [erx_f2fs_codec:current_block(nat, Super, Checkpoint, 0),
+                  erx_f2fs_codec:current_block(nat, Super, Checkpoint, 1),
+                  erx_f2fs_codec:current_block(sit, Super, Checkpoint, 0),
+                  erx_f2fs_codec:current_block(sit, Super, Checkpoint, 1)]).
+
 crc_matches_the_definition_from_any_seed_test() ->
     Cases = [{0, <<>>}, {16#ffffffff, <<"123456789">>},
              {?ERX_F2FS_MAGIC, <<"F2FS">>},

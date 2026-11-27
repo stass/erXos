@@ -192,7 +192,8 @@ node_block(#{superblock := Super, checkpoint := Header, nat := Journal} = Volume
                 Entry;
             #{} ->
                 PerBlock = ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK,
-                [Block] = fetch(Blocks, [nat_address(Super, Header, Nid div PerBlock)]),
+                [Block] = fetch(Blocks, [erx_f2fs_codec:current_block(nat, Super, Header,
+                                                                      Nid div PerBlock)]),
                 lists:nth(Nid rem PerBlock + 1, ok(erx_f2fs_codec:nat_block(Block)))
         end,
     require(Address =/= ?ERX_F2FS_NULL_ADDR, {nat, free}),
@@ -200,13 +201,6 @@ node_block(#{superblock := Super, checkpoint := Header, nat := Journal} = Volume
     require(valid_block(Volume, Address), {nat, block_addr}),
     [Node] = fetch(Blocks, [Address]),
     Node.
-
-%% NAT block Index of one copy: the copies interleave a segment at a time,
-%% and the block's bit in the version bitmap, first bit most significant,
-%% selects the second ([F 23], [F 34]).
-nat_address(#{nat_blkaddr := First}, #{nat_version_bitmap := Bitmap}, Index) ->
-    First + Index div ?BLOCKS_PER_SEG * 2 * ?BLOCKS_PER_SEG + Index rem ?BLOCKS_PER_SEG +
-        erx_f2fs_codec:bit(Bitmap, Index) * ?BLOCKS_PER_SEG.
 
 %% Whether Address is a main area block the SIT marks valid.
 valid_block(#{superblock := #{main_blkaddr := Main} = Super, sit := Sit}, Address) ->

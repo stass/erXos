@@ -162,7 +162,7 @@ layout(#{start := Start, sectors := Sectors}, Unit) ->
     require(Segments =< ?ERX_F2FS_SEGMENT_COUNT_MAX, {geometry, too_large}),
     %% The NAT's bitmap shares the header with the SIT's, unless the SIT's
     %% would leave it less than a segment a copy and moves to payload blocks.
-    SitBitmap = bitmap_bytes(Sit),
+    SitBitmap = erx_f2fs_codec:bitmap_bytes(Sit),
     {Payload, NatRoom} =
         case SitBitmap + ?BITMAP_BYTES_PER_SEGMENT =< ?BITMAP_ROOM of
             true -> {0, (?BITMAP_ROOM - SitBitmap) div ?BITMAP_BYTES_PER_SEGMENT};
@@ -189,9 +189,8 @@ section_segments(Unit, PartitionSegments) ->
 halved(S, Most) when S > 1, S > Most -> halved(S div 2, Most);
 halved(S, _Most) -> S.
 
-%% The bytes of a version bitmap, a bit for each block of one copy of a
-%% table of Segments.
-bitmap_bytes(Segments) -> Segments div 2 * ?BITMAP_BYTES_PER_SEGMENT.
+%% A version bitmap selecting copy 0 of every block of a table of Segments.
+zero_bitmap(Segments) -> <<0:(erx_f2fs_codec:bitmap_bytes(Segments) * 8)>>.
 
 %% The first segment of log Type's section, the main area's section Type.
 log_segment(#{section := S}, Type) -> Type * S.
@@ -225,10 +224,8 @@ superblock(#{blocks := Blocks, section := S, segment0 := Segment0, segments := S
           meta_ino => ?ERX_F2FS_META_INO, uuid => Uuid, feature => ?FEATURES}.
 
 %% The tables' first copies: SIT blocks of the logs' entries, then zeros;
-%% NAT block 0 with the reserved nids and the root, then zeros. The NAT
-%% copies interleave a segment at a time ([F 34]), the SIT's are halves.
-tables(#{sit := Sit, nat := Nat} = Layout, #{sit_blkaddr := SitAddress, nat_blkaddr := NatAddress},
-       Zero) ->
+%% NAT block 0 with the reserved nids and the root, then zeros.
+tables(#{sit := Sit, nat := Nat} = Layout, Super, Zero) ->
     SitBlocks = sit_blocks(Layout),
     Nids = [#{version => 0, ino => Nid, block_addr => Address}
             || {Nid, Address} <- [{0, 0}, {?ERX_F2FS_NODE_INO, 1}, {?ERX_F2FS_META_INO, 1},
@@ -236,13 +233,12 @@ tables(#{sit := Sit, nat := Nat} = Layout, #{sit_blkaddr := SitAddress, nat_blka
     Free = #{version => 0, ino => 0, block_addr => 0},
     NatBlock = erx_f2fs_codec:encode_nat_block(
                  Nids ++ lists:duplicate(?ERX_F2FS_NAT_ENTRIES_PER_BLOCK - length(Nids), Free)),
-    [{SitAddress + Index, Block}
+    [{erx_f2fs_codec:table_block(sit, Super, 0, Index), Block}
      || {Index, Block} <- lists:enumerate(0, SitBlocks ++ lists:duplicate(
-                                                 Sit div 2 * ?BLOCKS_PER_SEG - length(SitBlocks),
+                                                 erx_f2fs_codec:copy_blocks(Sit) - length(SitBlocks),
                                                  Zero))] ++
-        [{NatAddress + ?BLOCKS_PER_SEG * 2 * (Index div ?BLOCKS_PER_SEG) + Index rem ?BLOCKS_PER_SEG,
-          case Index of 0 -> NatBlock; _ -> Zero end}
-         || Index <- lists:seq(0, Nat div 2 * ?BLOCKS_PER_SEG - 1)].
+        [{erx_f2fs_codec:table_block(nat, Super, 0, Index), case Index of 0 -> NatBlock; _ -> Zero end}
+         || Index <- lists:seq(0, erx_f2fs_codec:copy_blocks(Nat) - 1)].
 
 %% The SIT blocks through the last log's segment: each log's segment with
 %% its type, and the root's two blocks valid.
@@ -295,8 +291,8 @@ checkpoint(#{main := Main, sit := Sit, nat := Nat, reserved := Reserved, payload
                                     valid_node_count => 1, valid_inode_count => 1,
                                     next_free_nid => ?ERX_F2FS_ROOT_INO + 1,
                                     checksum_offset => ?BLOCK_SIZE - 4,
-                                    sit_version_bitmap => <<0:(bitmap_bytes(Sit) * 8)>>,
-                                    nat_version_bitmap => <<0:(bitmap_bytes(Nat) * 8)>>}),
+                                    sit_version_bitmap => zero_bitmap(Sit),
+                                    nat_version_bitmap => zero_bitmap(Nat)}),
     lists:enumerate(Pack1, [Header | PayloadBlocks] ++ Pack ++ [Header]) ++ [{Pack1 + ?BLOCKS_PER_SEG, Zero}].
 
 summary(Entries, Type) ->

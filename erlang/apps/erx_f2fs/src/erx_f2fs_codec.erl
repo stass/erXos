@@ -81,7 +81,8 @@ a summary block is always written with an empty journal.
          encode_inode/2, encode_direct_node/2, encode_indirect_node/2,
          encode_dentry_block/1, empty_journal/0,
          dentry_hash/1, dentry_slots/1, bit/2, extra_attr_features/0,
-         nat_capacity/1, node_capacity/1, main_end/1]).
+         nat_capacity/1, node_capacity/1, main_end/1, copy_blocks/1, bitmap_bytes/1,
+         table_block/4, current_block/4]).
 -export_type([superblock/0, checkpoint/0, nat_entry/0, sit_entry/0,
               summary/0, inode/0, dentries/0, footer/0, failure/0]).
 
@@ -344,7 +345,49 @@ f2fs_nat_entries_per_block for each block of one of its two copies
 """.
 -spec nat_capacity(superblock()) -> non_neg_integer().
 nat_capacity(#{segment_count_nat := Segments}) ->
-    ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK * (Segments div 2) * ?BLOCKS_PER_SEG.
+    ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK * copy_blocks(Segments).
+
+-doc """
+The blocks of one copy of a NAT or SIT of Segments segments: each table
+holds two copies ([F 23], [F 36]), and a version bitmap has a bit per
+block of one.
+""".
+-spec copy_blocks(non_neg_integer()) -> non_neg_integer().
+copy_blocks(Segments) -> Segments div 2 * ?BLOCKS_PER_SEG.
+
+-doc """
+The bytes of a NAT or SIT version bitmap for a table of Segments
+segments: a bit per block of one copy ([F 23]).
+""".
+-spec bitmap_bytes(non_neg_integer()) -> non_neg_integer().
+bitmap_bytes(Segments) -> copy_blocks(Segments) div 8.
+
+-doc """
+The address of block Index of copy Copy, 0 or 1, of a volume's NAT or
+SIT, Table, whose superblock is Super. The NAT's copies interleave a
+segment at a time, copy 1 the second segment of each pair ([F 34]); the
+SIT's are the area's two halves ([F 38]). A new volume's tables are
+written as copy 0; a reader takes current_block/4.
+""".
+-spec table_block(nat | sit, superblock(), 0 | 1, non_neg_integer()) -> non_neg_integer().
+table_block(nat, #{nat_blkaddr := First}, Copy, Index) ->
+    First + Index div ?BLOCKS_PER_SEG * 2 * ?BLOCKS_PER_SEG + Copy * ?BLOCKS_PER_SEG +
+        Index rem ?BLOCKS_PER_SEG;
+table_block(sit, #{sit_blkaddr := First, segment_count_sit := Segments}, Copy, Index) ->
+    First + Copy * copy_blocks(Segments) + Index.
+
+-doc """
+The address of block Index of the copy of Table, nat or sit, that the
+block's bit in the version bitmap of Checkpoint selects, first bit most
+significant: the block a reader reads ([F 23], [F 34], [F 38]).
+""".
+-spec current_block(nat | sit, superblock(), checkpoint(), non_neg_integer()) ->
+          non_neg_integer().
+current_block(Table, Super, Checkpoint, Index) ->
+    table_block(Table, Super, bit(version_bitmap(Table, Checkpoint), Index), Index).
+
+version_bitmap(nat, #{nat_version_bitmap := Bitmap}) -> Bitmap;
+version_bitmap(sit, #{sit_version_bitmap := Bitmap}) -> Bitmap.
 
 -doc """
 The nids that can hold a node in the NAT of a volume whose superblock is

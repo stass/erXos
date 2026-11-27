@@ -352,7 +352,8 @@ check_bitmap_sizes(#{segment_count_sit := Sit, segment_count_nat := Nat,
                      segment_count_main := Main},
                    #{sit_ver_bitmap_bytesize := SitBytes,
                      nat_ver_bitmap_bytesize := NatBytes}) ->
-    require(SitBytes =:= bitmap_bytes(Sit) andalso NatBytes =:= bitmap_bytes(Nat),
+    require(SitBytes =:= erx_f2fs_codec:bitmap_bytes(Sit) andalso
+                NatBytes =:= erx_f2fs_codec:bitmap_bytes(Nat),
             {checkpoint, bitmap_size}),
     require(SitBytes * 8 >= ceil_div(Main, ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK),
             {checkpoint, sit_bitmap_bits}).
@@ -369,7 +370,8 @@ check_start_sum(#{cp_payload := Payload}, #{cp_pack_start_sum := StartSum}) ->
 %% largest pack ([F 27]).
 check_nat_bits(#{cp_payload := Payload, segment_count_nat := Nat},
                #{ckpt_flags := Flags}) when Flags band ?ERX_F2FS_CP_NAT_BITS =/= 0 ->
-    NatBitsBlocks = ceil_div(?NAT_BITS_VERSION_BYTES + 2 * bitmap_bytes(Nat), ?BLOCK_SIZE),
+    NatBitsBlocks = ceil_div(?NAT_BITS_VERSION_BYTES + 2 * erx_f2fs_codec:bitmap_bytes(Nat),
+                             ?BLOCK_SIZE),
     require(Payload + ?ERX_F2FS_CP_FIXED_BLOCKS + ?ERX_F2FS_CP_SUMMARY_BLOCKS_MAX +
                 NatBitsBlocks < ?BLOCKS_PER_SEG,
             {checkpoint, nat_bits_room});
@@ -456,11 +458,9 @@ admit_sit(#{segment_count_main := Main}, Allowance) ->
     require(Bytes =< Allowance, {allowance, {sit, Bytes}}).
 
 %% Each SIT block the main area needs, from the copy its version bit
-%% selects: copy 1 is the area's second half ([F 38]).
-sit_addresses(#{sit_blkaddr := First, segment_count_sit := Segments,
-                segment_count_main := Main},
-              #{sit_version_bitmap := Bitmap}) ->
-    [First + Index + erx_f2fs_codec:bit(Bitmap, Index) * table_blocks(Segments)
+%% selects ([F 38]).
+sit_addresses(#{segment_count_main := Main} = Super, Checkpoint) ->
+    [erx_f2fs_codec:current_block(sit, Super, Checkpoint, Index)
      || Index <- lists:seq(0, ceil_div(Main, ?ERX_F2FS_SIT_ENTRIES_PER_BLOCK) - 1)].
 
 %% The SIT, whole, as a tuple of the main segments' entries with the
@@ -602,12 +602,6 @@ names(Classified, Class) -> [Name || {Name, Of} <- Classified, Of =:= Class].
 
 %%% Geometry
 
-%% The blocks of one copy of a table of Segments segments, which holds two
-%% copies ([F 23], [F 36]).
-table_blocks(Segments) -> Segments div 2 * ?BLOCKS_PER_SEG.
-
-%% A version bitmap's bytes: a bit per block of one copy ([F 23]).
-bitmap_bytes(Segments) -> table_blocks(Segments) div 8.
 
 ceil_div(A, B) -> (A + B - 1) div B.
 
