@@ -6,7 +6,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
 
--export([fixture_volume/0, cleared_fuchsia/0]).
+-export([fixture_volume/0, cleared_fuchsia/0, chained_volume/0]).
 
 -define(BLOCK, 4096).
 -define(SEGMENT, 512).
@@ -618,12 +618,20 @@ the_sit_is_admitted_before_it_is_read_test() ->
 %% A node block of the checkpoint at the warm node log's next block, its
 %% cp_ver as Version says, fails the mount; one of another checkpoint
 %% does not.
-chain(Flags, Version) ->
+chain(Flags, Version) -> mount(chained(Flags, Version)).
+
+%% The fixture volume's blocks with a node block at the chain's start, its
+%% cp_ver as Version says.
+chained(Flags, Version) ->
     Header = flags(Flags),
     {ok, #{crc := Crc}} = erx_f2fs_codec:checkpoint(erx_f2fs_codec_tests:checkpoint_block(Header, bitmaps())),
     Footer = <<3:32/little, 3:32/little, 0:32, (Version(Crc)):64/little, 0:32>>,
     Block = <<0:((?BLOCK - 24) * 8), Footer/binary>>,
-    mount(maps:merge(volume(super(), pack(?PACK1, Header)), #{?WALK_START => Block})).
+    maps:merge(volume(super(), pack(?PACK1, Header)), #{?WALK_START => Block}).
+
+%% erx_f2fs_volume_tests' volume with a chain to replay: the partition's
+%% blocks and its blocks by address.
+chained_volume() -> {?PARTITION, chained(0, fun(Crc) -> 1 bor (Crc bsl 32) end)}.
 
 a_chain_fails_the_mount_test_() ->
     Plain = ?ERX_F2FS_CP_CRC_RECOVERY,

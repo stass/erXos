@@ -7,7 +7,8 @@
 %% corpus images that mount, each block's slot checked against the summary
 %% Linux wrote for its block.
 -module(erx_f2fs_core_tests).
--export([fixture_file/0, fixture_nodes/0, fixture_directory/0, fixture_names/0]).
+-export([fixture_file/0, fixture_nodes/0, fixture_directory/0, fixture_names/0,
+         fixture_node_directory/1, fixture_repeating_directory/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
@@ -508,11 +509,13 @@ each_name_is_found_in_its_bucket_test() ->
 %% holes, and answers the position the next starts from; together the
 %% calls give every entry once, in position order, and a call from a
 %% position inside a block skips what lies before. The test directory's
-%% six dentry blocks and the holes between them take two calls.
+%% six dentry blocks and the holes between them take two calls, the first
+%% ending where its ninth step would start.
 readdir_resumes_at_its_position_test() ->
     Dir = directory(),
     {ok, {First, Next}} = readdir(Dir, 0),
-    ?assert(is_integer(Next) andalso Next > 0),
+    DentryBlocks = [Block || {Block, _, _, _, _} <- dir_dentries()],
+    ?assertEqual(position(lists:nth(9, step_starts(0, lists:usort(DentryBlocks))), 0), Next),
     {ok, {Rest, done}} = readdir(Dir, Next),
     Expected = lists:sort([{position(Block, Slot), Name} || {Block, Slot, Name, _, _} <- dir_dentries()]),
     ?assertEqual(Expected, [{At, Name} || #{position := At, name := Name} <- First ++ Rest]),
@@ -529,6 +532,67 @@ a_readdir_over_holes_is_one_step_a_run_test() ->
     Huge = Empty#{i_size := 1 bsl 60, addresses := [0 || _ <- Addresses], i_nid := [0, 0, 0, 0, 0]},
     ?assertEqual({ok, {[], done}}, erx_f2fs_core:readdir(Volume, Huge, 0, Blocks)),
     ?assertEqual({ok, {[], done}}, erx_f2fs_core:readdir(Volume, Huge, position(5000000, 3), Blocks)).
+
+%% The blocks a readdir's steps start at from Block, in a directory whose
+%% address array holds the dentry blocks Data, sorted, and holes
+%% elsewhere: each dentry block, each run of holes before one, and the
+%% run after the last.
+step_starts(Block, []) -> [Block];
+step_starts(Block, [Block | Data]) -> [Block | step_starts(Block + 1, Data)];
+step_starts(Block, [Next | _] = Data) -> [Block | step_starts(Next, Data)].
+
+%% Every entry of Dir from Position on, a readdir at a time.
+listing(Dir, Position) ->
+    case readdir(Dir, Position) of
+        {ok, {Entries, done}} -> Entries;
+        {ok, {Entries, Next}} -> Entries ++ listing(Dir, Next)
+    end.
+
+%% The test file's inode and nodes as a directory, with indirect node 1's
+%% child moved to its fourth node id, so three node ids of 0 come before
+%% it, and a dentry block at each of the file's five data blocks: "." and
+%% ".." and n0 in the first, at file block 0, and n1 to n4 at slot 0 of
+%% the others. "." and ".." name the fixture volume's root, whose blocks
+%% it holds too, and every other name inode Ino.
+node_directory(Ino) ->
+    #{inode := Inode} = file_inode(#{}),
+    Moved = [{?INDIRECT1, indirect(?INDIRECT1, 3, at(3, ?CHILD))},
+             {?CHILD, direct(?CHILD, 7, at(2, ?DATA + 3))}],
+    {Volume, Blocks} = file(#{inode => Inode#{i_mode := 8#40755, i_links := 2}}, Moved),
+    [First | Rest] = [<<"n", D>> || D <- "01234"],
+    Root = ?ERX_F2FS_ROOT_INO,
+    Dentries = [[{0, <<".">>, Root, 0}, {1, <<"..">>, Root, 0}, {2, First, Ino, hash(First)}]
+                | [[{0, Name, Ino, hash(Name)}] || Name <- Rest]],
+    DentryBlocks = #{?DATA + N => erx_f2fs_codec_tests:dentry_block(Entries)
+                     || {N, Entries} <- lists:enumerate(0, Dentries)},
+    {Volume, maps:merge(erx_f2fs_mount_tests:fixture_volume(), maps:merge(Blocks, DentryBlocks))}.
+
+%% erx_f2fs_volume_tests' directory in nodes: its nid and volume.
+fixture_node_directory(Ino) -> {?INO, node_directory(Ino)}.
+
+%% A directory whose direct node 1 names one dentry block, which holds no
+%% entry, in every slot, its address array holes and its other node ids 0,
+%% with i_blocks Held: three blocks hold it, though its slots name 1,018.
+fixture_repeating_directory(Held) ->
+    #{inode := Inode} = file_inode(#{}),
+    #{i_addr := Words} = erx_f2fs_codec_tests:inode_fields(),
+    {Extra, _} = lists:split(3, Words),
+    {Volume, Blocks} = file(#{inode => Inode#{i_mode := 8#40755, i_links := 2, i_blocks := Held},
+                              i_addr => Extra ++ lists:duplicate(?SLOTS, 0),
+                              i_nid => [?DIRECT1, 0, 0, 0, 0]},
+                            [{?DIRECT1, direct(?DIRECT1, 1, lists:duplicate(?PER, ?DATA))}]),
+    {?INO, {Volume, Blocks#{?DATA := erx_f2fs_codec_tests:dentry_block([])}}}.
+
+%% A directory held in direct, indirect and double indirect nodes lists
+%% every entry once, in position order: under the address array, under
+%% direct node 1's first and last slots, under indirect node 1's child past
+%% three node ids of 0, which one step takes, and under the double indirect
+%% node's grandchild.
+a_directory_in_nodes_lists_through_each_node_test() ->
+    Blocks = [?B_DIRECT1, ?B_DIRECT1 + ?PER - 1, ?B_INDIRECT1 + 3 * ?PER + 2, ?B_DOUBLE + ?PER + 3],
+    Expected = [{0, <<".">>}, {1, <<"..">>}, {2, <<"n0">>}
+                | [{position(Block, 0), <<"n", D>>} || {Block, D} <- lists:zip(Blocks, "1234")]],
+    ?assertEqual(Expected, [{At, Name} || #{position := At, name := Name} <- listing(node_directory(?INO), 0)]).
 
 %% An inline directory's entries are its inline slots ([F 48]); its bytes
 %% are no file's, so read/5 refuses it.

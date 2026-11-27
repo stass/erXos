@@ -937,6 +937,14 @@ design does not have, to be deleted so no side-by-side table can show it under s
   file (incompatible bit 0x4, which the reader refuses) and no regular file in the plain layout with a
   partial last block, so no case reads a shared inode (nlink 2) or checks the chunked refusal or that
   tail; each can be made by patching `compact.img` in the EUnit cases and fixing its superblock checksum.
+* [Low] storage, F2FS device numbers (`erlang/apps/erx_f2fs/src/erx_f2fs_request.erl`, `attr/1`): a
+  character or block device's getattr leaves `rdev` out of `valid`, since the encodings in its address
+  array are Linux's and no source read in the task gives them (open question 7 of the F2FS facts
+  record). Settle them from the facts record or the oracle guest, then answer `rdev`.
+* [Low] storage, F2FS readdir over a damaged child (`erlang/apps/erx_f2fs/src/erx_f2fs_request.erl`,
+  `dirents/3`): an entry whose inode fails a check fails the whole readdir with `eio`, so one damaged
+  inode hides its directory's other names. Decide in design-f2fs.md's "Directories" whether such an
+  entry is left out, listed with its dentry's type and a qid without the generation, or fails the call.
 * [Medium] test, F2FS listing (`test/erlang/erx_f2fs_listing.erl`): cost grows faster than the tree on
   hostile shapes. Each entry of an inode with K names carries its K-path link class, so K names cost
   O(K^2) once the listing is copied or compared (3,000 links to one inode: about 500 MB flattened); a

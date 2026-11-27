@@ -271,6 +271,15 @@ limit f2fs_mode_blk u32 0x6000
 limit f2fs_mode_reg u32 0x8000
 limit f2fs_mode_lnk u32 0xa000
 limit f2fs_mode_sock u32 0xc000
+# A dentry's file_type: unknown, then the seven kinds of i_mode [F 59].
+limit f2fs_ft_unknown u8 0
+limit f2fs_ft_reg_file u8 1
+limit f2fs_ft_dir u8 2
+limit f2fs_ft_chrdev u8 3
+limit f2fs_ft_blkdev u8 4
+limit f2fs_ft_fifo u8 5
+limit f2fs_ft_sock u8 6
+limit f2fs_ft_symlink u8 7
 # A directory's hash levels at most: Linux reads a larger i_current_depth
 # as this [F 42], [F 58].
 limit f2fs_dir_hash_depth_max u32 63

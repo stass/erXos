@@ -103,8 +103,6 @@ admitted.
 -define(PACKS, 2).
 %% Each kind's logs in a checkpoint header: hot, warm and cold ([F 21]).
 -define(LOGS_PER_KIND, 3).
-%% The node ids below the NAT's capacity that hold no node ([F 36]).
--define(RESERVED_NIDS, 3).
 %% The fewest checkpoint, table and reserved segments Linux mounts ([F 55]).
 -define(METADATA_SEGMENTS_MIN, 8).
 %% nat_bits' leading version word ([F 27]).
@@ -317,7 +315,7 @@ check_counts(#{segment_count := Segments, segment_count_ckpt := Checkpoint,
     require(Overprovision =/= 0 andalso Reserved =/= 0, {checkpoint, reserved_segments}),
     require(User > 0 andalso User < Main * ?BLOCKS_PER_SEG, {checkpoint, user_blocks}),
     require(Valid =< User, {checkpoint, valid_blocks}),
-    require(Nodes =< erx_f2fs_codec:nat_capacity(Super) - ?RESERVED_NIDS,
+    require(Nodes =< erx_f2fs_codec:node_capacity(Super),
             {checkpoint, valid_nodes}).
 
 %% Each of the six logs inside the main area, no two on one segment
@@ -413,7 +411,7 @@ contents(#{cp_payload := PayloadBlocks} = Super, Start,
                                || Block <- read(Blocks, Orphans)]),
       data_summaries => DataSummaries,
       node_summaries => node_summaries(NodeLogs, read(Blocks, Node)),
-      nat => ok(erx_f2fs_core:nat(Super, ok(erx_f2fs_codec:nat_journal(NatJournal)))),
+      nat => nat(Super, ok(erx_f2fs_codec:nat_journal(NatJournal))),
       sit_journal => sit_journal(Super, SitJournal)}.
 
 %% The data logs' summaries and the NAT and SIT journals' bytes: the
@@ -625,6 +623,14 @@ read(Blocks, Addresses) ->
     case [Address || Address <- Addresses, not is_map_key(Address, Blocks)] of
         [] -> [maps:get(Address, Blocks) || Address <- Addresses];
         Missing -> throw({?MODULE, need, lists:usort(Missing)})
+    end.
+
+%% The NAT the core makes of the journal's Entries, opaque to this module,
+%% so it is matched here and never by ok/1.
+nat(Super, Entries) ->
+    case erx_f2fs_core:nat(Super, Entries) of
+        {ok, Nat} -> Nat;
+        {error, Failure} -> fail(Failure)
     end.
 
 ok({ok, Value}) -> Value;

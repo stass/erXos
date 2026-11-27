@@ -386,6 +386,14 @@ operation that walks a whole node tree (a truncate, the freeing of a
 large file, orphan cleanup) runs as a sequence of steps of at most 64
 nodes each.
 
+A read-only volume's requests write nothing, so each is a sequence of
+such steps with read phases only: `erx_f2fs_request` answers a request as
+moves, `{reply, Reply}`, `{then, Step}`, a next step that is a pure
+function of the blocks read so far, or `{failed, Nid, Failure}`, a check
+of the medium node `Nid` broke, which the volume answers `eio`. A request
+that crosses several nodes, as a readdir reads each entry's inode, takes
+one step per node, so the cache pins one node's blocks at a time.
+
 ### A chain never spans a mount
 
 A mount replays the chain in memory, through the same core operations a
@@ -543,7 +551,9 @@ the domain's supervisor, with two kinds of process:
   the calling process, as the behaviour requires; a read's call returns
   once the window has answered its blocks, so it waits in its grant as a
   read waits for its medium on a local file system. The tree's handle is
-  the volume process's pid and a reference made at its start.
+  the volume process's pid: only processes of the storage domain reach it,
+  since a message from another domain arrives in its envelope, which the
+  volume does not take as a request.
 
 A grant's requests reach the volume concurrently with every other
 grant's, and the volume makes each request atomic, which design-files.md
@@ -579,6 +589,7 @@ the only effects.
 | `erx_f2fs_codec` | every on-disk record's decoder and encoder over the generated layouts, the CRC, the dentry hash, the bitmaps' bit orders; the only module that reads or builds block bytes |
 | `erx_f2fs_mount` | choosing the superblock copy and the checkpoint pack, the mount checks, loading the SIT, the chain walk, orphan cleanup and replay; answers the initial state |
 | `erx_f2fs_core` | the volume state and every operation on it: lookup, create, write, truncate, link, unlink, rename, setattr, readdir, holds; the NAT's one lookup and the node tree's reads; the allocator, the room rule and the one slot-setting function |
+| `erx_f2fs_request` | each request of the callback module as steps over `erx_f2fs_core`, the answer each step gives and every errno; the volume process runs the steps |
 | `erx_f2fs_plan` | the checkpoint plan, the mount checkpoint's copies, the `fsync` record plan and the decision between record and checkpoint, and `need/1`, the free sections the next checkpoint takes |
 | `erx_f2fs_clean` | victim choice and the move step |
 | `erx_f2fs_format` | the format plan of a new volume |
@@ -790,7 +801,8 @@ the position the next call starts from. A call takes at most eight steps
 below the directory's end, each a dentry block or a run of empty slots
 that one node leaves: NULL_ADDR and NEW_ADDR slots of the address array
 or of one direct node, or the span under a node id of 0 together with
-the node ids of 0 after it in the same node. Its work therefore follows
+the node ids of 0 after it in the same indirect node, each of the
+inode's five node ids a step of its own. Its work therefore follows
 the blocks and nodes the directory holds, never the size it claims, and
 a directory claiming the largest size with no block lists in one call.
 The position it answers is always past the one it was given, so a
@@ -1588,7 +1600,8 @@ nothing above the callback module changes.
   keeping links and symlinks is a documented improvement over littlefs in
   the parity corpus. `xattr` answers `enotsup`. A device node, FIFO or
   socket Linux made shows in `readdir` and `getattr` and answers `open`
-  with `enotsup`.
+  with `enotsup`; a directory opened for writing answers `eisdir`, and a
+  symlink, which the server never follows, `eloop`.
 * **Nodes and identity.** A node is a nid. A qid's path is the nid in the
   low 32 bits and `i_generation` in the high 32
   ([design-storage.md](design-storage.md#read-write-storage)), unique

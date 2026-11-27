@@ -60,7 +60,7 @@ mount asks whether a log's next block holds a node of the checkpoint
          direct_node/4, indirect_node/4, dentry_block/1, inline_dentries/1,
          node_footer/1, crc/2,
          dentry_hash/1, dentry_slots/1, bit/2, extra_attr_features/0,
-         nat_capacity/1, main_end/1]).
+         nat_capacity/1, node_capacity/1, main_end/1]).
 -export_type([superblock/0, checkpoint/0, nat_entry/0, sit_entry/0,
               summary/0, inode/0, dentries/0, footer/0, failure/0]).
 
@@ -322,6 +322,13 @@ f2fs_nat_entries_per_block for each block of one of its two copies
 -spec nat_capacity(superblock()) -> non_neg_integer().
 nat_capacity(#{segment_count_nat := Segments}) ->
     ?ERX_F2FS_NAT_ENTRIES_PER_BLOCK * (Segments div 2) * ?BLOCKS_PER_SEG.
+
+-doc """
+The nids that can hold a node in the NAT of a volume whose superblock is
+Super: those from the root's on, as none below it holds one ([F 36]).
+""".
+-spec node_capacity(superblock()) -> non_neg_integer().
+node_capacity(Super) -> nat_capacity(Super) - ?ERX_F2FS_ROOT_INO.
 
 -doc """
 The first block past the main area of a volume whose superblock is Super

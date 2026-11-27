@@ -100,17 +100,22 @@ limit p9_s_iflnk u32 0xa000
 limit p9_s_ifchr u32 0x2000
 limit p9_s_ifblk u32 0x6000
 # A readdir entry's type byte, Linux's DT_ values as 9P2000.L carries them.
+limit p9_dt_unknown u8 0
+limit p9_dt_fifo u8 1
 limit p9_dt_chr u8 2
 limit p9_dt_dir u8 4
+limit p9_dt_blk u8 6
 limit p9_dt_reg u8 8
 limit p9_dt_lnk u8 10
+limit p9_dt_sock u8 12
 # The type each of erXos's file servers answers in statfs, a different one
 # for each kind of tree, which 9P2000.L leaves to the server: Linux's
 # RAMFS_MAGIC (the made trees with no type of their own: the start service's
 # tree, /svc/machine and a display's window tree), TMPFS_MAGIC (/tmp), PROC_SUPER_MAGIC
 # and DEVFS_SUPER_MAGIC, EROFS_SUPER_MAGIC_V1 (the `system` tree), and for
 # littlefs "lefs", the last four bytes of its superblock magic "littlefs",
-# read as a little-endian word, and for the media tree, one tree over every
+# read as a little-endian word, for F2FS its superblock's magic, and for
+# the media tree, one tree over every
 # drive's volumes, whatever their formats (docs/design-drives.md, "Mounting it"),
 # "medi", the first four bytes of its name read the same way. Each member's
 # name is the name the shell's `mount` prints for its type
@@ -125,6 +130,7 @@ enum p9_magic u32
   value littlefs 0x7366656c
   value erofs 0xe0f5e1e2
   value media 0x6964656d
+  value f2fs 0xf2f52010
 
 # setattr's valid: which of its fields the request sets.
 flags p9_setattr_valid u32

@@ -39,7 +39,8 @@ never past the largest block a file addresses, so it reads at most two
 blocks a level for at most 29 levels whatever depth and level the inode
 claims ([F 58]). A readdir takes at most ?READDIR_STEPS steps a call, each
 a block that holds data or a run of empty slots that one node leaves, the
-span under a node id of 0 among them, and answers the position the next
+span under a node id of 0 and the node ids of 0 after it in the same
+indirect node among them, and answers the position the next
 call starts from, which is past the one it was given; so its work follows
 the blocks and nodes the directory holds, not the size it claims.
 """.
@@ -428,9 +429,10 @@ dentry_blocks(Volume, Dir, Block, End, Steps, Blocks, Nodes, Found) ->
 %% run of Count blocks from Block that one node leaves empty, all NULL_ADDR
 %% or NEW_ADDR slots of its address array or of one direct node, or the
 %% span under node id 0 and under the node ids 0 that follow it in the same
-%% node ([F 4], [F 53]). Count is at least 1.
+%% indirect node ([F 4], [F 53]); each of the inode's five node ids is a run
+%% of its own. Count is at least 1.
 extent(Volume, #{addresses := Addresses}, Block, _Blocks, Nodes) when Block < length(Addresses) ->
-    {run(Volume, lists:nthtail(Block, Addresses)), Nodes};
+    {slots_extent(Volume, lists:nthtail(Block, Addresses)), Nodes};
 extent(Volume, #{addresses := Addresses, i_nid := Nids, footer := #{ino := Ino}}, Block, Blocks,
        Nodes) ->
     %% dir_end/1 keeps Block within the blocks a file addresses.
@@ -445,7 +447,7 @@ extent_under(_Volume, _Ino, 0, Path, _Blocks, Nodes) ->
     {{empty, rest(Path)}, Nodes};
 extent_under(Volume, Ino, Nid, [{Offset, Index}], Blocks, Nodes) ->
     {Addresses, Decoded} = node(direct_node, Volume, Ino, Nid, Offset, Blocks, Nodes),
-    {run(Volume, lists:nthtail(Index, tuple_to_list(Addresses))), Decoded};
+    {slots_extent(Volume, lists:nthtail(Index, tuple_to_list(Addresses))), Decoded};
 extent_under(Volume, Ino, Nid, [{Offset, Index} | Path], Blocks, Nodes) ->
     {Children, Decoded} = node(indirect_node, Volume, Ino, Nid, Offset, Blocks, Nodes),
     case lists:nthtail(Index, tuple_to_list(Children)) of
@@ -458,7 +460,7 @@ extent_under(Volume, Ino, Nid, [{Offset, Index} | Path], Blocks, Nodes) ->
 
 %% The extent at the head of Slots, a node's slots from the block's on: its
 %% data block, or the run of empty slots it starts.
-run(Volume, [Address | _] = Slots) ->
+slots_extent(Volume, [Address | _] = Slots) ->
     case length(lists:takewhile(fun empty_slot/1, Slots)) of
         0 ->
             checked_slot(Volume, {0, 0, Address}),
