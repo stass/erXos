@@ -533,6 +533,14 @@ scripts live in `~/erxos-scratch/tools/`.
     Its findings come to me as conform, generalization or delete. A
     generalization folds things that do the same job into one, existing or
     better, abstraction and deletes the copies.
+* **Recovery follows [design-recovery.md](docs/design-recovery.md).**
+  A recoverable failure of a device or a peer (a timeout, an error, a
+  crash) climbs its stack's ladder, whose top is paced, never a give-up;
+  a device that can never work, a hardware safety stop and an operator's
+  stop stay final. Every stack that talks to a device or a peer has a
+  stand-in that can stop answering, and every rung, deadline and retry
+  limit has a test that injects its fault, with a seeded fault that
+  removes it.
 * **The common path first; the long tail goes to `TODO.md`.** Build what the
   milestone needs for the cases that occur in it. Rare failure modes, in-place
   recovery machinery and protection against hostile peer domains beyond the

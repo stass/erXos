@@ -151,13 +151,14 @@ restart intensity of zero (chapter 3, section
 [3.3.4](03-erlang.md#334-supervisors)), so the end of any child ends
 the supervisor, the application, and with it the whole storage domain.
 The domain service then restarts the domain, at most five times in
-600 seconds, as the manifest's row for it says. The recovery design
-proposes to narrow this, and whether littlefs's contract takes it is
-still open: a block driver that resets its device or restarts while
-littlefs has nothing outstanding and has flushed every write the driver
-answered would not be seen by littlefs at all, while one that may have
-lost an answered write would still fail littlefs's next request and end
-the domain (chapter 15, section
+600 seconds, as the manifest's row for it says; the recovery design
+holds a sixth restart until the first leaves the period, rather than
+leaving the domain down. It also narrows what ends the domain, and
+littlefs's contract follows it: a block driver that resets its device
+or restarts while littlefs has nothing outstanding and has synced every
+write the driver answered is not seen by littlefs at all, while one
+that may have lost an answered write still fails littlefs's next
+request and ends the domain (chapter 15, section
 [15.1.1](15-devices.md#1511-what-a-drivers-end-reaches); **Designed**).
 
 Erlang's habit, the one chapter 3's supervisors teach, is to restart

@@ -28,9 +28,9 @@ Decisions every reader needs:
   driver's start never touches its device, so every device fault is a
   fault of a running driver, which restarts at most once per its hold,
   for ever, as the network stack's links do. A device's faults never
-  end its domain ([Restarts are paced](#restarts-are-paced)). Whether
-  the domain service paces a failing domain instead of leaving it down
-  is open decision 1.
+  end its domain ([Restarts are paced](#restarts-are-paced)). The
+  domain service paces a failing domain the same way instead of
+  leaving it down.
 * **Retry is an allow-list.** Only an operation its stack marks as safe
   to repeat is sent again, a bounded number of times inside the one
   deadline its caller gave it; the caller sees one answer. Anything else
@@ -108,7 +108,10 @@ Genode's documentation and the MINIX 3 paper ([References](#references)).
 
 **The standing rules.** `CLAUDE.md` asks for the recovery that already
 exists over new machinery, for deferring only what fails safely, and
-never for deferring a case that would lose data or answer wrongly. The
+never for deferring a case that would lose data or answer wrongly,
+and its rule on recovery makes this document binding for every
+recoverable failure of a device or a peer, with a fault-injection test
+for every rung, deadline and retry limit. The
 model therefore reuses three mechanisms the tree already has: deadlines
 in pure cores, the network stack's hold, and the capability registry's
 wait for a successor facet (`otp/erts/preloaded/src/erx_facets.erl:129-165`).
@@ -267,14 +270,34 @@ admission time as its deadline; requests behind it wait within the
 queue's bound and fail at their own deadlines. The history belongs to
 the driver's incarnation: a new incarnation starts with an empty one,
 but starts at most once per hold, so replacements add at most `Max`
-breaks per hold, and the service keeps no history of its own.
+breaks per hold, and the service keeps no history of its own. This
+is chosen over a history the service keeps across replacements: the
+hold already bounds how often an incarnation starts, so a history kept
+by the service would add a protocol between each driver and its service
+for a bound that holds without it.
 
 So a failing device costs a bounded number of breaks and restarts per
 unit of time, for as long as it is present, and its domain stays up.
 What climbs to `domain_restart` is what the domain cannot fix in place:
 a start that fails, a non-driver process crashing past its own
-supervisor's intensity, and a fault of the runtime. The domain service's
-own pace is [open decision 1](#open-decisions).
+supervisor's intensity, and a fault of the runtime.
+
+**A domain is paced too.** Past `restarts` in `restart_period_s`, the
+domain service holds a configured domain's next start until the oldest
+counted restart leaves the period, and after a row of boot timeouts,
+which are counted in a row rather than in a period, until
+`restart_period_s` after its last end; a start the domain library
+refuses counts as a start that failed and is held the same way. The
+timer is the domain service's, outside the failed domain; the inspector
+shows when the next start is due, and each start is one log line
+([design-system.md](design-system.md)). A domain marked `required`
+resets the machine where another would be held, since the machine does
+not run without it. Leaving a domain down instead would turn a flaky
+card or controller into a dead subsystem until reboot, which a headless
+board cannot repair. No `ctl` word starts a domain that is down: a held
+domain starts by itself, and such a word, with its grammar, fuzz case
+and authority, comes with the first consumer that cannot wait out a
+period.
 
 ### Retry
 
@@ -411,7 +434,7 @@ The rest follows:
   ([design-drives.md](design-drives.md#failure-handling)); no volume can
   take another's notice, since there is no notice to take. littlefs's
   next request fails and the storage domain ends, under its release
-  contract ([open decision 2](#open-decisions)). Any other holder fails
+  contract ([design-stopgap.md](design-stopgap.md#release-contract)). Any other holder fails
   its operation. Each file system already recovers from a removal, since
   a stick can be pulled anyway; the model adds no second path and no new
   answer.
@@ -479,6 +502,15 @@ its windows end, its volumes mount afresh, and no write of the old
 medium is sent to it. Retried writes follow the same rule, so a write is
 never sent to a medium its volume did not mount.
 
+**Reattach is the media layer's.** Whether the volumes on a medium carry
+on across a reset is decided where the promise is kept, by the window's
+one fact and the continuity rule above, and not inside the USB function
+or any other transport: a transport keeps no medium of its own across a
+reset that may have changed it, as the BOT function keeps none across a
+port reset, and the bus core keeps only the device and its place. One
+rule then serves every transport, and no transport judges for itself
+what a reset may have cost.
+
 After a detach (a re-enumeration, a driver incarnation that finds a
 different medium, a domain restart) a returning device is a new device.
 Its name follows its place: a USB drive keeps its slot, an input device
@@ -527,7 +559,7 @@ says otherwise.
 | an SD card | `cancel` (stop command), `device_reset` twice (the start sequence again, CID compared), `controller_reset` | `driver_restart`, held | every clean window; a clean volume notices nothing |
 | virtio-blk | a request deadline; `device_reset` (the device's reset and its queue set up again) | `driver_restart`, held | as for SD |
 | a FAT volume in the media domain | none of its own: its window carries the transport's rungs | its window's end at a break that finds it unclean: every volume of the medium ends and mounts afresh at the next walk | its mount point; files open before the end answer `eio` |
-| littlefs on `/data` | none of its own | its window's end at a break that finds it unclean, or a failed request, ends the storage domain under its release contract ([open decision 2](#open-decisions)) | across a break or a driver restart that finds its window clean with nothing outstanding, everything; across a domain restart, what the medium holds |
+| littlefs on `/data` | none of its own | its window's end at a break that finds it unclean, or a failed request, ends the storage domain under its release contract ([design-stopgap.md](design-stopgap.md#release-contract)) | across a break or a driver restart that finds its window clean with nothing outstanding, everything; across a domain restart, what the medium holds |
 
 A FAT volume mounted again after its window ended with unflushed
 changes finds its dirty flag set. Its mount clears the flag and mounts
@@ -667,7 +699,7 @@ The gaps between the code and this model, by stack:
 | [design.md](design.md#failure-handling): a driver crash ends that driver, whose supervisor resets the device and restarts it | true for USB, Bluetooth, networking and display; the block drivers end the storage domain | the design. Its row also said clients see the driver's exit and reconnect; under this model they hold the service and see nothing, and the row says so |
 | [design-storage.md](design-storage.md#failure-handling-diagnostics-and-debuggability): the virtio-blk device process has a deadline and the device service resets the device by starting a new device process | no deadline; a broken queue ends the domain | the design on the deadline. On the reset each side holds half: the code's reason not to reset in place (a reset may drop answered writes) is right, and ending the window a break finds unclean answers it, so the device resets in place and the storage table's rows follow this document |
 | [design-display.md](design-display.md#failure-handling-diagnostics-and-debuggability): a display driver that stops answering keeps the last frame while clients wait, "or the driver ends and restarts" | the driver ends 5 s after a frame's first post | the code; the row names the deadline |
-| [design-system.md](design-system.md): a domain the manifest marks `required` ends the machine past its intensity | the service cannot mark one (`docs/todo-domains.md`) | the design; under open decision 1 it is the one domain for which pacing gives way to a reset of the machine |
+| [design-system.md](design-system.md): a domain the manifest marks `required` ends the machine past its intensity | the service cannot mark one (`docs/todo-domains.md`) | the design; it is the one domain for which pacing gives way to a reset of the machine ([Restarts are paced](#restarts-are-paced)) |
 | [design-ssh.md](design-ssh.md#failure-handling): `erx_ssh` listens again when the grant answers after a network domain restart | `erx_ssh_dev` has no such code | the design; the 0.1 daemon follows it as a facet client |
 
 Where another design's text prescribes something else, the owning
@@ -677,7 +709,6 @@ document is cited and not restated here:
 | --- | --- | --- |
 | [design-usb.md](design-usb.md)'s BOT engine: its `reset_1` to `reset_3` steps end the operation failed; where its Recovery section retries instead, the medium is kept across every reset recovery | an allow-listed command is retried after a reset recovery that succeeded, and the reset recovery is a break the transport tells the medium's window of, so a window holding an unflushed write ends | this design. design-usb.md's retry under a fresh tag within the issue bound is this design's retry; what it adds is the break told to the window (point 3 of [USB](#usb)) |
 | [design-usb.md](design-usb.md#media-and-drives): any UNIT ATTENTION, NOT READY, a failed sense, an issued request past its bound, the transport's or the function's end ends the medium; a port reset keeps no medium | a medium continues only where nothing can have changed it | design-usb.md; the identity comparison never keeps a medium past one of these ([Identity](#identity)) |
-| [design-stopgap.md](design-stopgap.md#release-contract): a block failure, any driver restart and any deadline end the storage domain; nothing resets the device in place; windows never vouch for a write across a reset | a break or a driver restart that finds `/data`'s window clean and idle is not seen by littlefs | design-stopgap.md, until [open decision 2](#open-decisions) is taken, which lists every clause it amends |
 | [design-drives.md](design-drives.md#failure-handling): a FAT volume removed while written stays read-only until repaired on another machine | its mount clears the dirty flag when `fsck_fat`'s first-finding check finds nothing else | [design-fsck-fat.md](design-fsck-fat.md#clearing-the-flag-at-mount), which amends design-drives.md's writable rule |
 
 ## Adaptive limits
@@ -1028,95 +1059,7 @@ tests come first or with the ladder they test:
 
 ## Open decisions
 
-1. **A configured domain past its restart intensity.** It is left down
-   until reboot (`erx_domain_srv.erl:1792-1812`), an accepted rule of
-   [design-system.md](design-system.md) ("Boot failure"). The choices:
-   * **Hold.** Past `restarts` in `restart_period_s`, the next start
-     waits until the oldest counted restart leaves the period, the window
-     rule USB already applies to a port's attempts; for a row of boot
-     timeouts, which are counted in a row rather than in a period, the
-     next start waits `restart_period_s` after the last end. A domain
-     restarts at most `restarts` times per period, for ever, one log line
-     each, and the inspector shows when the next start is due. A start
-     the library refuses counts as a start that failed and is held the
-     same way. A domain marked `required` resets the machine where
-     another would be held, as the design already says.
-   * **A `ctl` word.** `start NAME` written to `/svc/machine/ctl` starts
-     a domain that is down. It needs a grammar, a fuzz case and the
-     `machine` grant's authority, and a headless board has no operator to
-     write it.
-   * **Keep leaving it down.** A flaky card or controller then turns a
-     recoverable fault into a dead subsystem until reboot.
-
-   The hold's timer belongs to the domain service, outside the failed
-   domain, and a refused start is held like a failed one. A device's
-   faults no longer reach this rung, since they stay inside the running
-   driver ([Restarts are paced](#restarts-are-paced)); what reaches it
-   is a defect or a configuration fault.
-
-   Recommendation, this design's and the external review's alike: hold,
-   refused starts included, without the `ctl` word, keeping the
-   `required` domain's reset of the machine; the word can come with the
-   first consumer that cannot wait out a period.
-2. **littlefs's release contract.** The contract makes every block
-   failure and every driver restart end the storage domain, and forbids
-   resetting the device in place
-   ([design-stopgap.md](design-stopgap.md#release-contract)). Under this
-   model a break or a driver restart that finds the data partition's
-   window clean, with nothing outstanding, is not seen by littlefs; one
-   that finds it unclean ends the window, so littlefs's next request
-   fails and the domain ends, as contracted. The amendment is the whole
-   of it, in [design-stopgap.md](design-stopgap.md), each clause changed
-   to the same rule:
-   * the Failure row of the release contract: "a block failure" becomes
-     "a failed block request, or the end of its window at a break that
-     finds it unclean", and "nothing resets the device in place" becomes
-     "nothing replays a request above the device process";
-   * the NIF form's prose: the driver restarts under a mounted volume
-     and resets the device in place, held, and a window bound to the
-     device process carries on to the next incarnation when the break
-     finds it clean, and ends when it finds it unclean, in place of
-     answering `eio` for ever once its first device process ends;
-   * the published downside: "any block error, deadline or driver
-     restart ends the storage domain" becomes "any failed block request,
-     and any break that finds the window holding an unflushed write,
-     ends the storage domain";
-   * the Verification row's seed "the driver restarted in place:
-     `erx_blk_sup` outlives the kill" becomes the window's: the window
-     kept across a break that found it unclean, so a flush answers `ok`
-     over a write the stand-in's volatile part dropped.
-
-   Lost acknowledged writes still fail a request and end storage; only
-   an idle, clean restart becomes invisible. Recommendation, this
-   design's and the external review's alike: approve the amendment
-   whole; changing only "a block failure" would leave the other three
-   clauses forbidding what the model does.
-3. **A bounded FAT check at mount.** Decided: a dirty volume's mount
-   runs `fsck_fat`'s checker in its first-finding mode and, when nothing
-   but the dirty mark is found, writes only the steps that mark it
-   clean; it repairs nothing, and any finding, a bound, or a failed
-   read, write or flush keeps it read-only. The design is
-   [design-fsck-fat.md](design-fsck-fat.md#clearing-the-flag-at-mount),
-   which extends the ownership check of
-   [design-drives.md](design-drives.md#the-writable-rule) rather than
-   adding a scanner of its own.
-4. **A rule in `CLAUDE.md`.** A short reference that leaves the policy
-   here, restricted to recoverable failures and carrying the testing
-   requirement:
-
-   > **Recovery follows [design-recovery.md](docs/design-recovery.md).**
-   > A recoverable failure of a device or a peer (a timeout, an error, a
-   > crash) climbs its stack's ladder, whose top is paced, never a
-   > give-up; a device that can never work, a hardware safety stop and
-   > an operator's stop stay final. Every stack that talks to a device
-   > or a peer has a stand-in that can stop answering, and every rung,
-   > deadline and retry limit has a test that injects its fault, with a
-   > seeded fault that removes it.
-
-   Recommendation, this design's and the external review's alike: add
-   it, its first two sentences under Design and its last under Tests,
-   so the model binds stacks not yet written without a second copy of
-   its policy.
+None.
 
 ## References
 

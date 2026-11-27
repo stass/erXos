@@ -1127,11 +1127,15 @@ on a machine whose boot timeout is long; counted in a row, they leave a
 domain that hangs every time down after `restarts` restarts, whatever the
 boot timeout. Beyond the intensity,
 a domain the manifest marks `required` ends the machine the same way, with
-the reason in the log, and any other is left down and shown so in the
-inspector, since a machine without its network is still a machine an
-operator can repair at the console. Whether such a domain is instead
-started again at its intensity's pace is an open decision of
-[design-recovery.md](design-recovery.md#open-decisions). Each end of a configured domain is one
+the reason in the log, and any other is held: its next start waits until
+the oldest counted restart leaves the period, or, after a row of boot
+timeouts, `restart_period_s` after its last end, and a start the domain
+library refuses counts as a start that failed and is held the same way.
+The timer is the domain service's, outside the failed domain, and the
+inspector shows when the next start is due. So a configured domain
+restarts at most `restarts` times a period, for ever, and a flaky card
+or controller never leaves a subsystem dead until reboot
+([design-recovery.md](design-recovery.md#restarts-are-paced)). Each end of a configured domain is one
 log line, and a fault's line names where it struck from the kernel's fault
 record: its program counter, cause and address, the address shown as
 unknown for a fault that names none. An asynchronous error is taken at a
@@ -5296,7 +5300,7 @@ reported as unreadable and dropped.
 | The machine ends unordered more than three times in a row | the reset count, in its own sector beside the boot-selection record | the machine, booted in its rescue configuration | the operator, at the console | the console's login, saying the machine booted for rescue and why |
 | The system domain faults, halts outside an ordered end, or misses the watchdog's deadline | the kernel | the machine | none: the kernel writes the crash record and ends the machine by `erx.panic` | the report on the console, brief in a release build; the previous boot's crash record in the inspector at the next boot, to the system shell, where the platform keeps one |
 | The system release fails to boot | the root task's end | the machine | none | the report on the console; the machine ends by `erx.panic` |
-| A configured domain fails to start, or ends repeatedly | the domain service's restart intensity | its objects until destroyed | the domain service restarts it within its intensity; beyond it, a `required` domain ends the machine as a fault would, and any other stays down | a log line; the inspector shows the domain down or the machine's end |
+| A configured domain fails to start, or ends repeatedly | the domain service's restart intensity | its objects until destroyed | the domain service restarts it within its intensity; beyond it, a `required` domain ends the machine as a fault would, and any other is held until the oldest counted restart leaves the period | a log line; the inspector shows the domain down or the machine's end |
 | A trial fails: its lease passes, or the system domain ends | the kernel's lease; the kernel | the machine | none | the machine resets and boots the committed slot; the update service records the failed trial |
 | The coordinator or a service fails, or preparation misses its deadline, during an ordered end | the ending record's deadline, checked by the fault thread; the coordinator's outcomes | completed checkpoints and incomplete preparation | a normal reset, never a restart or a thaw | incomplete durability and the failed phase, where logging remains available |
 | A driver process crashes, or a device misbehaves | the driver's supervisor; the driver's own checks of what the device wrote | the device's state, unknown | the supervisor restarts the driver, which resets the device | a log line; a client's request fails or is retried |

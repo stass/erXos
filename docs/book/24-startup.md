@@ -401,7 +401,7 @@ does not report within its **boot timeout**, 60 seconds unless the
 manifest sets another, is stopped. All of this is built
 (`erlang/apps/erx_domain/src/erx_domain_srv.erl`).
 
-### 24.3.3 Restarts, and a row left down
+### 24.3.3 Restarts, and a row held
 
 What happens to the machine whose storage domain hangs at every boot?
 A domain that fails to start, or ends later, is restarted by the
@@ -419,9 +419,19 @@ by 5) no five restarts share one period. Counted by time, such a hang
 would restart for ever. So a restart after a boot timeout keeps
 counting until a boot of that row that reached ready ends, however
 long that takes (`erx_domain_core:intensity/4`). A domain that hangs
-at every boot is left down after five restarts, whatever its boot
-timeout, and the machine runs on without it. This
+at every boot is restarted five times, whatever its boot timeout. This
 is built, with host tests of the pure decision.
+
+Past its intensity a domain is held rather than left down: its next
+start waits until the oldest counted restart leaves the period, or,
+after a row of boot timeouts, `restart_period_s` after its last end,
+and a start the domain library refuses is held the same way. The timer
+is the domain service's, outside the failed domain, and the inspector
+shows when the next start is due, so a flaky card or controller never
+leaves a subsystem dead until reboot
+([design-recovery.md](../design-recovery.md#restarts-are-paced)). This
+is **Designed**; the built service leaves such a domain down, and the
+machine runs on without it.
 
 The machine does not reset for it: a configured domain is one node
 among several, and its absence is a fact the inspector shows
@@ -822,7 +832,7 @@ is ever asked for. The trial request is designed and not built.
 | A damaged boot image | `bootstrap` refuses before moving a byte | `erXos image: <where>: <reason>` |
 | Bad handoff, manifest, device tree or pool | the root task refuses before ERTS | its reason, then the end |
 | Console path differs from the firmware's | the root task refuses | both paths |
-| A configured domain fails or hangs at boot | restarted within its intensity, then left down | the domain's end lines; the inspector |
+| A configured domain fails or hangs at boot | restarted within its intensity, then held until its next start is due | the domain's end lines; the inspector |
 | A system service other than the domain service | restarted alone by its supervisor | a crash report |
 | The domain service, or the system runtime | the machine resets | crash record, `erx: end reset` |
 | ERTS stops petting | the root's thread resets the machine | crash record with the watchdog cause |

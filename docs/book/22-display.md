@@ -657,8 +657,9 @@ Beside the Reset key, a fault menu injects hardware faults so a visitor
 can watch erXos handle them. The emulator makes every fault; none is a
 command typed into the guest. A hung disk does its work but never
 raises its interrupt. A dead disk's registers are unmapped, so the
-driver's next access faults. The storage domain then restarts up to
-5 times and stays down, while the rest of the system runs on. Corrupt
+driver's next access faults. The storage domain then restarts at its
+manifest row's pace, 5 times in 600 seconds, while the rest of the
+system runs on. Corrupt
 RAM flips 64 bits in the system domain's program, and a power cut
 restarts the machine with the disk keeping what reached it. The demo
 and its fault menu are built.
