@@ -8,7 +8,8 @@
 %% Linux wrote for its block.
 -module(erx_f2fs_core_tests).
 -export([fixture_file/0, fixture_nodes/0, fixture_directory/0, fixture_names/0,
-         fixture_node_directory/1, fixture_repeating_directory/1, summary/3]).
+         fixture_node_directory/1, fixture_repeating_directory/1, fixture_unmapped_file/0,
+         fixture_inline_file/0, summary/3]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
@@ -188,6 +189,18 @@ ssa_entries(error) ->
 %% direct and indirect nodes with the nid and node offset its parent gives,
 %% an indirect node's offset being 3, 1022, 2041 or 2042 + 1019k ([F 53]).
 fixture_file() -> file().
+
+%% erx_f2fs_volume_tests' write refusals: the test file's inode nid, the
+%% first of its blocks no node holds, and the file sized past that block.
+fixture_unmapped_file() ->
+    Block = ?B_DIRECT1 + ?PER,
+    {?INO, Block, file(#{inode => (inode_fields_inode())#{i_size := (Block + 1) * ?BLOCK}}, [])}.
+
+%% A file of five bytes of inline data, and its inode nid.
+fixture_inline_file() ->
+    {?INO, file(#{inode => (inode_fields_inode())#{i_inline := ?ERX_F2FS_EXTRA_ATTR bor ?ERX_F2FS_INLINE_DATA,
+                                                   i_size := 5, i_blocks := 1},
+                  i_addr => inline_words(<<"hello">>), i_nid => [0, 0, 0, 0, 0]}, [])}.
 
 fixture_nodes() ->
     [{case lists:member(Offset, [3, 2041, 2042]) of

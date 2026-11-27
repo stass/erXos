@@ -25,6 +25,10 @@ class ErxF2fsVolumeTest < Minitest::Test
   LOCK = File.join(ROOT, 'deps.lock')
 
   Seed = Data.define(:fault, :source, :anchor, :replacement, :failure)
+
+  # The verdict of the case named Name, after the log lines (a header and a message each)
+  # it writes.
+  def self.case_failed(name) = /#{name}[^\n]*?\.\.\.(?:=ERROR REPORT[^\n]*\n[^\n]*\n)*\*failed\*/
   # The corpus case's verdict, after the log lines (a header and a message each) its
   # trees write.
   CORPUS_CASE_FAILED = /corpus_trees_list_through_the_volume_as_through_the_core_test_\/0-fun-\d+-\.\.\.(?:=ERROR REPORT[^\n]*\n[^\n]*\n)*\*failed\*/
@@ -73,7 +77,40 @@ class ErxF2fsVolumeTest < Minitest::Test
     Seed.new(fault: "a write's first block merged over zeros, not the old bytes", source: REQUEST,
              anchor: 'Merged = <<(binary:part(Head, 0, Lead))/binary, Bytes/binary,',
              replacement: 'Merged = <<0:(Lead * 8), Bytes/binary,',
-             failure: WRITE_CASE_FAILED)
+             failure: WRITE_CASE_FAILED),
+    Seed.new(fault: 'an open for appending admitted', source: REQUEST,
+             anchor: '_ when Flags band (?ERX_P9_O_TRUNC bor ?ERX_P9_O_APPEND) =/= 0 -> {error, enotsup};',
+             replacement: '_ when Flags band ?ERX_P9_O_TRUNC =/= 0 -> {error, enotsup};',
+             failure: case_failed('a_read_write_volume_refuses_appends_truncation_and_gaps')),
+    Seed.new(fault: "a write admitted past the size's block", source: REQUEST,
+             anchor: 'ok ?= supported(not is_map_key(inline_data, Inode) andalso First =< Size div ?BLOCK_SIZE),',
+             replacement: 'ok ?= supported(not is_map_key(inline_data, Inode)),',
+             failure: case_failed('a_read_write_volume_refuses_appends_truncation_and_gaps')),
+    Seed.new(fault: 'a write admitted to inline data', source: REQUEST,
+             anchor: 'ok ?= supported(not is_map_key(inline_data, Inode) andalso First',
+             replacement: 'ok ?= supported(First',
+             failure: case_failed('a_write_refuses_a_slot_no_node_holds_and_inline_data')),
+    Seed.new(fault: 'a write admitted to a block no node holds', source: REQUEST,
+             anchor: '{ok, none} -> {reply, {error, enotsup}};',
+             replacement: '{ok, none} -> mapped(Volume, Inode, Range, Blocks);',
+             failure: case_failed('a_write_refuses_a_slot_no_node_holds_and_inline_data')),
+    Seed.new(fault: "a write's last block merged over the medium's bytes past the size", source: REQUEST,
+             anchor: '{ok, Bytes} ?= erx_f2fs_core:read(Volume, Inode, Block * ?BLOCK_SIZE, ?BLOCK_SIZE, Blocks),',
+             replacement: '{ok, Bytes} ?= erx_f2fs_core:read(Volume, Inode#{i_size := (Block + 1) * ?BLOCK_SIZE}, ' \
+                          'Block * ?BLOCK_SIZE, ?BLOCK_SIZE, Blocks),',
+             failure: case_failed('a_write_reads_zeros_past_the_size_and_is_cut_at_64_blocks')),
+    Seed.new(fault: 'a write taking 65 blocks', source: REQUEST,
+             anchor: '-define(WRITE_BLOCKS, 64).',
+             replacement: '-define(WRITE_BLOCKS, 65).',
+             failure: case_failed('a_write_reads_zeros_past_the_size_and_is_cut_at_64_blocks')),
+    Seed.new(fault: 'a failed write leaving the volume running', source: VOLUME,
+             anchor: "        {error, eio} ->\n            {ended, {error, eio}, State}\n",
+             replacement: "        {error, eio} ->\n            {{error, eio}, State}\n",
+             failure: case_failed('a_failed_write_or_flush_ends_the_volume_with_eio')),
+    Seed.new(fault: "a failed fsync's checkpoint leaving the volume running", source: VOLUME,
+             anchor: "        {ok, Committed} -> {ok, Committed};\n        {error, eio} -> {ended, {error, eio}, State}",
+             replacement: "        {ok, Committed} -> {ok, Committed};\n        {error, eio} -> {{error, eio}, State}",
+             failure: case_failed('a_failed_write_or_flush_ends_the_volume_with_eio'))
   ].freeze
 
   def test_eunit_cases_pass

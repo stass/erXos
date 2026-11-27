@@ -550,27 +550,37 @@ block({_Partition, Blocks}, A) -> maps:get(A, Blocks, <<0:(?BLOCK * 8)>>).
 landed({Partition, Blocks}, Writes) -> {Partition, maps:merge(Blocks, maps:from_list(Writes))}.
 
 %% A block device over Medium that also writes and flushes, recording every
-%% write and flush in the order it served them, for the crash states.
-recorder(Medium) -> spawn_link(fun() -> recorder_loop(Medium, []) end).
+%% write and flush in the order it served them, for the crash states; once
+%% told to fail writes or flushes, it answers each eio and records nothing.
+recorder(Medium) -> spawn_link(fun() -> recorder_loop(Medium, [], none) end).
 
-recorder_loop(Medium, Journal) ->
+recorder_loop(Medium, Journal, Failing) ->
     receive
         {'$gen_call', From, {read, Sector, Count}} ->
             First = Sector * ?SECTOR div ?BLOCK,
             gen_server:reply(From, {ok, << <<(block(Medium, A))/binary>>
                                            || A <- lists:seq(First, First + Count * ?SECTOR div ?BLOCK - 1) >>}),
-            recorder_loop(Medium, Journal);
+            recorder_loop(Medium, Journal, Failing);
+        {'$gen_call', From, {write, _Sector, _Bytes}} when Failing =:= write ->
+            gen_server:reply(From, {error, eio}),
+            recorder_loop(Medium, Journal, Failing);
         {'$gen_call', From, {write, Sector, Bytes}} ->
             gen_server:reply(From, ok),
             Blocks = [{Sector * ?SECTOR div ?BLOCK + I, binary:part(Bytes, I * ?BLOCK, ?BLOCK)}
                       || I <- lists:seq(0, byte_size(Bytes) div ?BLOCK - 1)],
-            recorder_loop(landed(Medium, Blocks), [{write, Blocks} | Journal]);
+            recorder_loop(landed(Medium, Blocks), [{write, Blocks} | Journal], Failing);
+        {'$gen_call', From, flush} when Failing =:= flush ->
+            gen_server:reply(From, {error, eio}),
+            recorder_loop(Medium, Journal, Failing);
         {'$gen_call', From, flush} ->
             gen_server:reply(From, ok),
-            recorder_loop(Medium, [flush | Journal]);
+            recorder_loop(Medium, [flush | Journal], Failing);
+        {'$gen_call', From, {failing, Failing1}} ->
+            gen_server:reply(From, ok),
+            recorder_loop(Medium, Journal, Failing1);
         {'$gen_call', From, journal} ->
             gen_server:reply(From, {Medium, lists:reverse(Journal)}),
-            recorder_loop(Medium, Journal)
+            recorder_loop(Medium, Journal, Failing)
     end.
 
 %% A volume over Medium in Mode, and its device.
@@ -606,25 +616,32 @@ file_on(Medium, Path) ->
     Bytes.
 
 %% The first corpus image that mounts read-write with a regular file of
-%% more than two blocks, as a medium, and the file's path.
-writable_file() -> writable_file(corpus_images()).
+%% more than two blocks whose size Wanted accepts: the image as a medium,
+%% the file's path, the image's mount and the file's inode nid and size.
+writable_file(Wanted) -> writable_file(Wanted, corpus_images()).
 
-writable_file([Image | Images]) ->
+writable_file(Wanted, [Image | Images]) ->
     Files = case mounted(Image) of
                 {ok, #{mode := read_write} = Mounted} ->
-                    [Path || {Path, #{kind := regular, size := Size}}
-                                 <- erx_f2fs_listing:of_tree(core_reader(Image, Mounted)),
-                             Size > 2 * ?BLOCK];
+                    #{stat := Stat} = Reader = core_reader(Image, Mounted),
+                    [{Path, Mounted, Nid, Size}
+                     || {Path, #{kind := regular, size := Size}} <- erx_f2fs_listing:of_tree(Reader),
+                        Size > 2 * ?BLOCK, Wanted(Size), {ok, #{inode := Nid}} <- [Stat(Path)]];
                 _ -> []
             end,
     case Files of
-        [Path | _] -> {medium(Image), Path};
-        [] -> writable_file(Images)
+        [{Path, Found, Nid, Size} | _] -> {medium(Image), Path, Found, {Nid, Size}};
+        [] -> writable_file(Wanted, Images)
     end.
 
-patched(Old, At, Patch) ->
-    <<(binary:part(Old, 0, At))/binary, Patch/binary,
-      (binary:part(Old, At + byte_size(Patch), byte_size(Old) - At - byte_size(Patch)))/binary>>.
+any_size(_Size) -> true.
+
+%% Old with Bytes written at At, zeros filling any gap past its end.
+overwritten(Old, At, Bytes) ->
+    Padded = <<Old/binary, 0:(max(0, At - byte_size(Old)) * 8)>>,
+    End = At + byte_size(Bytes),
+    <<(binary:part(Padded, 0, At))/binary, Bytes/binary,
+      (binary:part(Padded, min(End, byte_size(Padded)), max(0, byte_size(Padded) - End)))/binary>>.
 
 %% A read-write volume writes its mount checkpoint, reads a write back
 %% before and after the fsync that commits it, and its unmount checkpoint
@@ -637,7 +654,7 @@ patched(Old, At, Patch) ->
 a_write_survives_fsync_unmount_and_every_cut_test_() ->
     {timeout, 900,
      fun() ->
-             {Medium, Path} = writable_file(),
+             {Medium, Path, _Mounted, _File} = writable_file(fun any_size/1),
              V0 = version(Medium),
              Old = file_on(Medium, Path),
              {Volume, Device} = start_on(Medium, read_write),
@@ -645,7 +662,7 @@ a_write_survives_fsync_unmount_and_every_cut_test_() ->
              Patch = binary:copy(<<16#c3>>, ?BLOCK + 1000),
              At = ?BLOCK - 500,
              ?assertEqual({ok, byte_size(Patch), At}, erx_f2fs:write(Handle, At, Patch, Volume)),
-             New = patched(Old, At, Patch),
+             New = overwritten(Old, At, Patch),
              ?assertEqual(New, contents(Volume, Handle)),
              ?assertEqual(ok, erx_f2fs:fsync(Handle, Volume)),
              ?assertEqual(New, contents(Volume, Handle)),
@@ -687,3 +704,86 @@ landings(Writes, Medium) ->
            end,
     [[], Writes] ++ [Writes -- [W] || W <- Writes] ++ [[Torn(W) | Writes -- [W]] || W <- Writes] ++
         [[W || W <- Writes, rand:uniform(2) =:= 1] || _ <- lists:seq(1, 4)].
+
+%%% What a write refuses, cuts and ends
+
+%% Fixture as a read-write view, whose requests take the write path.
+writable({Volume, Blocks}) -> {Volume#{dirty => #{}}, Blocks}.
+
+%% A write needs a node to hold each block's slot, and blocks of the file's
+%% own: one reaching a block no node holds, from it or from the block
+%% before, and one into inline data answer enotsup.
+a_write_refuses_a_slot_no_node_holds_and_inline_data_test() ->
+    {Ino, Block, File} = erx_f2fs_core_tests:fixture_unmapped_file(),
+    ?assertEqual({error, enotsup}, requested(writable(File), {write, {Ino, Block * ?BLOCK, <<"x">>}})),
+    ?assertEqual({error, enotsup}, requested(writable(File), {write, {Ino, Block * ?BLOCK - 1, <<"xy">>}})),
+    {InlineIno, Inline} = erx_f2fs_core_tests:fixture_inline_file(),
+    ?assertEqual({error, enotsup}, requested(writable(Inline), {write, {InlineIno, 0, <<"x">>}})).
+
+%% A read-write volume opens no file to append or truncate, and refuses a
+%% write that starts past the block holding the size, which would leave
+%% blocks between that no write cleared.
+a_read_write_volume_refuses_appends_truncation_and_gaps_test() ->
+    {Medium, Path, _Mounted, {_Nid, Size}} = writable_file(fun any_size/1),
+    {Volume, _Device} = start_on(Medium, read_write),
+    File = node(Volume, Path),
+    [?assertEqual({error, enotsup}, erx_f2fs:open(File, Flags, Volume))
+     || Flags <- [?ERX_P9_O_RDWR bor ?ERX_P9_O_APPEND, ?ERX_P9_O_WRONLY bor ?ERX_P9_O_APPEND,
+                  ?ERX_P9_O_RDWR bor ?ERX_P9_O_TRUNC, ?ERX_P9_O_TRUNC]],
+    {ok, Handle} = erx_f2fs:open(File, ?ERX_P9_O_RDWR, Volume),
+    ?assertEqual({error, enotsup}, erx_f2fs:write(Handle, (Size div ?BLOCK + 1) * ?BLOCK, <<"x">>, Volume)),
+    stop(Volume).
+
+%% The bytes of the size's block past the size read as zeros, whatever the
+%% medium holds there, so a write past the size within that block shows
+%% nothing of what the block held beyond its file; and a write takes at
+%% most 64 blocks from its first, answering the bytes it took.
+a_write_reads_zeros_past_the_size_and_is_cut_at_64_blocks_test_() ->
+    {timeout, 300,
+     fun() ->
+             {{Partition, Blocks} = Clean, Path, Mounted, {Nid, Size}} =
+                 writable_file(fun(S) -> S rem ?BLOCK > 0 andalso S rem ?BLOCK < ?BLOCK - 200 end),
+             Image = image(Partition, Blocks),
+             {ok, Inode} = direct(Image, fun(B) -> erx_f2fs_core:inode(Mounted, Nid, B) end),
+             {ok, {_, _, Tail}} = direct(Image, fun(B) -> erx_f2fs_core:slot(Mounted, Inode, Size div ?BLOCK, B) end),
+             Kept = Size rem ?BLOCK,
+             Medium = landed(Clean, [{Tail, <<(binary:part(block(Clean, Tail), 0, Kept))/binary,
+                                              (binary:copy(<<16#5a>>, ?BLOCK - Kept))/binary>>}]),
+             Old = file_on(Medium, Path),
+             {Volume, _Device} = start_on(Medium, read_write),
+             {ok, Handle} = erx_f2fs:open(node(Volume, Path), ?ERX_P9_O_RDWR, Volume),
+             ?assertEqual({ok, 4, Size + 100}, erx_f2fs:write(Handle, Size + 100, <<"tail">>, Volume)),
+             Tailed = overwritten(Old, Size + 100, <<"tail">>),
+             ?assertEqual(Tailed, contents(Volume, Handle)),
+             Long = binary:copy(<<16#e7>>, 65 * ?BLOCK),
+             ?assertEqual({ok, 64 * ?BLOCK - 100, 100}, erx_f2fs:write(Handle, 100, Long, Volume)),
+             ?assertEqual(overwritten(Tailed, 100, binary:part(Long, 0, 64 * ?BLOCK - 100)),
+                          contents(Volume, Handle)),
+             stop(Volume)
+     end}.
+
+%% A write the medium refuses, or a flush it fails, ends the volume with
+%% eio, and every later request answers eio.
+a_failed_write_or_flush_ends_the_volume_with_eio_test_() ->
+    {timeout, 300,
+     fun() ->
+             {Medium, Path, _Mounted, _File} = writable_file(fun any_size/1),
+             Write = fun(Handle, Volume) -> erx_f2fs:write(Handle, 0, <<"x">>, Volume) end,
+             Fsync = fun(Handle, Volume) ->
+                             {ok, 1, 0} = Write(Handle, Volume),
+                             erx_f2fs:fsync(Handle, Volume)
+                     end,
+             [begin
+                  {Volume, Device} = start_on(Medium, read_write),
+                  unlink(Volume),
+                  Down = monitor(process, Volume),
+                  {ok, Handle} = erx_f2fs:open(node(Volume, Path), ?ERX_P9_O_RDWR, Volume),
+                  ok = gen_server:call(Device, {failing, Failing}),
+                  ?assertEqual({Failing, {error, eio}}, {Failing, Request(Handle, Volume)}),
+                  ?assertEqual({Failing, eio}, receive {'DOWN', Down, process, Volume, Why} -> {Failing, Why}
+                                               after 5000 -> {Failing, running}
+                                               end),
+                  ?assertEqual({error, eio}, erx_f2fs:read(Handle, 0, 1, Volume))
+              end || {Failing, Request} <- [{write, Write}, {flush, Fsync}]],
+             ok
+     end}.
