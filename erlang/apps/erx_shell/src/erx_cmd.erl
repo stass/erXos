@@ -93,7 +93,7 @@ job_control => erx_shell:job_control(),
 -define(EVENTS_KEY, '$erx_events').
 
 -doc "Writes bytes to standard output.".
--spec write(ctx(), iodata()) -> ok.
+-spec write(#{stdout := stream(), _ => _}, iodata()) -> ok.
 write(#{stdout := Out}, Bytes) ->
     put_bytes(Out, iolist_to_binary(Bytes)).
 

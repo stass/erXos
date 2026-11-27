@@ -70,7 +70,7 @@ translate(Pattern, Syntax) when Syntax =:= bre; Syntax =:= ere ->
     end.
 
 -doc "The `re:compile/2` options a translated pattern is compiled with.".
--spec options(#{ignore_case := boolean()}) -> [atom()].
+-spec options(#{ignore_case := boolean(), _ => _}) -> [atom()].
 options(#{ignore_case := true}) -> [caseless | options(#{ignore_case => false})];
 options(#{ignore_case := false}) -> [dotall, dollar_endonly].
 

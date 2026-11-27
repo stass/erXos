@@ -364,6 +364,7 @@ close_bracket(L, At) ->
         _ -> malformed(At)
     end.
 
+-spec malformed(offset()) -> no_return().
 malformed(At) ->
     fault(At, syntax, <<"malformed redirection">>).
 
@@ -461,6 +462,7 @@ body_lines(B, Start, LineStart, Tag, At) ->
             unterminated(At)
     end.
 
+-spec unterminated(offset()) -> no_return().
 unterminated(At) ->
     fault(At, incomplete, <<"here document is not terminated">>).
 

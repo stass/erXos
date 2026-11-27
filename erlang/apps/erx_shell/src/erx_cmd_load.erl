@@ -250,6 +250,7 @@ put_blob(Facet, Name, Hash, Bytes, Offset) ->
         Refused -> refused([Name], Refused)
     end.
 
+-spec refused([binary()], term()) -> no_return().
 refused(Names, {error, Why}) -> fail(Names, Why);
 refused(Names, Other) -> fail(Names, {unexpected, Other}).
 
@@ -265,6 +266,8 @@ line(Name, Reason) -> [<<"load: ">>, Name, <<": ">>, erx_cmd:format_error(Reason
 %% another domain is waited on with no deadline of its own, since the code service
 %% answers every request it is sent; `local`, in the system domain's own shell, is the
 %% service itself. An exit carries no request bytes into what is written.
+%% gen's reply tag [alias | Ref] is an improper list by its protocol.
+-dialyzer({no_improper_lists, call/3}).
 call(Facet, Request, Names) ->
     Envelope = {'$gen_call', {self(), [alias | make_ref()]}, Request},
     erlang:external_size(Envelope) =< ?ERX_CODE_REQUEST_MAX orelse fail(Names, <<"request too large">>),

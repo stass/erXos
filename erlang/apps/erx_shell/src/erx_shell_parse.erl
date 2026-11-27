@@ -778,6 +778,7 @@ enter(D, At) when D >= ?MAX_DEPTH ->
 enter(D, _Pos) ->
     D + 1.
 
+-spec unexpected(erx_shell_lex:token()) -> no_return().
 unexpected(Token) ->
     fail(Token, <<"unexpected ", (describe(Token))/binary>>).
 

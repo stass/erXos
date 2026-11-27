@@ -139,7 +139,7 @@ columns([], _Width) ->
     [];
 columns(Names, Width) ->
     Max = lists:max([string:length(Name) || Name <- Names]),
-    ColWidth = (Max + ?TAB) band bnot (?TAB - 1),
+    ColWidth = (Max div ?TAB + 1) * ?TAB,
     case Width < 2 * ColWidth of
         true ->
             [[Name, $\n] || Name <- Names];
@@ -162,7 +162,7 @@ row(Names, ColWidth) ->
 
 %% The tabs from column At to the last tab stop at or before End.
 tabs(At, End) ->
-    Next = (At + ?TAB) band bnot (?TAB - 1),
+    Next = (At div ?TAB + 1) * ?TAB,
     case Next =< End of
         true -> [$\t | tabs(Next, End)];
         false -> []

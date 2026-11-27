@@ -230,7 +230,7 @@ not_found(Name, S) ->
 %% A program's status; its starter is a process of its own, so its pipe
 %% ends and pumps end with it, and an interrupt that ends the line ends it.
 program(Name, Image, Args, Vars, #{cwd := Cwd} = S) ->
-    Ctx = #{name => Name, cwd => Cwd, env => Vars,
+    Ctx = #{name => Name, cwd => Cwd, env => Vars, facets => #{},
             stdin => stream(0, S), stdout => stream(1, S), stderr => stream(2, S)},
     case isolated(fun() -> erx_shell_program:run(Image, Args, Ctx) end) of
         {value, Status} -> Status;
@@ -549,11 +549,8 @@ join(Shown, Name) ->
 
 names(Path) ->
     case file:list_dir(Path) of
-        {ok, Names} -> [name(Name) || Name <- Names];
+        {ok, Names} -> [unicode:characters_to_binary(Name) || Name <- Names];
         {error, _} -> []
     end.
-
-name(Name) when is_binary(Name) -> Name;
-name(Name) -> unicode:characters_to_binary(Name).
 
 exists(Path) -> element(1, file:read_link_info(Path)) =:= ok.
