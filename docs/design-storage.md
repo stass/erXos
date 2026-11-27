@@ -1199,7 +1199,13 @@ field is not zero (`mmc.c:1735-1737`): 16 KiB for 1 up to 4 MiB for 9.
 Whether the specification codes the values above 9 as FreeBSD's shift
 does is unverified, since its table was not read; the value sizes only
 discards and the file system's log line, so a wrong one costs speed and
-no data. `open_units` is 2 on every card: no register says how many
+no data. It is the card's report, not a measurement: Bergmann found
+that "all cards currently seem to report 4MB segments, even those that
+actually use 2MB or 8MB segments internally"
+([LWN 428584](https://lwn.net/Articles/428584/), section Partitioning),
+so the unit a format uses comes from the card profile's timings where
+there is one ([design-f2fs.md](design-f2fs.md#formatting-a-volume)).
+`open_units` is 2 on every card: no register says how many
 units a card keeps open, and while "on many of the better drives, five
 or more segments can be open simultaneously", "some brands can only have
 one or two segments open at a time" (Bergmann,
@@ -1213,6 +1219,9 @@ CMD33 with the last, one below the end (`mmcsd.c:1307, 1332`), and CMD38
 with argument 0, erase (`mmcreg.h:275-276`), answered with busy
 (`mmcsd.c:1345-1347`), so its transfer complete follows the end of the
 erase, as a write's follows programming; then CMD13, as after a write.
+The driver issues the erase form alone, never the secure forms
+(`mmcreg.h:280-282`), and treats no form as another: what each
+promises is the specification's, which was not read here.
 `erx_blk_write`'s SD discard function alone builds the three commands,
 after the trial check. `discard` in `info/0` is the allocation unit, or
 8192 sectors when it is `unknown`, so one request erases at most one

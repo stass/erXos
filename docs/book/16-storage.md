@@ -467,7 +467,8 @@ segments, and the design makes the section the one unit in which the
 volume meets the card
 ([design-f2fs.md, The section is the medium's
 unit](../design-f2fs.md#the-section-is-the-mediums-unit)). The format
-sizes a section to the card's allocation unit and starts every section
+sizes a section to the card's allocation unit, as timings on the card
+show it rather than as the card reports it, and starts every section
 on one; each log fills a whole section before it takes another; the
 cleaner empties whole sections; and when a checkpoint frees a section,
 the volume tells the card with a **discard**, so the card learns of a

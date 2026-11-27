@@ -127,8 +127,8 @@ it each sector reads as anything, its old bytes included. The window's
 `info` gives four facts of the medium
 ([design-storage.md](design-storage.md#data-model)): `max_sectors`, the
 most one read or write moves, 8 sectors on virtio, one 4 KiB block, and
-64 on an SD card, 32 KiB; `erase_unit`, the medium's allocation unit in
-sectors, or `unknown`; `open_units`, how many allocation units the
+64 on an SD card, 32 KiB; `erase_unit`, the allocation unit the medium
+reports, in sectors, or `unknown`; `open_units`, how many allocation units the
 medium takes writes into at once without a penalty, 2 on an SD card and
 `unlimited` on virtio; and `discard`, the most sectors one discard
 covers, or `none`. The storage design assumes a medium that writes a
@@ -151,7 +151,12 @@ documentation "expects that the section size would be the same as the
 unit size of garbage collection in FTL" (`f2fs.rst` l.785-787, section
 Default Block Allocation, in [References](#references)). How far current A1 and A2 cards
 relax the open-unit limit is unverified; the measurement of
-[Performance](#performance) settles it for the Pi's card.
+[Performance](#performance) settles it for the Pi's card. A reported
+unit is a starting point, not a fact about the card's insides: in the
+same article "all cards currently seem to report 4MB segments, even
+those that actually use 2MB or 8MB segments internally", so the unit
+the format uses is the one the card profile infers from the card's
+timings where there is one.
 
 F2FS's records are packed, with a 64-bit `block_count` at offset 36 of
 the superblock and 32-bit fields at odd offsets in NAT entries, summary
@@ -407,9 +412,10 @@ and starts the main area on an absolute section boundary of the medium
 ([Formatting a volume](#formatting-a-volume)), so a section covers whole
 allocation units, or part of one on a medium whose unit is larger than
 the largest section. A mount whose window reports an `erase_unit` that
-the volume's sections do not cover whole, as on a card whose unit
-exceeds the format's default, writes as usual and says so in one log
-line and in the inspector, which show both sizes. Everything else
+the volume's sections do not cover whole, as on a card whose reported
+unit exceeds the format's default, writes as usual and says so in one
+log line and in the inspector, which show both sizes; the line names
+the card's report, which may not be its internal unit. Everything else
 follows from treating the section as the unit:
 
 * **Allocation.** A log takes a free section, one that no log holds and
@@ -437,6 +443,23 @@ follows from treating the section as the unit:
   logs too, so the reserves are the same, and a volume another writer
   left with partly filled logs keeps their free tails idle, at most four
   sections' worth, until a six-log mount writes them.
+* **Streams at the card.** Two logs per volume are not two streams at
+  the card. The card holds two F2FS volumes, the vault's and the data
+  partition, each in its own storage domain, so while both write the
+  card sees up to four appending streams, and each volume's checkpoints
+  add its NAT, SIT, summary and pack blocks in its own metadata area;
+  the boot-selection record and the reset count add a sector at a boot.
+  The vault keeps small sealed blobs, such as login keys and Bluetooth
+  bonds ([design-ssh.md](design-ssh.md), [design-bluetooth.md](design-bluetooth.md)),
+  and writes only when one changes; an idle volume writes nothing,
+  since a checkpoint runs only while something is dirty
+  ([What is durable when](#what-is-durable-when)). So while `/data` is
+  busy the card sees its two streams and its checkpoints, and a vault
+  write is a short burst of two more streams and one checkpoint. A card
+  that keeps two units open closes and reopens units at each such
+  burst and at each checkpoint of either volume; whether that stays
+  within what the Pi's cards keep open is measured with both volumes
+  writing ([Performance](#performance)).
 * **Runs.** The volume process sends each phase's writes in address
   order, a run of contiguous blocks as one request of at most the
   window's `max_sectors`, and merges a step's reads the same way. Logs
@@ -877,10 +900,19 @@ whole from the state at its start:
    many sectors. The checkpoint does not wait for them. They are free in
    the committed checkpoint, so no durable view references them, which
    is Linux's order too: its discards are "issued only after that
-   checkpoint's commit block completes" ([R 37], crash state [C 6]). The
-   window serves requests in order, so a write the next epoch makes into
-   such a section reaches the medium after its discard. A failed discard
-   is a failed request and ends the volume like a failed write.
+   checkpoint's commit block completes" ([R 37], crash state [C 6]).
+   No discard can reach a section after the section is allocated again:
+   freeing the sections and sending their discards are one action of
+   the volume process, taken in the turn that sees the commit answered
+   and before any step that can allocate runs, and the window, whose one
+   client the volume is, serves requests in the order they arrive. So
+   every write into a reallocated section reaches the medium after that
+   section's discard; a discard is never held back, batched past a later
+   step or retried. A failed discard is a failed request and ends the
+   volume like a failed write. Correctness never rests on discards: a
+   volume over a window whose `discard` is `none` behaves the same in
+   every other way, and no reader takes meaning from what a discarded
+   sector holds.
 
 The header carries the new version, one above the committed one, the
 counts, the six logs' positions, all `alloc_type` LFS, and the flags:
@@ -1510,10 +1542,12 @@ clean room's facts too.
   least 1 and at most 8, and at most the partition's segments over 256,
   so that the 16 sections the cleaner reserves stay within a sixteenth
   of the partition. The unit is the `erase_unit` the installation passes
-  in `Options`, which it knows when it reads the card the guest reported
-  or the operator gives it, and 4 MiB otherwise, the size Bergmann found
-  most common ([The medium under the volume](#the-medium-under-the-volume));
-  an image built once for every card takes the default. So the vault's
+  in `Options`: the unit the card profile inferred for the card or its
+  model where there is one ([Performance](#performance)), else the unit
+  the card reports when the installation knows it, and 4 MiB otherwise,
+  the size Bergmann found most common
+  ([The medium under the volume](#the-medium-under-the-volume)); an
+  image built once for every card takes the default. So the vault's
   64 MiB and the data partition's 128 MiB as packed have one-segment
   sections, and a data partition grown to the rest of a card of a few
   GiB has the card's unit, up to 16 MiB. A larger unit costs reserve:
@@ -2257,6 +2291,8 @@ inputs, each paired with the seeded fault it must catch:
 | on a two-log mount every block written lands in the warm node or warm data log, and the other four logs keep their positions through every workload | a directory's dnode placed in the hot node log |
 | a phase's runs cover exactly its blocks, each run contiguous, at most `max_sectors` and within one phase | two blocks one block apart merged into a run |
 | after each commit exactly the sections it freed are discarded, in requests within the window's `discard`, and none on a window whose `discard` is `none` | a section freed by the epoch's cleaning discarded before the commit |
+| every discard is sent before the first write into its section after the commit | the freed sections released to the allocator one step before their discards are sent |
+| every workload of the power-cut harness gives the same trees over a window with `discard` and one without | a new dentry block written only up to its last used slot, trusting a discarded section to read as zeros |
 
 The oracle guest settles what the facts records leave open about
 sections and logs: erXos's images with 2, 4 and 8 segments per section,
@@ -2281,7 +2317,11 @@ watch list ([todo-performance.md](todo-performance.md)):
   against Linux's one preflush and FUA write;
 * small writes without a buffer: a write of less than a block rewrites
   the whole block out of place, so a stream of short appends rewrites its
-  last block each time;
+  last block each time, which on an SD card may cost more than any
+  section size saves; whether a bounded per-file buffer of dirty blocks
+  ([Alternatives considered](#alternatives-considered)) earns its
+  complexity is a question the card measurement settles, with short
+  application appends among its workloads;
 * the volume process carries every block request and its answer, at 4 KiB
   per request on virtio and 32 KiB on an SD card, each phase's
   contiguous blocks merged into runs;
@@ -2409,8 +2449,10 @@ watch list ([todo-performance.md](todo-performance.md)):
    and the comparison shows two logs cleaning measurably more.
 2. **The default section of an image built for every card.**
    Recommendation: 4 MiB, the size Bergmann found most common, until the
-   card profile reads the units of the cards erXos is tested on; a
-   larger default costs every volume a larger reserve.
+   card profile infers the units of the cards erXos is tested on from
+   their timings rather than their reports; a larger default costs every
+   volume a larger reserve, and an 8 MiB section would cover units of 2,
+   4 and 8 MiB whole.
 
 ## Risks
 
@@ -2421,7 +2463,7 @@ watch list ([todo-performance.md](todo-performance.md)):
 | Linux, extending a file, reads the nodes a cut left mapped past its size | low | after a cut between a large truncate's steps, the file's old bytes in Linux's extension of it | the nodes-past-a-size probe settles it; if Linux reads them, a large truncate frees from the file's end and lowers the size at each step, so no checkpoint commits a slot past a size |
 | A medium that tears within a sector | low | a torn commit block or superblock | the storage design's sector assumption; recorded with the block driver's residual |
 | A cheap card keeps fewer than two units open, as some of Bergmann's did | medium | two logs alternate, and writes fall to tens of KB/s | the card profile of [todo-performance.md](todo-performance.md) measures the open-unit limit before G13; a card below two is a reason to revisit the file system, recorded with the measurement |
-| A card's unit is larger than 16 MiB, or the image's default 4 MiB is not the card's | medium | a cleaned section frees part of a unit, and the card copies the rest | the mount names both sizes; the installation passes the card's unit when it knows it; the measurement compares section sizes |
+| A card's unit is larger than 16 MiB, or the image's default 4 MiB is not the card's, or the card reports a unit it does not use | medium | a cleaned section frees part of a unit, and the card copies the rest | the card profile infers the unit from timings, and the installation passes the inferred unit; the mount names the reported and the volume's sizes; the measurement compares section sizes |
 | SD cards that ignore flushes | medium | any ordering lost on the Pi | recorded with the block driver's residual; the Pi's half of G13 measures it |
 | Two flushes and a pre-image per `fsync` too slow | medium | commit latency at G13 | the measurement decides; group commit across waiting `fsync`s and a forced-unit-access write are the fixes on the table |
 | A fragmented volume whose cleaner cannot gain | low | `enospc` before the volume is full | the property tests measure it at every format size; the overprovisioning is the knob |
