@@ -28,10 +28,28 @@ turn. Its phases are the design's table:
 * `status`: the CSW on bulk-in, checked (csw/3); a failure: `clear_status`;
 * `clear_status`: `reset_pipe` on bulk-in; then `status_again`;
 * `status_again`: the CSW once more; a failure: reset recovery;
+* `cancel`: `reset_pipe` on the pipe whose transfer is still posted,
+  which the controller answers `stopped`; then reset recovery;
 * `reset_1` to `reset_3`: the Bulk-Only Mass Storage Reset, then
-  `reset_pipe` on bulk-in, then on bulk-out; then the operation done,
-  failed, or at the function's start Get Max LUN (`max_lun`). A step of
-  reset recovery that fails stops the function.
+  `reset_pipe` on bulk-in, then on bulk-out; then the operation sent
+  again, done or failed, or at the function's start Get Max LUN
+  (`max_lun`).
+
+**The recovery ladder** (docs/design-usb.md, "Recovery"). Trouble on the
+wire climbs it a rung at a time, and every rung waits under a deadline of
+the engine's own, so no wait is without one: (1) `cancel`, only while a
+bulk transfer is posted, so the class reset never meets a transfer still
+queued; (2) reset recovery, `reset_1` to `reset_3`; (3) the port, the
+function's end as `{stop, {reset_port, Rung, Reason}}`, Rung the rung
+that failed, or `again` for an operation that needs recovery a second
+time, as Apple's driver escalates a consecutive failure to a device
+reset; the bus resets the port. A rung that fails or passes its
+usb_bot_recovery_step_ms goes to rung 3, never back down and never to a
+stop of another kind. After reset recovery, an operation whose command
+failed on the wire is sent again, at most usb_bot_retries times and
+within its issue deadline, as is one whose sense is MEDIUM ERROR,
+HARDWARE ERROR or ABORTED COMMAND, which FreeBSD retries by default; every
+command of the subset is idempotent, so a repeat moves the same blocks.
 
 A failed `reset_pipe` outside reset recovery goes to reset recovery. A
 data phase that fails in any way is cleared and followed by the status, as
@@ -55,8 +73,8 @@ request `{error, {device, {sense, Key, Asc, Ascq}}}` and, for NOT READY and
 UNIT ATTENTION, ends the unit's medium in that step. A sense that fails in
 any way, reset recovery included, answers `{error, {device, no_sense}}`
 and ends the unit's medium; the engine asks no sense for the sense. An
-operation that went through reset recovery is otherwise answered
-`{error, {device, reset}}`.
+operation that went through reset recovery and has no retry left is
+otherwise answered `{error, {device, reset}}`.
 
 A unit's medium is the engine's: none, or the reference the function made
 for it and whether it flushes. It becomes current only in the step that
@@ -76,20 +94,27 @@ and a stale reference ends nothing. The function's own word,
 same way and leaves an operation already issued to run as any operation
 does, to its CSW, through reset recovery or to its deadline, the device
 being inside a command that completes in turn; its answer reaches a caller
-that is gone, or the unit's course.
+that is gone, or the unit's course. Its command is never sent again: a
+retry is refused as its request would be at the head of the queue, and the
+operation is answered `{error, {device, gone}}`, so no WRITE follows the end
+of its medium.
 A flush of a medium that cannot flush is answered `{error, no_flush}`,
 never `ok`.
 
 A request still queued blk_wait_limit_ms (abi/formats/blk.txt) after its acceptance is
 answered `{error, {device, deadline}}` and never sent. One issued
-blk_in_flight_ms ago, its sense and reset recovery included, is
-answered the same and ends its unit's medium, and reset recovery starts at
-once: its class reset stops the transfer the device left hanging, whose
-late completion names an older tag and is ignored. A tick checks the
-operation's deadline while it waits on a bulk transfer, the only waits the
-function's own calls do not bound; an operation that ends past its
-deadline, through those calls, is answered and recovered the same way, so
-the reset recovery comes before the next command. deadline/1 is the time
+blk_in_flight_ms ago, its retries, sense and recovery included,
+is answered the same in whatever phase, and ends its unit's medium; a
+rung under way runs on to ready the device. An attempt whose bulk
+transfer is still posted usb_bot_attempt_ms after its CBW, the sense's
+CBW starting a clock of its own, climbs the ladder from `cancel`. Every
+event decides the deadlines at its time before anything else, as a tick at
+that time would, so an answer that comes past a deadline finds it decided
+and advances nothing, whatever order the function's mailbox delivers them
+in: the cancelled transfer's late completion names an older tag and is
+ignored, and the late answer of a step, which the function drops by its
+reference, changes nothing either when it meets a phase waiting on no step
+of its kind. A stop is the last action of its step. deadline/1 is the time
 of the next tick that can change anything.
 
 At start the engine runs reset recovery before Get Max LUN or any CBW, so
@@ -156,22 +181,29 @@ end the function.
                 | {answer, Id :: term(), reply()}
                 | {medium_ended, lun(), medium_ref()}
                 | {units, 1..16}
-                | {stop, {reset, term()} | {max_lun, byte()}}.
+                | {stop, {reset_port, rung(), term()} | {max_lun, byte()}}.
+
+-doc "The rung that failed, `again` for an operation that needed recovery a second time.".
+-type rung() :: cancel | reset_1 | reset_2 | reset_3 | again.
 
 -type phase() :: new | idle | command | data_in | data_out | clear_data | status | clear_status | status_again
-               | reset_1 | reset_2 | reset_3 | max_lun | stopped.
+               | cancel | reset_1 | reset_2 | reset_3 | max_lun | stopped.
 
 -type medium() :: none | #{ref := medium_ref(), flush := boolean()}.
 
 -type entry() :: #{id := term(), medium := medium_ref() | none, request := request(), accepted := integer()}.
 
 %% The current operation: its request, whether its own command or its REQUEST SENSE is on
-%% the wire, the command's CBW tag and data length, and what its data phase moved.
--type op() :: #{entry := entry(), stage := command | sense, issued := integer(), command := command(),
+%% the wire, when it was first issued, the retries sent, when the CBW on the wire was
+%% sent, whether it has been through recovery, the command's CBW tag and data length, and
+%% what its data phase moved.
+-type op() :: #{entry := entry(), stage := command | sense, issued := integer(), retries := non_neg_integer(),
+                attempt := integer(), recovered := boolean(), command := command(),
                 tag := non_neg_integer(), length := non_neg_integer(), moved := non_neg_integer(),
                 data := binary()}.
 
--opaque state() :: #{phase := phase(), tag := non_neg_integer(), op := op() | none,
+%% `until` is the deadline of the step a recovery phase waits on, none in any other phase.
+-opaque state() :: #{phase := phase(), tag := non_neg_integer(), op := op() | none, until := integer() | none,
                      queue := queue:queue(entry()), units := none | #{lun() => medium()}}.
 
 %% The phases that wait on a bulk transfer, the only ones a completion or an operation's
@@ -179,47 +211,44 @@ end the function.
 -define(ON_BULK(Phase), (Phase =:= command orelse Phase =:= data_in orelse Phase =:= data_out
                          orelse Phase =:= status orelse Phase =:= status_again)).
 
+%% The phases that wait on a pipe reset, the only ones its answer can find; a class
+%% request's answer finds only reset_1 and max_lun. Any other step answer is one the
+%% engine has stopped waiting on, and changes nothing.
+-define(ON_PIPE_RESET(Phase), (Phase =:= clear_data orelse Phase =:= clear_status orelse Phase =:= cancel
+                               orelse Phase =:= reset_2 orelse Phase =:= reset_3)).
+
 -doc "An engine that has not started.".
 -spec new() -> state().
 new() ->
-    #{phase => new, tag => 0, op => none, queue => queue:new(), units => none}.
+    #{phase => new, tag => 0, op => none, until => none, queue => queue:new(), units => none}.
 
 -doc "The next state on Event at time Now, in milliseconds, and the actions the function performs.".
 -spec step(event(), integer(), state()) -> {state(), [action()]}.
-step(start, _Now, State = #{phase := new}) ->
-    recover(State);
-step({request, Id, Medium, Request}, Now, State = #{queue := Queue}) ->
-    Entry = #{id => Id, medium => Medium, request => Request, accepted => Now},
-    next(Now, State#{queue := queue:in(Entry, Queue)});
-step({transfer, Tag, Result}, Now, State = #{phase := Phase, op := #{tag := Tag}}) when ?ON_BULK(Phase) ->
-    transferred(Phase, Result, Now, State);
-step({transfer, _StaleTag, _Result}, _Now, State) ->
-    {State, []};
-step({reset_pipe, Result}, Now, State = #{phase := Phase}) ->
-    pipe_reset(Phase, Result, Now, State);
-step({control, Result}, Now, State = #{phase := Phase}) ->
-    controlled(Phase, Result, Now, State);
-step({end_medium, Lun, Ref}, _Now, State) ->
-    end_medium(Lun, Ref, State);
-step(tick, Now, State = #{phase := Phase, op := #{issued := Issued}})
-  when ?ON_BULK(Phase), Now - Issued >= ?ERX_BLK_IN_FLIGHT_MS ->
-    abandon(Now, State);
-step(tick, Now, State) ->
-    expire_queued(Now, State).
+step(Event, Now, State) ->
+    {Live, Expired} = expire(Now, State),
+    {Next, Actions} = on(Event, Now, Live),
+    {Next, Expired ++ Actions}.
 
 -doc "The time at which a tick next changes anything, or `infinity`.".
 -spec deadline(state()) -> integer() | infinity.
-deadline(#{queue := Queue, op := Op, phase := Phase}) ->
+deadline(#{phase := stopped}) ->
+    infinity;
+deadline(#{queue := Queue, op := Op, phase := Phase, until := Until}) ->
     Queued = case queue:peek(Queue) of
                  {value, #{accepted := Accepted}} -> [Accepted + ?ERX_BLK_WAIT_LIMIT_MS];
                  empty -> []
              end,
     Issued = case Op of
-                 #{issued := At} when ?ON_BULK(Phase) -> [At + ?ERX_BLK_IN_FLIGHT_MS];
-                 _InCallOrNone -> []
+                 #{issued := At} -> [At + ?ERX_BLK_IN_FLIGHT_MS];
+                 none -> []
              end,
+    Attempt = case Op of
+                  #{attempt := Sent} when ?ON_BULK(Phase) -> [Sent + ?ERX_USB_BOT_ATTEMPT_MS];
+                  _NoneOrOffTheWire -> []
+              end,
+    Step = [Until || is_integer(Until)],
     %% A number sorts before an atom, so infinity is the minimum only of an empty list.
-    lists:min([infinity | Queued ++ Issued]).
+    lists:min([infinity | Queued ++ Issued ++ Attempt ++ Step]).
 
 -doc "A command's data phase: its direction and its CBW's length.".
 -spec data_phase(command()) -> {none, 0} | {in | out, non_neg_integer()}.
@@ -300,6 +329,43 @@ read_capacity_10(_Bytes) -> {error, short}.
 read_capacity_16(<<Last:64, Length:32, _/binary>>) -> {ok, #{last_block => Last, block_length => Length}};
 read_capacity_16(_Bytes) -> {error, short}.
 
+%% The deadlines decided at Now, before any event is: an operation past its issue deadline
+%% is answered in whatever phase it is, leaving its phase to overdue/2, which therefore
+%% meets a bulk phase with no operation and cancels that transfer as any overdue one;
+%% requests queued past their deadline are answered unsent. overdue/2 comes last, as it
+%% can stop the function. Past expire/2, every operation and queued request is within its
+%% deadlines for the rest of the step.
+expire(_Now, State = #{phase := stopped}) ->
+    {State, []};
+expire(Now, State) ->
+    {Late, LateActions} = late(Now, State),
+    {Swept, Expired} = expire_queued(Now, Late),
+    {Due, DueActions} = overdue(Now, Swept),
+    {Due, LateActions ++ Expired ++ DueActions}.
+
+%% An event met by an engine whose deadlines expire/2 has decided.
+on(_Event, _Now, State = #{phase := stopped}) ->
+    {State, []};
+on(start, Now, State = #{phase := new}) ->
+    reset(Now, State);
+on({request, Id, Medium, Request}, Now, State = #{queue := Queue}) ->
+    Entry = #{id => Id, medium => Medium, request => Request, accepted => Now},
+    next(Now, State#{queue := queue:in(Entry, Queue)});
+on({transfer, Tag, Result}, Now, State = #{phase := Phase, op := #{tag := Tag}}) when ?ON_BULK(Phase) ->
+    transferred(Phase, Result, Now, State);
+on({transfer, _StaleTag, _Result}, _Now, State) ->
+    {State, []};
+on({reset_pipe, Result}, Now, State = #{phase := Phase}) when ?ON_PIPE_RESET(Phase) ->
+    pipe_reset(Phase, Result, Now, State);
+on({control, Result}, Now, State = #{phase := Phase}) when Phase =:= reset_1; Phase =:= max_lun ->
+    controlled(Phase, Result, Now, State);
+on({Step, _LateResult}, _Now, State) when Step =:= reset_pipe; Step =:= control ->
+    {State, []};
+on({end_medium, Lun, Ref}, _Now, State) ->
+    end_medium(Lun, Ref, State);
+on(tick, _Now, State) ->
+    {State, []}.
+
 %% The queue's head starts an operation once the engine is idle.
 next(Now, State = #{phase := idle, queue := Queue}) ->
     case queue:out(Queue) of
@@ -309,20 +375,27 @@ next(Now, State = #{phase := idle, queue := Queue}) ->
 next(_Now, State) ->
     {State, []}.
 
-%% A request at the head of the queue is sent only within its deadline, for its unit's
-%% current medium, and, for a flush, to a medium that flushes.
-admit(#{id := Id, accepted := Accepted}, Now, State) when Now - Accepted >= ?ERX_BLK_WAIT_LIMIT_MS ->
-    answer_next(Id, {error, {device, deadline}}, Now, State);
-admit(Entry = #{id := Id, medium := Medium, request := Request}, Now, State) ->
+admit(Entry = #{id := Id, request := Request}, Now, State) ->
+    case refusal(Entry, State) of
+        none ->
+            send(#{entry => Entry, stage => command, issued => Now, retries => 0, recovered => false},
+                 command(Request), Now, State);
+        Refused ->
+            answer_next(Id, Refused, Now, State)
+    end.
+
+%% Why a request's command is not sent, or none: it is sent only for its unit's current
+%% medium, and, for a flush, to a medium that flushes. A retry asks again, so no command
+%% is sent for a medium that ended after its request was first sent.
+refusal(#{medium := Medium, request := Request}, State) ->
     Current = current(lun(Request), State),
     case {ref(Current) =:= Medium, Current, Request} of
-        {false, _Current, _Request} -> answer_next(Id, {error, {device, gone}}, Now, State);
-        {true, none, {Kind, _Lun, _Sector, _Blocks}} when Kind =:= read; Kind =:= write ->
-            answer_next(Id, {error, {device, gone}}, Now, State);
-        {true, none, {flush, _Lun}} -> answer_next(Id, {error, {device, gone}}, Now, State);
-        {true, #{ref := _Live}, {ready, _Lun, _New}} -> answer_next(Id, {error, {device, gone}}, Now, State);
-        {true, #{flush := false}, {flush, _Lun}} -> answer_next(Id, {error, no_flush}, Now, State);
-        {true, _Current, _Request} -> send(#{entry => Entry, stage => command, issued => Now}, command(Request), State)
+        {false, _Current, _Request} -> {error, {device, gone}};
+        {true, none, {Kind, _Lun, _Sector, _Blocks}} when Kind =:= read; Kind =:= write -> {error, {device, gone}};
+        {true, none, {flush, _Lun}} -> {error, {device, gone}};
+        {true, #{ref := _Live}, {ready, _Lun, _New}} -> {error, {device, gone}};
+        {true, #{flush := false}, {flush, _Lun}} -> {error, no_flush};
+        {true, _Current, _Request} -> none
     end.
 
 answer_next(Id, Reply, Now, State) ->
@@ -334,12 +407,12 @@ command({ready, Lun, _Ref}) -> {synchronize_cache, Lun};
 command(Request) -> Request.
 
 %% Posts Command's CBW under the next tag, a counter of this engine's, so a CSW or a late
-%% completion of an earlier command never matches.
-send(Op, Command, State = #{tag := Last}) ->
+%% completion of an earlier command never matches; the attempt's clock starts with it.
+send(Op, Command, Now, State = #{tag := Last}) ->
     Tag = (Last + 1) band 16#ffffffff,
     {_Direction, Length} = data_phase(Command),
     {State#{phase := command, tag := Tag,
-            op := Op#{command => Command, tag => Tag, length => Length, moved => 0, data => <<>>}},
+            op := Op#{command => Command, tag => Tag, length => Length, moved => 0, data => <<>>, attempt => Now}},
      [{command, Tag, Command}]}.
 
 transferred(command, {ok, _Sent}, _Now, State = #{op := #{command := Command, tag := Tag}}) ->
@@ -348,79 +421,119 @@ transferred(command, {ok, _Sent}, _Now, State = #{op := #{command := Command, ta
         {in, Length} -> {State#{phase := data_in}, [{data_in, Tag, Length}]};
         {out, _Length} -> {State#{phase := data_out}, [{data_out, Tag, Command}]}
     end;
-transferred(command, {error, _Reason}, _Now, State) ->
-    recover(State);
+transferred(command, {error, Reason}, Now, State) ->
+    recover(none, Reason, Now, State);
 transferred(data_in, {ok, Bytes}, _Now, State = #{op := Op}) when is_binary(Bytes) ->
     status(State#{op := Op#{moved := byte_size(Bytes), data := Bytes}});
 transferred(data_out, {ok, Moved}, _Now, State = #{op := Op}) when is_integer(Moved) ->
     status(State#{op := Op#{moved := Moved}});
-transferred(data_in, {error, _Reason}, _Now, State) ->
-    {State#{phase := clear_data}, [{reset_pipe, in}]};
-transferred(data_out, {error, _Reason}, _Now, State) ->
-    {State#{phase := clear_data}, [{reset_pipe, out}]};
-transferred(status, {error, _Reason}, _Now, State) ->
-    {State#{phase := clear_status}, [{reset_pipe, in}]};
-transferred(status_again, {error, _Reason}, _Now, State) ->
-    recover(State);
+transferred(data_in, {error, _Reason}, Now, State) ->
+    wait(clear_data, {reset_pipe, in}, Now, State);
+transferred(data_out, {error, _Reason}, Now, State) ->
+    wait(clear_data, {reset_pipe, out}, Now, State);
+transferred(status, {error, _Reason}, Now, State) ->
+    wait(clear_status, {reset_pipe, in}, Now, State);
+transferred(status_again, {error, Reason}, Now, State) ->
+    recover(none, Reason, Now, State);
 transferred(Status, {ok, Bytes}, Now, State) when Status =:= status; Status =:= status_again ->
     judge(Bytes, Now, State).
 
 status(State = #{op := #{tag := Tag}}) ->
     {State#{phase := status}, [{status, Tag}]}.
 
-pipe_reset(clear_data, ok, _Now, State) ->
-    status(State);
-pipe_reset(clear_status, ok, _Now, State = #{op := #{tag := Tag}}) ->
-    {State#{phase := status_again}, [{status, Tag}]};
-pipe_reset(Clear, {error, _Reason}, _Now, State) when Clear =:= clear_data; Clear =:= clear_status ->
-    recover(State);
-pipe_reset(reset_2, ok, _Now, State) ->
-    {State#{phase := reset_3}, [{reset_pipe, out}]};
-pipe_reset(reset_3, ok, Now, State) ->
-    recovered(Now, State);
-pipe_reset(Reset, {error, Reason}, _Now, State) when Reset =:= reset_2; Reset =:= reset_3 ->
-    stop({reset, Reason}, State).
+%% A step of recovery, a pipe reset or a class request, sent with its deadline.
+wait(Phase, Action, Now, State) ->
+    {State#{phase := Phase, until := Now + ?ERX_USB_BOT_RECOVERY_STEP_MS}, [Action]}.
 
-controlled(reset_1, {ok, _Bytes}, _Now, State) ->
-    {State#{phase := reset_2}, [{reset_pipe, in}]};
+%% A clear whose operation was answered at its deadline has no status to read: the
+%% device is readied by reset recovery whatever the clear's answer.
+pipe_reset(Clear, _Result, Now, State = #{op := none}) when Clear =:= clear_data; Clear =:= clear_status ->
+    reset(Now, State);
+pipe_reset(clear_data, ok, _Now, State) ->
+    status(State#{until := none});
+pipe_reset(clear_status, ok, _Now, State = #{op := #{tag := Tag}}) ->
+    {State#{phase := status_again, until := none}, [{status, Tag}]};
+pipe_reset(Clear, {error, Reason}, Now, State) when Clear =:= clear_data; Clear =:= clear_status ->
+    recover(none, Reason, Now, State);
+pipe_reset(cancel, ok, Now, State) ->
+    reset(Now, State);
+pipe_reset(reset_2, ok, Now, State) ->
+    wait(reset_3, {reset_pipe, out}, Now, State);
+pipe_reset(reset_3, ok, Now, State) ->
+    recovered(Now, State#{until := none});
+pipe_reset(Rung, {error, Reason}, _Now, State) when Rung =:= cancel; Rung =:= reset_2; Rung =:= reset_3 ->
+    stop({reset_port, Rung, Reason}, State).
+
+controlled(reset_1, {ok, _Bytes}, Now, State) ->
+    wait(reset_2, {reset_pipe, in}, Now, State);
 controlled(reset_1, {error, Reason}, _Now, State) ->
-    stop({reset, Reason}, State);
+    stop({reset_port, reset_1, Reason}, State);
 controlled(max_lun, Answer, Now, State) ->
     case max_lun(Answer) of
         {ok, Count} ->
             Units = maps:from_keys(lists:seq(0, Count - 1), none),
-            {Next, Actions} = next(Now, State#{phase := idle, units := Units}),
+            {Next, Actions} = next(Now, State#{phase := idle, until := none, units := Units}),
             {Next, [{units, Count} | Actions]};
         {error, Reason} ->
             stop(Reason, State)
     end.
 
-recover(State) ->
-    {State#{phase := reset_1}, [class_reset]}.
+%% The ladder's entry on trouble of the operation on the wire, Posted the pipe whose
+%% transfer is still posted, or none. An operation that has been through recovery once
+%% goes to the port (rung 3); otherwise a posted transfer is cancelled (rung 1) before
+%% reset recovery (rung 2), so the class reset never meets a transfer still queued.
+recover(_Posted, Reason, _Now, State = #{op := #{recovered := true}}) ->
+    stop({reset_port, again, Reason}, State);
+recover(Posted, _Reason, Now, State) ->
+    Marked = case State of
+                 #{op := Op = #{}} -> State#{op := Op#{recovered := true}};
+                 #{op := none} -> State
+             end,
+    case Posted of
+        none -> reset(Now, Marked);
+        Pipe -> wait(cancel, {reset_pipe, Pipe}, Now, Marked)
+    end.
 
-recovered(_Now, State = #{units := none}) ->
-    {State#{phase := max_lun}, [get_max_lun]};
+reset(Now, State) ->
+    wait(reset_1, class_reset, Now, State).
+
+%% The pipe a phase waiting on a bulk transfer has it posted on.
+posted(Phase) when Phase =:= command; Phase =:= data_out -> out;
+posted(Phase) when Phase =:= data_in; Phase =:= status; Phase =:= status_again -> in.
+
+recovered(Now, State = #{units := none}) ->
+    wait(max_lun, get_max_lun, Now, State);
 recovered(Now, State = #{op := none}) ->
     next(Now, State#{phase := idle});
 recovered(Now, State = #{op := #{stage := command}}) ->
-    finish({error, {device, reset}}, keep, Now, State);
+    retry({error, {device, reset}}, keep, Now, State);
 recovered(Now, State = #{op := #{stage := sense}}) ->
     sense_failed(Now, State).
 
+%% The operation's command sent again under a fresh tag while its request is not refused
+%% and it has retries left; otherwise it is finished with the refusal, or with Reply. Its
+%% deadline expire/2 has already decided.
+retry(Reply, Medium, Now, State = #{op := Op = #{retries := Retries, entry := Entry = #{request := Request}}}) ->
+    case {refusal(Entry, State), Retries < ?ERX_USB_BOT_RETRIES} of
+        {none, true} -> send(Op#{stage := command, retries := Retries + 1}, command(Request), Now, State);
+        {none, false} -> finish(Reply, Medium, Now, State);
+        {Refused, _Retries} -> finish(Refused, Medium, Now, State)
+    end.
+
 stop(Reason, State) ->
-    {State#{phase := stopped}, [{stop, Reason}]}.
+    {State#{phase := stopped, until := none}, [{stop, Reason}]}.
 
 judge(Bytes, Now, State = #{op := #{tag := Tag, length := Length}}) ->
     case csw(Bytes, Tag, Length) of
         {good, Residue} -> moved(Residue, Now, State);
         {failed, _Residue} -> failed(Now, State);
-        _ResetRecovery -> recover(State)
+        Invalid -> recover(none, {csw, Invalid}, Now, State)
     end.
 
 %% Status 1: the command's failure is explained by the operation's REQUEST SENSE, sent now,
 %% before any other request; the sense's own failure is not explained further.
-failed(_Now, State = #{op := Op = #{stage := command, command := Command}}) ->
-    send(Op#{stage := sense}, {request_sense, lun(Command)}, State);
+failed(Now, State = #{op := Op = #{stage := command, command := Command}}) ->
+    send(Op#{stage := sense}, {request_sense, lun(Command)}, Now, State);
 failed(Now, State = #{op := #{stage := sense}}) ->
     sense_failed(Now, State).
 
@@ -428,7 +541,7 @@ failed(Now, State = #{op := #{stage := sense}}) ->
 moved(Residue, Now, State = #{op := #{stage := Stage, command := Command, length := Length, moved := Moved,
                                       data := Data}}) ->
     case {Stage, outcome(Command, Length, Residue, Moved, Data)} of
-        {_Stage, not_meaningful} -> recover(State);
+        {_Stage, not_meaningful} -> recover(none, {csw, not_meaningful}, Now, State);
         {command, Outcome} -> completed(Outcome, Now, State);
         {sense, {ok, {Key, Asc, Ascq}}} -> sense_read(Key, Asc, Ascq, Now, State);
         {sense, {error, _Unread}} -> sense_failed(Now, State)
@@ -460,6 +573,10 @@ completed(Reply, Now, State) ->
 sense_read(?ERX_SCSI_SENSE_KEY_ILLEGAL_REQUEST, _Asc, _Ascq, Now,
            State = #{op := #{entry := #{request := {ready, Lun, Ref}}}}) ->
     become_ready(Lun, Ref, false, Now, State);
+sense_read(Key, Asc, Ascq, Now, State) when Key =:= ?ERX_SCSI_SENSE_KEY_MEDIUM_ERROR;
+                                           Key =:= ?ERX_SCSI_SENSE_KEY_HARDWARE_ERROR;
+                                           Key =:= ?ERX_SCSI_SENSE_KEY_ABORTED_COMMAND ->
+    retry({error, {device, {sense, Key, Asc, Ascq}}}, keep, Now, State);
 sense_read(Key, Asc, Ascq, Now, State) ->
     Ends = case Key =:= ?ERX_SCSI_SENSE_KEY_NOT_READY orelse Key =:= ?ERX_SCSI_SENSE_KEY_UNIT_ATTENTION of
                true -> end_medium;
@@ -470,18 +587,12 @@ sense_read(Key, Asc, Ascq, Now, State) ->
 sense_failed(Now, State) ->
     finish({error, {device, no_sense}}, end_medium, Now, State).
 
-%% Late, the readiness is answered as any late operation, and no medium is made.
-become_ready(_Lun, _Ref, _Flush, Now, State = #{op := #{issued := Issued}})
-  when Now - Issued >= ?ERX_BLK_IN_FLIGHT_MS ->
-    abandon(Now, State);
 become_ready(Lun, Ref, Flush, Now, State = #{units := Units}) ->
     none = maps:get(Lun, Units),
     finish({ok, #{flush => Flush}}, keep, Now, State#{units := Units#{Lun := #{ref => Ref, flush => Flush}}}).
 
 %% The operation done: its answer, then its unit's medium ended when Medium says so, then
 %% the next request, so no queued request runs against a medium the operation has ended.
-finish(_Reply, _Medium, Now, State = #{op := #{issued := Issued}}) when Now - Issued >= ?ERX_BLK_IN_FLIGHT_MS ->
-    abandon(Now, State);
 finish(Reply, Medium, Now, State = #{op := #{entry := #{id := Id, medium := Ref, request := Request}}}) ->
     Idle = State#{phase := idle, op := none},
     {Ended, EndActions} = case Medium of
@@ -491,13 +602,31 @@ finish(Reply, Medium, Now, State = #{op := #{entry := #{id := Id, medium := Ref,
     {Next, NextActions} = next(Now, Ended),
     {Next, [{answer, Id, Reply} | EndActions] ++ NextActions}.
 
-%% The operation's deadline passed: it is answered so, its medium ends, and reset recovery
-%% readies the device before the next command.
-abandon(Now, State = #{op := #{entry := #{id := Id, medium := Ref, request := Request}}}) ->
+%% An operation past its issue deadline is answered so, in whatever phase it is, and its
+%% medium ends; the phase is left to overdue/2.
+late(Now, State = #{op := #{issued := Issued, entry := #{id := Id, medium := Ref, request := Request}}})
+  when Now - Issued >= ?ERX_BLK_IN_FLIGHT_MS ->
     {Ended, EndActions} = end_medium(lun(Request), Ref, State#{op := none}),
-    {Recovering, ResetActions} = recover(Ended),
-    {Swept, Expired} = expire_queued(Now, Recovering),
-    {Swept, [{answer, Id, {error, {device, deadline}}} | EndActions] ++ ResetActions ++ Expired}.
+    {Ended, [{answer, Id, {error, {device, deadline}}} | EndActions]};
+late(_Now, State) ->
+    {State, []}.
+
+%% A bulk transfer still posted for an operation answered at its deadline, or past its
+%% attempt's, climbs the ladder from its cancel; a step of recovery past its own deadline
+%% fails as `timeout`.
+overdue(Now, State = #{phase := Phase, op := Op}) when ?ON_BULK(Phase) ->
+    case Op of
+        none -> recover(posted(Phase), deadline, Now, State);
+        #{attempt := At} when Now - At >= ?ERX_USB_BOT_ATTEMPT_MS -> recover(posted(Phase), attempt_deadline, Now, State);
+        #{} -> {State, []}
+    end;
+overdue(Now, State = #{phase := Phase, until := Until}) when is_integer(Until), Now >= Until ->
+    case Phase of
+        Control when Control =:= reset_1; Control =:= max_lun -> controlled(Phase, {error, timeout}, Now, State);
+        _PipeReset -> pipe_reset(Phase, {error, timeout}, Now, State)
+    end;
+overdue(_Now, State) ->
+    {State, []}.
 
 expire_queued(Now, State = #{queue := Queue}) ->
     {Expired, Kept} = lists:partition(fun(#{accepted := Accepted}) ->

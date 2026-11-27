@@ -294,6 +294,15 @@ enum usb_bot_status u8
   value good 0
   value failed 1
   value phase_error 2
+# The recovery ladder's bounds (design-usb.md, "Recovery"), erXos's choice: one attempt of
+# a command waits this long on its bulk transfers before its transfer is cancelled; each
+# step of recovery, a pipe reset or a class request, is failed this long after it was
+# sent, as FreeBSD bounds each of its reset transfers (umass.c:519, 5000 ms); and an
+# operation is sent again at most this many times, as FreeBSD's disk driver retries
+# (scsi_da.c:1573, DA_DEFAULT_RETRY 4), within blk_in_flight_ms (blk.txt).
+limit usb_bot_attempt_ms u32 8000
+limit usb_bot_recovery_step_ms u32 5000
+limit usb_bot_retries u32 4
 # How often a unit is polled with TEST UNIT READY until its medium is ready, and a
 # removable unit's medium after (design-usb.md, "The SCSI subset"), as FreeBSD's disk
 # driver polls (scsi_da.c:3060-3065, as the design cites it).

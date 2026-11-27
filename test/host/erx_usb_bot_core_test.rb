@@ -16,8 +16,13 @@ require_relative '../fixtures/erlang_build'
 # device that cannot count its bytes is trusted; the medium reference check removed, so
 # a request of an ended medium is sent to the next; the engine idle after a failed status
 # with the sense queued behind it, so a queued write runs before a UNIT ATTENTION is
-# seen; a failed sense answered by asking for sense again; and a flush of a medium that
-# cannot flush answered `ok`.
+# seen; a failed sense answered by asking for sense again; a flush of a medium that
+# cannot flush answered `ok`; and eight of the recovery ladder (docs/design-usb.md,
+# "Recovery"): the class reset sent while the transfer it gave up on is still posted,
+# a rung waiting with no deadline of its own, a failed rung that ends the function
+# without asking for the port, a retry counter that never stops, a retry sent for a
+# medium the function has ended, a retried write of the next block, the function's end
+# of a medium ignored, and a cancel that resets the other pipe.
 class ErxUsbBotCoreTest < Minitest::Test
   APPLICATIONS = %w[erx_usb].freeze
   CORE = 'erlang/apps/erx_usb/src/erx_usb_bot_core.erl'
@@ -38,19 +43,45 @@ class ErxUsbBotCoreTest < Minitest::Test
              anchor: 'case {ref(Current) =:= Medium, Current, Request} of',
              replacement: 'case {true, Current, Request} of'),
     Seed.new(fault: 'the engine idle after a failed status, its sense queued behind',
-             anchor: "failed(_Now, State = \#{op := Op = \#{stage := command, command := Command}}) ->\n    " \
-                     "send(Op\#{stage := sense}, {request_sense, lun(Command)}, State);",
+             anchor: "failed(Now, State = \#{op := Op = \#{stage := command, command := Command}}) ->\n    " \
+                     "send(Op\#{stage := sense}, {request_sense, lun(Command)}, Now, State);",
              replacement: "failed(Now, State = \#{op := \#{stage := command, " \
                           "entry := Entry = \#{request := Request}}, queue := Queue}) ->\n    " \
                           'Sense = Entry#{id := sense, request := {request_sense, lun(Request)}}, ' \
                           'finish({error, {device, failed}}, keep, Now, State#{queue := queue:in(Sense, Queue)});'),
     Seed.new(fault: 'a failed sense answered by asking for sense again',
              anchor: "failed(Now, State = \#{op := \#{stage := sense}}) ->\n    sense_failed(Now, State).",
-             replacement: "failed(_Now, State = \#{op := Op = \#{stage := sense, command := Command}}) ->\n    " \
-                          'send(Op, Command, State).'),
+             replacement: "failed(Now, State = \#{op := Op = \#{stage := sense, command := Command}}) ->\n    " \
+                          'send(Op, Command, Now, State).'),
     Seed.new(fault: 'a flush of a medium that cannot flush answered ok',
-             anchor: 'answer_next(Id, {error, no_flush}, Now, State)',
-             replacement: 'answer_next(Id, ok, Now, State)')
+             anchor: '-> {error, no_flush};',
+             replacement: '-> ok;'),
+    Seed.new(fault: 'a class reset sent before the cancel',
+             anchor: 'Pipe -> wait(cancel, {reset_pipe, Pipe}, Now, Marked)',
+             replacement: '_Pipe -> reset(Now, Marked)'),
+    Seed.new(fault: 'a rung with no deadline',
+             anchor: "reset(Now, State) ->\n    wait(reset_1, class_reset, Now, State).",
+             replacement: "reset(_Now, State) ->\n    {State\#{phase := reset_1}, [class_reset]}."),
+    Seed.new(fault: 'a failed recovery that stops instead of escalating',
+             anchor: '    stop({reset_port, Rung, Reason}, State).',
+             replacement: '    stop({reset, Reason}, State).'),
+    Seed.new(fault: 'a retry counter that never stops',
+             anchor: 'Retries < ?ERX_USB_BOT_RETRIES} of',
+             replacement: 'Retries >= 0} of'),
+    Seed.new(fault: 'a retry sent for a medium that has ended',
+             anchor: 'case {refusal(Entry, State), Retries',
+             replacement: 'case {none, Retries'),
+    Seed.new(fault: 'a retried write of the next block',
+             anchor: 'retries := Retries + 1}, command(Request), Now, State);',
+             replacement: 'retries := Retries + 1}, ' \
+                          'case command(Request) of {write, L, S, D} -> {write, L, S + 1, D}; C -> C end, ' \
+                          'Now, State);'),
+    Seed.new(fault: "the function's end of a medium ignored",
+             anchor: "on({end_medium, Lun, Ref}, _Now, State) ->\n    end_medium(Lun, Ref, State);",
+             replacement: "on({end_medium, _Lun, _Ref}, _Now, State) ->\n    {State, []};"),
+    Seed.new(fault: 'a cancel on the other pipe',
+             anchor: 'posted(Phase) when Phase =:= command; Phase =:= data_out -> out;',
+             replacement: 'posted(Phase) when Phase =:= command; Phase =:= data_out -> in;')
   ].freeze
 
   def test_bot_core_cases_pass_under_eunit
