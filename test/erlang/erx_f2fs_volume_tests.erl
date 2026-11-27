@@ -78,11 +78,27 @@ corpus_images() -> [Image || {_Name, Image} <- corpus()].
 
 %% Each corpus image by its deps.lock id, and the cleared Fuchsia image.
 corpus() ->
-    [begin
-         {ok, Image} = erx_f2fs_corpus:image(Pin, erx_f2fs_corpus:fetched(os:getenv("ERX_F2FS_CORPUS"), Pin)),
-         {Id, Image}
-     end || #{id := Id} = Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))]
+    [{Id, corpus_image(Pin)} || #{id := Id} = Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))]
         ++ [{"f2fs-fuchsia-cleared", erx_f2fs_mount_tests:cleared_fuchsia()}].
+
+corpus_image(Pin) ->
+    {ok, Image} = erx_f2fs_corpus:image(Pin, erx_f2fs_corpus:fetched(os:getenv("ERX_F2FS_CORPUS"), Pin)),
+    Image.
+
+%% The first corpus image that mounts, with its mount. It reads only the
+%% images up to that one: each read hashes a whole image, and the tests
+%% that need one tree must stay inside EUnit's five seconds on a slow host.
+first_mounted() ->
+    Reads = [fun() -> corpus_image(Pin) end || Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))]
+        ++ [fun erx_f2fs_mount_tests:cleared_fuchsia/0],
+    first_mounted(Reads).
+
+first_mounted([Read | Rest]) ->
+    Image = Read(),
+    case mounted(Image) of
+        {ok, Mounted} -> {Image, Mounted};
+        _ -> first_mounted(Rest)
+    end.
 
 %% The image's mount straight from its bytes, as erx_f2fs_core's reader
 %% below reads it.
@@ -315,7 +331,7 @@ stop(Volume) ->
 %% The first corpus image that mounts, its volume and device, and a path of
 %% each kind its tree holds.
 some_tree() ->
-    [{Image, Mounted} | _] = [{I, M} || I <- corpus_images(), {ok, M} <- [mounted(I)]],
+    {Image, Mounted} = first_mounted(),
     Listing = erx_f2fs_listing:of_tree(core_reader(Image, Mounted)),
     Of = fun(Kind) -> hd([Path || {Path, #{kind := K}} <- Listing, K =:= Kind, Path =/= []]) end,
     {Volume, Device} = start(Image),
