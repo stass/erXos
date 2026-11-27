@@ -5,16 +5,25 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
-* [Medium] USB, `erlang/apps/erx_usb/src/erx_usb_bot_core.erl`: on a Pi 4 an 8 GB FAT32 stick held a
-  removal about 90 s before the engine logged `medium LUN 0 ended: device` (board time 150.6 s), five
-  times `blk_in_flight_ms` (18 s), and the reset recovery that followed timed out in
-  `reset_pipe` 31 s later. The FAT server issued only a handful of sectors for that removal (a host
-  replay counts 4 reads and 3 writes), so the stick stopped answering. Which wait outlived the
-  deadline is unverified: the core checks the deadline on a tick only while a bulk transfer is
-  posted, and otherwise only once the function's own calls (control transfers, `reset_pipe`, each
-  bounded by the controller) return. Settled by a board run with the volume's failure log
-  (`erx_media: volume sN ended: its commit failed: ...`) and the BOT engine's step trace; the fix
-  is a deadline that holds across recovery, not a longer one.
+* [High] USB, `erlang/apps/erx_usb/src/erx_usb_bus_core.erl`: the bus side of the ladder's rung 3
+  and reattach (design-usb.md, "Recovery" and "Reattach"): a function end as
+  `{shutdown, {reset_port, Rung, Reason}}` resets the device's port and enumerates it again within
+  `usb_port_attempts_max`, keeping the device and its reference when its device and configuration
+  descriptors and serial string come back unchanged, then starts the function again. The bus
+  answers that end as any other (`ended/6` resets the function's pipes and restarts it, 3 ends in
+  60 s), so a stick that only a port reset revives stays wedged until it is replugged. Once it
+  lands, re-run on the Pi 4 the stick that ended mid-write and then timed out in `reset_pipe` 31 s
+  later, with the BOT engine's step trace.
+* [Low] USB, `erlang/apps/erx_usb/src/erx_usb_bot_core.erl`: a loose end of the recovery ladder,
+  bounded and failing safe. A clear (`reset_pipe` after a failed data phase or CSW) that times out leaves its
+  reset running in the controller, so reset recovery's own `reset_pipe in` is answered `{error, resetting}`
+  and the function ends naming `reset_2` rather than the clear that timed out.
+* [Medium] USB, `test/erlang/erx_usb_bot_core_tests.erl`: the BOT engine's explorer delivers every device
+  answer before the next deadline (at the model's time, or one millisecond before a tick), never at or past
+  it, so that every event decides the deadlines before anything else (`expire/2` ahead of `on/3`) rests on
+  two written traces alone; swapping the two in `step/3` passes the exploration. Offer each pending answer
+  also at the deadline, with the model taking a completion that arrives after its cancel as stale, and add
+  the swap as a seeded fault.
 * [Low] USB, `erlang/apps/erx_usb/src/erx_usb_bot.erl`: a medium whose function ends (a stick unplugged, a crash)
   logs `ready` and never `ended`: the function logs only the ends it sees itself (its transport's and the
   engine's `medium_ended`). Log it where the function ends, probably in the bus.

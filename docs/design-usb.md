@@ -3147,6 +3147,115 @@ Then the function sends Get Max LUN, a one-byte answer, decoded by
 `erx_usb_bot_core`; a STALL or any failure means one unit, as BOT
 allows, and a value above 15 refuses the interface.
 
+### Recovery
+
+A device that stops answering in the middle of a command (a stick that
+wedges on a long write is the common case) must cost at most its own
+requests and, if nothing gentler works, its own port, and no wait on the
+way may be without an end. Trouble on the wire climbs a ladder, a rung
+at a time, and every rung waits under a deadline the BOT core decides,
+the same core that decides the command deadlines, so no recovery step
+rests on another layer's timeout:
+
+| Rung | What it does | Its bound | On failure or past its bound |
+| --- | --- | --- | --- |
+| 1, `cancel` | `reset_pipe` on the pipe whose transfer is still posted; the controller stops the endpoint and answers the posted transfer `stopped` | `usb_bot_recovery_step_ms`, 5 s | rung 3 |
+| 2, reset recovery | the Bulk-Only Mass Storage Reset, then `reset_pipe` on bulk-in, then on bulk-out (BOT 1.0, 5.3.4) | 5 s each step | rung 3 |
+| 3, the port | the function ends as `{shutdown, {reset_port, Rung, Reason}}` and logs the rung that failed; the bus resets the function's pipes and starts it again, as for any end, which ends its media; the reset of the device's port that the end asks for, then [Reattach](#reattach), is the bus's planned rung ([todo-usb.md](todo-usb.md)) | the bus's restart bound: `usb_function_restarts_max` (3) ends in `usb_function_restart_window_ms` (60 s) | the device's port is given up until its connection changes |
+
+**Rung 1 comes only while a transfer is posted.** A command that hangs
+leaves its transfer queued on its endpoint, and a class reset sent
+beside it races the controller's completion of that transfer against
+the device's reset. FreeBSD stops the last transfer before its reset
+for the same reason (`umass_reset`, `usbd_transfer_stop`,
+`umass.c:1200-1209`, release/15.1.0). A failure the device reported
+(a stalled CBW, a CSW to reject) leaves nothing posted, and the ladder
+starts at rung 2.
+
+**A second recovery of one operation goes to rung 3.** An operation
+whose command fails again after a reset recovery that succeeded has
+shown that the gentler rung does not help this device: its next
+recovery is the port, as Apple's mass-storage driver turns a consecutive
+failure into a device reset (`IOUSBMassStorageClass.cpp`; unverified
+here, read from a survey of that driver rather than its source).
+FreeBSD's driver climbs no further than the Bulk-Only reset
+(`umass_reset`, `umass.c:1200-1290`, release/15.1.0; the file asks for
+no port reset or re-enumeration) and leaves a device its reset does not
+revive to the disk driver's retries and then to the user's replug. A
+stick whose endpoint does not answer a clear after the class reset is
+such a device, and only its port revives it.
+
+**Retry.** After a reset recovery that succeeds, the operation's command
+is sent again under a fresh tag, at most `usb_bot_retries` times (4, as
+FreeBSD's disk driver retries, `scsi_da.c:1573`), and only within the
+operation's issue deadline, so the block contract's bound of 28 s from
+acceptance holds whatever the retries do
+([design-storage.md](design-storage.md#data-model)). An attempt whose
+bulk transfer is still posted `usb_bot_attempt_ms` (8 s) after its CBW
+is cancelled at rung 1, which leaves time inside the 18 s issue deadline
+for one more attempt after a wedge. The retried outcomes are the wire's:
+a stalled CBW or CSW that stays stalled, an invalid or not meaningful
+CSW, a phase error and an attempt past its bound; and the sense keys
+FreeBSD retries by default, MEDIUM ERROR, HARDWARE ERROR and ABORTED
+COMMAND (`scsi_all.c`, `SS_RDEF`; unverified here, read from the same
+survey), which need no recovery. NOT READY and UNIT ATTENTION end the
+medium, and
+ILLEGAL REQUEST and DATA PROTECT are answers, not failures. A REQUEST
+SENSE is never sent again on its own: a reset discards the sense it
+would have read, so a sense that fails ends the operation and its
+medium. Every command of the SCSI subset is idempotent: READ and
+WRITE of the same blocks with the same bytes, INQUIRY, TEST UNIT READY,
+READ CAPACITY and SYNCHRONIZE CACHE move or report the same state when
+repeated, so a repeat after an attempt that half-finished leaves the
+medium as one whole attempt would. A command with an effect beyond its
+blocks, such as START STOP UNIT, would not be retried; the subset has
+none. The caller sees an error only when the retries or the deadline
+are spent: `{device, reset}` keeps the medium, `{device, deadline}` ends
+it.
+
+**What the BOT function needs from the bus.** One request, made by
+ending with `{shutdown, {reset_port, Rung, Reason}}`: reset this
+device's port and enumerate it again, keeping its place when it comes
+back the same. The BOT core owns only the decision to ask, and the
+function logs the rung that failed as it ends. The bus answers such an
+end as it answers any other
+([A function's end](#ports-hubs-and-devices-the-bus-core)): it resets
+the function's pipes and starts the function again, counting the end
+toward `usb_function_restarts_max` (3 ends in 60 s), past which it gives
+the device's port up. Resetting the port for a `reset_port` end, then
+[Reattach](#reattach), is the bus's planned rung
+([todo-usb.md](todo-usb.md)); the port's reset, its attempt bound and
+its throttle belong to the bus core
+([Ports, hubs and devices](#ports-hubs-and-devices-the-bus-core)), and a
+device the port reset does not revive is given up within the same
+restart bound.
+
+#### Reattach
+
+A port reset brings the device back through Address Device and its
+descriptors. The bus core keeps the device and its reference, instead
+of detaching and attaching it, when the device comes back the same: its
+device descriptor and active configuration descriptor byte for byte,
+and its serial-number string when it has one; it then starts the
+function that asked for the reset again, as it restarts any function
+after its end. A device that comes back different, or whose
+re-enumeration fails, is detached as a new device would be.
+
+A port reset keeps no medium. The function asked for it by ending, and
+it is the only writer of its media: its transports, which monitor it,
+end with it, its queued requests and windows with them, and no write of
+an old medium can reach the device once the function is gone, whenever
+the transports see its end; nothing waits across the reset. The restarted function
+finds each unit's medium as it finds any new one, through its readiness
+SYNCHRONIZE CACHE ([Media and drives](#media-and-drives)), under a fresh
+reference, and the media domain mounts it as it mounts a stick plugged
+in. A card swapped inside the reset's window is therefore never written
+with the old card's blocks: nothing of the old medium survives to write
+them. A drive number names a place, and a script finds a stick again by
+its volume label and serial ([design-drives.md](design-drives.md#fat));
+reattach uses the device's own identity only to keep the device and its
+place.
+
 ### The SCSI subset
 
 A BOT function sends these commands and no others, the first of them at
@@ -3302,9 +3411,13 @@ costs them nothing.
 still queued 10 s after its acceptance is answered `{error, {device,
 deadline}}` and never sent; an issued request not complete 18 s after
 its issue, its bulk transfers, its REQUEST SENSE and any reset recovery
-included, ends its medium, and the engine's next command starts with a reset recovery. A
-full-speed bulk pipe moves 64 sectors in well under a second, so the
-bound is the medium's slowness, not the bus's.
+included, ends its medium, and the engine's next command starts with
+a reset recovery. Every event the core steps decides these bounds at
+its time first, as a tick at that time would, so an answer that comes
+past a bound advances nothing, in whatever order the function's
+mailbox holds it and the tick. A full-speed bulk pipe moves 64
+sectors in well under a second, so the bound is the medium's
+slowness, not the bus's.
 
 ## On Fiasco
 
@@ -3428,12 +3541,15 @@ mounts, the same as if the medium had gone after the request.
 | a function process crashes, ends on a failed transfer of its HID or hub pipes, or, for HID, on a report descriptor read that timed out or met a controller error | its supervisor link, seen by the bus | the function; its place is freed, an input number with `release` | the bus resets the function's pipes, which answers what its predecessor left posted `stopped`, then restarts it, at most 3 times in 60 s; past that, or when a pipe's reset fails, the device is detached and its port disabled until its connection changes |
 | an interface its function cannot drive; for HID, no usable report, a descriptor read refused with a stall or otherwise failed than by a timeout or a controller error, with no boot fallback, or no free input number | the function, which ends or fails its start with `{shutdown, {unusable, Reason}}` | that function, for good while its device stays; nothing else | none: it is not restarted and counts toward no restart bound, the device's other functions run on, and the reason is in the device's inspection record |
 | a halted endpoint | the completion's code | the transfer; EP0 is reset by the controller, any other pipe stays halted | HID and hubs end the function, as above; BOT's own recovery through `reset_pipe` (its status flow or reset recovery) |
-| a step of `reset_pipe` fails | the command's or request's answer | the reset; the pipe is `halted` | the class's recovery; for BOT a failed reset recovery ends the function, which the bus restarts as above |
+| a step of `reset_pipe` fails | the command's or request's answer | the reset; the pipe is `halted` | the class's recovery; for BOT, as the rows below |
 | an Address Device that fails | the command's completion | the enumeration; the slot is disabled, and behind a transaction translator after a USB Transaction Error, the translator's buffer cleared before the answer | the port is disabled as for any failed enumeration; a CLEAR_TT_BUFFER that fails detaches the translator's hub and every device behind it |
 | a failed command whose REQUEST SENSE fails | `erx_usb_bot_core` | the operation, answered `{device, no_sense}`; the unit's medium | reset recovery when the sense's CSW calls for it; the medium is found again by TEST UNIT READY |
-| an invalid CSW or a phase error | `erx_usb_bot_core` | the command, answered `{device, reset}` | reset recovery |
-| an issued request past its 18 s bound | the BOT core | the request, answered `{device, deadline}`; the medium; its windows end; queued requests of the medium answered `gone` | the engine's next command starts with reset recovery; the medium is found again by TEST UNIT READY |
-| a medium's transport ends | the function's monitor of it | the medium; its windows end; queued requests of the medium answered `gone`; an operation already issued runs on as any operation, and its answer reaches a caller that is gone, or the unit's course | the unit's readiness sequence finds the medium again under a fresh reference, at most once a poll period however often its transport ends; the function and its other units run on |
+| an invalid CSW, a phase error, a stalled CBW, or a CSW that stays stalled after its clear | `erx_usb_bot_core` | the attempt | reset recovery, then the command sent again under a fresh tag, at most 4 times within the 18 s issue bound; with no retry left, the operation answered `{device, reset}`, the medium kept ([Recovery](#recovery)) |
+| a bulk transfer still posted 8 s after its attempt's CBW: a device that stopped answering | the BOT core, on its tick | the attempt | the transfer cancelled by `reset_pipe` on its pipe, then reset recovery and a retry as the row above |
+| a sense of MEDIUM ERROR, HARDWARE ERROR or ABORTED COMMAND | `erx_usb_bot_core` | the attempt | the command sent again, at most 4 times within the 18 s issue bound; with no retry left, the sense is the answer |
+| a second recovery of one operation, or a rung of the ladder (the cancel, or a step of reset recovery) that fails or is not answered in 5 s | the BOT core | the function, ending `{shutdown, {reset_port, Rung, Reason}}` with the rung in its log line; every operation and medium of the function | the bus resets the function's pipes and starts it again, as for any end, within the function's restart bound as above; the port reset the end asks for, keeping a device that comes back the same, is the bus's planned rung ([Reattach](#reattach), [todo-usb.md](todo-usb.md)) |
+| an issued request past its 18 s bound | the BOT core, at the first event that finds the bound past, a tick or a late answer, before that event does anything else | the request, answered `{device, deadline}`; the medium; its windows end; queued requests of the medium answered `gone` | a transfer still posted is cancelled, then reset recovery readies the device before the next command; a rung already under way runs on; the medium is found again by TEST UNIT READY |
+| a medium's transport ends | the function's monitor of it | the medium; its windows end; queued requests of the medium answered `gone`; an operation already issued runs on as any operation, but its command is never sent again, a retry being answered `gone`, and its answer reaches a caller that is gone, or the unit's course | the unit's readiness sequence finds the medium again under a fresh reference, at most once a poll period however often its transport ends; the function and its other units run on |
 | a medium removed or changed | TEST UNIT READY, UNIT ATTENTION, the detach | the medium; its window ends | the media domain ends the medium's volumes; the next medium mounts at the next walk ([design-drives.md](design-drives.md#failure-handling)) |
 | a medium that cannot flush | the readiness SYNCHRONIZE CACHE | nothing: its flushes answer `no_flush` | none; the media domain mounts its volumes read-only, with `the medium cannot flush` on its `sN_ro_reason` |
 | a control transfer not answered in 5 s | the controller process's deadline | the transfer, answered `timeout` after Stop Endpoint and Set TR Dequeue Pointer past it | the caller's; EP0 is open again |
@@ -3522,7 +3638,7 @@ targeted traces carry the longer sequences.
 | `erx_hid_desc` against FreeBSD's `hid.c` compiled on the host as the oracle, over the fuzz corpus, comparing each input field's offset, size, count and usage | the push-depth bound removed: a descriptor of four nested pushes is accepted |
 | `erx_hid_core` | the ErrorRollOver check removed; the state reduced to one previous report; the interrupt length taken as the packet size |
 | the usage table, `abi/formats/hid.txt`'s map compared with FreeBSD's `evdev_usb_scancodes` read from the pinned source | one map entry changed |
-| `erx_usb_bot_core`, explored to a fixed point over two units, two media generations a unit and every CSW and sense outcome, and a table of BOT 1.0's thirteen cases (section 6.7) | the tag check removed; the residue rule removed; the medium reference check removed; the engine idle after status 1 with the sense queued behind it, so a queued write runs before a UNIT ATTENTION is seen; a failed sense answered by asking for sense again; a refused flush answered `ok` |
+| `erx_usb_bot_core`, explored to a fixed point over two units, two media generations a unit and every CSW and sense outcome, and over the recovery ladder with time (ticks at its deadline, transfers that never complete or complete after their cancel, steps answered late, failed or never, and the function's end of a medium at any moment), and a table of BOT 1.0's thirteen cases (section 6.7) | the tag check removed; the residue rule removed; the medium reference check removed; the engine idle after status 1 with the sense queued behind it, so a queued write runs before a UNIT ATTENTION is seen; a failed sense answered by asking for sense again; a refused flush answered `ok`; the class reset sent while the transfer it gave up on is still posted; a rung waiting with no deadline of its own; a failed rung ending the function without asking for the port; a retry counter that never stops; a retry sent for a medium the function has ended; a retried write of the next block; the function's end of a medium ignored; a cancel that resets the other pipe |
 | a BOT function's replacement, on the host, through `erx_usb_bus_core`'s restart path and `erx_usb_bot_core`, against a model BOT device whose command state (waiting for a CBW, expecting data out, holding data in, holding a CSW) survives the function's end, changes only on a CBW, data, a CSW read or a class reset, and whose halts and toggles survive a class reset (BOT 1.0, section 3.1); the function killed after the device accepted a WRITE(10) CBW, halfway through a WRITE(10)'s data-out and a READ(10)'s data-in phase, and with a CSW not yet read | the start's reset recovery skipped, so the model takes the replacement's CBW as the write's data and no valid CSW answers it; the recovery's halt clears run before its class reset |
 | `erx_blk_write`'s BOT functions on a trial boot value | the trial check removed |
 | the HID function, `erx_usb_hid` with `erx_hid_core`'s plan, from a model device behind a stand-in of `erx_usb_pipe` through the places to the records a reader of the input tree decodes: a keyboard's attach and its requests, typing, removal with a key held, a stop mid-typing and the next instance, a refused descriptor on a boot keyboard, a report storm with no reader, and no free number | a transfer not posted again; one posted again before the stream took its records; SET_IDLE(0) not sent; a failed transfer posted again instead of ending; a refused descriptor kept in the report protocol |

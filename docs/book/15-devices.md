@@ -618,6 +618,26 @@ and HID report decoders and the input tree are **Built** as pure
 code, with host tests and fuzz targets. No
 USB driver runs on a booted machine; that is designed and not built.
 
+### 15.7.4 A stick that stops answering
+
+A USB stick can wedge in the middle of a command and answer nothing
+more. The engine of a storage function, a pure core like the others,
+then climbs a short ladder, and every rung waits under a deadline the
+core keeps itself, so no wait is without an end
+([design-usb.md, Recovery](../design-usb.md#recovery)). It first
+cancels the transfer still posted by resetting that pipe, so the next
+step never races it; then it sends the storage class's reset and clears
+both bulk pipes; and when a rung fails, or one operation needs recovery
+twice, the function ends, asking for a reset of the device's port; the
+bus starts the function again, and resetting the port is the bus's
+planned rung.
+After a recovery that works, the command is sent again, at most four
+times and within the request's own deadline, which is safe because
+every command the engine sends reads or writes the same blocks when
+repeated. A caller sees an error only once the retries or the deadline
+are spent, and a stick that stops answering costs its own requests and,
+at worst, its own port.
+
 ## 15.8 The Raspberry Pi 4's small devices
 
 The Pi 4's 40-pin header carries pins that can be GPIO, I2C, SPI,
