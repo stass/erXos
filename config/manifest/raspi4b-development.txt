@@ -103,10 +103,10 @@ principal system
 # the card's one app, the dashboard, so the display domain's outer budget pays for one
 # pixel area; and the display and net, which the build grants the app template. The app
 # is a principal with a domains quota of one, so max_domains is the system principal's
-# nine, the one app, ntpd and bleuart. max_connections, 37, holds ntpd's session's two
+# nine, the one app, ntpd and bleuart. max_connections, 35, holds ntpd's session's two
 # connections and bleuart's three (their comments), the 24 of the network domain's comment and the app's session's four: its system connection, packages,
-# the display and net, two more for root's session's display connection and its
-# replacement's, and two for its media_raw connection and its replacement's.
+# the display and net, and two more for root's session's display connection and its
+# replacement's.
 apps
   memory 69206016
   max 1
@@ -123,7 +123,7 @@ machine
   users_share @share.users
   system_principal @principal.system
   max_domains 12
-  max_connections 37
+  max_connections 35
   system_lane 4096
   system_queue 16384
   peer_held 4096
@@ -418,10 +418,10 @@ facet usb_input
 # the bridge's place, so a stick put in takes disk0 (docs/design-usb.md, "Mass storage
 # reaches the file servers"). Its 25 MiB and its share's 50 mcpu on CPU 0 are QEMU virt's, measured on
 # neither board; with them the configured domains' grants take 2,150 mcpu of the 2,325
-# the system share's reserve leaves them. Its five connections beside its system
+# the system share's reserve leaves them. Its three connections beside its system
 # connection are the USB domain's drive grant and root's session's media and media_raw
-# facets with one more of each while that session is replaced; the USB domain's quota of two holds the drive grant
-# beside the display's usb_input.
+# facets, which share one connection, with one more while that session is replaced; the
+# USB domain's quota of two holds the drive grant beside the display's usb_input.
 runtime_limits media
   max_frame 131072
   max_message_heap 131072
@@ -449,7 +449,7 @@ limits media
   grant @share.media
   spaces none
   lane 4096
-  connections 5
+  connections 3
   crash 0
   flags none
   runtime_limits @runtime_limits.media

@@ -342,7 +342,7 @@ end
   def test_a_manifest_without_the_block_unit_has_no_device_record
     source = Erx::Manifest::Edit.without_apps(@source).sub(/^unit block\n(?:  .*\n)*/, '')
                                                       .gsub(/^(?:window|image) \w+\n(?:  .*\n)*|^system_image\n(?:  .*\n)*/, '')
-                                                      .gsub(/^(?:service system|service login_keys|service media|facet media|facet login_keys|facet login_keys_session)\n(?:  .*\n)*/, '')
+                                                      .gsub(/^(?:service system|service login_keys|service media|service media_raw|facet media|facet media_raw|facet login_keys|facet login_keys_session)\n(?:  .*\n)*/, '')
     refute_equal @source, source
     output, status = read(admitted(source))
     assert status.success?, output

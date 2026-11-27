@@ -640,7 +640,7 @@ class AbiSchemaTest < Minitest::Test
     drive = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)).services.find { |service| service.fetch(:name) == 'drive' }
     assert_equal 'drive', drive.fetch(:served_by)
     assert_equal({ 'window' => 1 }, drive.fetch(:operations))
-    assert_equal({ 'max_request' => 65_536, 'in_flight' => 8, 'reductions' => 1_000_000, 'period_ns' => 1_000_000_000,
+    assert_equal({ 'max_request' => 65_536, 'in_flight' => 9, 'reductions' => 1_000_000, 'period_ns' => 1_000_000_000,
                    'max_heap_size' => 131_072 }, drive.fetch(:quantities))
   end
 

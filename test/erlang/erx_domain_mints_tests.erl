@@ -1075,7 +1075,7 @@ a_drive_grant_mints_under_its_service_and_installs_under_its_number_test() ->
     ?assertEqual([{mint, 1, mint(5), drive, 6, Window#{drive => 0}},
                   {mint, 2, mint(5), drive, 6, Window#{drive => 1}}], Mints),
     ?assertEqual([window], maps:get(operations, Window)),
-    ?assertEqual(8, maps:get(in_flight, Window)),
+    ?assertEqual(9, maps:get(in_flight, Window)),
     {Installs, _} = run([{minted, 5, 2, {ok, facet(5)}}], State),
     ?assertEqual([[{install, 2, 6, {drive, 1}, ?ERX_SERVICE_DRIVE, facet(5)}]], Installs).
 
