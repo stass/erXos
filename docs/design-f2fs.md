@@ -1639,8 +1639,8 @@ nothing above the callback module changes.
   socket Linux made shows in `readdir` and `getattr` and answers `open`
   with `enotsup`; a directory opened for writing answers `eisdir`, and a
   symlink, which the server never follows, `eloop`. An open needs the
-  owner's permission bits for its access, by the one rule every file
-  server's open follows (`erx_fs:open_permitted/3`), and a handle answers
+  owner's permission bits for its access, by the rule erx_ramfs's opens
+  follow too (`erx_fs:open_permitted/3`), and a handle answers
   only the access it was opened for (`eacces` and `ebadf`), as erx_ramfs's
   opens and handles do.
 * **Nodes and identity.** A node is a nid. A qid's path is the nid in the

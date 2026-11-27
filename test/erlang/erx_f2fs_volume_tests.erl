@@ -708,7 +708,11 @@ landings(Writes, Medium) ->
 %%% What a write refuses, cuts and ends
 
 %% Fixture as a read-write view, whose requests take the write path.
-writable({Volume, Blocks}) -> {Volume#{dirty => #{}}, Blocks}.
+%% A read-write view of {Volume, Blocks}, holding no dirty node yet and
+%% the checkpoint's counts, as erx_f2fs_core:view/1 gives one at mount.
+writable({#{checkpoint := Header} = Volume, Blocks}) ->
+    Counts = maps:with([valid_block_count, valid_node_count, valid_inode_count], Header),
+    {Volume#{dirty => #{}, counts => Counts}, Blocks}.
 
 %% A handle answers only the access it was opened for: a write through one
 %% opened to read, appending or not, and a read through one opened only to
@@ -744,7 +748,8 @@ an_open_to_read_needs_the_owners_read_bit_test() ->
 %% statfs counts the space the volume offers on a read-write mount, so its
 %% free blocks run out when writes answer enospc, and none are free once
 %% the volume is past it; a read-only mount counts the checkpoint's user
-%% blocks.
+%% blocks. A main area of 40 one-segment sections offers 40 less the
+%% cleaner's 16 sections of 512 blocks each.
 statfs_counts_the_space_a_read_write_volume_offers_test() ->
     {_Ino, {Volume, Blocks}} = erx_f2fs_core_tests:fixture_file_mode(8#100644),
     #{superblock := Super, checkpoint := Header} = Volume,

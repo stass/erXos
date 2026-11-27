@@ -16,6 +16,7 @@ class ErxF2fsPlanTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_f2fs/src/erx_f2fs_core.erl'
   PLAN = 'erlang/apps/erx_f2fs/src/erx_f2fs_plan.erl'
+  REQUEST = 'erlang/apps/erx_f2fs/src/erx_f2fs_request.erl'
   TESTS = %w[test/erlang/erx_f2fs_plan_tests.erl test/erlang/erx_f2fs_corpus.erl].freeze
   CORPUS = File.join(ROOT, 'build/third_party')
   LOCK = File.join(ROOT, 'deps.lock')
@@ -62,7 +63,11 @@ class ErxF2fsPlanTest < Minitest::Test
     Seed.new(fault: "an epoch's charge leaving out its dentry blocks", file: CORE,
              anchor: 'map_size(Nodes) + map_size(Dentries) =< erx_f2fs_mount:walk_blocks().',
              replacement: 'map_size(Nodes) + 0 * map_size(Dentries) =< erx_f2fs_mount:walk_blocks().',
-             case_name: 'the_room_rule_bounds_the_epoch_by_the_walk_test')
+             case_name: 'the_room_rule_bounds_the_epoch_by_the_walk_test'),
+    Seed.new(fault: "a read-write volume's statfs counting the last checkpoint's blocks", file: REQUEST,
+             anchor: 'true -> {erx_f2fs_mount:offered(Volume), maps:get(counts, Volume)};',
+             replacement: 'true -> {erx_f2fs_mount:offered(Volume), Header};',
+             case_name: 'set_slot_clears_only_what_the_summary_confirms_test_')
   ].freeze
 
   def test_eunit_cases_pass

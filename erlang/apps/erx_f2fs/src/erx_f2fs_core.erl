@@ -987,14 +987,16 @@ replace(List, Index, Value) ->
 -doc """
 The volume as State holds it, for reads (docs/design-f2fs.md, "Inodes"):
 its tables, its dirty nodes and its summaries, which a read takes for a
-segment they hold over the pack's and the SSA's. Only a checkpoint makes
+segment they hold over the pack's and the SSA's, and its counts, which
+statfs reads in place of the last checkpoint's. Only a checkpoint makes
 a dentry block dirty, and it commits it, so between requests the state
 holds none and the view takes none.
 """.
 -spec view(state()) -> volume().
-view(#state{volume = Volume, nodes = Nodes, summaries = Summaries, dentries = Dentries})
+view(#state{volume = Volume, nodes = Nodes, summaries = Summaries, dentries = Dentries,
+            counts = Counts})
   when map_size(Dentries) =:= 0 ->
-    Volume#{dirty => Nodes, held => Summaries}.
+    Volume#{dirty => Nodes, held => Summaries, counts => Counts}.
 
 -doc """
 The block a node's value is written as: its footer and its body, an

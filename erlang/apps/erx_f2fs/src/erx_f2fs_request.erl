@@ -201,10 +201,11 @@ walk(Dir, Name, Volume, Blocks) ->
     end.
 
 %% An open's handle, the node's nid and the access it was opened for. The
-%% owner's permission bits decide every open by the one rule of
-%% erx_fs:open_permitted/3, which erx_ramfs_core's opens follow too; a
-%% directory opened for writing or truncation answers eisdir, and a
-%% read-only volume such an open's erofs, before that rule.
+%% owner's permission bits decide every open by erx_fs:open_permitted/3,
+%% the rule erx_ramfs_core's opens follow too. An open for writing or
+%% truncation is refused first with eisdir on a directory, then with erofs
+%% on a read-only volume, before that rule; one that passes it and asks to
+%% truncate or append answers enotsup.
 opened(Nid, Inode, Flags, Writable) -> opened(Nid, Inode, kind(Inode), Flags, Writable).
 
 opened(_Nid, _Inode, _Kind, Flags, _Writable) when Flags band ?ERX_P9_O_ACCMODE =:= ?ERX_P9_O_ACCMODE ->
@@ -387,16 +388,16 @@ dirent_type(_Unknown) -> ?ERX_P9_DT_UNKNOWN.
 %% statfs: the volume's blocks and the free ones, and the nids that can
 %% hold a node and the free ones, which the mount checked against each
 %% other ([F 55]). A read-write volume's blocks are the space it offers
-%% writes, so its free blocks run out where a write answers enospc, and
-%% none are free on a volume already past it; a read-only volume's are the
-%% checkpoint's user blocks.
-statfs(#{superblock := Super,
-         checkpoint := #{user_block_count := User, valid_block_count := Valid,
-                         valid_node_count := Nodes}} = Volume) ->
-    Blocks = case writable(Volume) of
-                 true -> erx_f2fs_mount:offered(Volume);
-                 false -> User
-             end,
+%% writes, counted against the view's live counts, so its free blocks run
+%% out where a write answers enospc, and none are free on a volume already
+%% past it; a read-only volume's are the checkpoint's user blocks, counted
+%% against the checkpoint's counts.
+statfs(#{superblock := Super, checkpoint := #{user_block_count := User} = Header} = Volume) ->
+    {Blocks, #{valid_block_count := Valid, valid_node_count := Nodes}} =
+        case writable(Volume) of
+            true -> {erx_f2fs_mount:offered(Volume), maps:get(counts, Volume)};
+            false -> {User, Header}
+        end,
     Free = max(0, Blocks - Valid),
     Files = erx_f2fs_codec:node_capacity(Super),
     #{type => ?ERX_P9_MAGIC_F2FS, fsid => 0, bsize => ?BLOCK_SIZE, blocks => Blocks,

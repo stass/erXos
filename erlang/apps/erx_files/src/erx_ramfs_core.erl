@@ -63,7 +63,6 @@ anything else.
 -define(LINK_MODE, 8#777).
 -define(MODE_BITS, 8#7777).
 %% The owner's permission bits: the domain is one user who owns every file.
--define(R, 8#400).
 -define(W, 8#200).
 -define(X, 8#100).
 

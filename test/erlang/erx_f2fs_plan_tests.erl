@@ -368,7 +368,14 @@ confirmed_clears({_Partition, Medium} = Image, Source) ->
     ?assertEqual({1, 0, IBlocks - 1}, slot_effect(Kept, State0, Old)),
     {ok, Freed} = need(fun(B) -> erx_f2fs_core:set_slot(Kept, Root3, 0, ?ERX_F2FS_NULL_ADDR, B) end,
                        Medium),
-    ?assertEqual({0, -1, IBlocks - 2}, slot_effect(Freed, State0, Old)).
+    ?assertEqual({0, -1, IBlocks - 2}, slot_effect(Freed, State0, Old)),
+    %% statfs reads the state's counts, not the last checkpoint's.
+    ?assertEqual({free(State0), free(State0) + 1}, {free(Kept), free(Freed)}).
+
+%% The free blocks statfs answers on State's view.
+free(State) ->
+    {reply, {ok, #{bfree := Free}}} = erx_f2fs_request:start(statfs, erx_f2fs_core:view(State)),
+    Free.
 
 %% Address's valid bit in State, State's valid_block_count less Before's,
 %% and the root's i_blocks.

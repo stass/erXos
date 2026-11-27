@@ -330,7 +330,7 @@ handle_tree({_Pid, Tree, _Rights}) ->
 
 -doc """
 Whether a node of Mode opens for Access, and for a truncation when
-Truncate: the one permission rule of every callback module's `open`. An
+Truncate: the permission rule erx_ramfs_core's and erx_f2fs's opens share. An
 open needs the owner's bits for its access, `r` to read, `w` to write,
 both for both, and `w` for a truncation, whoever opens it; the domain is
 one user who is no superuser (docs/design-tmp.md, "Permissions").
