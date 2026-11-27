@@ -76,6 +76,7 @@ reaches the client as `eio`.
 %% grant's life; or {own, Tree}, a tree value init made, which only this grant holds.
 %% For an own tree every callback below takes the current Tree in Fs's place and
 %% answers {Answer, Tree1}, forget {ok, Tree1}, and the grant keeps Tree1.
+-type answer(Answer) :: Answer | {Answer, Tree1 :: term()}.
 -callback init(Args :: term()) -> {ok, Fs :: term()} | {own, Tree :: term()}.
 %% A tree whose grants a facet row's `tree` may root within it (abi/services/files.txt)
 %% adds subtree: the init Args of a grant of the tree Args name, rooted at the root Tree
@@ -86,57 +87,58 @@ reaches the client as `eio`.
               {ok, Args1 :: term()} | {error, einval}.
 %% The tree the grant roots in: its name, which attach's Aname must match, and its root.
 %% An error fails the grant's start, as an answer that fails the root's check does.
--callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()} | {error, file:posix()}.
+-callback root(Fs :: term()) ->
+              answer({ok, Tree :: binary(), Node :: term(), qid()} | {error, file:posix()}).
 -callback walk(Node :: term(), Name :: binary(), Fs :: term()) ->
-              {ok, Node1 :: term(), qid()} | {error, file:posix()}.
+              answer({ok, Node1 :: term(), qid()} | {error, file:posix()}).
 %% A tree that adds forget keeps each node its walk, make or lcreate's make
 %% answers alive for the calling grant until the grant forgets it or ends; the
 %% grant forgets a node once none of its fids names it, and at once one whose
 %% answer it refused. The one callback without a reply.
 -callback forget(Node :: term(), Fs :: term()) -> term().
 -callback getattr(Node :: term(), Fs :: term()) ->
-              {ok, attr()} | {error, file:posix()}.
+              answer({ok, attr()} | {error, file:posix()}).
 -callback open(Node :: term(), Flags :: non_neg_integer(), Fs :: term()) ->
-              {ok, Handle :: term()} | {error, file:posix()}.
+              answer({ok, Handle :: term()} | {error, file:posix()}).
 %% A read or a write that waits for an event answers {wait, Keeper, Request}:
 %% the tree's Keeper answers it later, through erx_fs_waits ("Waiting requests").
 -callback read(Handle :: term(), Offset :: non_neg_integer(),
                Count :: 1..65536, Fs :: term()) ->
-              {ok, binary()} | {error, file:posix()} | wait().
+              answer({ok, binary()} | {error, file:posix()} | wait()).
 -callback readdir(Handle :: term(), Offset :: non_neg_integer(),
                   Max :: 1..256, Fs :: term()) ->
-              {ok, [dirent()]} | {error, file:posix()}.
+              answer({ok, [dirent()]} | {error, file:posix()}).
 -callback readlink(Node :: term(), Fs :: term()) ->
-              {ok, binary()} | {error, file:posix()}.
--callback statfs(Fs :: term()) -> {ok, statfs()}.
+              answer({ok, binary()} | {error, file:posix()}).
+-callback statfs(Fs :: term()) -> answer({ok, statfs()}).
 %% ok, or the errno of what the close could not complete; the fid ends
 %% either way.
--callback clunk(Handle :: term(), Fs :: term()) -> ok | {error, file:posix()}.
+-callback clunk(Handle :: term(), Fs :: term()) -> answer(ok | {error, file:posix()}).
 %% A tree that writes adds these; one without them is read-only (F5). write's At is
 %% the offset the bytes were written at: the request's, or the file's end for an
 %% append fid (design-files.md, "Open files and offsets").
 -callback write(Handle :: term(), Offset :: non_neg_integer(), binary(),
                 Fs :: term()) ->
-              {ok, Count :: non_neg_integer(), At :: non_neg_integer()}
-            | {error, file:posix()} | wait().
+              answer({ok, Count :: non_neg_integer(), At :: non_neg_integer()}
+                    | {error, file:posix()} | wait()).
 %% A {file, ...} make answers with the open Handle; every other kind without.
 -callback make(Dir :: term(), Name :: binary(), What :: what(), Fs :: term()) ->
-              {ok, Node :: term(), qid(), Handle :: term()}
-            | {ok, Node :: term(), qid()} | {error, file:posix()}.
+              answer({ok, Node :: term(), qid(), Handle :: term()}
+                    | {ok, Node :: term(), qid()} | {error, file:posix()}).
 -callback setattr(Target :: {open, Handle :: term()} | {node, Node :: term()},
                   Changes :: map(), Fs :: term()) ->
-              ok | {error, file:posix()}.
+              answer(ok | {error, file:posix()}).
 -callback unlink(Dir :: term(), Name :: binary(),
                  Kind :: file | directory | {node, Node :: term()},
                  Fs :: term()) ->
-              ok | {error, file:posix()}.
+              answer(ok | {error, file:posix()}).
 -callback rename(Dir :: term(), Name :: binary(), NewDir :: term(),
                  NewName :: binary(), Fs :: term()) ->
-              ok | {error, file:posix()}.
+              answer(ok | {error, file:posix()}).
 -callback fsync(Handle :: term(), Fs :: term()) ->
-              ok | {error, file:posix()}.
+              answer(ok | {error, file:posix()}).
 -callback xattr(Node :: term(), Op :: term(), Fs :: term()) ->
-              {ok, term()} | {error, file:posix()}.
+              answer({ok, term()} | {error, file:posix()}).
 %% A tree whose node or handle terms can be larger than a few words adds
 %% largest_node: the largest node or handle any of its grants answers, a term
 %% the grant's heap reserve counts each fid's copies of (reserve_words/2).
