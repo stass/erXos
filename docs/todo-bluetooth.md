@@ -58,11 +58,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   uses, a link using a service from its first request that reaches one of the service's attributes (a read, a
   write, a subscription), with `connected` and the MTU replayed to that handler then, so a handler hears only the
   phones that talk to it.
-* [Medium] bluetooth, the `bt` row's grants (docs/design-bluetooth.md "The Bluetooth domain"): the design has the
-  manifest check hold the Bluetooth domain's row to its `line` grant, the store's grant and the login facet, and
-  refuse a device, a partition window and any other facet, but `tools/lib/erx/manifest.rb` has no such rule, so the
-  radio-facing domain's authority rests on the manifest text alone, the Raspberry Pi 4's development manifest
-  among them. Add the rule with a test that a device or a second facet on the row is refused.
 * [Medium] bluetooth, the line's request clauses (`erlang/apps/erx_uart/src/erx_line.erl`, `take/3`;
   design-bluetooth.md, "The controller's line"): a request of no known kind is a `function_clause`
   crash of the line, whose reason carries the state raw. Fix: a refusal in `take/3` of a request of
@@ -84,18 +79,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   peer before it reports the connection. Question for the design: rely on Part E 5.3 and check the board's
   controller's handle reuse with a probe, or add such a fence. A cheap narrowing for host-initiated disconnects
   alone: refuse a link's packets once its handle's disconnect is asked.
-* [Medium] bluetooth, no Bluetooth manifest serves the store's grant (`config/manifest/raspi4b-development.txt`,
-  the bluetooth suite's rows in `tools/lib/erx/bt_domain.rb`; docs/design-bluetooth.md "The Bluetooth domain", the
-  store's grant): the storage domain serves `bt_state` and `ssh_state` (`erx_lfs` trees, roots `bt/` and `ssh/`),
-  the build derives each one's row read-write to the domain named `bt` or `ssh` alone (`bt_state_service`,
-  `ssh_state_service`, `Manifest::WELL_KNOWN`), and the store reads the grant's place, `/data/bt`; but no manifest
-  declares `service bt_state`, so the `bt` row holds no store and runs `store_unavailable`, and the manifest check
-  neither holds the `bt` row to its grants nor refuses a `bluetooth` grant in a manifest whose `bt` row has no
-  store. The storage domain starts either tree's mint only where its row declares the service
-  (`erx_lfs_sup:minted/1`). The build grants `bt_state` to the domain named `bt` (`Manifest::HolderDomain`), not to
-  the server of `ble`, so a manifest whose Bluetooth domain has another name gives the bonds to the wrong domain;
-  derive the holder from that role. Add the service to the Bluetooth images and the suite, and the `bt` row's
-  allow-list check.
+* [Medium] bluetooth, what makes a domain the Bluetooth domain (`tools/lib/erx/manifest.rb`,
+  `check_bluetooth_domains`; docs/design-bluetooth.md "The Bluetooth domain"): the manifest check holds a domain to
+  the Bluetooth allow-list, and a grant of its control tree to its store, only where the domain serves a `ble`
+  service, so a manifest whose Bluetooth domain drops its `ble` rows (the service, its grants and `bt_state`) keeps
+  the controller's line, its `bluetooth` tree and any other facet, and a grant of that tree passes without a store.
+  The role needs a mark the domain cannot drop: the release it runs, the `bluetooth` tree it serves under a
+  well-known name, or the `line` grant if the line interface stays the controller's alone (it is not today: the
+  boot manifest tests grant a line to a domain that holds a window).
 * [Low] bluetooth, a forgotten bond's keys can stay on the development store's medium (`erx_bt_state_file`):
   until the next successful put, a late put that landed below the newest, or a lower file a deletion missed,
   keeps a forgotten bond's keys on the medium (the store asks 0600 in a 0700 directory, which littlefs does not keep), though never read.

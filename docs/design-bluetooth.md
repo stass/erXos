@@ -739,9 +739,12 @@ the release otherwise only loads, declared per script
   and in a development build `bt_state`, a files service of its own
   that the storage domain roots at the data volume's `bt/` directory,
   named in `abi/manifest.txt` by `bt_state_service`, whose one row the
-  build derives, read-write to the domain named `bt` alone, in every
-  manifest that serves it, as it serves SSH's `ssh_state`
-  ([design-ssh.md](design-ssh.md#host-keys)); the domain mounts it at
+  build derives, read-write to the domain that serves `ble` alone,
+  whatever its name, so the bonds follow the Bluetooth domain by
+  construction, in every manifest that serves it, as it serves SSH's
+  `ssh_state` ([design-ssh.md](design-ssh.md#host-keys)); the manifest
+  check refuses the service served by any domain but the data volume's
+  server, and in a release manifest; the domain mounts it at
   its place, `/data/bt`, the path of the volume's `bt/` in a namespace
   that mounts the volume at `/data`, so failing to list `/data/bt` is
   an unavailable store and an empty listing is one without bonds. The

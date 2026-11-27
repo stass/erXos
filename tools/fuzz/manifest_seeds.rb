@@ -24,8 +24,8 @@ module Erx
   # rows, the configured domains' with alpha granted the line on a UART of its own, so a
   # parameter row holds a device reference, the development manifest with its inspect grant
   # naming both operations, so the facet table holds operation rows, the configured
-  # domains' with alpha granted the ble service beta serves, so a parameter span holds an
-  # identifier set, and the configured domains' with an apps row
+  # domains' without their introduction and with alpha granted the ble service beta
+  # serves, so a parameter span holds an identifier set, and the configured domains' with an apps row
   # offering one service, two packages, a signer and the build's development key, so each
   # of those tables holds rows.
   module ManifestSeeds
@@ -124,14 +124,14 @@ module Erx
                      planner: ManifestContextFixture.accepting_planner).bytes
     end
 
-    # The configured domains' manifest (ManifestContextFixture.domain_source) on QEMU virt
-    # with alpha granted the ble service beta serves, naming BLE_SERVICES
+    # The configured domains' manifest (ManifestContextFixture.domain_source) on QEMU virt,
+    # without their introduction, with alpha granted the ble service beta serves, naming BLE_SERVICES
     # (ManifestContextFixture.ble_grant), as the check packs it over a context whose
     # abi/gatt declares them.
     def ble_grant(source, codec, platform)
       context = Manifest::Context.new(**ManifestContextFixture.arguments(codec), platform: platform,
                                                                                gatt_services: ManifestContextFixture::GATT_NAMES)
-      Manifest.admit(source: ManifestContextFixture.domain_source(source) + ManifestContextFixture.ble_grant(BLE_SERVICES),
+      Manifest.admit(source: ManifestContextFixture.domain_source(source, introduce: false) + ManifestContextFixture.ble_grant(BLE_SERVICES),
                      codec: codec, context: context, planner: ManifestContextFixture.accepting_planner).bytes
     end
 

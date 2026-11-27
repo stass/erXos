@@ -103,8 +103,8 @@ principal system
 # the card's one app, the dashboard, so the display domain's outer budget pays for one
 # pixel area; and the display and net, which the build grants the app template. The app
 # is a principal with a domains quota of one, so max_domains is the system principal's
-# nine, the one app, ntpd and bleuart. max_connections, 31, holds ntpd's session's two
-# connections and bleuart's three (their comments), the 20 of the network domain's comment and the app's session's four: its system connection, packages,
+# nine, the one app, ntpd and bleuart. max_connections, 35, holds ntpd's session's two
+# connections and bleuart's three (their comments), the 24 of the network domain's comment and the app's session's four: its system connection, packages,
 # the display and net, and two more for root's session's display connection and its
 # replacement's.
 apps
@@ -123,7 +123,7 @@ machine
   users_share @share.users
   system_principal @principal.system
   max_domains 12
-  max_connections 31
+  max_connections 35
   system_lane 4096
   system_queue 16384
   peer_held 4096
@@ -206,12 +206,14 @@ system_image
 #
 # Its quota of two connections holds root's session and one more while a session is
 # replaced; its system connection counts against no quota (life_connections,
-# liberx/system/dom_life.c). At rest the machine holds 13 of the 20 these rows take: the
+# liberx/system/dom_life.c). At rest the machine holds 15 of the 24 these rows take: the
 # system connections of root's session and of the storage, network, display, PCIe, USB,
-# media and Bluetooth domains, the session's data, net and media, the display's usb_input
-# and the media domain's drive grant; the other seven are the four a replacement session
-# makes beside its predecessor's closing rows and the three a restarted configured domain
-# makes, the USB domain's system connection, usb_input and drive grant, as on QEMU virt. The apps row's one app takes four more (the apps row's comment).
+# media and Bluetooth domains, the session's data, net, media and bluetooth, the display's
+# usb_input, the media domain's drive grant and the Bluetooth domain's bt_state; the other
+# nine are the five a replacement session makes beside its predecessor's closing rows and
+# the four a restarted configured domain makes at most, the Bluetooth domain's system
+# connection and bt_state and its clients' bluetooth and ble, where QEMU virt's USB domain
+# makes three. The apps row's one app takes four more (the apps row's comment).
 domain network
   principal @principal.system
   limits @limits.network
@@ -491,11 +493,14 @@ window disk0
 # rest of the stack once init holds the ready answer's facets, the line grant among them.
 # The service ble, which the domain serves, has one grant here, bleuart_ble, so bleuart's
 # session is the one domain that holds ble on this board; its row makes the domain
-# service accept the mint the domain names. The domain's connections quota of 2 is that
-# session's ble connection and its successor's, admitted while the Bluetooth domain still
-# answers the end of the one before. They are
+# service accept the mint the domain names. A connection counts against both its ends'
+# quotas, so the domain's connections quota of 6 is that session's ble connection and its
+# successor's, admitted while the Bluetooth domain still answers the end of the one
+# before; root's session's grant of bluetooth, the control tree, and its replacement's
+# (bluetooth_root); and its own bt_state grant and the one a restarted storage domain
+# answers while the old one closes. They are
 # the rows of QEMU virt's Bluetooth suite (tools/lib/erx/bt_domain.rb, whose comment
-# explains the runtime limits, the share and the limits) with four differences:
+# explains the runtime limits, the share and the limits) with these differences:
 #
 # * runtime: the BeamAsm image, as the design names, where the suite runs the
 #   interpreter; its 32 MiB and its boot time are measured on BeamAsm on neither board;
@@ -505,7 +510,11 @@ window disk0
 #   (docs/research-bluetooth-pi4.md, B-P3 and B-P4);
 # * restarts: 5 in 600 s, so the domain service restarts it within its intensity
 #   (docs/design-bluetooth.md, "Failure handling");
-# * the line grant's device: UART0, below.
+# * the line grant's device: UART0, below;
+# * connections: 6, for bleuart's successor, root's grant of the control tree and a
+#   storage restart, where the suite's cells need fewer;
+# * bluetooth_root, root's grant of the control tree, which only the suite's bleuart
+#   cell, the one with root's template, carries.
 #
 # Its system connection is one more of the machine's max_connections; the line grant,
 # of a system-domain service, travels on it.
@@ -543,7 +552,7 @@ limits bt
   grant @share.bt
   spaces none
   lane 4096
-  connections 2
+  connections 6
   crash 0
   flags none
   runtime_limits @runtime_limits.bt
@@ -570,6 +579,30 @@ service ble
 service bluetooth
   server @domain.bt
   interface svc
+# bluetooth_root: root's grant of the control tree, read-write, as every development
+# manifest with a bt row grants it (docs/design-bluetooth.md, "Who is granted it"), so an
+# administrator at the console, over SSH or in the web client's terminal pairs with
+# btpair; bleuart's template holds none. Its quantities are the svc interface's
+# (abi/services/svc.txt).
+facet bluetooth_root
+  name "bluetooth"
+  grantee @session.system
+  service @service.bluetooth
+  operations none
+  max_request 131072
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 262144
+  parameter rights rw
+# bt_state: the Bluetooth store's development grant, the data volume's bt/ directory,
+# which the storage domain serves as a files service of its own and mints only where
+# this row declares it (docs/design-bluetooth.md, "The Bluetooth domain"). Its name is
+# bt_state_service (abi/manifest.txt): the build derives its one row, read-write to the
+# domain that serves ble, and refuses the service in a release manifest.
+service bt_state
+  server @domain.storage
+  interface files
 facet line
   grantee @domain.bt
   service @service.line

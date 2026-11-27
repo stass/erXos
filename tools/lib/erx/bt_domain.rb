@@ -49,7 +49,16 @@ module Erx
     # ble and of bluetooth, its control tree, and its -eval starts the rest of the stack
     # once init holds the ready answer's facets, the line grant among them. The services
     # ble and bluetooth, which the domain serves, have no grant here: their rows make the
-    # domain service accept the mints the domain names.
+    # domain service accept the mints the domain names. The service bt_state is the
+    # store's development grant, which the storage domain mints only where a row declares
+    # it and whose one row the build derives, read-write to the server of ble
+    # (docs/design-bluetooth.md, "The Bluetooth domain"): a connection between the domain
+    # and the storage domain. A connection counts against both its ends' quotas, so the
+    # domain's connections quota of 5 holds its bt_state grant, the one client of ble each
+    # cell has, the echo domain, the app or bleuart, with bleuart's successor while the
+    # bleuart cell's stop and start overlap, and in that cell root's session's grant of
+    # bluetooth and its replacement's (BLEUART_ROOT_RECORDS). The suite's restarts are 0,
+    # so no successor of the domain itself needs room.
     ROWS = <<~ROWS.freeze
       runtime_limits #{DOMAIN}
         max_frame 131072
@@ -78,7 +87,7 @@ module Erx
         grant @share.#{DOMAIN}
         spaces none
         lane 4096
-        connections 1
+        connections 5
         crash 0
         flags none
         runtime_limits @runtime_limits.#{DOMAIN}
@@ -101,6 +110,9 @@ module Erx
       service bluetooth
         server @domain.#{DOMAIN}
         interface svc
+      service bt_state
+        server @domain.storage
+        interface files
     ROWS
 
     # The echo domain (docs/design-bluetooth.md, "On QEMU against Bumble"): the handler of
@@ -249,6 +261,18 @@ module Erx
     # The connections bleuart's session makes: its system connection, its ble connection
     # and the line root_line mints (config/manifest/raspi4b-development.txt).
     BLEUART_CONNECTIONS = 3
+    # Root's grant of the Bluetooth domain's control tree, which every development
+    # manifest with a bt row gives root's template (docs/design-bluetooth.md, "Who is
+    # granted it"), from the Pi 4's manifest, its one source. The bleuart cell is the one
+    # with root's template, so the one that carries it. ROOT_BLUETOOTH_CONNECTIONS is what
+    # it adds to max_connections, root's session's connection and its replacement's.
+    # STORAGE_CONNECTIONS is what the storage domain's quota grows by in that cell, the
+    # Bluetooth domain's bt_state beside root's session's data connection, its
+    # replacement's and the four apps' packages, which take the quota's six; the suite's
+    # restarts are 0, so the Bluetooth domain has no successor to make room for.
+    BLEUART_ROOT_RECORDS = [%w[facet bluetooth_root]].freeze
+    ROOT_BLUETOOTH_CONNECTIONS = 2
+    STORAGE_CONNECTIONS = 1
     STOP_BLEUART = "service bleuart stop\r"
     STOPPED = /\AStopping bleuart\.\r\n/n
     STOP_SECONDS = 60
@@ -260,13 +284,16 @@ module Erx
     # session templates back, which MediumBoot drops, so the console logs root in and
     # root_line has root's session to answer; and bleuart's records, with room for its
     # principal's memory, its domain and its connections. Root's session gets back its
-    # grants of ROOT_SESSION_RECORDS from source, which MediumBoot drops with the template.
+    # grants of ROOT_SESSION_RECORDS from source, which MediumBoot drops with the template,
+    # and its grant of the control tree (BLEUART_ROOT_RECORDS) from board.
     def self.bleuart_manifest(source, platform:, board:)
       rows = named_records(board, BLEUART_RECORDS)
       text = medium(source, platform: platform) + ProductionImage.sessions(source) +
-             Manifest::Frontend.records_text(named_records(source, ROOT_SESSION_RECORDS) + rows)
+             Manifest::Frontend.records_text(named_records(source, ROOT_SESSION_RECORDS) + rows +
+                                             named_records(board, BLEUART_ROOT_RECORDS))
       Manifest::Edit.grow(text, { %w[machine root_memory] => rows.first.decimal('memory'), %w[machine max_domains] => 1,
-                                  %w[machine max_connections] => BLEUART_CONNECTIONS })
+                                  %w[machine max_connections] => BLEUART_CONNECTIONS + ROOT_BLUETOOTH_CONNECTIONS,
+                                  ['limits storage', 'connections'] => STORAGE_CONNECTIONS })
     end
 
     # The records of the manifest text source that names lists as [kind, name] pairs, in

@@ -203,7 +203,7 @@ bytes packages_service 8 value 7061636b61676573
 # The names of the development state services, each a files service of the storage
 # domain rooted at a directory of the data volume of its own, whose one row the build
 # derives, read-write to the one domain that keeps its state there: "bt_state", the
-# volume's bt/, to the domain named bt (docs/design-bluetooth.md, "The Bluetooth
+# volume's bt/, to the domain that serves ble (docs/design-bluetooth.md, "The Bluetooth
 # domain"), and "ssh_state", its ssh/, to the domain named ssh (docs/design-ssh.md,
 # "Host keys").
 bytes bt_state_service 8 value 62745f7374617465

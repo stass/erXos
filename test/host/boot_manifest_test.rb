@@ -11,6 +11,7 @@ require_relative '../../tools/lib/erx/platform'
 require_relative '../fixtures/manifest_context'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/manifest'
+require_relative '../../tools/lib/erx/manifest_edit'
 require_relative '../fixtures/generated_tree'
 require_relative '../../tools/fuzz/manifest_seeds'
 
@@ -469,8 +470,11 @@ end
   def test_the_uses_column_follows_the_holders_grants_and_rescue_marks
     uart0_uses = ->(source) { pi_pin_rows(source).select { |row| row.first >= 30 }.map(&:last).uniq }
     assert_equal [1], uart0_uses.(pi_source)
-    rescued = pi_source.sub(/^(domain bt\n(?:  .*\n)*?)  flags none\n/) { "#{Regexp.last_match(1)}  flags rescue\n" }
-    refute_equal pi_source, rescued
+    # A rescue Bluetooth domain holds no store, which the rescue configuration's storage
+    # domain would serve, and so is granted no control tree.
+    storeless = Erx::Manifest::Edit.without(pi_source, ['service bt_state', 'facet bluetooth_root'])
+    rescued = storeless.sub(/^(domain bt\n(?:  .*\n)*?)  flags none\n/) { "#{Regexp.last_match(1)}  flags rescue\n" }
+    refute_equal storeless, rescued
     assert_equal [2], uart0_uses.(rescued)
     ungranted = pi_source.sub(/^facet line\n(?:  .*\n)*/, '')
     refute_equal pi_source, ungranted

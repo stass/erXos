@@ -105,6 +105,30 @@ class BtDomainTest < Minitest::Test
     assert_equal domains.call(plain) + 1, domains.call(source)
   end
 
+  # Every cell declares the store's development grant, bt_state, whose row the build
+  # derives to the Bluetooth domain; the bleuart cell, the one with root's template,
+  # carries root's grant of the control tree from the Pi 4's manifest, with room for it
+  # and its replacement in max_connections.
+  def test_the_cells_declare_the_store_and_the_bleuart_cell_grants_root_the_tree
+    store = "service bt_state\n  server @domain.storage\n  interface files\n"
+    plain = Erx::BtDomain.app_manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
+    [Erx::BtDomain.manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM), plain].each do |source|
+      assert_includes source, store
+      refute_includes source, "facet bluetooth_root\n"
+    end
+    board = Erx::Platform.load(root: ROOT, name: Erx::BtDomain::BLEUART_PLATFORM).manifest_source(ROOT)
+    source = Erx::BtDomain.bleuart_manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM, board: board)
+    grant = source[source.index("facet bluetooth_root\n")..][/\Afacet bluetooth_root\n(?:  [^\n]*\n)+/]
+    assert_includes grant, "  grantee @session.system\n  service @service.bluetooth\n"
+    assert_includes grant, "  parameter rights rw\n"
+    connections = ->(text) { Erx::Manifest::Edit.value(text, record: 'machine', field: 'max_connections') }
+    echo = Erx::BtDomain.manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
+    assert_equal connections.call(echo) - Erx::BtDomain::ECHO_CONNECTIONS + Erx::BtDomain::BLEUART_CONNECTIONS +
+                 Erx::BtDomain::ROOT_BLUETOOTH_CONNECTIONS, connections.call(source)
+    storage = ->(text) { Erx::Manifest::Edit.value(text, record: 'limits storage', field: 'connections') }
+    assert_equal storage.call(echo) + Erx::BtDomain::STORAGE_CONNECTIONS, storage.call(source)
+  end
+
   # bleuart's peers pass on their own passing lines alone: the shell peer's is not the
   # absent peer's, nor the serial peer's.
   def test_the_bleuart_rows_want_their_own_peer_s_line

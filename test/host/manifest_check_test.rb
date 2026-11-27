@@ -1339,7 +1339,10 @@ class ManifestCheckTest < Minitest::Test
   def test_a_pin_controller_holder_with_a_window_is_refused
     window = "window seeded\n  holder @domain.pins\n  device \"/emmc2bus/mmc@7e340000\"\n  role data\n  partition 0\n" \
              "  image none\n"
-    unheld = changed(pi_source.sub(/^window data\n(?:  .*\n)*/, ''))
+    # The data volume's window moves, and bt_state, which its holder serves, goes with
+    # root's grant of the control tree that needs it.
+    storeless = Erx::Manifest::Edit.without(pi_source, ['service bt_state', 'facet bluetooth_root'])
+    unheld = changed(storeless.sub(/^window data\n(?:  .*\n)*/, ''))
     refused(Erx::Manifest::Invalid, 'unit.holder', unheld + pi_pins_domain + window + pi_unit('gpio', '@domain.pins'),
             pi_context, message: /domain pins .*a row of windows names it/)
   end
@@ -1731,10 +1734,15 @@ class ManifestCheckTest < Minitest::Test
 
   # The development state services (docs/design-bluetooth.md, "The Bluetooth domain";
   # docs/design-ssh.md, "Host keys"): a manifest that serves bt_state holds the build's
-  # one derived row of it, read-write to the domain named bt, and none other; ssh_state's
-  # holder is the domain named ssh. Seeded: a derived row to the system domain, or
-  # source :any, fails these.
-  def state_service(name) = "service #{name}\n  server @domain.storage\n  interface files\n"
+  # one derived row of it, read-write to the domain that serves ble, whatever its name,
+  # and none other; ssh_state's holder is the domain named ssh. Each is served by the
+  # data volume's server, and a release manifest serves neither. Seeded: a derived row
+  # to the system domain, source :any, a holder named bt, the server rule or the release
+  # rule removed fails these.
+  def state_service(name, server: '@domain.storage') = "service #{name}\n  server #{server}\n  interface files\n"
+
+  # The Pi's manifest, which serves bt_state, without it.
+  def pi_without_store = pi_shipped.sub(state_service('bt_state'), '')
 
   # Each facet row as [grantee kind, grantee, service name, parameter scalars].
   def granted_rows(view)
@@ -1748,25 +1756,133 @@ class ManifestCheckTest < Minitest::Test
     end
   end
 
+  # The bt_state rows of source as granted_rows gives them, beside the index of the
+  # domain named holder.
+  def bt_state_rows(source, holder)
+    view = @codec.open('manifest', admit(source, pi_context).bytes)
+    index = view.each('domains').map { |row| view.string(row.fetch('name')) }.index(holder)
+    [index, granted_rows(view).select { |row| row[2] == 'bt_state' }]
+  end
+
   def test_the_build_derives_the_bt_state_row_to_the_bt_domain_alone
-    view = @codec.open('manifest', admit(pi_shipped + state_service('bt_state'), pi_context).bytes)
-    bt = view.each('domains').map { |row| view.string(row.fetch('name')) }.index('bt')
-    rw = @codec.member('files_rights', 'rw')
-    assert_equal [[@codec.member('mf_grantee', 'domain'), bt, 'bt_state', [rw]]],
-                 granted_rows(view).select { |row| row[2] == 'bt_state' }
+    bt, rows = bt_state_rows(pi_shipped, 'bt')
+    assert_equal [[@codec.member('mf_grantee', 'domain'), bt, 'bt_state', [@codec.member('files_rights', 'rw')]]], rows
+  end
+
+  # The bond keys follow the Bluetooth domain by construction: the row goes to the
+  # server of ble, here a domain named radio, and not to a domain by its name.
+  def test_the_bt_state_row_goes_to_the_server_of_ble_whatever_its_name
+    source = pi_shipped.gsub('@domain.bt', '@domain.radio').sub("\ndomain bt\n", "\ndomain radio\n")
+    radio, rows = bt_state_rows(source, 'radio')
+    assert_equal [[@codec.member('mf_grantee', 'domain'), radio, 'bt_state', [@codec.member('files_rights', 'rw')]]], rows
   end
 
   def test_a_bt_state_row_the_manifest_writes_is_refused
     facet = login_keys_facet(grantee: '@domain.bt', rights: "  parameter rights rw\n").gsub('login_keys', 'bt_state')
-    refused(Erx::Manifest::Invalid, 'facet.service', pi_shipped + state_service('bt_state') + facet, pi_context,
+    refused(Erx::Manifest::Invalid, 'facet.service', pi_shipped + facet, pi_context,
             message: /only the derived bt_state rows do/)
   end
 
-  def test_a_state_service_without_its_holder_domain_is_refused
-    { 'bt_state' => 'bt', 'ssh_state' => 'ssh' }.each do |name, holder|
-      refused(Erx::Manifest::Invalid, 'service.name', @source + state_service(name),
-              message: /a #{name} service holds a domain named #{holder}/)
+  def test_a_state_service_without_its_holder_is_refused
+    refused(Erx::Manifest::Invalid, 'service.server', @source + state_service('bt_state'),
+            message: /a bt_state service has one configured domain that serves the ble interface/)
+    refused(Erx::Manifest::Invalid, 'service.name', @source + state_service('ssh_state'),
+            message: /a ssh_state service holds a domain named ssh/)
+  end
+
+  # A state service served by another domain than the data volume's would hand the
+  # bond keys to a domain the design never gives them, the network domain here, even
+  # beside a service of its own named data.
+  def test_a_state_service_another_domain_than_the_data_volume_s_serves_is_refused
+    moved = pi_shipped.sub(state_service('bt_state'), state_service('bt_state', server: '@domain.network'))
+    [moved, moved + "service netdata\n  name \"data\"\n  server @domain.network\n  interface files\n"].each do |source|
+      refused(Erx::Manifest::Invalid, 'service.server', source, pi_context,
+              message: /service bt_state is served by the holder of the data volume's windows, which its server is not/)
     end
+  end
+
+  # A release image keeps its stores in the vault's state slots: a release manifest that
+  # serves a development state service is refused as such, ahead of the release build's
+  # refusal.
+  def test_a_release_manifest_serves_no_development_state_service
+    %w[bt_state ssh_state].each do |name|
+      source = @source.sub('flags development', 'flags none') + state_service(name)
+      refused(Erx::Manifest::Invalid, 'service.name', source, context(build_kind: 'release'),
+              message: /service #{name} is a development build's store, which a release manifest does not serve/)
+    end
+  end
+
+  # The Bluetooth domain's control tree and its store (docs/design-bluetooth.md, "The
+  # control tree"): the Pi's development manifest grants root's template the tree rw and
+  # the bt row its store; a grant of the tree where the bt row has no store is refused,
+  # and a grant with rx is refused. An apps row offers no svc tree yet (check_apps);
+  # the store rule reads the normalized grants, an apps row's among them, once it does.
+  # Seeded: the store rule removed packs the manifest without a store.
+  BLUETOOTH_ROOT = "facet bluetooth_root\n  name \"bluetooth\"\n  grantee @session.system\n  service @service.bluetooth\n"
+
+  # The index of the session template of the principal named principal in view.
+  def template_of(view, principal)
+    principals = view.each('principals').map { |row| view.string(row.fetch('name')) }
+    view.each('sessions').to_a.index { |row| principals.fetch(row.fetch('principal')) == principal }
+  end
+
+  def test_the_pi_s_manifest_grants_root_the_control_tree_beside_the_store
+    view = @codec.open('manifest', admit(pi_shipped, pi_context).bytes)
+    root = template_of(view, 'system')
+    rows = granted_rows(view).select { |row| row[2] == 'bluetooth' }
+    assert_equal [[@codec.member('mf_grantee', 'session'), root, 'bluetooth', [@codec.member('svc_rights', 'rw')]]], rows
+  end
+
+  def test_a_bluetooth_grant_where_the_bt_row_has_no_store_is_refused
+    refused(Erx::Manifest::Invalid, 'facet.service', pi_without_store, pi_context,
+            message: /facet bluetooth grants bt's control tree bluetooth, but bt holds no bt_state store/)
+  end
+
+  def test_a_bluetooth_grant_with_rx_is_refused
+    source = pi_shipped.sub(/(#{Regexp.escape(BLUETOOTH_ROOT)}(?:  [^\n]*\n)*?)  parameter rights rw\n/, "\\1  parameter rights rx\n")
+    refute_equal pi_shipped, source
+    error = assert_raises(Erx::ABI::SchemaError) { admit(source, pi_context) }
+    assert_match(/parameter rights is one of ro, rw/, error.message)
+  end
+
+  # bleuart, the console over Nordic's UART service, administers no bond
+  # (docs/design-bluetooth.md, "Who is granted it"): its template holds no grant of the tree.
+  def test_bleuart_holds_no_grant_of_the_control_tree
+    view = @codec.open('manifest', admit(pi_shipped, pi_context).bytes)
+    bleuart = template_of(view, 'bleuart')
+    refute_nil bleuart
+    refute(granted_rows(view).any? do |row|
+      row[0] == @codec.member('mf_grantee', 'session') && row[1] == bleuart && row[2] == 'bluetooth'
+    end)
+  end
+
+  # The Bluetooth domain's allow-list (docs/design-bluetooth.md, "The Bluetooth domain"):
+  # what it parses comes from anyone in radio range, so it holds its ble services, its
+  # control tree, its line grant and its store, and is named by nothing else. Each seed
+  # differs from the Pi's manifest in one row. Seeded: holds_only's block admitting every
+  # row packs each.
+  BT_HOLDS = /the Bluetooth domain, bt, holds nothing but its ble and svc services, one line grant and its bt_state store/
+
+  def test_the_bluetooth_domain_holds_no_device
+    source = pi_shipped.sub(pi_unit('rng', 'system'), pi_unit('rng', '@domain.bt'))
+    refused(Erx::Manifest::Invalid, 'units', source, pi_context, message: BT_HOLDS)
+  end
+
+  def test_the_bluetooth_domain_holds_no_other_facet
+    facet = "facet bt_packages\n  name \"packages\"\n  grantee @domain.bt\n  service @service.packages\n  operations none\n" \
+            "  max_request 131072\n  in_flight 16\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 262144\n" \
+            "  parameter rights ro\n"
+    refused(Erx::Manifest::Invalid, 'facets', pi_shipped + facet, pi_context, message: BT_HOLDS)
+  end
+
+  def test_the_bluetooth_domain_is_introduced_to_no_domain
+    refused(Erx::Manifest::Invalid, 'introductions', "#{pi_shipped}introduce @domain.bt @domain.network\n", pi_context,
+            message: BT_HOLDS)
+  end
+
+  def test_the_bluetooth_domain_serves_no_other_service
+    refused(Erx::Manifest::Invalid, 'services', pi_shipped + state_service('bt_files', server: '@domain.bt'), pi_context,
+            message: BT_HOLDS)
   end
 
   # A second record_volume window lies on the system window's block device, as the

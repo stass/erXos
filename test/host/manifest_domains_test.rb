@@ -1131,9 +1131,11 @@ class ManifestDomainsTest < Minitest::Test
   end
 
   # source ready for an apps row: max_domains raised by count, the domains max apps take
-  # (property 4), and the system tree the row needs, held by beta (property 19).
-  def for_apps(source, count)
-    ManifestContextFixture.with_system_tree(source, holder: '@domain.beta')
+  # (property 4), and the system tree the row needs (property 19), held by holder, beta
+  # by default; a test whose beta serves ble, and so holds nothing else
+  # (check_bluetooth_domains), puts the tree and the packages service on alpha.
+  def for_apps(source, count, holder: '@domain.beta')
+    ManifestContextFixture.with_system_tree(source.sub(PACKAGES) { PACKAGES.sub('@domain.beta', holder) }, holder: holder)
                           .sub(/^(  max_domains )(\d+)$/) { "#{Regexp.last_match(1)}#{Regexp.last_match(2).to_i + count}" }
   end
 
@@ -1510,7 +1512,7 @@ class ManifestDomainsTest < Minitest::Test
   # declaring a service the row does not offer, and two declaring nus.
   def test_a_package_row_declares_only_offered_gatt_services_none_twice
     ble = "service ble\n  server @domain.beta\n  interface ble\n"
-    source = for_apps(@source + ble + self.class.apps(services: 'ble', gatt: 'nus', max: 2), 2)
+    source = for_apps(@source + ble + self.class.apps(services: 'ble', gatt: 'nus', max: 2), 2, holder: '@domain.alpha')
     rows = self.class.package('clock') + self.class.package('quotes')
     with_packages({ 'clock' => 4096, 'quotes' => 4096 }, { 'clock' => %w[nus] })
     admit(source + rows)
@@ -1703,7 +1705,7 @@ class ManifestDomainsTest < Minitest::Test
     granted = served.call(@source + ble_grant(%w[nus]))
     assert_includes granted.fetch('beta'), key.call("['nus']")
     refute_includes granted.fetch('alpha'), 'services'
-    offered = for_apps(@source + ble_grant(%w[nv]) + self.class.apps(services: 'ble', gatt: 'nus'), 8)
+    offered = for_apps(@source + ble_grant(%w[nv]) + self.class.apps(services: 'ble', gatt: 'nus'), 8, holder: '@domain.alpha')
     assert_includes served.call(offered, context: gatt_context).fetch('beta'), key.call("['nus','nv']")
     assert_includes served.call(@source + "service ble\n  server @domain.beta\n  interface ble\n").fetch('beta'), key.call('[]')
     ['-erx_bt services x', '-erx_bt name y services x', '-- -erx_bt services x -eval ok'].each do |args|
@@ -1806,7 +1808,7 @@ class ManifestDomainsTest < Minitest::Test
   # then be offered.
   def test_the_apps_rows_gatt_is_the_app_templates_ble_grant
     ble = "service ble\n  server @domain.beta\n  interface ble\n"
-    offered = ->(gatt, services: 'ble') { for_apps(@source + ble + self.class.apps(services: services, gatt: gatt), 8) }
+    offered = ->(gatt, services: 'ble') { for_apps(@source + ble + self.class.apps(services: services, gatt: gatt), 8, holder: '@domain.alpha') }
     view = @codec.open('manifest', admit(offered.call('nus')).bytes)
     service = rows(view, 'services').index { |row| view.string(row.fetch('name')) == 'ble' }
     first = view.header.fetch('facet_parameters').fetch('offset')
@@ -1821,7 +1823,7 @@ class ManifestDomainsTest < Minitest::Test
       ['apps.gatt', offered.call(nil)] => /services names ble, so the row states gatt/,
       ['apps.gatt', offered.call('nus', services: nil)] => /gatt is stated, so services names ble/,
       ['facet.parameter', offered.call('nusb')] => %r{the apps row's gatt names "nusb", which abi/gatt does not declare},
-      ['facet.parameter', for_apps(@source + ble_grant(%w[nus]) + self.class.apps(services: 'ble', gatt: 'nus'), 8)] =>
+      ['facet.parameter', for_apps(@source + ble_grant(%w[nus]) + self.class.apps(services: 'ble', gatt: 'nus'), 8, holder: '@domain.alpha')] =>
         /(ble grant nm and the apps row's gatt|the apps row's gatt and ble grant nm) both name "nus"/
     }.each do |(field, source), message|
       refused(Erx::Manifest::Invalid, field, source, message: message)

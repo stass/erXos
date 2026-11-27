@@ -138,7 +138,7 @@ limits session
   grant @share.session
   spaces @share.session
   lane 65536
-  connections 8
+  connections 10
   crash 0
   flags spaces
   runtime_limits @runtime_limits.session
@@ -230,8 +230,10 @@ facet storage_ctl
 # 64 KiB with their data. reductions and period_ns bind no erx_fs grant. The storage
 # domain takes two connections, root's session and one more while a session is replaced,
 # and four more, one for each app of QEMU virt's apps row, whose template the build
-# grants packages,
-# and root's session eight: data, net, the display and media, and one
+# grants packages; on the Raspberry Pi 4, whose apps row has one app, the two it leaves
+# hold the Bluetooth domain's bt_state, which the build derives, and its successor's,
+# and root's session ten: data, net, the display and media, and on a board with a
+# Bluetooth domain bluetooth, its control tree, and one
 # more for each while its server is replaced; a domain's system connection counts against no quota (life_connections,
 # liberx/system/dom_life.c). The network domain takes two, as the storage domain does for sessions,
 # and four more, one for each app of QEMU virt's apps row, whose template the build

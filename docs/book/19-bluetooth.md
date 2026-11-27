@@ -23,7 +23,7 @@
 > notifications, `bleuart`, root's shell over the serial service,
 > and tests against a Bumble peer that scans, connects, reads, streams
 > and pairs. Also designed and not built: the control tree's place at
-> `/svc/bluetooth`, its grant and the `btpair` command, without which no
+> `/svc/bluetooth` and the `btpair` command, without which no
 > image can pair; an id for each bond, which a handler hears in place of
 > an address, and the list of bonds; a service's own octets in the
 > advertising; and apps as centrals, which scan and read other devices.
@@ -183,10 +183,8 @@ own.
 The Bluetooth domain mounts its grant of the line at `/dev/line` and
 opens `/dev/line/data` and `/dev/line/ctl` as ordinary files. Its manifest
 row holds that grant and a store for its bonds (19.6). The manifest
-check is designed to refuse anything more, because a stranger in radio
-range reaches whatever the domain holds through a parser defect; that
-check is designed and not built, so the row's contents rest on the
-manifest text. Figure 19.1 shows the path.
+check refuses anything more, because a stranger in radio range reaches
+whatever the domain holds through a parser defect. Figure 19.1 shows the path.
 
 ```mermaid
 flowchart LR

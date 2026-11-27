@@ -111,7 +111,9 @@ module ManifestContextFixture
   # by the rescue configuration; a service alpha serves, their introduction and the
   # data window held by alpha. The manifest's own session template stays. The system
   # principal's quota covers the domains and one session, and max_domains is that quota.
-  def domain_source(plain)
+  # introduce: false leaves alpha and beta unintroduced, as a manifest whose beta serves
+  # ble must be (the Bluetooth domain's allow-list, Manifest::Check#check_bluetooth_domains).
+  def domain_source(plain, introduce: true)
     domain = lambda do |name, flags|
       "domain #{name}\n  principal @principal.system\n  limits @limits.app\n  kind service\n  flags #{flags}\n" \
         "  runtime @artifact.emu\n  release @artifact.app\n  restarts 3\n  restart_period_s 5\n  args \"-x y\"\n"
@@ -121,7 +123,7 @@ module ManifestContextFixture
           "  peer_held 4096\n  peer_held_total 4096\n"
     with_quota(domainless(plain), 3).sub("window data\n  holder system", "window data\n  holder @domain.alpha") +
       app + domain.call('alpha', 'required') + domain.call('beta', 'rescue') +
-      "service probe\n  server @domain.alpha\n  interface 1\nintroduce @domain.alpha @domain.beta\n"
+      "service probe\n  server @domain.alpha\n  interface 1\n" + (introduce ? "introduce @domain.alpha @domain.beta\n" : "")
   end
 
   # The system tree an apps row needs (property 19, docs/design-packaging.md, "The apps

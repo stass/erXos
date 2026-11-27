@@ -491,13 +491,19 @@ module Erx
       # build grants it.
       HolderDomain = Data.define(:name)
 
+      # The configured domain that serves the manifest's services of an interface, the one
+      # holder of a development state service kept by the domain of a role
+      # (docs/design-bluetooth.md, "The Bluetooth domain"): bt_state's is the server of
+      # ble, so the bond keys follow the Bluetooth domain whatever its name.
+      ServerOf = Data.define(:interface)
+
       # A row the build derives of a well-known service: its grantee, :system (the system
       # domain), :app_template, :user_templates (every session template but the app
-      # template) or a HolderDomain, and its parameter values.
+      # template), a HolderDomain or a ServerOf, and its parameter values.
       Derived = Data.define(:grantee, :values) do
         def initialize(grantee:, values:)
           raise Erx::Error, "Derived grantee #{grantee.inspect} is not one derived_grantees names" unless
-            %i[system app_template user_templates].include?(grantee) || grantee.is_a?(HolderDomain)
+            %i[system app_template user_templates].include?(grantee) || grantee.is_a?(HolderDomain) || grantee.is_a?(ServerOf)
 
           super
         end
@@ -523,11 +529,16 @@ module Erx
       #   row packs the template's packages and system rows in fields of their own
       #   (apps_rows), so a new service with such a row needs a field there too;
       # * source, which granted rows (check_granted_rows) may grant it: :any, :none (only
-      #   the derived rows do), or a SourceGrants.
+      #   the derived rows do), or a SourceGrants;
+      # * store, :development for a development state service, a development build's
+      #   store on the data volume, which a release manifest does not serve, its stores being
+      #   the vault's state slots, and which the data volume's server serves
+      #   (check_release_stores, check_state_servers); nil for every other.
       #
       # A row with neither needs nor window is not checked to be of its interface.
-      WellKnown = Data.define(:constant, :interface, :needs, :window, :derived, :source) do
-        def initialize(constant:, needs:, window:, derived:, source:, interface: 'files')
+      WellKnown = Data.define(:constant, :interface, :needs, :window, :derived, :source, :store) do
+        def initialize(constant:, needs:, window:, derived:, source:, interface: 'files', store: nil)
+          raise Erx::Error, "WellKnown #{constant} store #{store.inspect}" unless [:development, nil].include?(store)
           raise Erx::Error, "WellKnown #{constant} needs #{needs.inspect}" unless [:apps, :served, nil].include?(needs)
           raise Erx::Error, "WellKnown #{constant} source #{source.inspect}" unless
             [:any, :none].include?(source) || source.is_a?(SourceGrants)
@@ -577,13 +588,14 @@ module Erx
         # state there and to no other, so the domain that parses the radio, or the
         # network, reaches that directory and no principal's files
         # (docs/design-bluetooth.md, "The Bluetooth domain"; docs/design-ssh.md, "Host
-        # keys").
+        # keys"). bt_state's holder is the Bluetooth domain, the server of ble; ssh_state's
+        # is the domain named ssh.
         WellKnown.new(constant: 'bt_state_service', needs: :served, window: nil,
-                      derived: [Derived.new(grantee: HolderDomain.new(name: 'bt'), values: { 'rights' => 'rw' })],
-                      source: :none),
+                      derived: [Derived.new(grantee: ServerOf.new(interface: 'ble'), values: { 'rights' => 'rw' })],
+                      source: :none, store: :development),
         WellKnown.new(constant: 'ssh_state_service', needs: :served, window: nil,
                       derived: [Derived.new(grantee: HolderDomain.new(name: 'ssh'), values: { 'rights' => 'rw' })],
-                      source: :none),
+                      source: :none, store: :development),
         # Property 8's drive clauses (docs/design-drives.md, "Manifest rows" and "Links and
         # rights"): the media domain, the server of every drive window, serves every
         # drive's volumes. Any grantee may hold a row of it, and none runs what a drive
@@ -754,9 +766,22 @@ module Erx
         invalid("facet #{listed.name} lists root_line, which a release manifest grants no one", 'facet.operations') if listed
       end
 
+      # A release image keeps its stores in the vault's state slots
+      # (docs/design-system.md, "State slots"): a release manifest that serves a
+      # development state service (WellKnown's store) is refused, ahead of the release
+      # build's other refusals, so no release image keeps keys where the holders of the
+      # data volume read them.
+      def check_release_stores
+        names = WELL_KNOWN.select(&:store).map { |known| name_of(known) }
+        served = records('service').find { |record| names.include?(service_name(record)) }
+        invalid("service #{service_name(served)} is a development build's store, which a release manifest does not serve",
+                'service.name') if served
+      end
+
       def check_mode(development:, partial:)
         unless development
           check_release_root_line
+          check_release_stores
           raise Unsupported.new('a release build needs the confinement check that M11 brings', field: 'machine.flags')
         end
         REFUSED.each { |kind, reason| unsupported(reason, kind) unless records(kind).empty? }
@@ -824,6 +849,8 @@ module Erx
         check_pcie(rows)
         check_window_services(rows)
         check_drive_domains(rows)
+        check_state_servers(rows)
+        check_bluetooth_domains(rows)
         RootStartup.check(loadable: root_loadable_bytes, baseline: baseline,
                           root_memory: root_memory, platform: @context.platform)
       end
@@ -2126,7 +2153,8 @@ module Erx
       end
 
       # The grantees, each [kind, index], that a derived row's grantee names; a
-      # HolderDomain names the domain of its name, which a manifest with required_by holds.
+      # HolderDomain names the domain of its name, and a ServerOf the one configured domain
+      # that serves its interface, which a manifest with required_by holds.
       def derived_grantees(grantee, tables, required_by:)
         sessions = tables.fetch('sessions')
         case grantee
@@ -2134,6 +2162,11 @@ module Erx
           index = @indices.fetch('domain')[name]
           invalid("a manifest with #{required_by} holds a domain named #{name}", 'service.name') unless index
           [[grantee_kind('domain'), index]]
+        in ServerOf(interface:)
+          servers = servers_of(tables, interface)
+          invalid("a manifest with #{required_by} has one configured domain that serves the #{interface} interface",
+                  'service.server') unless servers.size == 1 && servers.first != @codec.constant('mf_none')
+          [[grantee_kind('domain'), servers.first]]
         in :system then [[grantee_kind('system'), 0]]
         in :app_template then [[grantee_kind('session'), app_template_index(tables)]]
         in :user_templates
@@ -2144,6 +2177,31 @@ module Erx
 
       # The name of the well-known service known, its machine constant's bytes.
       def name_of(known) = @codec.fixed_bytes(known.constant)
+
+      # The distinct servers of the services of the interface abi/services declares as name.
+      def servers_of(tables, name)
+        interface = fetch_interface(name)
+        tables.fetch('services').select { |row| row.fetch('interface') == interface }.map { |row| row.fetch('server') }.uniq
+      end
+
+      # The development state services (WellKnown's store) of the data volume: each a
+      # directory of the volume its server roots the service at, so each is served by the
+      # holder of the data volume's windows, the one domain that mounts the volume, and by
+      # no other, which would otherwise hold the keys a state service keeps
+      # (check_and_place). The window, not a service named data, which any domain may
+      # serve, names that domain.
+      def check_state_servers(tables)
+        role = @codec.member('mf_window_role', 'data')
+        holders = tables.fetch('windows').select { |row| row.fetch('role') == role }.map { |row| row.fetch('holder') }.uniq
+        WELL_KNOWN.select(&:store).each do |known|
+          name = name_of(known)
+          tables.fetch('services').select { |row| row.fetch('name') == name }.each do |row|
+            next if holders == [row.fetch('server')]
+
+            invalid("service #{name} is served by the holder of the data volume's windows, which its server is not", 'service.server')
+          end
+        end
+      end
 
       # The well-known services' source clauses, over granted: every facet row but the
       # well-known services' own derived rows, that is the board's source rows and the
@@ -3852,6 +3910,57 @@ module Erx
           else drive_domain_reference?(scope, row, tables)
           end
         end
+      end
+
+      # The Bluetooth domain, each configured domain that serves a ble service
+      # (docs/design-bluetooth.md, "The Bluetooth domain" and "The control tree"), which
+      # check_ble_grants keeps off the system domain. What it
+      # parses comes from anyone in radio range, so it is held to an allow-list
+      # (holds_only): it is named by nothing but its place in the boot order, its services
+      # of the ble and svc interfaces, its line grant, the controller's, of which a
+      # manifest holds at most one (check_line_grants), and the store's grant, bt_state's
+      # derived row; no device, partition window, introduction or other facet. A grant of
+      # its control tree, a service of svc it serves, makes the grantee the machine's
+      # Bluetooth administrator, and every pairing window of a domain without a store
+      # answers eio, so any facet row of the tree, a source row, an apps row's or a derived
+      # one, needs the store's grant too: an image that offers pairing and can never pair
+      # is refused.
+      def check_bluetooth_domains(tables)
+        services = tables.fetch('services')
+        service = ->(row) { services.fetch(row.fetch('service')) }
+        ble, svc = fetch_interface('ble'), fetch_interface('svc')
+        store = services.find { |row| row.fetch('name') == @codec.fixed_bytes('bt_state_service') }
+        line = ->(row) { grant_checker(service.call(row).fetch('interface')) == 'line_grant' }
+        servers_of(tables, 'ble').each do |domain|
+          name = domain_name(tables, domain)
+          what = "the Bluetooth domain, #{name}, holds nothing but its ble and svc services, one line grant and its bt_state store"
+          holds_only(tables, domain, what) do |scope, row|
+            case scope
+            when 'boot_order' then true
+            when 'services' then [ble, svc].include?(row.fetch('interface'))
+            when 'facets' then line.call(row) || service.call(row).equal?(store)
+            else false
+            end
+          end
+          check_bluetooth_store(tables, domain, store, svc)
+        end
+      end
+
+      # check_bluetooth_domains' store rule for the Bluetooth domain at index domain: a
+      # manifest that grants a tree of the svc interface it serves holds its store's grant,
+      # the facet row of store, the bt_state service, whose grantee it is.
+      def check_bluetooth_store(tables, domain, store, svc)
+        services = tables.fetch('services')
+        facets = tables.fetch('facets')
+        granted = facets.find { |row| services.fetch(row.fetch('service')).values_at('server', 'interface') == [domain, svc] }
+        held = facets.any? do |row|
+          row.values_at('grantee_kind', 'grantee') == [grantee_kind('domain'), domain] && services.fetch(row.fetch('service')).equal?(store)
+        end
+        return if granted.nil? || held
+
+        name = domain_name(tables, domain)
+        invalid("facet #{granted.fetch('name')} grants #{name}'s control tree #{services.fetch(granted.fetch('service')).fetch('name')}, " \
+                "but #{name} holds no bt_state store, so every pairing window would answer eio", 'facet.service')
       end
 
       # What either drive domain's allow-list admits besides its own rows: its place in

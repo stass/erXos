@@ -6,6 +6,7 @@ require 'json'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/bt_domain'
 require_relative '../../tools/lib/erx/generated'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../../tools/lib/erx/platform'
@@ -92,8 +93,9 @@ class ErxPkgManifestTest < Minitest::Test
 
   # QEMU virt's development manifest, whose apps row offers the display and the network,
   # with the package quotes and the enabled package clock, the signer ops and a
-  # development key of 7s; with ble, the row offers the ble service too, served by the
-  # network domain, with gatt nus.
+  # development key of 7s; with ble, the Bluetooth suite's app-cell manifest
+  # (BtDomain.app_manifest), whose apps row offers the ble service too, served by the
+  # Bluetooth domain, with gatt nus.
   def admitted(ble: false)
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     arguments = ManifestContextFixture.arguments(codec)
@@ -103,14 +105,9 @@ class ErxPkgManifestTest < Minitest::Test
     context = Erx::Manifest::Context.new(**arguments, platform: JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json'))),
                                                       artifacts: arguments.fetch(:artifacts).merge(packages),
                                                       development_key: "\x07".b * 32)
-    board = Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT)
-    if ble
-      offered = "  services display net\n"
-      raise "QEMU virt's apps row no longer states #{offered.inspect}" unless board.include?(offered)
-
-      board = board.sub(offered, "  services display net ble\n  gatt nus\n") +
-              "service ble\n  server @domain.network\n  interface ble\n"
-    end
+    platform = Erx::Platform.load(root: ROOT, name: 'qemu-virt')
+    board = platform.manifest_source(ROOT)
+    board = Erx::BtDomain.app_manifest(board, platform: platform) if ble
     rows = "package quotes\n  input @artifact.package-quotes\n" \
            "package clock\n  input @artifact.package-clock\n  enable YES\n" \
            "signer ops\n  key hex:#{'cd' * 32}\n"
