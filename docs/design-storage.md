@@ -272,16 +272,13 @@ calls, so nothing above it depends on the controller:
   `{error, no_discard}` and never `ok`: virtio without the device's
   discard feature, a standard-capacity SD card, and a USB medium, whose
   SCSI subset has no UNMAP ([design-usb.md](design-usb.md#the-scsi-subset));
-* `erx_blk:info()`: `{ok, #{transport, capacity, max_sectors, flush, erase_unit, open_units, discard, detail}}`,
+* `erx_blk:info()`: `{ok, #{transport, capacity, max_sectors, flush, discard, detail}}`,
   the transport's name (`virtio_mmio`, `sdhci` or `usb_bot`), the medium's length
   in sectors of 512 bytes, the most sectors one read or write moves, whether the
-  medium flushes; the medium's allocation unit in sectors, the unit a
-  managed-flash medium erases and maps in, or `unknown`; how many such
-  units it takes writes into at once without a penalty, a number or
-  `unlimited`; the most sectors one discard covers, or `none`; and a map
+  medium flushes; the most sectors one discard covers, or `none`; and a map
   of what the transport reports about itself for the log and the
-  inspector (virtio's version and features; the card's type, bus width
-  and clock).
+  inspector (virtio's version and features; the card's type, bus width,
+  clock and the allocation unit it reports).
 
 Each answers with one closed set of errors: `{error, bad_count}` for
 bytes that are not whole sectors, a read or write count above
@@ -311,10 +308,9 @@ transport's: 8 sectors on virtio, the sectors one pool buffer holds
 beside its header and status byte; 32 sectors on the SD controller,
 16 KiB (`blk_sd_max_sectors` of `abi/formats/blk.txt`, beside its
 deadlines), whose write a card within its specification finishes
-inside both the wait limit and the in-flight bound below. The facts of the medium that only
-shape how a client writes come from the transport the same way: on
-virtio the allocation unit is `unknown`, `open_units` is `unlimited`, and
-`discard` is the device's `max_discard_sectors` when it offers
+inside both the wait limit and the in-flight bound below. The fact of the medium that only
+shapes how a client writes comes from the transport the same way: on
+virtio `discard` is the device's `max_discard_sectors` when it offers
 `VIRTIO_BLK_F_DISCARD` (feature 13, virtio 1.2 sections 5.2.3 and
 5.2.4), which the start then accepts, and `none` otherwise; a discard is
 one `VIRTIO_BLK_T_DISCARD` request (type 11) carrying one 16-byte
@@ -1195,22 +1191,19 @@ measure ([todo-performance.md](todo-performance.md)).
 also carries AU_SIZE, four bits from bit 428, which FreeBSD decodes
 (`mmc.c:1325`) and turns into a unit of `16 << AU_SIZE` sectors when the
 field is not zero (`mmc.c:1735-1737`): 16 KiB for 1 up to 4 MiB for 9.
-`info/0` reports that unit as `erase_unit`, and `unknown` for zero.
-Whether the specification codes the values above 9 as FreeBSD's shift
-does is unverified, since its table was not read; the value sizes only
-discards and the file system's log line, so a wrong one costs speed and
-no data. It is the card's report, not a measurement: Bergmann found
-that "all cards currently seem to report 4MB segments, even those that
-actually use 2MB or 8MB segments internally"
-([LWN 428584](https://lwn.net/Articles/428584/), section Partitioning),
-so the unit a format uses comes from the card profile's timings where
-there is one ([design-f2fs.md](design-f2fs.md#formatting-a-volume)).
-`open_units` is 2 on every card: no register says how many
-units a card keeps open, and while "on many of the better drives, five
-or more segments can be open simultaneously", "some brands can only have
-one or two segments open at a time" (Bergmann,
-[LWN 428584](https://lwn.net/Articles/428584/)); the card profile
-measures the Pi's cards before this changes.
+The driver decodes 1 to 9 so and reports the unit in `info/0`'s detail,
+for the log and the inspector, and reports `unknown` for 0 and for 10
+to 15, whose coding by the specification is unverified, since its table
+was not read. The value sizes only the largest discard, below, so a
+wrong one costs speed and no data. It is the card's report, not a
+measurement: Bergmann found that "all cards currently seem to report
+4MB segments, even those that actually use 2MB or 8MB segments
+internally" ([LWN 428584](https://lwn.net/Articles/428584/), section
+Partitioning), so the unit a format uses comes from the card profile's
+timings, through the installation
+([design-f2fs.md](design-f2fs.md#formatting-a-volume)), never from this
+field. How many units a card keeps open no register says; the card
+profile measures it ([todo-performance.md](todo-performance.md)).
 
 **Discards.** A high-capacity card whose CSD lists command class 5, bit
 5 of the CCC field in bits 95 to 84 (`mmc.c:1236`), takes a discard as
@@ -1243,47 +1236,10 @@ not read here, and the board probe records them with the time one unit's
 erase takes. A card past the bound fails the request as any missed bound
 does.
 
-**eMMC.** The driver admits SD cards alone. A driver for an eMMC device
-reports the same facts from its EXT_CSD as FreeBSD reads them: the unit
-is the high-capacity erase group, byte 224 times 1024 sectors, used once
-ERASE_GROUP_DEF, byte 175, is set (`mmc.c:1876-1882`); and the cache is
-turned on and flushed through CACHE_CTRL and FLUSH_CACHE, bytes 33 and
-32 (`mmcreg.h:362-363`), as FreeBSD turns on an eMMC's cache and never
-an SD card's, which the contract's flush already covers. How many units
-an eMMC keeps open is unmeasured, and it reports 2 until a measurement
-says more.
-
-A discard on an eMMC is CMD35, CMD36 and CMD38 with TRIM, argument 1,
-at sector granularity, and only on a device that passes both tests
-below; any other device reports `discard => none` and is never sent
-CMD38:
-
-* SEC_FEATURE_SUPPORT, byte 231, has GB_CL_EN (`mmcsd.c:285-293`;
-  `mmcreg.h:272-279, 392, 486`);
-* its CID matches no row of the exclusion table, matched as FreeBSD
-  matches its quirk table: manufacturer, OEM unless the row says any,
-  and product name (`mmc.c:1896-1904`). The table holds FreeBSD's rows,
-  with their reasons: Kingston's V10008 and V10016 (manufacturer 0x70,
-  any OEM), where "a firmware bug can lead to unrecoverable data
-  corruption" on TRIM (`mmc.c:125-130`, `mmcsd.c:285-288`); and
-  SanDisk's iNAND SEM02G, SEM04G, SEM08G, SEM16G and SEM32G
-  (manufacturer 0x2, OEM 0x100), which need CMD38's argument written to
-  EXT_CSD byte 113 first (`mmc.c:115-123`, `mmcsd.c:272-279`). That
-  preparation is not built, and nothing needs it until one of those
-  devices is supported, so they do not discard.
-
-The table only withholds discard, never grants it. Other exclusions
-published elsewhere, Linux's quirk list among them, are GPL source not
-read here, so whether more devices corrupt data on TRIM is unverified.
-Before an eMMC device is supported, its board probe records its CID
-and checks that sectors outside a discarded range read back unchanged
-after the discard; a device that fails joins the table. Discard is an
-optimization the file system never needs for correctness, since its
-power-cut harness gives the same trees with and without it
-([design-f2fs.md](design-f2fs.md#the-power-cut-harness)), so
-withholding it costs only write speed. When the driver is built, its
-tests show a CID of each row with GB_CL_EN set reporting `discard =>
-none`, and fail when the table match is dropped.
+**eMMC.** The driver admits SD cards alone. An eMMC device's erase
+group, cache and TRIM, and the devices known to corrupt data on TRIM,
+wait for a supported board that has one
+([todo-storage.md](todo-storage.md)).
 
 **Deadlines and interrupts.** A request keeps the transport contract's
 wait limit and in-flight bound ([Data model](#data-model)) with one
@@ -1738,8 +1694,9 @@ the medium, and a checkpoint syncs every file open in the volume and then
 flushes ([Interfaces](#interfaces)). The one owner runs the volume's
 operations one at a time, whichever client asked, so under littlefs a
 request waits for the volume's queue, which each client's grant bounds by
-its requests in flight and its fid pool; erXos's F2FS, whose open files
-have owners of their own, has no such queue. A port that crashes
+its requests in flight and its fid pool; erXos's F2FS's volume process,
+which also runs one request at a time, has the same queue
+([design-f2fs.md](design-f2fs.md#processes-and-ownership)). A port that crashes
 mid-operation leaves the operation's outcome unknown, as its protocol
 specifies; writes it had already sent to the window complete or fail at
 the window as any write does, and the owner mounts the volume again only
@@ -2694,7 +2651,7 @@ runs the driver whole. Each check and the seeded fault it must catch:
 | a card is admitted exactly when *Admitting a card* allows, every admitted capacity a whole number of sectors whose last address fits 32 bits | any `READ_BL_LEN` accepted (fails at 15, a 64 GiB card addressed in bytes); the agreement check dropped |
 | the CSD, SCR, SD status, General Information and Performance Enhancement parsers give known values, CSD capacities equal to the model's for 2 and 4 GiB images | the R2 parser's one-byte shift dropped |
 | the cache step skips a card without bit 330, refuses one without CMD48, flushes and clears an enabled cache, and refuses one that still reads enabled | the read-back skipped |
-| AU_SIZE of the SD status gives `erase_unit` for each value 1 to 9 and `unknown` for 0, from known SD status words | the field read one bit low |
+| AU_SIZE of the SD status gives the unit for each value 1 to 9 and `unknown` for 0 and for 10 to 15, from known SD status words | the field read one bit low |
 | a discard on a high-capacity card with class 5 issues CMD32 with its first sector, CMD33 with its last and CMD38 with argument 0, in order, then CMD13; it answers `erofs` on a trial boot touching no register; a standard-capacity card or one without class 5 reports `discard => none` and answers `no_discard`; a count above `discard` is `bad_count` | CMD33 given the end rather than the last sector; the trial check removed from the discard function |
 | on the `raspi4b` model, a discard of a 4 GiB image's unit is answered `ok` and a later write and read of its first sector return the written bytes | the discard sent after the write it should precede |
 | the divider's clock is at most the target and the next smaller divisor exceeds it | `<` in place of `=<` |

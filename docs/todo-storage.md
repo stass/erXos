@@ -872,6 +872,23 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   facet, with Linux as the oracle for the on-disk format. Until then the
   flag is refused, as every unimplemented feature is
   ([design-storage.md](design-storage.md#read-write-storage)).
+* [Low] storage, eMMC: a driver for an eMMC device, when a supported board has one, reports its
+  allocation unit from EXT_CSD's high-capacity erase group (byte 224 once ERASE_GROUP_DEF, byte 175,
+  is set), turns its cache on and flushes it through CACHE_CTRL and FLUSH_CACHE (bytes 33 and 32), as
+  FreeBSD does (`mmc.c:1876-1882`, `mmcreg.h:362-363` at `release/15.1.0`), and discards with TRIM only
+  on a device with GB_CL_EN that matches no row of FreeBSD's TRIM exclusions (`mmc.c:115-130`), after its
+  board probe shows sectors outside a discarded range unchanged ([design-storage.md](design-storage.md)).
+* [Low] test, F2FS against more Linux kernels: the guest's batch on other kernels, each a row of image
+  pin, kernel version and f2fs-tools package, only the pinned v7.3.4 kernel's result counting against
+  erXos, once a difference between kernels matters to a consumer ([design-f2fs.md](design-f2fs.md#the-linux-oracle-guest)).
+* [Low] test, F2FS hostile corpora beyond the fixed ones: syzbot's F2FS images, fetched only on
+  explicit request since their license is unknown, never committed, redistributed or attached to a
+  report, and differential fuzzing, the fuzz targets' mutants that erXos mounts sent in batches to a
+  hostile-image guest, each judged by the corpus verdicts ([design-f2fs.md](design-f2fs.md#corpora)).
+* [Low] test, F2FS workload shrinking and sampled matrices: a failing generated workload shrunk to a
+  shorter one that still fails, and a matrix of geometries, profiles, feature sets and every
+  `mkfs.f2fs` option whose cells a batch's seed draws, once fixed workloads and seeded traces stop
+  finding failures ([design-f2fs.md](design-f2fs.md#testing-on-the-host)).
 * [Low] storage, F2FS compression: the `compression` feature flag, when a
   consumer needs it, with its per-cluster work in a per-byte primitive.
   Until then the flag is refused, as every unimplemented feature is

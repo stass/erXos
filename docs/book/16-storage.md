@@ -411,9 +411,10 @@ its one rule is that no write ever lands on a block the durable view
 references
 ([design-f2fs.md, The construction](../design-f2fs.md#the-construction)).
 
-The allocator holds this rule by itself. A block that stops being used
-stays "touched" until the next checkpoint commits, and the allocator
-hands out only blocks that are neither in use nor touched. Four rules
+The allocator holds this rule by itself. It never hands out a single
+block: a log takes a whole free section and appends through it, and
+only a checkpoint's commit makes a section free, so a block that stops
+being used stays out of reach until the next checkpoint commits. Four rules
 about the order of writes and flushes complete it. With these, stale
 chains, torn
 records and blocks freed too early cannot arise from erXos's writes, and
@@ -449,8 +450,8 @@ The table says what correct means before any code is written.
 The **power-cut harness** makes those states. It runs the core over a
 test window that records every write, and after each step of a workload
 makes the states a cut could leave: each sector written since the last
-answered flush old or new, and each sector discarded old, zeroed or
-filled, each on its own, so a request may land in any part. It
+answered flush old or new, each on its own, so a request may land in
+any part. It
 enumerates every combination of up to ten whole writes, every sector
 choice over two blocks, and every subset of each block's sectors,
 samples beyond, and reports which states it sampled. Each state is
@@ -475,18 +476,18 @@ sizes a section to the card's allocation unit, as timings on the card
 show it rather than as the card reports it, and starts every section
 on one; each log fills a whole section of its own before it takes
 another, and a volume whose logs `mkfs.f2fs` placed in one section has
-them moved apart by its first read-write mount; the cleaner empties
-whole sections; and when a checkpoint frees a section, the volume tells
-the card with a **discard**, so the card learns of a whole free unit.
-The card also says how many logs to write: six streams would make a card
-that keeps two units open close and reopen them, so on an SD card the
-volume writes two, one for nodes and one for data, while every
-checkpoint still names the six that Linux's format requires. The price
-is cleaning: data of different lifetimes share a log, so a section the
-cleaner empties holds more live blocks. Writes that lie next to each
-other on the medium travel as one request. A measurement on the Pi's own
-card, against Linux's F2FS on the same card, chooses the section size
-and the number of logs. This is designed and not built.
+them moved apart by its first read-write mount; and the cleaner empties
+whole sections. Six streams would make a card that keeps two units open
+close and reopen them, so the volume writes two logs, one for nodes and
+one for data, on every medium, while every checkpoint still names the
+six that Linux's format requires. The price is cleaning: data of
+different lifetimes share a log, so a section the cleaner empties holds
+more live blocks. Writes that lie next to each other on the medium
+travel as one request. A measurement on the Pi's own card, against
+Linux's F2FS on the same card, chooses the section size and the number
+of logs, and decides whether a later stage tells the card of each
+section a checkpoint frees with a **discard**, so the card learns of a
+whole free unit. This is designed and not built.
 
 ## 16.5 FAT, drives and the SD controller
 

@@ -3485,28 +3485,43 @@ implementation, in Erlang, from it alone; the feature bits it implements,
 refusing the rest; the cleaner; the Linux oracle guest with `fsck.f2fs`;
 the host tests, a reference model and workloads over every geometry
 from the smallest volume to a multi-TiB sparse one, and the corpora; the
-distribution guest, Linux's F2FS and f2fs-tools at scale
+guest's batches, Linux's F2FS and f2fs-tools at scale
 ([design-f2fs.md](design-f2fs.md#testing-on-the-host));
 the power-cut harness; the fuzz target; legal review of the clean room
 before a product ships it.
 
 **Stages, on QEMU.** Each ends in tests of its own
-([design-f2fs.md](design-f2fs.md#verification)): (1) the format's
-facts and the reader, `abi/formats/f2fs.txt` with the layout
-language's packed storage, the codec with its fuzz targets, the
-corpora's fetch, the listing, and the oracle guest making Linux
-images; (2) read-only mounts, with the walk and replay in memory, of
-every Linux image and corpus image, clean and with chains, each
-read-only feature with chains included, erXos's
-trees equal to Linux's; (3) the format and read-write mounts with
-checkpoints, every namespace and data operation, the room rule, the
-mount checkpoint with its copies, orphans, the test window, the model and the
-generator over every geometry, and the distribution guest, every
-image passing `fsck.f2fs` and listing equal in Linux; (4) `fsync`
-records and the power-cut harness, every crash state checked in erXos
-and in the guests, and the probes; (5) the cleaner, under churn to
-high utilisation at every format size; (6) parity and the switch, the
-file-semantics corpus and pjdfstest against littlefs and Linux, gate
+([design-f2fs.md](design-f2fs.md#verification)) and builds on the one
+before: reading comes first, then writing with every `fsync` a
+checkpoint, and records last. (1) The pack's contents and the tables:
+the payload, orphan blocks, summaries in both forms, journals, the SIT
+whole and the NAT by block, the root's checks and the mount's
+allowance. (2) The node tree: a file's blocks through its address array
+and nodes, holes, `NEW_ADDR`, inline data and symlinks, against
+Linux-made images. (3) Directories: the hash, the level geometry,
+lookup and bounded `readdir`, inline dentries. (4) The read-only
+volume: the volume process over a window and the read callbacks,
+mounting clean Linux and corpus images read-only, a chain failing the
+mount with the walk's remedy. (5) A minimal oracle guest: the one
+runner with its pinned kernel, `mkfs.f2fs` images of declared trees,
+erXos's listings equal to Linux's. (6) The encoders, each a round trip
+against its decoder and Linux-made blocks. (7) The format, its images
+passing `fsck.f2fs` and mounting in Linux. (8) The volume state and the
+checkpoint writer: `set_slot`, `set_node`, the allocator over free
+sections and the mount checkpoint, the two-log placement probe first.
+(9) The namespace operations. (10) The data operations: writes,
+truncates, `setattr` and reads. (11) Orphans and holds. (12) The test
+window, the reference model and the power-cut harness, over fixed
+workloads and seeded traces. (13) The room rule, `fsync` as a
+checkpoint and power cuts: every crash state erXos's writes leave
+without records (C1 to C6, C13 to C18), in erXos and in the guest.
+(14) The cleaner, under churn to high utilisation at every format
+size. (15) Integration: the callbacks under `erx_fs`, the QEMU suites,
+pjdfstest and the file-semantics corpus against littlefs. (16) Records:
+outgoing records with their pre-images, the walk and replay of erXos's
+and Linux's chains up to the walk's bound, the mount checkpoint's
+copies and the size rule, the remaining crash states (C7 to C9), and
+the torn-record and keep-size probes. (17) Parity and the switch: gate
 G13, then the seam's change and littlefs's deletion. The estimate is
 about 8,000 lines of Erlang, 2,000 of Ruby and 5,000 of tests.
 
@@ -3514,8 +3529,11 @@ about 8,000 lines of Erlang, 2,000 of Ruby and 5,000 of tests.
 F2FS to the boards, which creates the data partition and the vault's
 partition afresh, with nothing littlefs wrote carried across, and the
 update service's refusal of an update whose storage formats differ from
-the running system's ([design-storage.md](design-storage.md#system-updates)).
-Both follow 0.2, which ships littlefs on the boards.
+the running system's ([design-storage.md](design-storage.md#system-updates));
+then the SD policy the card measurement chooses, the section size and
+the logs, and the discard stage once that measurement shows discards
+pay ([design-f2fs.md](design-f2fs.md#discards)).
+These follow 0.2, which ships littlefs on the boards.
 
 **Exit criteria, on QEMU (1b-H).** Every image erXos's F2FS writes, and
 every state of the power-cut harness, passes `fsck.f2fs` and mounts in the
@@ -3526,9 +3544,8 @@ last checkpoint without the records; the file-semantics corpus
 agrees with littlefs and with Linux's F2FS, every difference a bug fixed,
 a documented improvement with a test, or a bug in littlefs recorded as
 such; the fuzz target runs its budget clean; the host runs and the
-distribution guest's batch run their milestone budgets clean, every
-corpus image meets its verdict, and every difference between kernels is
-reported with both named.
+guest's batch run their milestone budgets clean, and every corpus image
+meets its verdict.
 
 **Exit criteria, with M12.** The partition after a failed trial is byte
 for byte the partition before it; the installation and the update

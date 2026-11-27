@@ -1971,8 +1971,9 @@ is recorded, never corrected:
 
 * **Which Linux.** Alpine's `virt` kernel is a stock kernel trimmed for
   virtual machines, not the generic kernel most systems run; Ubuntu
-  26.04's generic kernel is already pinned for
-  [F2FS's distribution guest](design-f2fs.md#the-distribution-guest).
+  26.04's cloud image is already pinned as the root disk of
+  [F2FS's guest](design-f2fs.md#the-guests-batches), under a kernel of
+  its own.
   Recommendation: Alpine alone now, and Ubuntu's kernel as a second
   Linux row only if a cell's result would change a decision.
 * **The board's Linux binary.** The board's Linux row compiles

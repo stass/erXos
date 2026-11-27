@@ -962,17 +962,17 @@ design does not have, to be deleted so no side-by-side table can show it under s
   64-bit inode numbers two inodes equal modulo 2^32 share a link class; trees of F2FS (32-bit nids)
   and devices with small numbers are not affected. The listing module's lines exceed 80 columns.
 * [Medium] test, F2FS oracle: erXos's F2FS is checked against Linux's, which needs a Linux guest under QEMU
-  with a pinned v7.3.4 kernel that has F2FS (Debian's generic arm64 kernel is the candidate to check;
-  Ubuntu 26.04's is 7.0.0) and f2fs-tools 1.16.0. Neither the guest nor its pins exist.
-* [Medium] test, F2FS distribution guest
-  ([design-f2fs.md](design-f2fs.md#the-distribution-guest)): the probe booted Ubuntu 26.04's arm64
-  cloud image under Lima, not under the oracle guest's QEMU runner. Settle by probe before building on
-  them: that image boots under QEMU with UEFI and a cloud-init seed fsimg makes; `flakey` drops writes
-  after a chosen point as the Linux cut needs; which other distributions package f2fs-tools with an F2FS
-  kernel; that Homebrew has no f2fs-tools formula and Apple's container kernel has no F2FS, which the
-  design states as unverified; xfstests' `replay-log`: its pinned commit, and that it builds in the guest
-  and replays a `log-writes` log onto a snapshot up to a chosen entry; and syzbot's F2FS images, by URL and
-  SHA-256, for the fetch manifest.
+  with Linux v7.3.4 built out of the tree from kernel.org's release, F2FS and the device-mapper targets
+  built in, and Ubuntu 26.04's cloud image with f2fs-tools 1.16.0 as its root disk. Neither the guest nor
+  its pins exist.
+* [Medium] test, F2FS guest's root disk
+  ([design-f2fs.md](design-f2fs.md#the-guests-batches)): the probe booted Ubuntu 26.04's arm64
+  cloud image under Lima with its own kernel, not under the guest's QEMU runner with the pinned kernel.
+  Settle by probe before building on them: that image boots so with a cloud-init seed fsimg makes;
+  `flakey` drops writes after a chosen point as the Linux cut needs; that Homebrew has no f2fs-tools
+  formula and Apple's container kernel has no F2FS, which the design states as unverified; and xfstests'
+  `replay-log`: its pinned commit, and that it builds in the guest and replays a `log-writes` log onto a
+  snapshot up to a chosen entry.
 * [Low] test, pjdfstest over erXos's file systems: pjdfstest (FreeBSD `contrib/pjdfstest`, BSD-2-Clause)
   built for erXos's POSIX layer and run under QEMU over `/data` on F2FS and littlefs
   ([design-f2fs.md](design-f2fs.md#posix-suites)); whether the POSIX layer offers every call it
