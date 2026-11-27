@@ -179,6 +179,70 @@ than mirroring pixels. The [overview](docs/overview.md) tells the longer story.
   ([verification](docs/design-verification.md),
   [host oracle](docs/design-host-oracle.md), [style](docs/style.md))
 
+## Timeouts, crashes and driver restarts
+
+Devices and peers fail: a USB stick goes silent, an SD card returns one
+bad checksum, a Bluetooth controller stops talking, a driver crashes.
+Every stack that waits on a device or a peer recovers the same way
+([recovery](docs/design-recovery.md)):
+
+* **Every wait has a deadline, recovery included.** Each protocol's
+  pure core keeps its deadlines in its own state and takes the time as
+  an input, so no wait on a device can hang, and tests drive the clock
+  like any other input.
+* **A ladder, smallest step first.** A failure climbs one step per
+  consecutive failure: cancel the request, reset the protocol, reset the
+  device keeping its identity, reset the controller, restart the driver,
+  restart the domain. Any success drops back to the bottom. The steps are
+  data in the core, each with its deadline and its bound.
+* **Paced, not given up.** A driver that ran and then failed restarts
+  at most once per second, for as long as its device is there, so a
+  failing device never takes its whole subsystem down. A device that
+  can never work is shown as such and left off.
+* **Retry only what is safe to repeat.** A block read or write, a flush,
+  a descriptor read: retried within the caller's deadline, and the caller
+  sees one answer. Anything else fails to its caller once.
+* **Clients hold the service, not the driver.** Mounts, connections,
+  bonds and windows belong to the service a driver runs under, so a
+  driver restart loses only what the driver rebuilds from its device.
+  Across domains a client waits for the service's successor and sets
+  itself up again.
+* **No silent data loss.** A reset that may have dropped writes the
+  device had already confirmed turns into a power cut for the file
+  system above, which mounts again as of its last flush. A device that
+  comes back after a reset is trusted with writes only once its identity
+  reads back the same; otherwise it is a new device.
+* **Tested by breaking it.** Every recovery step, deadline and retry
+  limit has a test that injects the fault that triggers it and checks
+  the step taken, its log line, that clients came back and that nothing
+  confirmed was lost; a planted bug that removes the step must make the
+  test fail. Faults go in at four places: each core is explored
+  exhaustively against devices that answer, fail or go silent at every
+  step; stand-in USB controllers, sticks, SD cards, Bluetooth lines and
+  network media on the host stall, answer late, answer wrongly or
+  vanish under the real drivers; the QEMU harness unplugs devices, drops
+  links, fails disk requests, silences the Bluetooth line and kills each
+  serving domain through one fault-control module; and the Raspberry Pi
+  4 covers what only hardware does, such as the USB stick that goes
+  silent. No recovery step lands without its fault tests.
+
+The bounded ladder, its count of consecutive failures and a device reset
+that keeps the disk mounted come from Apple's USB storage driver;
+restartable drivers from *MINIX 3*; bounds on resets per device from
+*QNX*. erXos's own are the ladders as data in pure cores that are
+explored exhaustively, pacing in place of giving up (from its network
+stack), a generation on every answer in place of replaying writes, and
+clients that follow a service's successor through the capability
+registry.
+
+The network stack works this way today: deadlines in its cores, links
+restarted once a second for ever, connections that survive a driver
+restart. Deadlines in state are also built for USB and Bluetooth. The
+rest is designed: the ladders below the class drivers, storage drivers
+that restart without ending their domain, the generation on every
+answer, and fault injection beyond what the QEMU suites already do
+(unplug or eject a medium, kill a domain, cut the power).
+
 ## Current status
 
 erXos is in Phase 1 of the [roadmap](docs/plan.md): the system is up on the
