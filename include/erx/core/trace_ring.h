@@ -17,14 +17,20 @@
  *
  * The ring and its reader are pure over the ring they are handed, so the host tests run
  * them on rings of their own. The kernel links them through erx_cores.a and the root and
- * the hosted process link the same file; the glue's C++ never includes this header, whose
- * ring holds atomics, and reaches the kernel's rings through erx/core/trace_kernel.h.
+ * the hosted process link the same file. The glue's C++ reaches the kernel's rings through
+ * erx/core/trace_kernel.h, not here: the ring's fields are C11 atomics.
+ *
+ * Like every seam header, this one compiles alone as C++ and takes the ABI only from the
+ * seam's generated headers (abi_trace.h): it names the ring and
+ * its records by their struct tags, incomplete here, and a file that reads or writes their
+ * fields includes erx/abi.h, which completes them as erx_trace_ring_t and
+ * erx_trace_record_t.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "erx/abi.h"
+#include "erx/core/abi_trace.h"
 #include "erx/core/trace_kernel.h"
 #include "erx/core/trace_read.h"
 
@@ -41,19 +47,25 @@
  * records, each one cache line, and its head, the next index to write, on a line of its
  * own.
  */
+struct erx_trace_ring;
+struct erx_trace_record;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * Empties ring by storing to every one of its pages: each record's sequence 0 and the head
  * 0. It runs before the ring's first write, while nothing writes or reads it, so the pages
  * are faulted in before any write under the writer's lock or mask.
  */
-void	erx_trace_ring_clear(erx_trace_ring_t *ring);
+void	erx_trace_ring_clear(struct erx_trace_ring *ring);
 
 /*
  * Writes entry at the ring's head and moves the head on. The caller is the ring's one
  * writer. Returns false, writing nothing, once the ring is exhausted.
  */
-bool	erx_trace_ring_put(erx_trace_ring_t *ring, const erx_trace_entry_t *entry);
+bool	erx_trace_ring_put(struct erx_trace_ring *ring, const erx_trace_entry_t *entry);
 
 /*
  * The lock-free reader over ring: copies at most max of the whole records from cursor on
@@ -63,14 +75,18 @@ bool	erx_trace_ring_put(erx_trace_ring_t *ring, const erx_trace_entry_t *entry);
  * ERX_ELIMIT. A cursor more than ERX_TRACE_RING_RECORDS below the head starts that far
  * below it, and the records it skips count as overwritten.
  */
-int	erx_trace_ring_read(const erx_trace_ring_t *ring, uint64_t cursor, erx_trace_record_t *records,
-	    uint32_t max, erx_trace_read_result_t *result);
+int	erx_trace_ring_read(const struct erx_trace_ring *ring, uint64_t cursor,
+	    struct erx_trace_record *records, uint32_t max, erx_trace_read_result_t *result);
 
 #ifdef ERX_TRACE_RING_TEST_HOOKS
 /* Called by the reader between a record's field loads and its second sequence load. */
-void	erx_trace_ring_test_between(const erx_trace_record_t *record);
+void	erx_trace_ring_test_between(const struct erx_trace_record *record);
 /* Called by the writer between its first and second field stores. */
-void	erx_trace_ring_test_writing(const erx_trace_record_t *record);
+void	erx_trace_ring_test_writing(const struct erx_trace_record *record);
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif /* ERX_CORE_TRACE_RING_H */

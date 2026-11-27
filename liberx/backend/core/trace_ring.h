@@ -15,6 +15,7 @@
 
 #include <stdint.h>
 
+#include "erx/abi.h"
 #include "erx/core/trace_ring.h"
 
 /* The root's or the hosted process's one ring. The root touches it as its service starts. */

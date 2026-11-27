@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/abi.h"
 #include "erx/core/boot_pair.h"
 #include "erx/crash.h"
 #include "erx/log.h"

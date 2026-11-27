@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "erx/abi.h"
 #include "erx/crash.h"
 #include "erx/log.h"
 #include "erx/core/trace_ring.h"

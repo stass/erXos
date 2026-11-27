@@ -444,13 +444,24 @@ module Erx
                       slots.map { |label, cap| [label, cap.fetch(:optional) ? 'UINT32_C(1)' : 'UINT32_C(0)'] })]
       end
 
+      # The prefix of a sequence-counted layout's sequence names.
+      def sequence_prefix(layout) = "#{constant(layout.name)}_#{layout.sequence.fetch(:field).upcase}"
+
+      # A sequence's terminal as this header defines it; a seam header that
+      # repeats it (abi_trace.h) takes this spelling, so a file including both
+      # redefines nothing.
+      def sequence_terminal(layout)
+        sequence = layout.sequence || raise(SchemaError, "#{layout.name} has no sequence")
+        "#define #{sequence_prefix(layout)}_TERMINAL #{literal(sequence.fetch(:terminal), layout.fetch_field(sequence.fetch(:field)).type)}"
+      end
+
       def sequence_accessors(layout, schema)
         sequence = layout.sequence
         field = layout.fetch_field(sequence.fetch(:field))
         status_name = "e#{sequence.fetch(:exhaustion).delete_prefix('@')}"
         status = schema.constants.fetch(status_name)
-        prefix = "#{constant(layout.name)}_#{field.name.upcase}"
-        ["#define #{prefix}_TERMINAL #{literal(sequence.fetch(:terminal), field.type)}",
+        prefix = sequence_prefix(layout)
+        [sequence_terminal(layout),
          "#define #{prefix}_EXHAUSTION #{constant(status.name)}", '',
          '/* Tests a captured sequence value; it does not validate a snapshot. */',
          'static inline erx_status_t',
