@@ -129,7 +129,7 @@ it each sector reads as anything, its old bytes included. The window's
 `info` gives two facts of the medium that shape how the volume writes
 ([design-storage.md](design-storage.md#data-model)): `max_sectors`, the
 most one read or write moves, 8 sectors on virtio, one 4 KiB block, and
-64 on an SD card, 32 KiB; and `discard`, the most sectors one discard
+32 on an SD card, 16 KiB; and `discard`, the most sectors one discard
 covers, or `none`, which only the discard stage reads
 ([Discards](#discards)). The storage design assumes a medium that
 writes a sector atomically and honours a flush
@@ -2634,7 +2634,7 @@ watch list ([todo-performance.md](todo-performance.md)):
   complexity is a question the card measurement settles, with short
   application appends among its workloads;
 * the volume process carries every block request and its answer, at 4 KiB
-  per request on virtio and 32 KiB on an SD card, each phase's
+  per request on virtio and 16 KiB on an SD card, each phase's
   contiguous blocks merged into runs;
 * on the Pi's card: whether two logs beat six, what each discard
   costs and whether erases stall the requests behind them, the commit
