@@ -69,12 +69,23 @@ NAT journal is handed to erx_f2fs_core, which checks it and alone resolves
 a nid. The root is the inode erx_f2fs_core reads, a directory with blocks,
 a size and links ([F 55]).
 
-The chain: the warm node log's next block starts the checkpoint's chain of
-fsynced node blocks when its footer carries the checkpoint's version
-(docs/design-f2fs.md, "The walk"). This mount does not replay, so a chain
-fails it with {walk, chain}, whose remedy is one mount in Linux, which
-replays the chain and writes a checkpoint. A first block that tore reads
-as a chain too, failing the mount where the walk would end at once.
+The walk (docs/design-f2fs.md, "The walk"): from the warm node log's next
+block it follows each footer's next_blkaddr while the block's cp_ver is the
+checkpoint's, and ends at the first address outside the main area or the
+first block of another version. What it meets there is what a checkpoint
+erXos's writer began and a cut interrupted leaves: node blocks of the
+committed epoch's version with no fsync mark, which nothing replays, so
+the walk passes them and adds them to its footprint, which a read-write
+mount's logs append past ("Read-write mounts: the mount checkpoint").
+erXos writes no fsync records, so a block with the fsync mark is a
+roll-forward chain only another writer leaves, and this mount does not
+replay one: it fails {walk, {chain, Start, Ino}}, naming the chain's first
+block and the inode of its first fsynced node, read-only mounts included;
+one mount in Linux, which replays the chain and writes a checkpoint, makes
+the volume mountable. An address the walk has read already fails it as
+{walk, loop}, a block valid at the checkpoint as {walk, valid}, as
+fsck.f2fs treats both, and a walk past ?WALK_BLOCKS matching blocks as
+{walk, long}, longer than an erXos checkpoint's nodes can reach.
 
 The mode is read_write when every feature is in W and the main area has
 more than 16 sections, of any size, and otherwise {read_only, Reasons},
@@ -116,6 +127,10 @@ admitted.
 %% erts_debug:size at 144 bytes on the host's OTP, 160 when an mtime is
 %% a bignum.
 -define(SIT_BYTES_PER_SEGMENT, 160).
+%% The matching blocks a walk passes at most: the epoch's charge bound, 512
+%% blocks a checkpoint's nodes stay within (docs/design-f2fs.md, "The walk"
+%% and "The room rule").
+-define(WALK_BLOCKS, 512).
 
 -doc "The blocks a mount has read, by address.".
 -type blocks() :: #{non_neg_integer() => binary()}.
@@ -177,11 +192,10 @@ mount(Partition, Allowance, Blocks) ->
         Volume = maps:merge(Contents,
                             #{superblock => Super, bad_copies => BadCopies, pack => Pack,
                               checkpoint => Checkpoint, logs => logs(Checkpoint),
-                              footprint => [walk_start(Super, Checkpoint)],
                               sit => sit(Super, Checkpoint, Contents, Blocks)}),
         Root = root(Volume, Blocks),
-        check_chain(Super, Checkpoint, Blocks),
-        {ok, Volume#{root => Root, mode => mode(Super)}}
+        Footprint = walk(Volume, walk_start(Super, Checkpoint), [], Blocks),
+        {ok, Volume#{root => Root, footprint => Footprint, mode => mode(Super)}}
     catch
         throw:{?MODULE, need, Addresses} -> {need, Addresses};
         throw:{?MODULE, failure, Failure} -> {error, Failure}
@@ -525,10 +539,34 @@ walk_start(#{main_blkaddr := Main},
            #{cur_node_segno := [_Hot, Warm | _], cur_node_blkoff := [_, Offset | _]}) ->
     Main + Warm * ?BLOCKS_PER_SEG + Offset.
 
-check_chain(Super, Header, Blocks) ->
-    [Block] = read(Blocks, [walk_start(Super, Header)]),
-    #{cp_ver := Version} = ok(erx_f2fs_codec:node_footer(Block)),
-    require(not of_checkpoint(Header, Version), {walk, chain}).
+%% The walk's footprint from Address, Read the blocks it has passed, latest
+%% first: every block it reads, its end included, in address order.
+walk(#{superblock := Super} = Volume, Address, Read, Blocks) ->
+    case Address >= maps:get(main_blkaddr, Super) andalso Address < erx_f2fs_codec:main_end(Super) of
+        false -> lists:sort(Read);
+        true -> step(Volume, Address, Read, Blocks)
+    end.
+
+step(#{superblock := Super, checkpoint := Header, sit := Sit} = Volume, Address, Read, Blocks) ->
+    require(not lists:member(Address, Read), {walk, loop}),
+    [Block] = read(Blocks, [Address]),
+    #{cp_ver := Version, flag := Flag, ino := Ino, next_blkaddr := Next} =
+        ok(erx_f2fs_codec:node_footer(Block)),
+    case of_checkpoint(Header, Version) of
+        false ->
+            lists:sort([Address | Read]);
+        true ->
+            require(not has(Flag, ?ERX_F2FS_NODE_MARK_FSYNC),
+                    {walk, {chain, lists:last([Address | Read]), Ino}}),
+            require(not valid(Super, Sit, Address), {walk, valid}),
+            require(length(Read) < ?WALK_BLOCKS, {walk, long}),
+            walk(Volume, Next, [Address | Read], Blocks)
+    end.
+
+%% Whether the SIT marks main area block Address valid.
+valid(#{main_blkaddr := Main}, Sit, Address) ->
+    #{valid_map := Map} = element((Address - Main) div ?BLOCKS_PER_SEG + 1, Sit),
+    erx_f2fs_codec:bit(Map, (Address - Main) rem ?BLOCKS_PER_SEG) =:= 1.
 
 %% Whether a node footer's cp_ver is the checkpoint's: its version with its
 %% CRC in the upper 32 bits under CRC_RECOVERY, or the version alone, or

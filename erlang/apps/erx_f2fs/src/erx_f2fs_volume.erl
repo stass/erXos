@@ -90,8 +90,13 @@ init({Window, Allowance}) ->
 refused({error, {allowance, _} = Failure}) ->
     logger:error("f2fs: the mount's tables pass its allowance: ~0p", [Failure]),
     enomem;
-refused({error, {walk, chain}}) ->
-    logger:error("f2fs: the volume holds a chain of fsynced nodes to replay; mount it once in "
+refused({error, {walk, {chain, Start, Ino}}}) ->
+    logger:error("f2fs: the volume holds a roll-forward chain from block ~b, its first fsynced "
+                 "node inode ~b's, which erXos does not replay; mount it once in Linux, which "
+                 "replays the chain and writes a checkpoint", [Start, Ino]),
+    eintegrity;
+refused({error, {walk, long}}) ->
+    logger:error("f2fs: the volume's chain is longer than erXos replays; mount it once in "
                  "Linux, which replays the chain and writes a checkpoint"),
     eintegrity;
 refused({unread, _Runs}) ->

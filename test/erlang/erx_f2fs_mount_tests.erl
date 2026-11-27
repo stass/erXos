@@ -68,7 +68,7 @@ fixture_volume() -> volume(super()).
 %% given, or asks more than eight times, fails the case.
 mount(Partition, Blocks) -> mount(Partition, ?ALLOWANCE, Blocks).
 
-mount(Partition, Allowance, Blocks) -> mount(Partition, Allowance, Blocks, #{}, 8).
+mount(Partition, Allowance, Blocks) -> mount(Partition, Allowance, Blocks, #{}, 520).
 
 mount(Partition, Allowance, Blocks, Given, Rounds) ->
     case erx_f2fs_mount:mount(Partition, Allowance, Given) of
@@ -615,44 +615,79 @@ the_sit_is_admitted_before_it_is_read_test() ->
 
 %%% The chain (docs/design-f2fs.md, "The walk")
 
-%% A node block of the checkpoint at the warm node log's next block, its
-%% cp_ver as Version says, fails the mount; one of another checkpoint
-%% does not.
-chain(Flags, Version) -> mount(chained(Flags, Version)).
+%% The fixture volume's blocks with node blocks from the chain's start, the
+%% checkpoint's flags as Flags says: each of Footers {Mark, Version, Next},
+%% at the walk's start and then at the address the one before names, its
+%% node marks Mark and its cp_ver as Version says, given the CRC.
+chained(Flags, Footers) -> chained(flags(Flags), Footers, ?WALK_START).
 
-%% The fixture volume's blocks with a node block at the chain's start, its
-%% cp_ver as Version says.
-chained(Flags, Version) ->
-    Header = flags(Flags),
+chained(Header, Footers, Start) ->
     {ok, #{crc := Crc}} = erx_f2fs_codec:checkpoint(erx_f2fs_codec_tests:checkpoint_block(Header, bitmaps())),
-    Footer = <<3:32/little, 3:32/little, 0:32, (Version(Crc)):64/little, 0:32>>,
-    Block = <<0:((?BLOCK - 24) * 8), Footer/binary>>,
-    maps:merge(volume(super(), pack(?PACK1, Header)), #{?WALK_START => Block}).
+    {Nodes, _} = lists:mapfoldl(fun({Mark, Version, Next}, At) -> {{At, node(Mark, Version(Crc), Next)}, Next} end,
+                                Start, Footers),
+    maps:merge(volume(super(), pack(?PACK1, Header)), maps:from_list(Nodes)).
+
+%% A node block of inode 3 with only a footer: the marks Mark, cp_ver
+%% Version and next_blkaddr Next.
+node(Mark, Version, Next) ->
+    <<0:((?BLOCK - 24) * 8), 3:32/little, 3:32/little, Mark:32/little, Version:64/little, Next:32/little>>.
+
+%% The checkpoint's version with its CRC above it, as CRC_RECOVERY matches.
+of_checkpoint(Crc) -> 1 bor (Crc bsl 32).
+
+-define(FSYNC, ?ERX_F2FS_NODE_MARK_FSYNC).
 
 %% erx_f2fs_volume_tests' volume with a chain to replay: the partition's
 %% blocks and its blocks by address.
-chained_volume() -> {?PARTITION, chained(0, fun(Crc) -> 1 bor (Crc bsl 32) end)}.
+chained_volume() -> {?PARTITION, chained(0, [{?FSYNC, fun of_checkpoint/1, 0}])}.
 
+chain(Flags, Version) -> mount(chained(Flags, [{?FSYNC, Version, 0}])).
+
+%% An fsynced node block of the checkpoint at the walk's start is a chain
+%% and fails the mount, under each rule of matching; one of another
+%% checkpoint ends the walk.
 a_chain_fails_the_mount_test_() ->
     Plain = ?ERX_F2FS_CP_CRC_RECOVERY,
-    [{"the version and CRC under CRC_RECOVERY",
-      ?_assertEqual({error, {walk, chain}}, chain(0, fun(Crc) -> 1 bor (Crc bsl 32) end))},
+    Chain = {error, {walk, {chain, ?WALK_START, 3}}},
+    [{"the version and CRC under CRC_RECOVERY", ?_assertEqual(Chain, chain(0, fun of_checkpoint/1))},
      {"the version alone under CRC_RECOVERY",
       ?_assertMatch({ok, _}, chain(0, fun(_Crc) -> 1 end))},
      {"an older version", ?_assertMatch({ok, _}, chain(0, fun(Crc) -> 0 bor (Crc bsl 32) end))},
      {"the low half alone without NOCRC_RECOVERY",
       ?_assertMatch({ok, _}, chain(0, fun(_Crc) -> 1 bor (16#dead bsl 32) end))},
      {"the low half under NOCRC_RECOVERY",
-      ?_assertEqual({error, {walk, chain}},
-                    chain(?ERX_F2FS_CP_NOCRC_RECOVERY, fun(_Crc) -> 1 bor (16#dead bsl 32) end))},
+      ?_assertEqual(Chain, chain(?ERX_F2FS_CP_NOCRC_RECOVERY, fun(_Crc) -> 1 bor (16#dead bsl 32) end))},
      {"the version alone without either flag",
-      ?_assertEqual({error, {walk, chain}},
-                    chain_without(Plain, fun(_Crc) -> 1 end))}].
+      ?_assertEqual(Chain, chain_without(Plain, fun(_Crc) -> 1 end))}].
+
+%% What an interrupted checkpoint of erXos leaves, node blocks of the
+%% checkpoint's version without the fsync mark, mounts at the checkpoint
+%% with every block the walk read in its footprint; an fsynced block after
+%% them is still a chain, named from its start, and a loop, a block valid
+%% at the checkpoint and a walk past its bound each fail.
+the_walk_passes_unmarked_nodes_test_() ->
+    V = fun of_checkpoint/1,
+    Other = fun(_Crc) -> 7 end,
+    S = ?WALK_START,
+    Footprint = fun(Footers) ->
+                        {ok, #{footprint := F}} = mount(chained(0, Footers)),
+                        F
+                end,
+    Long = fun(N) -> [{0, V, S + I + 1} || I <- lists:seq(0, N - 1)] ++ [{0, Other, 0}] end,
+    [{"one unmarked node, then outside the main area", ?_assertEqual([S], Footprint([{0, V, 0}]))},
+     {"two unmarked nodes, then another version",
+      ?_assertEqual([S, S + 1, S + 2], Footprint([{0, V, S + 1}, {0, V, S + 2}, {0, Other, 0}]))},
+     {"a dentry-marked node is passed",
+      ?_assertEqual([S], Footprint([{?ERX_F2FS_NODE_MARK_DENTRY, V, 0}]))},
+     {"an fsynced node after unmarked ones",
+      ?_assertEqual({error, {walk, {chain, S, 3}}}, mount(chained(0, [{0, V, S + 1}, {?FSYNC, V, 0}])))},
+     {"a loop", ?_assertEqual({error, {walk, loop}}, mount(chained(0, [{0, V, S + 1}, {0, V, S}])))},
+     {"a block valid at the checkpoint",
+      ?_assertEqual({error, {walk, valid}}, mount(chained(0, [{0, V, ?ROOT_DENTRIES}, {0, V, 0}])))},
+     {"the bound's matching blocks", ?_assertEqual(513, length(Footprint(Long(512))))},
+     {"one more", ?_assertEqual({error, {walk, long}}, mount(chained(0, Long(513))))}].
 
 chain_without(Flags, Version) ->
     Header = header(),
     Cleared = Header#{ckpt_flags := maps:get(ckpt_flags, Header) band bnot Flags},
-    {ok, #{crc := Crc}} = erx_f2fs_codec:checkpoint(erx_f2fs_codec_tests:checkpoint_block(Cleared, bitmaps())),
-    Footer = <<3:32/little, 3:32/little, 0:32, (Version(Crc)):64/little, 0:32>>,
-    mount(maps:merge(volume(super(), pack(?PACK1, Cleared)),
-                     #{?WALK_START => <<0:((?BLOCK - 24) * 8), Footer/binary>>})).
+    mount(chained(Cleared, [{?FSYNC, Version, 0}], ?WALK_START)).

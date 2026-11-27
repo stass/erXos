@@ -410,3 +410,22 @@ shared_sections() ->
                   erx_f2fs_codec:summary_block(maps:get(Ssa + Segno, Written)))
      || {Segno, Type} <- [{WarmNode, ?ERX_F2FS_SUMMARY_NODE}, {WarmData, ?ERX_F2FS_SUMMARY_DATA}]],
     cycles({Partition, written(Medium, Plan)}, 2).
+
+%%% Two checkpoints in one mount
+
+%% The second checkpoint of a mount writes its first node at the walk's
+%% start of the checkpoint the first committed, with that checkpoint's
+%% version and no fsync mark, so a cut before its last block leaves nodes
+%% the walk passes: every crash state mounts to one side or the other.
+a_second_checkpoint_in_one_mount_cuts_to_either_side_test_() ->
+    {timeout, 300,
+     fun() ->
+             {Partition, Medium} = fresh(),
+             {ok, #{root := #{footer := #{ino := Ino}} = Root} = Mounted} = mount({Partition, Medium}),
+             Dirty = fun(State) -> erx_f2fs_core:put_node(State, Ino, {inode, Root}) end,
+             {Plan1, Committed1} = checkpoint(Dirty(state(Mounted, Medium)), Medium),
+             After1 = written(Medium, Plan1),
+             {ok, Mounted1} = mount({Partition, After1}),
+             {Plan2, _} = checkpoint(Dirty(Committed1), After1),
+             crash_states({Partition, After1}, Mounted1, Plan2)
+     end}.
