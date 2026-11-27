@@ -10,6 +10,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   Reason}}` by resetting the device's port (design-usb.md, "Reattach"), and confirm the stick comes back
   with its function's runs carried over. QEMU's suite plants no fault that needs a port reset; the host tests over
   `erx_usb_fake_stick`'s `wedge` are the only check of the rung until then.
+* [Medium] USB, the final verdict of a device with no usable function (`erlang/apps/erx_usb/src/erx_usb_bus_core.erl:684`): an end as unusable is only recorded; when it was the device's last usable function the bus core does not yet detach the device and disable its port until its connection changes, as design-usb's Failure handling and design-recovery's final verdicts state.
 * [Medium] USB, the reset recovery as a break (`erlang/apps/erx_usb/src/erx_usb_bot.erl`,
   `erlang/apps/erx_blk/src/erx_blk_window.erl`): design-usb.md's Recovery says a reset recovery is a
   break the transport tells the medium's window of, so a window holding an unflushed write ends
@@ -22,9 +23,22 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `usb_bus_restarts_max`, so a stick that keeps failing is dead until replugged and a controller until
   the domain restarts. design-usb.md follows design-recovery.md ("Restarts are paced"): every one of
   these is held until the oldest counted event leaves its window and then tried again, for as long as
-  the device stays, and only a final verdict (an unusable device, an unsupported speed, an
-  over-current) keeps a port off. Hold instead of failing in `ended/6`, retry a failed enumeration at
-  the port's paced attempts, and make the bus group's restarts held rather than ending it.
+  the device stays, and only a final verdict (an unsupported speed, an over-current) keeps a port
+  off. Hold instead of failing in `ended/6`, and retry a failed enumeration at the port's paced
+  attempts. For the bus group, design-usb.md ("The process tree") gives the controller process a hold,
+  `usb_controller_hold_ms` (1 s), which neither `abi/formats/usb.txt` nor the controller process has:
+  add the limit, keep the controller alive for its hold in `terminate/2` as `erx_net_driver` does,
+  derive `erx_usb_bus_sup`'s intensity from it in place of `usb_bus_restarts_max` (then delete that
+  limit), and make the bus group `permanent` under `erx_usb` (`erlang/apps/erx_usb/src/erx_usb.erl`,
+  where it is `transient`). The comment on `usb_function_restarts_max` in `abi/formats/usb.txt` still
+  says an end past the bound detaches the device.
+* [Medium] USB, breaks not admitted (`erlang/apps/erx_usb/src/erx_usb_bus_core.erl`,
+  `erlang/apps/erx_usb/src/erx_usb_bot_core.erl`): design-recovery.md ("Every break is admitted") admits
+  every break, any rung from `protocol_reset` up, by the window rule over the core's history of that
+  device's breaks, which no success clears, so a device that fails, recovers and serves one request in
+  a loop still meets its pace. The USB cores keep no such history: the BOT engine bounds its reset recoveries
+  per operation (`usb_bot_retries`, its `retries` starting at 0 for each, `erx_usb_bot_core.erl:426`),
+  so a device that fails once per operation is reset at every one.
 * [Low] USB, `erlang/apps/erx_usb/src/erx_usb_bot_core.erl`: a loose end of the recovery ladder,
   bounded and failing safe. A clear (`reset_pipe` after a failed data phase or CSW) that times out leaves its
   reset running in the controller, so reset recovery's own `reset_pipe in` is answered `{error, resetting}`
