@@ -26,15 +26,15 @@ class ErxF2fsVolumeTest < Minitest::Test
 
   Seed = Data.define(:fault, :source, :anchor, :replacement, :failure)
 
-  # The verdict of the case named Name, after the log lines (a header and a message each)
-  # it writes.
-  def self.case_failed(name) = /#{name}[^\n]*?\.\.\.(?:=ERROR REPORT[^\n]*\n[^\n]*\n)*\*failed\*/
+  # The verdict of the case named Name, after whatever log lines it writes (a crash report
+  # spans many), before the next case's line.
+  def self.case_failed(name) = /#{name}[^\n]*?\.\.\.(?:(?!\n  erx_f2fs_volume_tests: ).)*?\*failed\*/m
   # The corpus case's verdict, after the log lines (a header and a message each) its
   # trees write.
   CORPUS_CASE_FAILED = /corpus_trees_list_through_the_volume_as_through_the_core_test_\/0-fun-\d+-\.\.\.(?:=ERROR REPORT[^\n]*\n[^\n]*\n)*\*failed\*/
 
   # The read-write case's verdict.
-  WRITE_CASE_FAILED = /a_write_survives_fsync_unmount_and_every_cut[^\n]*\*failed\*/m
+  WRITE_CASE_FAILED = case_failed('a_write_survives_fsync_unmount_and_every_cut')
 
   SEEDS = [
     Seed.new(fault: 'the cache never evicting', source: VOLUME,
@@ -77,7 +77,7 @@ class ErxF2fsVolumeTest < Minitest::Test
     Seed.new(fault: "a write's first block merged over zeros, not the old bytes", source: REQUEST,
              anchor: 'Merged = <<(binary:part(Head, 0, Lead))/binary, Bytes/binary,',
              replacement: 'Merged = <<0:(Lead * 8), Bytes/binary,',
-             failure: WRITE_CASE_FAILED),
+             failure: case_failed('writes_read_back_across_checkpoints')),
     Seed.new(fault: 'an open for appending admitted', source: REQUEST,
              anchor: '_ when Flags band (?ERX_P9_O_TRUNC bor ?ERX_P9_O_APPEND) =/= 0 -> {error, enotsup};',
              replacement: '_ when Flags band ?ERX_P9_O_TRUNC =/= 0 -> {error, enotsup};',

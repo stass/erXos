@@ -723,6 +723,7 @@ a_handle_answers_its_access_and_a_write_open_needs_the_owners_bits_test() ->
      || Handle <- [Reader, Appender]],
     [?assertEqual({error, eacces}, requested(writable(ReadOnly), {open, Ino, Flags}))
      || Flags <- [?ERX_P9_O_WRONLY, ?ERX_P9_O_RDWR, ?ERX_P9_O_TRUNC]],
+    ?assertEqual({error, einval}, requested(writable(ReadOnly), {open, Ino, ?ERX_P9_O_ACCMODE})),
     {Ino, WriteOnly} = erx_f2fs_core_tests:fixture_file_mode(8#100200),
     {ok, Writer} = requested(writable(WriteOnly), {open, Ino, ?ERX_P9_O_WRONLY}),
     ?assertEqual({error, ebadf}, requested(writable(WriteOnly), {read, Writer, 0, 1})),

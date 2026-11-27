@@ -150,7 +150,7 @@ start({readlink, Nid}, _Volume) ->
                      end)};
 start(statfs, #{superblock := Super, checkpoint := Header}) ->
     {reply, {ok, statfs(Super, Header)}};
-start({fsync, _Nid}, Volume) ->
+start({fsync, _Handle}, Volume) ->
     case writable(Volume) of
         true -> checkpoint;
         false -> {reply, ok}
@@ -208,6 +208,8 @@ walk(Dir, Name, Volume, Blocks) ->
 %% that access, as erx_ramfs_core grants them, root's opens too.
 opened(Nid, Inode, Flags, Writable) -> opened(Nid, Inode, kind(Inode), Flags, Writable).
 
+opened(_Nid, _Inode, _Kind, Flags, _Writable) when Flags band ?ERX_P9_O_ACCMODE =:= ?ERX_P9_O_ACCMODE ->
+    {error, einval};
 opened(_Nid, _Inode, Kind, _Flags, _Writable) when Kind =:= device; Kind =:= other -> {error, enotsup};
 opened(_Nid, _Inode, symlink, _Flags, _Writable) -> {error, eloop};
 opened(Nid, Inode, Kind, Flags, Writable) when Flags band ?ERX_P9_O_ACCMODE =/= 0;
@@ -227,7 +229,7 @@ access(Flags) ->
     case Flags band ?ERX_P9_O_ACCMODE of
         0 -> read;
         ?ERX_P9_O_WRONLY -> write;
-        _ -> read_write
+        ?ERX_P9_O_RDWR -> read_write
     end.
 
 %% Whether Inode's owner bits allow Access, a truncation needing write too.
