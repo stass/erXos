@@ -14,8 +14,8 @@
 -export([signed/2, fsimg/1, reader/2]).
 
 -define(SECTOR, 512).
--define(DEVELOPMENT, [msdosfs, littlefs]).
--define(RELEASE, [msdosfs]).
+-define(DEVELOPMENT, [fat, littlefs]).
+-define(RELEASE, [fat]).
 
 %% A volume of Sectors 512-byte sectors, zero but for Overlay, {ByteOffset, Bytes}.
 signed(Overlay, Sectors) ->
@@ -68,31 +68,31 @@ each_row_selects_its_format_test() ->
     [?assertMatch(#{format := Name}, probe(signed(Overlay, 1024))) || {Name, Overlay} <- Rows],
     ?assertEqual(#{format => unknown, also => []}, probe(signed([], 1024))).
 
-fsimg_fat_volumes_are_msdosfs_with_their_type_test() ->
-    ?assertEqual(#{format => msdosfs, also => [], fat => 16}, probe(fsimg("fat16.img"))),
-    ?assertEqual(#{format => msdosfs, also => [], fat => 32}, probe(fsimg("fat32.img"))).
+fsimg_fat_volumes_are_fat_with_their_type_test() ->
+    ?assertEqual(#{format => fat, also => [], fat => 16}, probe(fsimg("fat16.img"))),
+    ?assertEqual(#{format => fat, also => [], fat => 32}, probe(fsimg("fat32.img"))).
 
 a_fat12_volume_is_named_with_its_type_test() ->
-    ?assertEqual(#{format => msdosfs, also => [], fat => 12}, probe(fsimg("fat12.img"))).
+    ?assertEqual(#{format => fat, also => [], fat => 12}, probe(fsimg("fat12.img"))).
 
 a_pico_boot_sector_without_its_signature_is_fat_test() ->
     Volume = maps:get(0, fsimg("fat16.img")),
     <<Head:510/binary, _:2/binary>> = Volume,
-    ?assertMatch(#{format := msdosfs, fat := 16}, probe((fsimg("fat16.img"))#{0 => <<Head/binary, 0, 0>>})).
+    ?assertMatch(#{format := fat, fat := 16}, probe((fsimg("fat16.img"))#{0 => <<Head/binary, 0, 0>>})).
 
 a_fat32_volume_holding_erofs_magic_selects_erofs_test() ->
     Volume = with(fsimg("fat32.img"), [{1024, <<?ERX_EROFS_MAGIC:32/little>>}]),
-    ?assertEqual(#{format => erofs, also => [msdosfs]}, probe(Volume)).
+    ?assertEqual(#{format => erofs, also => [fat]}, probe(Volume)).
 
 a_fat32_volume_that_kept_a_littlefs_superblock_selects_littlefs_test() ->
     Volume = with(fsimg("fat32.img"), [{4096 + 8, <<"littlefs">>}]),
-    ?assertEqual(#{format => littlefs, also => [msdosfs]}, probe(Volume, ?DEVELOPMENT)),
-    ?assertEqual(#{format => littlefs, also => [msdosfs]}, probe(Volume, ?RELEASE)),
+    ?assertEqual(#{format => littlefs, also => [fat]}, probe(Volume, ?DEVELOPMENT)),
+    ?assertEqual(#{format => littlefs, also => [fat]}, probe(Volume, ?RELEASE)),
     ?assertEqual(#{format => littlefs, also => []}, probe(Volume, [])).
 
 a_volume_too_short_lacks_the_signatures_past_it_test() ->
     Fat = fsimg("fat16.img"),
-    ?assertMatch(#{format := msdosfs}, probe(Fat#{length := 1})),
+    ?assertMatch(#{format := fat}, probe(Fat#{length := 1})),
     ?assertMatch(#{format := unknown}, probe(signed([{65536 + 1372, <<16#19540119:32/little>>}], 128))).
 
 a_failed_read_fails_the_probe_test() ->
@@ -109,4 +109,4 @@ an_erange_inside_the_volume_fails_the_probe_test() ->
 
 a_boot_sector_without_a_cluster_count_has_no_type_test() ->
     <<Head:11/binary, _:16, Rest/binary>> = maps:get(0, fsimg("fat16.img")),
-    ?assertMatch(#{format := msdosfs, fat := none}, probe((fsimg("fat16.img"))#{0 => <<Head/binary, 0:16, Rest/binary>>})).
+    ?assertMatch(#{format := fat, fat := none}, probe((fsimg("fat16.img"))#{0 => <<Head/binary, 0:16, Rest/binary>>})).

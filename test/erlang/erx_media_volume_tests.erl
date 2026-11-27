@@ -117,11 +117,11 @@ a_clean_fat_stick_mounts_rw_and_logs_one_line_test() ->
         Proxy = proxy(image("fat16.img"), ok),
         {_Sup, {none, [{#{number := 1, first := 0}, Volume}], 0}} = through(Proxy),
         Outcome = erx_media_volume:outcome(Volume),
-        ?assertMatch(#{format := msdosfs, fat := 16, mount := rw, label := <<_, _/binary>>}, Outcome),
+        ?assertMatch(#{format := fat, fat := 16, mount := rw, label := <<_, _/binary>>}, Outcome),
         ?assertEqual(none, erx_media_volume:ro_reason(Outcome)),
         ?assertEqual(1, flushes(Proxy)),
         #{label := Label} = Outcome,
-        Head = <<"erx_media: volume s1 (msdosfs) mounted rw, label ", Label/binary, " in ">>,
+        Head = <<"erx_media: volume s1 (fat) mounted rw, label ", Label/binary, " in ">>,
         Logged = receive {logged, Line} -> Line after 0 -> none end,
         ?assertMatch(<<Head:(byte_size(Head))/binary, _/binary>>, Logged),
         ?assertMatch({match, _}, re:run(binary:part(Logged, byte_size(Head), byte_size(Logged) - byte_size(Head)),
@@ -175,7 +175,7 @@ a_dirty_fat_volume_mounts_read_only_test() ->
         Outcome = erx_media_volume:outcome(Volume),
         ?assertMatch(#{fat := 16, mount := {ro, dirty}}, Outcome),
         ?assertEqual(<<"the FAT's dirty flag is set">>, erx_media_volume:ro_reason(Outcome)),
-        ?assertEqual(<<"erx_media: volume s1 (msdosfs) mounted read-only: the FAT's dirty flag is set">>,
+        ?assertEqual(<<"erx_media: volume s1 (fat) mounted read-only: the FAT's dirty flag is set">>,
                      receive {logged, Line} -> Line after 0 -> none end)
     after
         logger:remove_handler(?MODULE)
@@ -195,10 +195,10 @@ a_volume_not_served_has_no_mount_test() ->
 the_rule_names_its_first_failing_condition_test() ->
     Unsent = fun() -> erlang:error(flushed) end,
     ?assertEqual({ro, format}, erx_media_volume:writable(erofs, [], Unsent, fun() -> ok end)),
-    ?assertEqual({ro, {also, littlefs}}, erx_media_volume:writable(msdosfs, [littlefs], Unsent, fun() -> ok end)),
-    ?assertEqual({ro, flush}, erx_media_volume:writable(msdosfs, [], fun() -> {error, enotsup} end, fun() -> dirty end)),
-    ?assertEqual({ro, dirty}, erx_media_volume:writable(msdosfs, [], fun() -> ok end, fun() -> dirty end)),
-    ?assertEqual(rw, erx_media_volume:writable(msdosfs, [], fun() -> ok end, fun() -> ok end)).
+    ?assertEqual({ro, {also, littlefs}}, erx_media_volume:writable(fat, [littlefs], Unsent, fun() -> ok end)),
+    ?assertEqual({ro, flush}, erx_media_volume:writable(fat, [], fun() -> {error, enotsup} end, fun() -> dirty end)),
+    ?assertEqual({ro, dirty}, erx_media_volume:writable(fat, [], fun() -> ok end, fun() -> dirty end)),
+    ?assertEqual(rw, erx_media_volume:writable(fat, [], fun() -> ok end, fun() -> ok end)).
 
 %% Each read-only reason has one plain line, which status and the log line both show;
 %% an outcome that is not read-only has none.
@@ -206,14 +206,14 @@ each_read_only_reason_reads_plainly_test() ->
     Reason = fun(Format, Mount) -> erx_media_volume:ro_reason(#{format => Format, mount => Mount}) end,
     ?assertEqual(<<"erXos does not write erofs">>, Reason(erofs, {ro, format})),
     ?assertEqual(<<"a littlefs signature is also on the volume">>, Reason(littlefs, {ro, {also, littlefs}})),
-    ?assertEqual(<<"the medium cannot flush">>, Reason(msdosfs, {ro, flush})),
-    ?assertEqual(<<"the FAT's dirty flag is set">>, Reason(msdosfs, {ro, dirty})),
-    ?assertEqual(<<"the FAT's hard-error flag is set">>, Reason(msdosfs, {ro, hard_error})),
-    ?assertEqual(<<"the volume's FATs are not mirrored">>, Reason(msdosfs, {ro, mirror})),
-    ?assertEqual(<<"the volume has more clusters than the ownership check holds">>, Reason(msdosfs, {ro, too_large})),
+    ?assertEqual(<<"the medium cannot flush">>, Reason(fat, {ro, flush})),
+    ?assertEqual(<<"the FAT's dirty flag is set">>, Reason(fat, {ro, dirty})),
+    ?assertEqual(<<"the FAT's hard-error flag is set">>, Reason(fat, {ro, hard_error})),
+    ?assertEqual(<<"the volume's FATs are not mirrored">>, Reason(fat, {ro, mirror})),
+    ?assertEqual(<<"the volume has more clusters than the ownership check holds">>, Reason(fat, {ro, too_large})),
     ?assertEqual(<<"a cluster is reached twice, a chain reaches a free cluster, or a directory's .. does not "
-                   "name its parent">>, Reason(msdosfs, {ro, tree})),
-    ?assertEqual(none, Reason(msdosfs, rw)),
+                   "name its parent">>, Reason(fat, {ro, tree})),
+    ?assertEqual(none, Reason(fat, rw)),
     ?assertEqual(none, Reason(exfat, {none, format})).
 
 %% A table refused whole starts no volume; a medium whose window does not answer is a

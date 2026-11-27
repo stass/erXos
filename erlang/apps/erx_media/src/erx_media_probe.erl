@@ -14,7 +14,7 @@ writable rule. A volume where none is found is `unknown`.
 The signatures are abi/formats/probe.txt's rows, EROFS's and F2FS's magic from
 their own formats' tables, and FAT's test is the FAT server's boot-sector decoder,
 erx_fat_read:boot_sector/1, which also gives the FAT type, so the type has one
-source: a FAT12 volume is answered as `msdosfs` with `fat => 12`, for its mount to
+source: a FAT12 volume is answered as `fat` with `fat => 12`, for its mount to
 refuse by name.
 
 The probe is handed the volume's length in sectors: a sector at or past it is not
@@ -31,7 +31,7 @@ later format by mistake.
 
 -define(SECTOR, 512).
 
--type name() :: ufs | cd9660 | 'hfs+' | ext2fs | f2fs | erofs | littlefs | apfs | exfat | msdosfs | ntfs.
+-type name() :: ufs | cd9660 | 'hfs+' | ext2fs | f2fs | erofs | littlefs | apfs | exfat | fat | ntfs.
 -type probe() :: #{format := name() | unknown, also := [name()], fat => erx_fat_read:fat_type()}.
 -type read_sector() :: fun((non_neg_integer()) -> {ok, binary()} | {error, term()}).
 %% A signature: the bytes Bytes at byte Offset of the volume.
@@ -69,7 +69,7 @@ order() ->
                  || Block <- [0, ?ERX_PROBE_LITTLEFS_BLOCK]]},
      {apfs, [{?ERX_PROBE_APFS_OFFSET, ?ERX_PROBE_APFS_MAGIC_BYTES}]},
      {exfat, [{?ERX_PROBE_EXFAT_OFFSET, ?ERX_PROBE_EXFAT_MAGIC_BYTES}]},
-     {msdosfs, boot_sector},
+     {fat, boot_sector},
      {ntfs, [{?ERX_PROBE_NTFS_OFFSET, ?ERX_PROBE_NTFS_MAGIC_BYTES}]}].
 
 %% Every sector a signature lies in; no signature crosses a sector's end.
@@ -105,7 +105,7 @@ probe([], _Written, _Sectors) ->
 probe([Selected | Others], Written, Sectors) ->
     Probe = #{format => Selected, also => [Name || Name <- Others, lists:member(Name, Written)]},
     case Selected of
-        msdosfs ->
+        fat ->
             {fat, Type} = erx_fat_read:boot_sector(maps:get(0, Sectors)),
             Probe#{fat => Type};
         _ ->

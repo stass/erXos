@@ -272,7 +272,7 @@ updating or loading code from a drive.
        medium supervisor (one per medium; ends when the window ends)
          reader: table (MBR | GPT | none) -> volumes s1..sN, then ends
          one volume process per volume: probe, then mount:
-           msdosfs (the FAT server) | erofs | littlefs (owner + port sub-space)
+           fat (the FAT server) | erofs | littlefs (owner + port sub-space)
    media tree, /media: each request on a volume goes to its volume process
 ```
 
@@ -936,7 +936,7 @@ offset first, with erXos's formats placed by where their headers lie:
 | 7 | `littlefs` | in development builds and test images | `littlefs` at byte 8 of block 0 or of block 1, 4 KiB blocks, where littlefs's specification puts the superblock's name (`SPEC.md:444-447`) |
 | 8 | `apfs` | no | `NXSB` in the container superblock at byte 0 (`fstyp/apfs.c:77-93`) |
 | 9 | `exfat` | no | `EXFAT   ` as the boot sector's file-system name (`fstyp/exfat.c:333`) |
-| 10 | `msdosfs` | FAT16 and FAT32 | `fstyp`'s FAT test (`fstyp/msdosfs.c:48-115`), and the FAT type from the volume's count of clusters |
+| 10 | `fat` | FAT16 and FAT32 | `fstyp`'s FAT test (`fstyp/msdosfs.c:48-115`), and the FAT type from the volume's count of clusters |
 | 11 | `ntfs` | no | `NTFS    ` as the boot sector's system id (`fstyp/ntfs.c:146-147`) |
 
 The signatures, each with its offset, bytes and source, are the rows of
@@ -944,7 +944,7 @@ one checked-in table, `abi/formats/probe.txt`, from which the build
 generates the probe's constants. FAT's row is code, since it reads
 fields, not one string: the FAT server's boot-sector decoder, which
 gives the probe both the test and the type, so the type has one source.
-A FAT12 volume is refused by name there: `sN msdosfs`, `sN_fat 12`,
+A FAT12 volume is refused by name there: `sN fat`, `sN_fat 12`,
 `sN_mount none format`, since FAT12's entries of a byte and a half
 would need a decoder and a write rule of their own. littlefs's row is
 the specification's statement, which the host tests check on volumes
@@ -975,7 +975,7 @@ volume's mount: the mount is made when it starts, and ends when it ends.
 
 | Format | Module | Writes | Served by |
 | --- | --- | --- | --- |
-| `msdosfs` | `erx_fat`, the FAT server ([design-storage.md](design-storage.md#removable-media-fat)) | FAT16 and FAT32 | every build |
+| `fat` | `erx_fat`, the FAT server ([design-storage.md](design-storage.md#removable-media-fat)) | FAT16 and FAT32 | every build |
 | `erofs` | `erx_media_erofs` over the EROFS decoder ([EROFS, unauthenticated](#erofs-unauthenticated)) | never | every build |
 | `littlefs` | `erx_lfs`'s owner over the littlefs port ([littlefs, through its port](#littlefs-through-its-port)) | yes | development builds and test images |
 
@@ -1740,7 +1740,7 @@ so a pass shows the code under test ran.
 | `erx_media_table` over written cases of each rule: an MBR with one and with four entries; a FAT boot sector with zero entries and a plausible BPB, read as no table; a boot sector whose status bytes are not 0 or `0x80`, read as no table; entries of type `0x00` and of start or length 0 skipped; an extended entry listed and not served; an entry past the end, one that runs backwards and two overlapping entries, each refusing the table, the overlap in both orders | the status-byte test dropped, so a boot sector with code is read as a table; the overlap check made order-dependent, so the second order passes; the backwards check dropped |
 | the GPT cases: a GPT behind its protective entry; a primary header that fails its signature, its CRC, its usable area's bounds, an area past the medium's end among them, and its array's bounds in turn, each read from the backup at the last sector; a primary header that passes over an array that fails its CRC, read from the backup at the primary's alternate sector, which is not the last; both copies failing, refused and never read as an MBR or as no table; a signed sector 0 with an `0xEE` entry and a status byte neither `0x00` nor `0x80` over an otherwise mountable FAT boot sector, refused and never mounted whole; an array of 17 KiB; nine used entries, eight served; a primary array that starts at sector 0, one that starts and one that ends inside the usable area, each read from the backup, and one that ends on the last sector, where the backup header is then read, refused; both arrays inside their usable areas, refused `gpt header`; a usable area that meets a header, the other copy's array, and an array that encloses the usable area, each refused `gpt metadata` | a missing primary signature taken as no GPT, so the medium falls back to no table; the status-byte test made before the `0xEE` test, so the protective sector's FAT mounts whole; the usable area's bounds dropped, so the primary whose area lies past the end is taken and the backup never read; the backup read at the last sector after a passing header, so the alternate copy is missed; the array compared by its ends alone, so the enclosing array passes; the other copy's array left out of the metadata set; the array bound removed; the array's place bounded by the medium alone, so the array at sector 0 is taken |
 | the table as a property test: for every MBR and GPT the generator writes, the served volumes lie inside the medium, pairwise apart and apart from every metadata sector, and `place/3` never answers a sector outside its volume | the end check written `<` for `=<` |
-| `erx_media_probe` on a seed of each table row; on a FAT32 volume holding EROFS's magic at 1,024 bytes, which selects `erofs`; on a FAT32 volume that kept a littlefs superblock in block 1, which selects `littlefs` with `msdosfs` also found, mounting `ro` for `msdosfs` also found in a development build and `none format` in a release, which serves no littlefs; and on a FAT12 volume fsimg writes, refused `none format` | the order reversed, so the first volume selects `msdosfs`; the written-formats check dropped, so the littlefs volume is found alone; the FAT type left to the mount, so the FAT12 volume is selected and mounted |
+| `erx_media_probe` on a seed of each table row; on a FAT32 volume holding EROFS's magic at 1,024 bytes, which selects `erofs`; on a FAT32 volume that kept a littlefs superblock in block 1, which selects `littlefs` with `fat` also found, mounting `ro` for `fat` also found in a development build and `none format` in a release, which serves no littlefs; and on a FAT12 volume fsimg writes, refused `none format` | the order reversed, so the first volume selects `fat`; the written-formats check dropped, so the littlefs volume is found alone; the FAT type left to the mount, so the FAT12 volume is selected and mounted |
 | littlefs's signature over volumes the tree's littlefs writes with `erx_lfs_config`: freshly formatted, after many commits, after compactions of the root pair that leave its current superblock in block 1, and cut mid-commit and mounted again, each found by the probe and mounted | the signature read in block 0 alone, so the compacted volume is `unknown` |
 | the writable rule over every combination of format, written formats also found, flush answer, dirty flag, hard-error flag, FAT32's mirroring, cluster count and ownership check (its own cases are the storage design's) | the `also` condition removed, so the doubly formatted volume mounts writable; every flush answer but `ok` taken as `enotsup`; the hard-error, mirroring, cluster-count and ownership conditions each removed, so a volume that fails one mounts writable |
 | a selected format whose mount fails: the FAT32 volume holding EROFS's magic is `none failed` and nothing is written | a fall-through to the next format found, which mounts it as FAT |

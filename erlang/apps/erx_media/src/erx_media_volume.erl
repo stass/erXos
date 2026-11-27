@@ -127,7 +127,7 @@ number answers `enfile`.
 
 %% The formats the media domain writes on a drive: FAT alone, the format table's one
 %% row that writes and is served here (docs/design-drives.md, "The writable rule").
--define(WRITTEN, [msdosfs]).
+-define(WRITTEN, [fat]).
 %% A batch commits once it holds more than this many sectors (docs/design-storage.md,
 %% "Durability"), and 5 s after a change while changes wait.
 -define(BATCH_SECTORS, min(1024, ?ERX_MEDIA_VOLUME_BYTES div 4 div 512)).
@@ -803,19 +803,19 @@ errno(_Finding) -> eio.
 %% medium answers each read afresh.
 mounted({error, Why}, _Read, _Length, _Proxy, _Volume) ->
     {#{format => unknown, mount => {none, {failed, Why}}}, none};
-mounted({ok, #{format := msdosfs, also := Also, fat := Type}}, Read, Length, Proxy, Volume)
+mounted({ok, #{format := fat, also := Also, fat := Type}}, Read, Length, Proxy, Volume)
   when Type =:= 16; Type =:= 32 ->
     case erx_fat:mount(Read, Length) of
         {ok, Fat} ->
             #{type := Mounted, label := Label, serial := Serial} = erx_fat:info(Fat),
-            Mount = writable(msdosfs, Also, fun() -> erx_media_medium:window(Proxy, flush) end,
+            Mount = writable(fat, Also, fun() -> erx_media_medium:window(Proxy, flush) end,
                              fun() -> owned(Fat, Proxy, Volume) end),
-            {#{format => msdosfs, fat => Mounted, label => Label, serial => Serial, mount => Mount}, served(Mount, Fat)};
+            {#{format => fat, fat => Mounted, label => Label, serial => Serial, mount => Mount}, served(Mount, Fat)};
         {error, Finding} ->
-            {#{format => msdosfs, fat => Type, mount => {none, {failed, Finding}}}, none}
+            {#{format => fat, fat => Type, mount => {none, {failed, Finding}}}, none}
     end;
-mounted({ok, #{format := msdosfs, fat := Type}}, _Read, _Length, _Proxy, _Volume) ->
-    {#{format => msdosfs, fat => Type, mount => {none, format}}, none};
+mounted({ok, #{format := fat, fat := Type}}, _Read, _Length, _Proxy, _Volume) ->
+    {#{format => fat, fat => Type, mount => {none, format}}, none};
 mounted({ok, #{format := unknown}}, _Read, _Length, _Proxy, _Volume) ->
     {#{format => unknown, mount => {none, unknown}}, none};
 mounted({ok, #{format := Format}}, _Read, _Length, _Proxy, _Volume) ->

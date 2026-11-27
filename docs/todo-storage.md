@@ -94,8 +94,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      domain, 3, which the manifest's rows for other configured peers do not reckon either.
   5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume. Its read path is built (mount,
      directories, lookups and reads, with `erx_fat`'s fuzz target); what remains: its batches, dirty
-     flag and finish, the write path behind them with `msdosfs` added to `erx_media_volume`'s
-     `WRITE_PATHS` (until then every FAT volume mounts `ro`, `erXos has no msdosfs write path`); lookups through the generated simple-uppercase case table of
+     flag and finish, the write path behind them with `fat` added to `erx_media_volume`'s
+     `WRITE_PATHS` (until then every FAT volume mounts `ro`, `erXos has no fat write path`); lookups through the generated simple-uppercase case table of
      design-storage.md's "Names", where they ignore only ASCII case today, so a name differing from
      a stored one only in a non-ASCII letter's case is `not_found`; the root directory's label
      entry as `sN_label` beside the boot sector's; and `erx_fat_read:root_file/3` reading through
@@ -170,7 +170,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Low] No seeded fault covers `erx_fat_read:volume/1`'s `{fat, 16}` term weakened to `=/= not_fat`:
   add a record volume of FAT12's cluster count.
 * [Low] `erx_media_probe_fuzz`'s mutated sectors are a copy of `erx_media_probe:sectors/0`; derive them.
-* [Low] `fat => none`, a FAT-signed sector with no cluster count, selects `msdosfs`; design-drives.md
+* [Low] `fat => none`, a FAT-signed sector with no cluster count, selects `fat`; design-drives.md
   names only FAT12's refusal, so say what `status` shows for it or refuse it by name.
 * [Low] Small copies of generated facts: `erx_media_probe`'s `?SECTOR`, `erx_media_table`'s
   `Type =/= 0` for `?ERX_MBR_TYPE_EMPTY`.

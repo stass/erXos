@@ -129,11 +129,11 @@ the_tree_is_named_media_test() ->
 status_escapes_what_the_medium_supplies_test() ->
     Label = <<"A\\B\tC", 16#82>>,
     Table = {mbr, [{#{number => 1, length => 100}, self()}, {#{number => 2, length => 0}, extended}], 0},
-    Outcome = fun(_Pid) -> #{format => msdosfs, fat => 16, label => Label, serial => 16#1234, mount => rw} end,
+    Outcome = fun(_Pid) -> #{format => fat, fat => 16, label => Label, serial => 16#1234, mount => rw} end,
     Text = erx_media_tree:status({ok, #{sectors => 4096}}, Table, Outcome),
     Lines = [binary:split(Line, <<"\t">>) || Line <- binary:split(Text, <<"\n">>, [global, trim])],
     ?assertEqual([[<<"medium">>, <<"ready">>], [<<"transport">>, <<"unknown">>], [<<"sectors">>, <<"4096">>],
-                  [<<"flush">>, <<"unknown">>], [<<"table">>, <<"mbr">>], [<<"s1">>, <<"msdosfs">>],
+                  [<<"flush">>, <<"unknown">>], [<<"table">>, <<"mbr">>], [<<"s1">>, <<"fat">>],
                   [<<"s1_mount">>, <<"rw">>], [<<"s1_sectors">>, <<"100">>], [<<"s1_fat">>, <<"16">>],
                   [<<"s1_label">>, <<"A\\\\B\\tC\\x82">>], [<<"s1_serial">>, <<"4660">>],
                   [<<"s2">>, <<"extended">>], [<<"s2_mount">>, <<"none extended">>], [<<"unserved">>, <<"0">>]],
@@ -144,9 +144,9 @@ status_escapes_what_the_medium_supplies_test() ->
 %% gave, the same line erx_media_volume:ro_reason/1 makes for the mount's log line.
 status_names_why_a_volume_is_read_only_test() ->
     Table = {none, [{#{number => 1, length => 100}, self()}], 0},
-    Outcome = fun(_Pid) -> #{format => msdosfs, fat => 32, mount => {ro, {also, 'hfs+'}}} end,
+    Outcome = fun(_Pid) -> #{format => fat, fat => 32, mount => {ro, {also, 'hfs+'}}} end,
     Lines = binary:split(erx_media_tree:status({ok, #{sectors => 100}}, Table, Outcome), <<"\n">>, [global, trim]),
-    ?assertEqual([<<"s1\tmsdosfs">>, <<"s1_mount\tro">>, <<"s1_ro_reason\ta hfs+ signature is also on the volume">>,
+    ?assertEqual([<<"s1\tfat">>, <<"s1_mount\tro">>, <<"s1_ro_reason\ta hfs+ signature is also on the volume">>,
                   <<"s1_sectors\t100">>, <<"s1_fat\t32">>],
                  lists:sublist(Lines, 6, 5)).
 

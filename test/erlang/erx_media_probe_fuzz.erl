@@ -10,7 +10,7 @@
 %% probes it. Whatever the volume holds, the probe never raises and makes no atom, and
 %% answers a format of its order or unknown, also-found formats only among the
 %% formats written and never the one selected, and a FAT type exactly when it selects
-%% msdosfs. The seed comes from make check-fuzz.
+%% fat. The seed comes from make check-fuzz.
 
 -module(erx_media_probe_fuzz).
 -export([run/1]).
@@ -19,7 +19,7 @@
 
 -define(ROUNDS, 20000).
 -define(SECTOR, 512).
--define(NAMES, [ufs, cd9660, 'hfs+', ext2fs, f2fs, erofs, littlefs, apfs, exfat, msdosfs, ntfs]).
+-define(NAMES, [ufs, cd9660, 'hfs+', ext2fs, f2fs, erofs, littlefs, apfs, exfat, fat, ntfs]).
 -define(READ, [0, 2, 8, 18, 64, 130, 514]).
 %% The BIOS parameter block's fields, {offset, bytes}.
 -define(BPB, [{11, 2}, {13, 1}, {14, 2}, {16, 1}, {17, 2}, {19, 2}, {22, 2}, {32, 4}, {36, 4}]).
@@ -42,7 +42,7 @@ signatures() ->
 
 round_of(Seed) ->
     Volume = lists:foldl(fun(_, V) -> mutate(V) end, Seed, lists:seq(1, rand:uniform(8))),
-    Written = lists:nth(rand:uniform(3), [[], [msdosfs], [msdosfs, littlefs]]),
+    Written = lists:nth(rand:uniform(3), [[], [fat], [fat, littlefs]]),
     Atoms = erlang:system_info(atom_count),
     Answer = try
                  erx_media_probe:format(erx_media_probe_tests:reader(Volume, none), maps:get(length, Volume), Written)
@@ -69,10 +69,10 @@ overlay(Volume, Offset, Bytes, Lba) ->
 
 check({ok, #{format := unknown, also := []} = Probe}, _Written) when map_size(Probe) =:= 2 ->
     0;
-check({ok, #{format := msdosfs, also := Also, fat := Type}}, Written) when Type =:= 12; Type =:= 16; Type =:= 32;
+check({ok, #{format := fat, also := Also, fat := Type}}, Written) when Type =:= 12; Type =:= 16; Type =:= 32;
                                                                            Type =:= none ->
-    also(msdosfs, Also, Written);
-check({ok, #{format := Format, also := Also} = Probe}, Written) when map_size(Probe) =:= 2, Format =/= msdosfs ->
+    also(fat, Also, Written);
+check({ok, #{format := Format, also := Also} = Probe}, Written) when map_size(Probe) =:= 2, Format =/= fat ->
     lists:member(Format, ?NAMES) orelse error({unknown_format, Probe}),
     also(Format, Also, Written);
 check(Answer, _Written) ->
