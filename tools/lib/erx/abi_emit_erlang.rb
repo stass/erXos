@@ -9,9 +9,10 @@ require_relative 'abi_termios'
 
 module Erx
   module ABI
-    # The Erlang module contains a readable, closed schema and one bounded
-    # decoder. All atoms originate in these checked declarations, never bytes
-    # supplied to a target reader. Views retain the immutable input binary.
+    # The Erlang modules hold readable, closed schemas; a reader module holds its
+    # spec and hands it to erx_abi_reader, the one bounded decoder. All atoms
+    # originate in these checked declarations, never bytes supplied to a target
+    # reader. Views retain the immutable input binary.
     module ErlangEmitter
       Atom = Struct.new(:name)
       NOTICE = <<~ERLANG.freeze
@@ -676,13 +677,13 @@ module Erx
         accessors = %w[read/1 open/1 header/1 count/2 fetch/3] + (readable.empty? ? [] : ['span/4']) +
                     %w[string/2 fold/4 fuzz/1]
         lines = [NOTICE, "-module(#{module_name}).",
-                 '-moduledoc "Bounded structural reader over immutable ABI bytes; policy admission is separate.".',
+                 '-moduledoc """', 'Bounded structural reader over immutable ABI bytes, by erx_abi_reader',
+                 'over this module\'s spec; policy admission is separate.', '""".',
                  "-export([#{accessors.join(', ')}]).",
                  *prefix_export,
                  '-export_type([view/0, error/0]).', '',
-                 '-record(view, {schema = ?MODULE :: module(), bytes :: binary()}).',
-                 '-opaque view() :: #view{}.',
-                 '-type error() :: #{reason := atom(), field := binary(), offset := non_neg_integer()}.', '']
+                 '-opaque view() :: erx_abi_reader:view().',
+                 '-type error() :: erx_abi_reader:error().', '']
         named_types = types.values.reject { |type| type.is_a?(IntegerType) }.sort_by(&:name)
         unless named_types.empty?
           names = named_types.map { |type| "#{type_name(type)}/0" }
@@ -690,19 +691,13 @@ module Erx
           lines << ''
           named_types.each { |type| lines.concat(type_specification(type)) }
         end
-        lines << RUNTIME
+        lines << ENTRIES
         lines << span_accessor(readable, specification) unless readable.empty?
-        lines << PREFIX_RUNTIME if specification.extent
-        lines << 'reader_spec() ->'
-        lines << indent(literal(reader_data(specification), depth: 1), 4) + '.'
-        lines << ''
-        ordered = types.values.sort_by(&:name)
-        ordered.each do |type|
-          lines << "type(#{literal(atom(type.name))}) ->"
-          lines << indent(literal(type_data(type), depth: 1), 4) + ';'
-        end
-        lines << 'type(_) ->'
-        lines << '    fail(unsupported, <<"schema">>, 0).'
+        lines << PREFIX_ENTRY if specification.extent
+        lines << '%% The spec erx_abi_reader reads: this reader\'s root, tables, rules and the types they reach.'
+        lines << '-spec spec() -> erx_abi_reader:spec().'
+        lines << 'spec() ->'
+        lines << indent(literal(spec_data(module_name, specification, types), depth: 1), 4) + '.'
         lines << ''
         output = lines.join("\n")
         raise SchemaError, 'generated Erlang source is not ASCII' unless output.ascii_only?
@@ -842,6 +837,13 @@ module Erx
           input_masks: field.input_masks.to_h { |role, mask| [atom(role), mask] } }
       end
 
+      # The whole spec of one reader: the module that owns its views, its reader data and
+      # every type it reaches, by name.
+      def spec_data(module_name, reader, types)
+        { schema: atom(module_name), **reader_data(reader),
+          types: types.values.sort_by(&:name).to_h { |type| [atom(type.name), type_data(type)] } }
+      end
+
       def path_data(path)
         { scope: atom(path.scope), fields: path.fields.map { |field| atom(field) },
           offset: path.offset, size: path.field.size, label: path.name }
@@ -949,650 +951,64 @@ module Erx
         end
       end
 
+      # The entries of every generated reader: each hands the module's spec to
+      # erx_abi_reader, the one reader, and keeps its own name for its callers.
+      ENTRIES = <<~'ERLANG'.freeze
+        -doc "Validate the complete file and retain its immutable bytes.".
+        -spec read(binary()) -> {ok, view()} | {error, error()}.
+        read(Bytes) ->
+            erx_abi_reader:open(spec(), Bytes).
+
+        -doc "Validate structure, references and declared constraints; not policy admission.".
+        -spec open(binary()) -> {ok, view()} | {error, error()}.
+        open(Bytes) ->
+            erx_abi_reader:open(spec(), Bytes).
+
+        -doc "Return the checked header of a view from open/1.".
+        -spec header(view()) -> {ok, map()} | {error, error()}.
+        header(View) ->
+            erx_abi_reader:header(spec(), View).
+
+        -doc "Count records in a statically named table.".
+        -spec count(view(), atom()) -> {ok, non_neg_integer()} | {error, error()}.
+        count(View, Name) ->
+            erx_abi_reader:count(spec(), View, Name).
+
+        -doc "Fetch one checked record; out-of-range indices are errors.".
+        -spec fetch(view(), atom(), non_neg_integer()) -> {ok, map()} | {error, error()}.
+        fetch(View, Name, Index) ->
+            erx_abi_reader:fetch(spec(), View, Name, Index).
+
+        -doc "Resolve a bounded reference into the manifest's string table.".
+        -spec string(view(), #{offset := non_neg_integer(), length := non_neg_integer()}) ->
+            {ok, binary()} | {error, error()}.
+        string(View, Reference) ->
+            erx_abi_reader:string(spec(), View, Reference).
+
+        -doc "Fold a validated table without retaining every decoded record.".
+        -spec fold(view(), atom(), fun((map(), term()) -> term()), term()) ->
+            {ok, term()} | {error, error()}.
+        fold(View, Name, Function, Initial) ->
+            erx_abi_reader:fold(spec(), View, Name, Function, Initial).
+
+        -doc "Fuzz entry point: execute the production reader and retain its outcome.".
+        -spec fuzz(binary()) -> {ok, view()} | {error, error()}.
+        fuzz(Bytes) ->
+            erx_abi_reader:open(spec(), Bytes).
+      ERLANG
+
       # The entry of a reader whose input is the front of a longer binary, such as a
       # file's header: emitted for a reader that declares an extent, which names the
-      # input's length. The root it decodes to find that length never leaves it.
-      PREFIX_RUNTIME = <<~'ERLANG'.freeze
+      # input's length.
+      PREFIX_ENTRY = <<~'ERLANG'.freeze
         -doc """
         Validate the input at the front of a longer binary: the root's extent
         field names its length, and the bytes up to it, or as many as there
         are, are opened as open/1 opens them.
         """.
         -spec open_prefix(binary()) -> {ok, view()} | {error, error()}.
-        open_prefix(Bytes) when is_binary(Bytes) ->
-            Reader = reader_spec(),
-            Root = attempt(fun() ->
-                decode(maps:get(root, Reader), Bytes, 0, <<"root">>)
-            end),
-            case Root of
-                {ok, Header} ->
-                    Length = path_value(maps:get(extent, Reader), Header, Header),
-                    open(binary:part(Bytes, 0, min(Length, byte_size(Bytes))));
-                {error, _} = Error ->
-                    Error
-            end;
-        open_prefix(_) ->
-            {error, error_value(length, <<"root">>, 0)}.
-      ERLANG
-
-      RUNTIME = <<~'ERLANG'.freeze
-        -doc "Validate the complete file and retain its immutable bytes.".
-        -spec read(binary()) -> {ok, view()} | {error, error()}.
-        read(Bytes) ->
-            open(Bytes).
-
-        -doc "Validate structure, references and declared constraints; not policy admission.".
-        -spec open(binary()) -> {ok, view()} | {error, error()}.
-        open(Bytes) ->
-            attempt(fun() ->
-                {Reader, Header} = checked_header(Bytes),
-                Tables = maps:get(tables, Reader),
-                lists:foreach(fun(Name) ->
-                    case maps:find(Name, Tables) of
-                        {ok, Table} ->
-                            check_records(Name, Table, Bytes, Header, Reader, 0);
-                        error ->
-                            ok
-                    end
-                end, maps:get(order, Reader)),
-                check_partitions(Reader, Header, Bytes),
-                #view{bytes = Bytes}
-            end).
-
-        -doc "Return the checked header of a view from open/1.".
-        -spec header(view()) -> {ok, map()} | {error, error()}.
-        header(View) ->
-            attempt(fun() ->
-                {_Bytes, _Reader, Header} = view_data(View),
-                Header
-            end).
-
-        -doc "Count records in a statically named table.".
-        -spec count(view(), atom()) -> {ok, non_neg_integer()} | {error, error()}.
-        count(View, Name) ->
-            attempt(fun() ->
-                {_Bytes, Reader, Header} = view_data(View),
-                Table = record_table(Name, Reader),
-                path_value(maps:get(count, Table), Header, Header)
-            end).
-
-        -doc "Fetch one checked record; out-of-range indices are errors.".
-        -spec fetch(view(), atom(), non_neg_integer()) -> {ok, map()} | {error, error()}.
-        fetch(View, Name, Index) ->
-            attempt(fun() ->
-                {Bytes, Reader, Header} = view_data(View),
-                {_Base, Record} = indexed_record(Name, Index, Bytes, Header, Reader),
-                Record
-            end).
-
-        %% The byte offset of the record at Index of table Name, and the record;
-        %% an index outside the table is an error.
-        indexed_record(Name, Index, Bytes, Header, Reader) ->
-            Table = record_table(Name, Reader),
-            Count = path_value(maps:get(count, Table), Header, Header),
-            ensure(is_integer(Index) andalso Index >= 0 andalso Index < Count,
-                   index, <<"table">>, 0),
-            {record_base(Table, Index, Header), record_at(Name, Table, Index, Bytes, Header, Reader)}.
-
-        %% The byte offset of the record at Index of Table.
-        record_base(Table, Index, Header) ->
-            path_value(maps:get(offset, Table), Header, Header) + Index * maps:get(size, Table).
-
-        %% The record at Index of Table, which the caller bounded.
-        record_at(Name, Table, Index, Bytes, Header, Reader) ->
-            Offset = record_base(Table, Index, Header),
-            Type = maps:get(type, Table),
-            Record = decode(Type, Bytes, Offset, <<"table">>),
-            check_scope(Name, Type, Record, Bytes, Offset, Header, Reader),
-            Record.
-
-        -doc "Resolve a bounded reference into the manifest's string table.".
-        -spec string(view(), #{offset := non_neg_integer(), length := non_neg_integer()}) ->
-            {ok, binary()} | {error, error()}.
-        string(View, Reference) ->
-            attempt(fun() ->
-                {Bytes, Reader, Header} = view_data(View),
-                case Reference of
-                    #{offset := Offset, length := Length}
-                      when is_integer(Offset), Offset >= 0,
-                           is_integer(Length), Length >= 0 ->
-                        Table = string_table(strings, Reader),
-                        Count = path_value(maps:get(count, Table), Header, Header),
-                        ensure(Offset =< Count andalso Length =< Count - Offset,
-                               string_range, <<"strings">>, 0),
-                        Start = path_value(maps:get(offset, Table), Header, Header),
-                        slice(Bytes, Start + Offset, Length, <<"strings">>);
-                    _ ->
-                        fail(string_reference, <<"strings">>, 0)
-                end
-            end).
-
-        -doc "Fold a validated table without retaining every decoded record.".
-        -spec fold(view(), atom(), fun((map(), term()) -> term()), term()) ->
-            {ok, term()} | {error, error()}.
-        fold(View, Name, Function, Initial) when is_function(Function, 2) ->
-            Prepared = attempt(fun() ->
-                {Bytes, Reader, Header} = view_data(View),
-                {Bytes, Reader, Header, record_table(Name, Reader)}
-            end),
-            case Prepared of
-                {ok, {Bytes, Reader, Header, Table}} ->
-                    fold_records(Name, Table, Bytes, Header, Reader,
-                                 Function, Initial, 0);
-                {error, _} = Error ->
-                    Error
-            end;
-        fold(_, _, _, _) ->
-            {error, error_value(callback, <<"table">>, 0)}.
-
-        -doc "Fuzz entry point: execute the production reader and retain its outcome.".
-        -spec fuzz(binary()) -> {ok, view()} | {error, error()}.
-        fuzz(Bytes) ->
-            open(Bytes).
-
-        %% Only our explicit parse errors are translated. An implementation bug
-        %% remains an exception for tests/fuzzing instead of becoming bad input.
-        attempt(Function) ->
-            try Function() of
-                Value -> {ok, Value}
-            catch
-                throw:{abi_error, Reason, Field, Offset}:_Stacktrace ->
-                    {error, error_value(Reason, Field, Offset)}
-            end.
-
-        error_value(Reason, Field, Offset) ->
-            #{reason => Reason, field => Field, offset => Offset}.
-
-        fail(Reason, Field, Offset) ->
-            throw({abi_error, Reason, Field, Offset}).
-
-        ensure(true, _Reason, _Field, _Offset) -> ok;
-        ensure(false, Reason, Field, Offset) -> fail(Reason, Field, Offset).
-
-        %% A view stores no independently mutable copy of offsets or counts.
-        %% Accessors recheck the small header/table directory, not every row.
-        view_data(#view{schema = ?MODULE, bytes = Bytes}) when is_binary(Bytes) ->
-            {Reader, Header} = checked_header(Bytes),
-            {Bytes, Reader, Header};
-        view_data(_) ->
-            fail(view, <<"view">>, 0).
-
-        checked_header(Bytes) when is_binary(Bytes) ->
-            Reader = reader_spec(),
-            ensure(byte_size(Bytes) =< maps:get(maximum, Reader),
-                   length, <<"root">>, 0),
-            RootType = maps:get(root, Reader),
-            Header = decode(RootType, Bytes, 0, <<"root">>),
-            case maps:get(extent, Reader) of
-                none -> ok;
-                Extent ->
-                    ensure(path_value(Extent, Header, Header) =:= byte_size(Bytes),
-                           length, maps:get(label, Extent), maps:get(offset, Extent))
-            end,
-            End = check_tables(maps:get(order, Reader), Reader, Header,
-                               Bytes, maps:get(size, type(RootType))),
-            ensure(End =:= byte_size(Bytes), trailing, <<"root">>, End),
-            check_scope(root, RootType, Header, Bytes, 0, Header, Reader),
-            {Reader, Header};
-        checked_header(_) ->
-            fail(length, <<"root">>, 0).
-
-        record_table(Name, Reader) ->
-            case maps:find(Name, maps:get(tables, Reader)) of
-                {ok, Table} -> Table;
-                error -> fail(unknown_table, <<"table">>, 0)
-            end.
-
-        string_table(Name, Reader) ->
-            case maps:find(Name, maps:get(strings, Reader)) of
-                {ok, Table} -> Table;
-                error -> fail(unknown_string_table, <<"strings">>, 0)
-            end.
-
-        table(Name, Reader) ->
-            case maps:find(Name, maps:get(tables, Reader)) of
-                {ok, Table} -> Table;
-                error -> string_table(Name, Reader)
-            end.
-
-        check_tables([], _Reader, _Header, _Bytes, Cursor) -> Cursor;
-        check_tables([Name | Rest], Reader, Header, Bytes, Cursor) ->
-            Table = table(Name, Reader),
-            Alignment = maps:get(alignment, Table),
-            Padding = (Alignment - Cursor rem Alignment) rem Alignment,
-            Label = atom_to_binary(Name, utf8),
-            ensure(Padding =< byte_size(Bytes) - Cursor,
-                   truncated, Label, Cursor),
-            ensure(zero(slice(Bytes, Cursor, Padding, Label)),
-                   padding, Label, Cursor),
-            Start = Cursor + Padding,
-            Offset = path_value(maps:get(offset, Table), Header, Header),
-            Count = path_value(maps:get(count, Table), Header, Header),
-            Stride = maps:get(size, Table),
-            ensure(Offset =:= Start, order, Label, Start),
-            ensure(Count =< maps:get(maximum, Table) andalso
-                   Count =< (byte_size(Bytes) - Start) div Stride,
-                   extent, Label, Start),
-            check_tables(Rest, Reader, Header, Bytes, Start + Count * Stride).
-
-        check_records(Name, Table, Bytes, Header, Reader, Index) ->
-            Count = path_value(maps:get(count, Table), Header, Header),
-            case Index < Count of
-                false -> ok;
-                true ->
-                    Offset = record_base(Table, Index, Header),
-                    Type = maps:get(type, Table),
-                    Record = decode(Type, Bytes, Offset, atom_to_binary(Name, utf8)),
-                    check_scope(Name, Type, Record, Bytes, Offset, Header, Reader),
-                    check_records(Name, Table, Bytes, Header, Reader, Index + 1)
-            end.
-
-        %% An owner span partitions one target table. Progress is measured in
-        %% target records, so an offset never multiplies an unchecked count.
-        check_partitions(Reader, Header, Bytes) ->
-            lists:foreach(fun(Rule) ->
-                case maps:get(kind, Rule) of
-                    partition ->
-                        Path = maps:get(offset, Rule),
-                        Owner = record_table(maps:get(scope, Path), Reader),
-                        Target = record_table(maps:get(table, Rule), Reader),
-                        partition_rows(Rule, Owner, Target, Header, Bytes, 0, 0);
-                    _ -> ok
-                end
-            end, maps:get(rules, Reader)).
-
-        partition_rows(Rule, Owner, Target, Header, Bytes, Index, Covered) ->
-            OwnerCount = path_value(maps:get(count, Owner), Header, Header),
-            TargetCount = path_value(maps:get(count, Target), Header, Header),
-            TargetOffset = path_value(maps:get(offset, Target), Header, Header),
-            Stride = maps:get(size, Target),
-            Path = maps:get(offset, Rule),
-            case Index < OwnerCount of
-                false ->
-                    ensure(Covered =:= TargetCount, partition,
-                           maps:get(label, Path), TargetOffset + Covered * Stride);
-                true ->
-                    OwnerBase = record_base(Owner, Index, Header),
-                    Record = decode(maps:get(type, Owner), Bytes, OwnerBase,
-                                    maps:get(label, Path)),
-                    Offset = path_value(Path, Record, Header),
-                    Count = path_value(maps:get(count, Rule), Record, Header),
-                    ensure(Offset =:= TargetOffset + Covered * Stride andalso
-                           Covered =< TargetCount andalso
-                           Count =< TargetCount - Covered,
-                           partition, maps:get(label, Path),
-                           OwnerBase + maps:get(offset, Path)),
-                    partition_rows(Rule, Owner, Target, Header, Bytes,
-                                   Index + 1, Covered + Count)
-            end.
-
-        %% The first row and the count of the rows of a slice or partition
-        %% rule's table that the rule's span in Record, the record at byte Base,
-        %% names. The span's offset is the byte offset of its first row; a span
-        %% that does not fall whole on the table's rows is an error at that
-        %% offset field. The open check and span/4 both locate a span here.
-        span_rows(#{offset := Path, count := CountPath, table := Name}, Record, Header, Base, Reader) ->
-            Table = record_table(Name, Reader),
-            Total = path_value(maps:get(count, Table), Header, Header),
-            Stride = maps:get(size, Table),
-            Relative = path_value(Path, Record, Header) - path_value(maps:get(offset, Table), Header, Header),
-            Count = path_value(CountPath, Record, Header),
-            ensure(Relative >= 0 andalso Relative rem Stride =:= 0 andalso
-                   Relative div Stride =< Total andalso
-                   Count =< Total - Relative div Stride,
-                   slice, maps:get(label, Path), Base + maps:get(offset, Path)),
-            {Relative div Stride, Count}.
-
-        fold_records(Name, Table, Bytes, Header, Reader, Function, Accumulator, Index) ->
-            Count = path_value(maps:get(count, Table), Header, Header),
-            case Index < Count of
-                false -> {ok, Accumulator};
-                true ->
-                    Parsed = attempt(fun() ->
-                        record_at(Name, Table, Index, Bytes, Header, Reader)
-                    end),
-                    case Parsed of
-                        {ok, Record} ->
-                            Next = Function(Record, Accumulator),
-                            fold_records(Name, Table, Bytes, Header, Reader,
-                                         Function, Next, Index + 1);
-                        {error, _} = Error -> Error
-                    end
-            end.
-
-        slice(Bytes, Offset, Length, Label) ->
-            ensure(is_integer(Offset) andalso Offset >= 0 andalso
-                   is_integer(Length) andalso Length >= 0 andalso
-                   Offset =< byte_size(Bytes) andalso
-                   Length =< byte_size(Bytes) - Offset,
-                   truncated, Label, Offset),
-            binary:part(Bytes, Offset, Length).
-
-        decode(Name, Bytes, Offset, Label) ->
-            Type = type(Name),
-            Size = maps:get(size, Type),
-            _ = slice(Bytes, Offset, Size, Label),
-            case maps:get(kind, Type) of
-                integer ->
-                    Bits = Size * 8,
-                    case maps:get(signed, Type) of
-                        true ->
-                            <<Value:Bits/little-signed-integer>> =
-                                binary:part(Bytes, Offset, Size),
-                            Value;
-                        false ->
-                            <<Value:Bits/little-unsigned-integer>> =
-                                binary:part(Bytes, Offset, Size),
-                            Value
-                    end;
-                scalar -> decode(maps:get(base, Type), Bytes, Offset, Label);
-                enum -> decode(maps:get(base, Type), Bytes, Offset, Label);
-                bytes -> binary:part(Bytes, Offset, Size);
-                layout ->
-                    maps:from_list([decode_field(Field, Bytes, Offset, Label)
-                                    || Field <- maps:get(fields, Type)])
-            end.
-
-        decode_field(Field, Bytes, Base, Label) ->
-            Name = maps:get(name, Field),
-            Type = maps:get(type, Field),
-            Offset = Base + maps:get(offset, Field),
-            Value = case {maps:get(count, Field), Type} of
-                {scalar, _} -> decode(Type, Bytes, Offset, Label);
-                {Count, u8} -> slice(Bytes, Offset, Count, Label);
-                {Count, _} -> decode_array(Type, Count, Bytes, Offset, Label, [])
-            end,
-            {Name, Value}.
-
-        decode_array(_Type, 0, _Bytes, _Offset, _Label, Result) ->
-            lists:reverse(Result);
-        decode_array(Type, Count, Bytes, Offset, Label, Result) ->
-            Value = decode(Type, Bytes, Offset, Label),
-            decode_array(Type, Count - 1, Bytes,
-                         Offset + maps:get(size, type(Type)), Label, [Value | Result]).
-
-        check_scope(Scope, Type, Record, Bytes, Base, Header, Reader) ->
-            Rules = maps:get(rules, Reader),
-            check_layout(Type, Record, Bytes, Base, Scope, [], Record, Header,
-                         Rules, maps:get(source_role, Reader)),
-            lists:foreach(fun(Rule) ->
-                Path = rule_path(Rule),
-                case maps:get(scope, Path) =:= Scope of
-                    false -> ok;
-                    true ->
-                        Kind = maps:get(kind, Rule),
-                        StorageActive = Kind =:= optional orelse Kind =:= choice orelse
-                                        active(Rules, Scope, maps:get(fields, Path),
-                                               Record, Header),
-                        Enabled = StorageActive andalso rule_enabled(Rule, Record, Header),
-                        case Enabled of
-                            true -> check_rule(Rule, Record, Header, Bytes, Base, Reader);
-                            false -> ok
-                        end
-                end
-            end, Rules).
-
-        check_layout(Name, Value, Bytes, Base, Scope, Prefix, Record, Header, Rules, Role) ->
-            Layout = type(Name),
-            lists:foreach(fun([Offset, Length]) ->
-                Label = field_label(Scope, Prefix ++ [padding]),
-                ensure(zero(slice(Bytes, Base + Offset, Length, Label)),
-                       reserved, Label, Base + Offset)
-            end, maps:get(padding, Layout)),
-            lists:foreach(fun(Field) ->
-                FieldName = maps:get(name, Field),
-                Fields = Prefix ++ [FieldName],
-                FieldValue = maps:get(FieldName, Value),
-                Offset = Base + maps:get(offset, Field),
-                TypeName = maps:get(type, Field),
-                FieldType = type(TypeName),
-                case {maps:get(kind, FieldType), maps:get(count, Field)} of
-                    {layout, scalar} ->
-                        check_layout(TypeName, FieldValue, Bytes, Offset, Scope,
-                                     Fields, Record, Header, Rules, Role);
-                    _ ->
-                        case active(Rules, Scope, Fields, Record, Header) of
-                            false -> ok;
-                            true ->
-                                Label = field_label(Scope, Fields),
-                                check_field(Field, FieldValue, Label, Offset, Role)
-                        end
-                end
-            end, maps:get(fields, Layout)).
-
-        check_field(#{count := scalar} = Field, Value, Label, Offset, Role) ->
-            check_leaf(Field, Value, Label, Offset, Role);
-        check_field(Field, Values, Label, Offset, Role) when is_binary(Values) ->
-            check_array(Field, binary_to_list(Values), Label, Offset, Role);
-        check_field(Field, Values, Label, Offset, Role) ->
-            check_array(Field, Values, Label, Offset, Role).
-
-        check_array(_Field, [], _Label, _Offset, _Role) -> ok;
-        check_array(Field, [Value | Rest], Label, Offset, Role) ->
-            check_leaf(Field, Value, Label, Offset, Role),
-            check_array(Field, Rest, Label,
-                        Offset + maps:get(size, type(maps:get(type, Field))), Role).
-
-        check_leaf(Field, Value, Label, Offset, Role) ->
-            Type = type(maps:get(type, Field)),
-            case maps:get(kind, Type) of
-                bytes ->
-                    case maps:get(fixed, Type) of
-                        none -> ok;
-                        Fixed -> ensure(Value =:= Fixed, value, Label, Offset)
-                    end,
-                    ensure(maps:get(zero, Field) =:= 0 orelse zero(Value),
-                           reserved, Label, Offset);
-                _ ->
-                    check_integer_type(Type, Value, Label, Offset),
-                    WidthMask = (1 bsl (maps:get(size, Type) * 8)) - 1,
-                    Unsigned = Value band WidthMask,
-                    ensure((Unsigned band maps:get(zero, Field)) =:= 0,
-                           reserved, Label, Offset),
-                    case maps:find(Role, maps:get(input_masks, Field)) of
-                        {ok, Mask} ->
-                            ensure((Unsigned band bnot Mask) =:= 0,
-                                   ownership, Label, Offset);
-                        error -> ok
-                    end
-            end.
-
-        check_integer_type(#{kind := integer}, _Value, _Label, _Offset) -> ok;
-        check_integer_type(#{kind := scalar} = Type, Value, Label, Offset) ->
-            ensure(Value >= maps:get(minimum, Type) andalso
-                   Value =< maps:get(maximum, Type) andalso
-                   Value rem maps:get(multiple, Type) =:= 0,
-                   range, Label, Offset);
-        check_integer_type(#{kind := enum} = Type, Value, Label, Offset) ->
-            Valid = case maps:get(allowed, Type) of
-                none ->
-                    case maps:get(flags, Type) of
-                        true -> (Value band bnot maps:get(mask, Type)) =:= 0;
-                        false -> lists:member(Value, maps:get(values, Type))
-                    end;
-                Allowed -> lists:member(Value, Allowed)
-            end,
-            Reason = case maps:get(flags, Type) of true -> flags; false -> tag end,
-            ensure(Valid, Reason, Label, Offset).
-
-        active(Rules, Scope, Fields, Record, Header) ->
-            lists:all(fun(Rule) ->
-                case maps:get(kind, Rule) of
-                    optional ->
-                        Path = maps:get(path, Rule),
-                        Applies = maps:get(scope, Path) =:= Scope andalso
-                                  lists:prefix(maps:get(fields, Path), Fields),
-                        not Applies orelse
-                            (path_value(maps:get(flags, Rule), Record, Header)
-                             band maps:get(mask, Rule)) =/= 0;
-                    choice ->
-                        Tag = maps:get(tag, Rule),
-                        Candidates = [Path || Path <- maps:get(fields, Rule),
-                            lists:prefix(maps:get(fields, Path), Fields)],
-                        case {maps:get(scope, Tag) =:= Scope, Candidates} of
-                            {true, [Selected]} ->
-                                Value = path_value(Tag, Record, Header),
-                                Active = maps:get(Value, maps:get(cases, Rule), []),
-                                lists:member(Selected, Active);
-                            _ -> true
-                        end;
-                    _ -> true
-                end
-            end, Rules).
-
-        rule_path(#{path := Path}) -> Path;
-        rule_path(#{offset := Path}) -> Path;
-        rule_path(#{tag := Path}) -> Path.
-
-        rule_enabled(#{guard := #{tag := Tag, value := Expected}}, Record, Header) ->
-            path_value(Tag, Record, Header) =:= Expected;
-        rule_enabled(_Rule, _Record, _Header) -> true.
-
-        path_value(#{scope := root, fields := Fields}, _Record, Header) ->
-            field_value(Fields, Header);
-        path_value(#{fields := Fields}, Record, _Header) ->
-            field_value(Fields, Record).
-
-        field_value([], Value) -> Value;
-        field_value([Field | Rest], Value) ->
-            field_value(Rest, maps:get(Field, Value)).
-
-        field_label(Scope, Fields) ->
-            Prefix = case Scope of
-                root -> <<"root">>;
-                _ -> <<(atom_to_binary(Scope, utf8))/binary, "[]">>
-            end,
-            iolist_to_binary([Prefix | [[<<".">>, atom_to_binary(Field, utf8)]
-                                       || Field <- Fields]]).
-
-        check_rule(#{kind := value, path := Path, values := [Expected]},
-                   Record, Header, _Bytes, Base, _Reader) ->
-            ensure(path_value(Path, Record, Header) =:= Expected,
-                   value, maps:get(label, Path), Base + maps:get(offset, Path));
-        check_rule(#{kind := range, path := Path, values := [Minimum, Maximum]},
-                   Record, Header, _Bytes, Base, _Reader) ->
-            Value = path_value(Path, Record, Header),
-            ensure(Value >= Minimum andalso Value =< Maximum,
-                   range, maps:get(label, Path), Base + maps:get(offset, Path));
-        check_rule(#{kind := index, path := Path, table := Name, absent := Absent},
-                   Record, Header, _Bytes, Base, Reader) ->
-            Value = path_value(Path, Record, Header),
-            Table = record_table(Name, Reader),
-            Count = path_value(maps:get(count, Table), Header, Header),
-            ensure(Value < Count orelse Value =:= Absent,
-                   index, maps:get(label, Path), Base + maps:get(offset, Path));
-        check_rule(#{kind := Kind} = Rule, Record, Header, _Bytes, Base, Reader)
-          when Kind =:= slice; Kind =:= partition ->
-            {_First, _Count} = span_rows(Rule, Record, Header, Base, Reader),
-            ok;
-        check_rule(#{kind := string} = Rule, Record, Header, Bytes, Base, Reader) ->
-            check_string(Rule, Record, Header, Bytes, Base, Reader);
-        check_rule(#{kind := optional, path := Path, flags := Flags, mask := Mask},
-                   Record, Header, Bytes, Base, _Reader) ->
-            Present = (path_value(Flags, Record, Header) band Mask) =/= 0,
-            Offset = Base + maps:get(offset, Path),
-            ensure(Present orelse zero(slice(Bytes, Offset, maps:get(size, Path),
-                                             maps:get(label, Path))),
-                   inactive, maps:get(label, Path), Offset);
-        check_rule(#{kind := choice, tag := Tag, cases := Cases, fields := Fields},
-                   Record, Header, Bytes, Base, _Reader) ->
-            Value = path_value(Tag, Record, Header),
-            case maps:find(Value, Cases) of
-                error ->
-                    fail(tag, maps:get(label, Tag), Base + maps:get(offset, Tag));
-                {ok, Active} ->
-                    lists:foreach(fun(Path) ->
-                        Offset = Base + maps:get(offset, Path),
-                        ensure(lists:member(Path, Active) orelse
-                               zero(slice(Bytes, Offset, maps:get(size, Path),
-                                          maps:get(label, Path))),
-                               inactive, maps:get(label, Path), Offset)
-                    end, Fields)
-            end.
-
-        check_string(Rule, Record, Header, Bytes, Base, Reader) ->
-            Path = maps:get(offset, Rule),
-            Offset = path_value(Path, Record, Header),
-            Length = path_value(maps:get(count, Rule), Record, Header),
-            Table = string_table(maps:get(table, Rule), Reader),
-            Total = path_value(maps:get(count, Table), Header, Header),
-            Label = maps:get(label, Path),
-            Location = Base + maps:get(offset, Path),
-            ensure(Offset =< Total andalso Length =< Total - Offset andalso
-                   Length =< maps:get(maximum, Rule) andalso
-                   (maps:get(empty, Rule) orelse Length > 0),
-                   string_range, Label, Location),
-            case Length =:= 0 andalso maps:get(empty, Rule) of
-                true -> ok;
-                false ->
-                    Start = path_value(maps:get(offset, Table), Header, Header),
-                    Text = slice(Bytes, Start + Offset, Length, Label),
-                    ensure(valid_string(maps:get(class, Rule), Text),
-                           string_class, Label, Location)
-            end.
-
-        zero(<<>>) -> true;
-        zero(<<0, Rest/binary>>) -> zero(Rest);
-        zero(_) -> false.
-
-        valid_string(bytes, _Bytes) -> true;
-        valid_string(identifier, Bytes) ->
-            byte_size(Bytes) >= 1 andalso byte_size(Bytes) =< 63 andalso
-                identifier(Bytes, first);
-        valid_string(utf8, Bytes) -> valid_utf8(Bytes, true);
-        valid_string(dt_path, Bytes) -> valid_path(Bytes, true);
-        valid_string(namespace_path, Bytes) -> valid_path(Bytes, false);
-        valid_string(relative_path, Bytes) ->
-            Bytes =/= <<>> andalso valid_path(<<$/, Bytes/binary>>, true);
-        valid_string(args, <<>>) -> true;
-        valid_string(args, Bytes) -> binary:last(Bytes) =:= 0;
-        valid_string(env, Bytes) -> environment(Bytes, #{}).
-
-        identifier(<<>>, _Position) -> true;
-        identifier(<<Byte, Rest/binary>>, Position) ->
-            AlphaNumeric = (Byte >= $a andalso Byte =< $z) orelse
-                           (Byte >= $0 andalso Byte =< $9),
-            Valid = AlphaNumeric orelse (Position =:= rest andalso
-                     (Byte =:= $_ orelse Byte =:= $-)),
-            Valid andalso identifier(Rest, rest).
-
-        valid_utf8(<<>>, _Clean) -> true;
-        valid_utf8(<<Point/utf8, Rest/binary>>, Clean) ->
-            Safe = not Clean orelse
-                   (Point >= 16#20 andalso not (Point >= 16#7f andalso Point =< 16#9f)),
-            Safe andalso valid_utf8(Rest, Clean);
-        valid_utf8(_, _) -> false.
-
-        valid_path(<<$/, Rest/binary>> = Bytes, Clean) ->
-            valid_utf8(Bytes, Clean) andalso
-                (Rest =:= <<>> orelse path_component(Rest, 0, true));
-        valid_path(_, _) -> false.
-
-        path_component(<<>>, Length, Dots) ->
-            Length > 0 andalso not (Dots andalso Length =< 2);
-        path_component(<<0, _/binary>>, _Length, _Dots) -> false;
-        path_component(<<$/, Rest/binary>>, Length, Dots) ->
-            Length > 0 andalso not (Dots andalso Length =< 2) andalso
-                path_component(Rest, 0, true);
-        path_component(<<Byte, Rest/binary>>, Length, Dots) ->
-            path_component(Rest, Length + 1, Dots andalso Byte =:= $.).
-
-        environment(<<>>, _Seen) -> true;
-        environment(Bytes, Seen) ->
-            case binary:match(Bytes, <<0>>) of
-                nomatch -> false;
-                {End, 1} ->
-                    Entry = binary:part(Bytes, 0, End),
-                    case binary:match(Entry, <<$=>>) of
-                        {At, 1} when At > 0 ->
-                            Key = binary:part(Entry, 0, At),
-                            not maps:is_key(Key, Seen) andalso
-                                environment(binary:part(Bytes, End + 1,
-                                                       byte_size(Bytes) - End - 1),
-                                            maps:put(Key, true, Seen));
-                        _ -> false
-                    end
-            end.
+        open_prefix(Bytes) ->
+            erx_abi_reader:open_prefix(spec(), Bytes).
       ERLANG
 
       # span/4 reads a span from its owner row itself and takes its table from the span's
@@ -1608,26 +1024,7 @@ module Erx
 
       SPAN_CODE = <<~'ERLANG'.freeze
         span(View, Owner, Index, Field) ->
-            attempt(fun() ->
-                {Bytes, Reader, Header} = view_data(View),
-                Rule = span_rule(Owner, Field, Reader),
-                {Base, Record} = indexed_record(Owner, Index, Bytes, Header, Reader),
-                {First, Count} = span_rows(Rule, Record, Header, Base, Reader),
-                TargetName = maps:get(table, Rule),
-                Target = record_table(TargetName, Reader),
-                [record_at(TargetName, Target, Row, Bytes, Header, Reader)
-                 || Row <- lists:seq(First, First + Count - 1)]
-            end).
-
-        %% The slice or partition rule of span field Field of table Owner's rows.
-        span_rule(Owner, Field, Reader) ->
-            Rules = [Rule || #{field := RuleField, offset := #{scope := RuleOwner}} = Rule
-                                 <- maps:get(rules, Reader),
-                             RuleOwner =:= Owner, RuleField =:= Field],
-            case Rules of
-                [Rule | _] -> Rule;
-                [] -> fail(unknown_span, <<"span">>, 0)
-            end.
+            erx_abi_reader:span(spec(), View, Owner, Index, Field).
       ERLANG
     end
   end

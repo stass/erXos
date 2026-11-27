@@ -35,6 +35,7 @@
              erx_abi_events,
              erx_abi_layout,
              erx_abi_packed,
+             erx_abi_reader,
              erx_abi_signals,
              erx_abi_termios,
              erx_abi_translations,

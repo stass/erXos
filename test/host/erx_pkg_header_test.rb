@@ -28,7 +28,7 @@ class ErxPkgHeaderTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   SOURCES = %w[erlang/apps/erx/src/erx_pkg_header.erl otp/erts/preloaded/src/erx_verity_tree.erl
-               build/gen/erlang/apps/erx/src/generated/erx_pkg_reader.erl
+               build/gen/erlang/apps/erx/src/generated/erx_pkg_reader.erl erlang/apps/erx/src/erx_abi_reader.erl
                test/erlang/host_bytes/erx_bytes.erl
                test/erlang/erx_pkg_header_tests.erl test/erlang/erx_app_pack_tests.erl].map { |path| File.join(ROOT, path) }.freeze
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')

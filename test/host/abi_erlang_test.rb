@@ -35,7 +35,8 @@ class AbiErlangTest < Minitest::Test
     @environment = { 'ERL_AFLAGS' => nil, 'ERL_FLAGS' => nil, 'ERL_ZFLAGS' => nil,
                      'ERL_LIBS' => nil, 'ERL_ROOTDIR' => nil, 'ROOTDIR' => nil }
     @runner.run([File.join(@oracle, 'erlc'), '-Werror', '-I', @directory, '-o', @directory,
-                 File.join(@directory, 'erx_manifest.erl'),
+                 File.join(@directory, 'erx_manifest.erl'), File.join(@directory, 'erx_pkg_reader.erl'),
+                 File.join(@root, 'erlang/apps/erx/src/erx_abi_reader.erl'),
                  File.join(@root, 'test/fixtures/erx_abi_reader_tests.erl')],
                 name: 'erlc', deadline: 60, env: @environment)
     File.binwrite(File.join(@directory, 'valid.bin'), AbiManifestFixture.valid)

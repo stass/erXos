@@ -26,6 +26,8 @@ module ErxManifestFuzz
   # The generated sources and headers named here are in build/gen.
   Erx::Generated.ensure(root: ROOT)
   MODULE_SOURCE = File.join(ROOT, 'build/gen/erlang/apps/erx/src/generated/erx_manifest.erl')
+  # The one reader erx_manifest hands its spec to, where the seeded fault is planted.
+  READER_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/erx_abi_reader.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_manifest_fuzz.erl')
   # The package process's reader of the manifest's package records, which the target runs
   # on every manifest the generated reader accepts, and the generated header it includes.
@@ -83,8 +85,8 @@ module ErxManifestFuzz
   module_function
 
   def run(seed:)
-    source = File.binread(MODULE_SOURCE)
-    raise "no reserved-bits check in #{MODULE_SOURCE}" unless source.include?(RESERVED)
+    source = File.binread(READER_SOURCE)
+    raise "no reserved-bits check in #{READER_SOURCE}" unless source.include?(RESERVED)
 
     Dir.mktmpdir('erx-manifest-fuzz') do |work|
       corpus = File.join(work, 'corpus.bin')
@@ -128,12 +130,14 @@ module ErxManifestFuzz
     program
   end
 
-  # The Erlang reader's verdicts, from module_text compiled in a directory of its own.
-  def erlang_verdicts(work, corpus, module_text)
+  # The Erlang reader's verdicts, with reader_text as erx_abi_reader, compiled in a
+  # directory of its own.
+  def erlang_verdicts(work, corpus, reader_text)
     Dir.mktmpdir('erlang', work) do |directory|
-      module_path = File.join(directory, 'erx_manifest.erl')
-      File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', directory, module_path, PACKAGE_READER, TARGET_SOURCE,
+      reader_path = File.join(directory, 'erx_abi_reader.erl')
+      File.binwrite(reader_path, reader_text)
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', directory, MODULE_SOURCE, reader_path,
+                                       PACKAGE_READER, TARGET_SOURCE,
                                        stdin_data: '')
       raise output unless status.success?
 

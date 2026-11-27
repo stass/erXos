@@ -23,8 +23,10 @@ class ErxPkgManifestTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   READER = File.join(ROOT, 'build/gen/erlang/apps/erx/src/generated/erx_manifest.erl')
+  # The one reader the generated reader hands its spec to.
+  SHARED = File.join(ROOT, 'erlang/apps/erx/src/erx_abi_reader.erl')
   MODULE = File.join(ROOT, 'erlang/apps/erx_starter/src/erx_pkg_manifest.erl')
-  SOURCES = [READER, MODULE] +
+  SOURCES = [READER, SHARED, MODULE] +
             %w[erlang/apps/erx_starter/src/erx_pkg.erl
                test/erlang/erx_pkg_manifest_tests.erl].map { |path| File.join(ROOT, path) }.freeze
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
@@ -56,7 +58,7 @@ class ErxPkgManifestTest < Minitest::Test
     'service and row swapped' => Fault.new(file: MODULE, from: '#{service := Index, facet := Facet}',
                                            to: '#{service := Facet, facet := Index}'),
     'ble offered as a need' => Fault.new(file: MODULE, from: 'Interface =/= ?ERX_SERVICE_BLE', to: 'Interface =/= -1'),
-    'span off by one' => Fault.new(file: READER, from: '{Relative div Stride, Count}.',
+    'span off by one' => Fault.new(file: SHARED, from: '{Relative div Stride, Count}.',
                                    to: '{Relative div Stride + 1, Count}.'),
     'development key in a release' =>
       Fault.new(file: READER, from: RELEASE_END,

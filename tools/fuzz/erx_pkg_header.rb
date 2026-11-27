@@ -24,6 +24,7 @@ module ErxPkgHeaderFuzz
   DECODER = File.join(ROOT, 'erlang/apps/erx/src/erx_pkg_header.erl')
   SOURCES = [File.join(ROOT, 'otp/erts/preloaded/src/erx_verity_tree.erl'),
              File.join(ROOT, 'build/gen/erlang/apps/erx/src/generated/erx_pkg_reader.erl'),
+             File.join(ROOT, 'erlang/apps/erx/src/erx_abi_reader.erl'),
              File.join(ROOT, 'test/erlang/erx_pkg_header_fuzz.erl')].freeze
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   DEADLINE_SECONDS = '300'

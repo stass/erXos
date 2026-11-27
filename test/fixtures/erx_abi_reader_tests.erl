@@ -109,6 +109,8 @@ unknown_lookup_test() ->
     ?assertMatch({error, #{reason := unknown_table}}, erx_manifest:count(View, absent)),
     ?assertMatch({error, #{reason := index}}, erx_manifest:fetch(View, principals, 1)),
     ?assertMatch({error, #{reason := view}}, erx_manifest:header(not_a_view)),
+    %% One reader's view is refused by another, which shares its runtime.
+    ?assertMatch({error, #{reason := view}}, erx_pkg_reader:header(View)),
     ?assertMatch({error, #{reason := string_range}},
                  erx_manifest:string(View, #{offset => 16#ffffffff, length => 1})).
 
