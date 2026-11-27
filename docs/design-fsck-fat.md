@@ -365,7 +365,7 @@ ownership-check finding the repair removes.
 | `check_subdirectory: Incorrect `.' for NAME.`, `... `..' ...` | `dir.c:475-538`, `:964-976` | delete the entry | |
 | `Directory entry PATH of size N referencing invalid cluster M` | `dir.c:400-417` | first cluster and size set to 0 | as for the file case above |
 | `size of PATH is N, should at most be M` | `dir.c:434-445` | size set to the chain's | |
-| `PATH has too many clusters allocated` | `dir.c:446-460` | end the chain after the size's last cluster; the tail becomes a lost chain | |
+| `PATH has too many clusters allocated` | `dir.c:446-460` | end the chain after the size's last cluster; the tail becomes a lost chain. An empty file holding a cluster, which FreeBSD finds here at every run, has its first cluster set to 0, so that cluster becomes a lost chain, named or kept | |
 | `Lost cluster chain at cluster N` / `M Cluster(s) lost` | `fat.c:1285-1300` | named in `LOST.DIR`, or kept ([Lost chains](#lost-chains)) | |
 | `Free space in FSInfo block (N) not correct (M)`, `Next free cluster in FSInfo block (N) invalid` / `not free` | `fat.c:1307-1334` | both hints written unknown | |
 | the volume dirty | `check.c:161-174` | mark the volume clean at the end | |
@@ -456,7 +456,7 @@ is a bug, and the fuzz target fails on one.
 | What is held | Bound | At most |
 | --- | --- | --- |
 | the clusters some entry links to, and the clusters a walk has reached | one bit per cluster each, at most 4,194,304 clusters, the ownership check's limit; a larger volume is refused before any FAT sector is read but the one admission reads for the volume's flags | 1 MiB |
-| the directory frames and the subdirectories they wait on, with their names | measured as 64 bytes each plus its name's bytes, within 1 MiB, so at most 16,384, the ownership check's stack bound | 1 MiB |
+| the directory frames and the subdirectories they wait on, with their names | measured as 64 bytes each plus its name's bytes, within 1 MiB: at most 16,384, the ownership check's stack bound, with short names, and about 3,300 with 255-byte long names; a volume past it is refused, with nothing written | 1 MiB |
 | the FAT sector cache | 64 sectors | 32 KiB |
 | edits, and the view's index of them by sector | 12,288 edits | 2 MiB |
 | findings | measured as 64 bytes each plus its path's bytes, within 1 MiB; a path keeps at most its last 1,024 bytes, its earlier names shown as `...` | 1 MiB |
@@ -874,7 +874,8 @@ without a network device, takes each damaged image as a disk of its own,
 a fresh copy per run, and runs `fsck_msdosfs -n` and `fsck_msdosfs -y`.
 For each image the run passes when `-n`'s exit status equals erXos's;
 when the findings FreeBSD's `-y` run prints, matched by message, equal
-erXos's findings; and when, after both `-y` runs, FreeBSD's `-n` exits 0
+erXos's findings, FreeBSD's two lines `Lost cluster chain at cluster N`
+and `M Cluster(s) lost` matching erXos's one lost-chain finding; and when, after both `-y` runs, FreeBSD's `-n` exits 0
 on erXos's image, erXos's check finds nothing on FreeBSD's, and both
 read back, through `erx_fat` on the host, to the same names, sizes and
 contents. A class in
