@@ -13,12 +13,14 @@ n of the F2FS facts record, part 1.
 
 The NAT is resolved only here: nat/2 checks the journal the mount read and
 answers it as an opaque value, and every node read goes through
-node_block/4, which looks the nid up, the journal's entry over its NAT
-block's ([F 35]), and admits the entry only when it is used, owned by the
-inode the reader expects and places its node in the main area at a block
-the SIT marks valid. The codec then checks the block's footer against the
-nid, the inode and the node offset the reader expects, so every node of a
-file is read at its one place in that file's tree.
+node_block/4, which refuses the reserved nids, looks the nid up, the
+journal's entry over its NAT block's ([F 35]), and admits the entry only
+when it is used, owned by the inode the reader expects and places its node
+in the main area at a block the SIT marks valid in a node log's segment.
+The codec then checks the block's footer against the nid, the inode and
+the node offset the reader expects, so every node of a file is read at its
+one place in that file's tree. A data slot likewise names only a valid
+block of a data log's segment, so no file reads a node as its data.
 
 Every function takes two arguments besides its own. The first is the
 volume: the map erx_f2fs_mount answers, or at the mount the part of it
@@ -119,7 +121,7 @@ inode(#{superblock := Super} = Volume, Ino, Blocks) ->
 The slot of file block Block of Inode, a file with an address array:
 in the array, or in the direct node its node ids lead to ([F 53]). A
 slot's address is NULL_ADDR, NEW_ADDR, or a main area block the SIT marks
-valid.
+valid in a data log's segment.
 """.
 -spec slot(volume(), erx_f2fs_codec:inode(), non_neg_integer(), blocks()) -> result(slot()).
 slot(Volume, Inode, Block, Blocks) ->
@@ -179,13 +181,15 @@ readdir(Volume, Dir, Position, Blocks) ->
 
 %%% The NAT
 
-%% The block of node Nid of inode Ino. Its NAT entry is the journal's or
-%% its block's in the copy the version bitmap selects ([F 34], [F 35]);
-%% the entry is used, owned by Ino and places the node at a valid block.
-%% The owner is checked here as well as in the node's footer, so another
-%% file's node is refused before its block is asked for.
+%% The block of node Nid of inode Ino. Nid names a node, past the reserved
+%% nids, whose NAT entries place no node ([F 6]). Its NAT entry is the
+%% journal's or its block's in the copy
+%% the version bitmap selects ([F 34], [F 35]); the entry is used, owned by
+%% Ino and places the node at a valid block of a node log's segment. The
+%% owner is checked here as well as in the node's footer, so another file's
+%% node is refused before its block is asked for.
 node_block(#{superblock := Super, checkpoint := Header, nat := Journal} = Volume, Nid, Ino, Blocks) ->
-    require(Nid < erx_f2fs_codec:nat_capacity(Super), {nat, nid}),
+    require(erx_f2fs_codec:valid_nid(Super, Nid), {nat, nid}),
     #{block_addr := Address, ino := Owner} =
         case Journal of
             #{Nid := Entry} ->
@@ -198,18 +202,25 @@ node_block(#{superblock := Super, checkpoint := Header, nat := Journal} = Volume
         end,
     require(Address =/= ?ERX_F2FS_NULL_ADDR, {nat, free}),
     require(Owner =:= Ino, {nat, owner}),
-    require(valid_block(Volume, Address), {nat, block_addr}),
+    require(block_kind(Volume, Address) =:= node, {nat, block_addr}),
     [Node] = fetch(Blocks, [Address]),
     Node.
 
-%% Whether Address is a main area block the SIT marks valid.
-valid_block(#{superblock := #{main_blkaddr := Main} = Super, sit := Sit}, Address) ->
+%% The kind of block at Address, data or node, when it is a main area block
+%% the SIT marks valid: the kind of log its segment's SIT entry names, so a
+%% data slot never reads a node and the NAT never places a node in a data
+%% block ([F 21], [F 37]); else none.
+block_kind(#{superblock := #{main_blkaddr := Main} = Super, sit := Sit}, Address) ->
     case Address >= Main andalso Address < erx_f2fs_codec:main_end(Super) of
         true ->
-            #{valid_map := Map} = element((Address - Main) div ?BLOCKS_PER_SEG + 1, Sit),
-            erx_f2fs_codec:bit(Map, (Address - Main) rem ?BLOCKS_PER_SEG) =:= 1;
+            #{valid_map := Map, type := Type} = element((Address - Main) div ?BLOCKS_PER_SEG + 1, Sit),
+            case erx_f2fs_codec:bit(Map, (Address - Main) rem ?BLOCKS_PER_SEG) of
+                1 when Type < ?ERX_F2FS_LOG_HOT_NODE -> data;
+                1 -> node;
+                0 -> none
+            end;
         false ->
-            false
+            none
     end.
 
 %%% The node tree
@@ -231,12 +242,13 @@ find_slot(Volume, #{addresses := Addresses, i_nid := Nids, footer := #{ino := In
 find_slot(_Volume, _Inode, _Block, _Blocks, _Nodes) ->
     fail({file, inline}).
 
-%% A slot's address is a hole, NEW_ADDR or a valid block ([F 4]).
+%% A slot's address is a hole, NEW_ADDR or a valid block of a data log's
+%% segment ([F 4], [F 37]).
 checked_slot(_Volume, none) ->
     none;
 checked_slot(Volume, {_Nid, _Index, Address} = Slot) ->
     require(Address =:= ?ERX_F2FS_NULL_ADDR orelse Address =:= ?ERX_F2FS_NEW_ADDR orelse
-                valid_block(Volume, Address),
+                block_kind(Volume, Address) =:= data,
             {data, block_addr}),
     Slot.
 

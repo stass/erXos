@@ -163,6 +163,14 @@ document's "residual risks accepted" paragraph.
   releases on every CPU, including those made for other domains: a coarse side channel, beside
   the covert one user-mode `SEV` already gives. Trapping user-mode `WFE`, or erXos's kernel,
   closes it.
+* [High] erx_f2fs_core, a data block's owner: a read does not yet check that the block's
+  summary entry names the slot it came through (docs/design-f2fs.md, "Inodes"). The read-only
+  volume reuses no block, so there a crafted second slot reads only bytes its image's writer
+  could have copied, and a slot naming a free block fails. The check must land before the
+  read-write path does: there a crafted slot naming a free block, or a second slot outliving
+  its block's owner, reads another user's later writes as its own file's bytes, and a
+  `set_slot` that frees an old address without the summary's confirmation frees another
+  file's block.
 * [Low] board walk: ssh to the board does not check its host key
   (`tools/lib/erx/board_run.rb`): a development image makes a new key at every boot, so a host
   that answers at the board's address could falsify the sensor readings the walk takes over ssh

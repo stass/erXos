@@ -67,7 +67,19 @@ class ErxF2fsCoreTest < Minitest::Test
     Seed.new(fault: "a name holding '/' accepted", source: CODEC,
              anchor: '            require(binary:match(Name, [<<"/">>, <<0>>]) =:= nomatch, name),',
              replacement: '            require(binary:match(Name, [<<0>>]) =:= nomatch, name),',
-             failure: /each_directory_refusal_names_its_rule[^\n]*failed/)
+             failure: /each_directory_refusal_names_its_rule[^\n]*failed/),
+    Seed.new(fault: "a node read from a data log's segment", source: CORE,
+             anchor: '    require(block_kind(Volume, Address) =:= node, {nat, block_addr}),',
+             replacement: '    require(block_kind(Volume, Address) =/= none, {nat, block_addr}),',
+             failure: /\(a direct node in a data segment\)[^\n]*failed/),
+    Seed.new(fault: "a data slot read from a node log's segment", source: CORE,
+             anchor: '                block_kind(Volume, Address) =:= data,',
+             replacement: '                block_kind(Volume, Address) =/= none,',
+             failure: /\(the inode's own block as its data\)[^\n]*failed/),
+    Seed.new(fault: "the node inode's and meta inode's nids admitted", source: CORE,
+             anchor: '    require(erx_f2fs_codec:valid_nid(Super, Nid), {nat, nid}),',
+             replacement: '    require(Nid > 0 andalso Nid < erx_f2fs_codec:nat_capacity(Super), {nat, nid}),',
+             failure: /\(node id 1\)[^\n]*failed/)
   ].freeze
 
   def test_eunit_cases_pass

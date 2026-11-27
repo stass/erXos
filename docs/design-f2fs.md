@@ -681,7 +681,9 @@ within their segments ([F 39], [T 75]).
 Every change of a block reference goes through one function,
 `set_slot(State, Owner, Index, Address)`, where the owner is a dnode or an
 inode's address array and the address one of `NULL_ADDR`, `NEW_ADDR` or
-a real address ([F 4]). It clears the old address's valid bit, sets the
+a real address ([F 4]). It clears the old address's valid bit when that
+block's summary names the slot, so a crafted slot never frees another
+file's block, sets the
 new one's, which makes the new block live, records the new block's
 summary entry ([F 46]) in its segment's unpublished summary, adjusts
 `valid_block_count` by the slots' weights (a real address or `NEW_ADDR`
@@ -760,10 +762,13 @@ blocks with E = 3 and X = 0, 4,329,690,873,856 bytes; a write past that
 answers `efbig`.
 
 **Every node is read at its one place.** A nid resolves only through the
-core's one NAT lookup, the journal's entry over its NAT block's
-([F 35]), which admits an entry only when it is used, owned by the
-inode the reader expects, and places its node in the main area at a
-block the SIT marks valid; the mount reads the root through it too.
+core's one NAT lookup, which refuses the nids that name no node, 0 and
+the node and meta inodes' 1 and 2 ([F 9], [F 54]), takes the journal's
+entry over its NAT block's ([F 35]), and admits an entry only when it is
+used, owned by the inode the reader expects, and places its node in the
+main area at a block the SIT marks valid, in a segment whose SIT entry
+names a node log ([F 21], [F 37]); the mount reads the root through it
+too.
 The codec then checks the block's footer: its `nid` is the nid asked
 for, its `ino` the file's inode, and its node offset the one the node's
 place in the file's tree gives, 0 for the inode itself ([F 43],
@@ -771,10 +776,23 @@ place in the file's tree gives, 0 for the inode itself ([F 43],
 cannot name a node from two places, from itself or from another file:
 no walk loops or aliases, and a walk to one file block reads at most
 one node a level. A slot's address is `NULL_ADDR`, `NEW_ADDR` or a main
-area block the SIT marks valid; any other fails the read, and both
-sentinels read as zeros. A slot's index in an inode counts after the
-extra attributes, as the summaries do ([F 46]). The read path never
-reads an xattr node.
+area block the SIT marks valid, in a segment whose SIT entry names a
+data log; any other fails the read, and both sentinels read as zeros. So
+no file reads a node, its own inode included, as its data, and no block a
+client's write filled is ever read as a node. A slot's index in an inode
+counts after the extra attributes, as the summaries do ([F 46]). The
+read path never reads an xattr node.
+
+**A data block is read only through its owner's slot.** A valid data
+block's summary entry names its one owner, the node and the index whose
+slot holds it ([F 46]), and a read takes the block only when that entry
+names the slot it came through, the summary taken where the volume state
+holds it ([Segment summaries](#segment-summaries)): one summary block a
+segment the read touches. A crafted image may give a second slot to a
+block, or a slot to a free block a later write fills; on a read-write
+volume either would read another file's bytes, written after the crafted
+slot was, as that slot's file. Through the summary each reads nothing,
+and fails the read.
 
 ### Directories
 

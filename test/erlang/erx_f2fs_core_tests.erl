@@ -108,10 +108,14 @@ file_nodes() ->
 %% The fixture volume holding the test file with Changes to its inode
 %% fields and Replaced nodes, {Nid, Block}; its NAT, valid blocks and
 %% blocks by address.
-file(Changes, Replaced) ->
+file(Changes, Replaced) -> file(Changes, Replaced, []).
+
+%% As file/2, with Added nodes, {Nid, Address, Block}, each in the NAT
+%% journal over any entry the file gives its nid.
+file(Changes, Replaced, Added) ->
     Super = maps:get(superblock, mounted()),
     Nodes = [{Nid, Address, proplists:get_value(Nid, Replaced, Block)}
-             || {Nid, Address, Block} <- file_nodes()],
+             || {Nid, Address, Block} <- file_nodes()] ++ Added,
     Inode = erx_f2fs_codec_tests:inode_block(Super, file_inode(Changes)),
     Blocks = maps:from_list([{Address, case Block of inode -> Inode; _ -> Block end}
                              || {_Nid, Address, Block} <- Nodes]
@@ -260,6 +264,33 @@ each_refusal_names_its_rule_test_() ->
              {"an indirect child at another node offset", {indirect_node, footer},
               ?B_DOUBLE + ?PER + 3, #{},
               [{?GRANDCHILD, indirect(?GRANDCHILD, 2043, at(1, ?DOUBLE_DIRECT))}]}]].
+
+%% A data slot reads only a block of a data log's segment, and a node only
+%% a block of a node log's ([F 21], [F 37]): the inode's own block named
+%% by its slot 0 fails, as does a direct node the NAT places in a data
+%% segment, though its footer is right.
+blocks_are_read_only_from_segments_of_their_kind_test_() ->
+    [{"the inode's own block as its data",
+      ?_assertEqual({error, {data, block_addr}}, read(file(slot0(?NODES + 1), []), 0, 4))},
+     {"a direct node in a data segment",
+      ?_assertEqual({error, {nat, block_addr}},
+                    slot(file(#{}, [], [{?DIRECT1, ?DATA + 10, direct(?DIRECT1, 1, [?DATA + 1])}]),
+                         ?B_DIRECT1))}].
+
+%% The node inode's and the meta inode's nids name no node ([F 6]): the NAT
+%% lookup refuses each, though the NAT holds an entry for it, owned by the
+%% file, that places a direct node whose footer names it.
+reserved_node_ids_are_refused_test_() ->
+    Reserved = fun(Nid) -> file(#{i_nid => [Nid, 0, 0, 0, 0]}, [],
+                                [{Nid, ?NODES + 8, direct(Nid, 1, [?DATA + 1])}])
+               end,
+    [{"node id " ++ integer_to_list(Nid), ?_assertEqual({error, {nat, nid}}, slot(Reserved(Nid), ?B_DIRECT1))}
+     || Nid <- [?ERX_F2FS_NODE_INO, ?ERX_F2FS_META_INO]].
+
+%% The test file's inode changes that put Address in its slot 0.
+slot0(Address) ->
+    #{i_addr := [E1, E2, E3, _ | Rest]} = file_inode(#{}),
+    #{i_addr => [E1, E2, E3, Address | Rest]}.
 
 %% With inline xattrs the address array ends 50 words early ([F 48]): its
 %% last slot is 869, and file block 870 is direct node 1's first.

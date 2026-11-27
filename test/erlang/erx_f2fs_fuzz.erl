@@ -32,7 +32,8 @@
 %% dentry's name must end by its area's last slot (`size`). Every value a
 %% reader answers whose record has an encoder must read back from its encoding
 %% in the form erXos writes, an inode's i_ext with len 0 and its checksum aside
-%% (`round_trip`). A run reaches every rule of ?REACHED (failure `unreached`).
+%% (`round_trip`). A file's slot names only a valid main area block of a data
+%% log's segment (`kind`). A run reaches every rule of ?REACHED (failure `unreached`).
 -module(erx_f2fs_fuzz).
 -export([run/1]).
 
@@ -656,17 +657,12 @@ node_case() ->
     outcome(Kind, Result).
 
 %% The fixture file with one of its blocks mutated, by bytes or by a word set
-%% to a nid, an address or a node offset, then a slot, a read of up to four
-%% blocks or the file read as a symlink's target, through the need loop.
+%% to a nid, an address or a node offset, or with its inode's slot 0 naming
+%% one of its node blocks, then a slot, a read of up to four blocks or the
+%% file read as a symlink's target, through the need loop.
 walk_case() ->
     {#{superblock := Super} = Volume, Blocks} = erx_f2fs_core_tests:fixture_file(),
-    Address = pick(lists:sort(maps:keys(Blocks))),
-    Old = maps:get(Address, Blocks),
-    New = case rand:uniform(3) of
-              1 -> mutate_bytes(Old, ?BLOCK);
-              2 -> write_word(Old, walk_offset(), walk_value());
-              3 -> Old
-          end,
+    {Address, New} = walk_mutation(Blocks),
     Mutated = Blocks#{Address := maybe_fix_inode(Super, New)},
     Block = file_block(),
     Length = rand:uniform(4 * ?BLOCK),
@@ -690,10 +686,43 @@ walk_case() ->
     case Result of
         {ok, Bytes} when is_binary(Bytes), byte_size(Bytes) > max(Length, ?BLOCK) ->
             fail(size, byte_size(Bytes));
+        {ok, {_Nid, _Index, SlotAddress} = Slot}
+          when SlotAddress =/= ?ERX_F2FS_NULL_ADDR, SlotAddress =/= ?ERX_F2FS_NEW_ADDR ->
+            data_block(Volume, SlotAddress) orelse fail(kind, Slot);
         _ ->
             ok
     end,
     outcome(walk, Result).
+
+%% A block of the fixture file and its mutation. The inode lies at the main
+%% area's second block and its six nodes after it; its slot 0 follows three
+%% words of extra attributes.
+walk_mutation(Blocks) ->
+    case rand:uniform(4) of
+        4 ->
+            Inode = ?FIXTURE_MAIN + 1,
+            {Inode, write_word(maps:get(Inode, Blocks), ?ERX_F2FS_INODE_BLOCK_OFF_I_ADDR + 4 * 3,
+                               Inode + rand:uniform(7) - 1)};
+        Kind ->
+            Address = pick(lists:sort(maps:keys(Blocks))),
+            Old = maps:get(Address, Blocks),
+            {Address, case Kind of
+                          1 -> mutate_bytes(Old, ?BLOCK);
+                          2 -> write_word(Old, walk_offset(), walk_value());
+                          3 -> Old
+                      end}
+    end.
+
+%% Whether Address is a main area block the SIT marks valid in a segment it
+%% gives a data log ([F 21], [F 37]).
+data_block(#{superblock := #{main_blkaddr := Main}, sit := Sit}, Address) ->
+    Segment = (Address - Main) div (1 bsl ?ERX_F2FS_LOG_BLOCKS_PER_SEG),
+    Address >= Main andalso Segment < tuple_size(Sit) andalso
+        case element(Segment + 1, Sit) of
+            #{type := Type, valid_map := Map} ->
+                Type < ?ERX_F2FS_LOG_HOT_NODE andalso
+                    erx_f2fs_codec:bit(Map, (Address - Main) rem (1 bsl ?ERX_F2FS_LOG_BLOCKS_PER_SEG)) =:= 1
+        end.
 
 %% The fixture directory with one of its blocks mutated, by bytes or by a
 %% word set where its bitmap, a dentry record, or the inode's depth, level,

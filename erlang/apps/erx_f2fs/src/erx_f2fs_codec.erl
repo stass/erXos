@@ -81,7 +81,7 @@ a summary block is always written with an empty journal.
          encode_inode/2, encode_direct_node/2, encode_indirect_node/2,
          encode_dentry_block/1, empty_journal/0,
          dentry_hash/1, dentry_slots/1, bit/2, extra_attr_features/0,
-         nat_capacity/1, node_capacity/1, main_end/1, copy_blocks/1, bitmap_bytes/1,
+         nat_capacity/1, valid_nid/2, node_capacity/1, main_end/1, copy_blocks/1, bitmap_bytes/1,
          table_block/4, current_block/4]).
 -export_type([superblock/0, checkpoint/0, nat_entry/0, sit_entry/0,
               summary/0, inode/0, dentries/0, footer/0, failure/0]).
@@ -947,9 +947,12 @@ bound_hash_depth(#{i_mode := Mode, i_current_depth := Depth} = Inode)
 bound_hash_depth(Inode) ->
     Inode.
 
-%% A nid names a node when it is at least the root's and below the NAT's
-%% capacity, f2fs_nat_entries_per_block for each block of one of the NAT's
-%% two copies ([F 6], [F 36]).
+-doc """
+Whether Nid names a node of a volume whose superblock is Super: it is at
+least the root's, past 0 and the node and meta inodes' reserved nids, and
+below the NAT's capacity ([F 6], [F 36]).
+""".
+-spec valid_nid(superblock(), non_neg_integer()) -> boolean().
 valid_nid(Super, Nid) ->
     Nid >= ?ERX_F2FS_ROOT_INO andalso Nid < nat_capacity(Super).
 
