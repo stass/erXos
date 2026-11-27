@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'base64'
 require 'digest'
 require 'fileutils'
 require_relative 'error'
@@ -275,7 +274,7 @@ module Erx
     # A step's bytes from its base64 text, refused unless they are the bytes its size
     # line states.
     def output(text, bytes:, sha256:, line:)
-      decoded = Base64.strict_decode64(text)
+      decoded = text.unpack1('m0')
       refuse(line, "after #{decoded.bytesize} bytes of output") unless decoded.bytesize == bytes && Digest::SHA256.hexdigest(decoded) == sha256
       decoded
     rescue ArgumentError

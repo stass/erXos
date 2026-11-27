@@ -4,7 +4,6 @@
 # frozen_string_literal: true
 # erx-gate: fuzz timed
 
-require 'base64'
 require 'digest'
 require 'optparse'
 require_relative '../lib/erx/f2fs_oracle_guest'
@@ -30,7 +29,7 @@ module Erx
 
     # A step's lines as the guest prints them: its chunks, then its size line.
     def step(name, step, bytes)
-      chunks = Base64.strict_encode64(bytes).scan(/.{1,24}/).map { |chunk| "#{GUEST::PREFIX}out #{name} #{step} #{chunk}" }
+      chunks = [bytes].pack('m0').scan(/.{1,24}/).map { |chunk| "#{GUEST::PREFIX}out #{name} #{step} #{chunk}" }
       [*chunks, "#{GUEST::PREFIX}size #{name} #{step} #{bytes.bytesize} #{Digest::SHA256.hexdigest(bytes)}"]
     end
 

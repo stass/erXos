@@ -3,7 +3,6 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
-require 'base64'
 require 'digest'
 require 'fileutils'
 require 'open3'
@@ -35,7 +34,7 @@ class F2fsOracleGuestTest < Minitest::Test
 
   # A step's lines as the guest prints them: its chunks, then its size line.
   def lines(name, step, bytes)
-    chunks = Base64.strict_encode64(bytes).scan(/.{1,8}/).map { |chunk| "erx-f2fs: out #{name} #{step} #{chunk}" }
+    chunks = [bytes].pack('m0').scan(/.{1,8}/).map { |chunk| "erx-f2fs: out #{name} #{step} #{chunk}" }
     [*chunks, "erx-f2fs: size #{name} #{step} #{bytes.bytesize} #{Digest::SHA256.hexdigest(bytes)}"]
   end
 
