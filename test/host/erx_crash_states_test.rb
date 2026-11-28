@@ -33,7 +33,7 @@ class ErxCrashStatesTest < Minitest::Test
   PLAN = 'erlang/apps/erx_fat/src/erx_fat_plan.erl'
   ALLOC = 'erlang/apps/erx_fat/src/erx_fat_alloc.erl'
   STEP_LOOP = "apply([{_Step, Images} | Rest], Write, Flush) ->\n" \
-              "    case written(Images, Write) of\n" \
+              "    case written(Images, 0, Write) of\n" \
               "        ok ->\n" \
               "            case Flush() of\n"
 
