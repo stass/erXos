@@ -1306,7 +1306,9 @@ Two things finish volumes:
   ended alone (`erlang.erl:8120-8165`, `process_flag(max_heap_size,
   ...)`). The FAT server holds a batch's changes until it commits,
   measured as the sectors the batch will write, file data, directories
-  and FAT alike, and commits early once what they cost passes a quarter
+  and FAT alike, a FAT sector once however many FATs the boot sector
+  declares (its plan names the sector once and `erx_fat_plan` writes
+  it to every copy), and commits early once what they cost passes a quarter
   of the bound, each sector costed at what a collection counts for it:
   its image and the image a later change replaced, and four times its
   share of the batch's maps on the heap, 2 KiB in all, so a batch

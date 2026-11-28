@@ -22,6 +22,7 @@ module ErxFatFuzz
   CORE = 'erlang/apps/erx_fat/src/erx_fat.erl'
   DECODER = 'erlang/apps/erx_fat/src/erx_fat_read.erl'
   ALLOC = 'erlang/apps/erx_fat/src/erx_fat_alloc.erl'
+  PLAN = 'erlang/apps/erx_fat/src/erx_fat_plan.erl'
   FUZZ = 'test/erlang/erx_fat_fuzz.erl'
   # The directory changes the rounds make on a volume that passes the ownership
   # check, with the names and the case table they read, which the build generates.
@@ -57,7 +58,7 @@ module ErxFatFuzz
       File.binwrite(core_path, core_text)
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-I', File.join(ROOT, File.dirname(CORE)), '-o', work, core_path,
-                                       File.join(ROOT, DECODER), File.join(ROOT, ALLOC), File.join(ROOT, FUZZ),
+                                       File.join(ROOT, DECODER), File.join(ROOT, ALLOC), File.join(ROOT, PLAN), File.join(ROOT, FUZZ),
                                        *CHANGES.map { |source| File.join(ROOT, source) },
                                        Erx::Generated.path(CASE, root: ROOT),
                                        stdin_data: '')

@@ -227,6 +227,66 @@ a_removal_on_a_large_volume_costs_a_handful_of_sectors_test_() ->
                            finish(Pid)
                    end}.
 
+%% A volume whose boot sector declares 255 FATs, which the specification allows,
+%% cuts a file of 32,768 clusters to nothing and syncs within its memory bound: the
+%% release's plan names each FAT sector once, its 257 sectors reach every copy, and
+%% every copy then holds the first FAT's bytes with the chain free. Were each copy a
+%% write of its own, the plan would hold 65,280 writes, past the volume's bound.
+a_volume_of_255_fats_frees_a_long_chain_test_() ->
+    {timeout, 300, fun() ->
+                           Fats = 255,
+                           {Medium, FatSectors} = many_fats(Fats, 32_768),
+                           Proxy = ram(Medium, infinity),
+                           Pid = volume(Proxy, Medium),
+                           ?assertMatch(#{mount := rw}, erx_media_volume:outcome(Pid)),
+                           {ok, dir, Root} = erx_media_volume:root(Pid),
+                           {ok, file, F} = erx_media_volume:walk(Pid, Root, <<"LONG.DAT">>),
+                           {_, Before} = counts(Proxy),
+                           ok = erx_media_volume:truncate(Pid, F, 0),
+                           ok = erx_media_volume:fsync(Pid),
+                           ?assert(is_process_alive(Pid)),
+                           {_, After} = counts(Proxy),
+                           ?assert(After - Before >= 257 * Fats),
+                           Sector = fun(Lba) -> {ok, Bytes} = erx_media_medium:window(Proxy, {read, Lba, 1}), Bytes end,
+                           [begin
+                                First = Sector(32 + Index),
+                                [?assertEqual({Index, Copy, First}, {Index, Copy, Sector(32 + Copy * FatSectors + Index)})
+                                 || Copy <- lists:seq(1, Fats - 1)]
+                            end || Index <- [0, 128, 256]],
+                           <<_:12/binary, Third:32/little, _/binary>> = Sector(32),
+                           <<_:8/binary, Last:32/little, _/binary>> = Sector(32 + 256),
+                           ?assertEqual({0, 0}, {Third, Last}),
+                           finish(Pid)
+                   end}.
+
+%% A synthesized FAT32 medium of 70,000 one-sector clusters and Fats FATs whose root,
+%% cluster 2, holds LONG.DAT, a file of Clusters clusters chained from cluster 3; with
+%% the sectors of each FAT.
+many_fats(Fats, Clusters) ->
+    Count = 70_000,
+    FatSectors = ((Count + 2) * 4 + ?SECTOR - 1) div ?SECTOR,
+    Data = 32 + Fats * FatSectors,
+    Total = Data + Count,
+    Last = Clusters + 2,
+    Boot = <<16#eb, 16#58, 16#90, "ERXOS   ", ?SECTOR:16/little, 1, 32:16/little, Fats, 0:16, 0:16, 16#f8, 0:16,
+             0:16, 0:16, 0:32, Total:32/little, FatSectors:32/little, 0:16, 0:16, 2:32/little, 0:16, 0:16,
+             0:96, 16#80, 0, 16#29, 1:32/little, "NO NAME    ", "FAT32   ", 0:(420 * 8), 16#55, 16#aa>>,
+    Entry = fun(0) -> 16#0ffffff8;
+               (C) when C =:= 1; C =:= 2; C =:= Last -> 16#0fffffff;
+               (C) when C >= 3, C < Last -> C + 1;
+               (_) -> 0
+            end,
+    Root = erx_fat_entry:encode(erx_fat_entry:with_size(erx_fat_entry:new(<<"LONG    DAT">>, 0, file, 3, 315532800),
+                                                        Clusters * ?SECTOR)),
+    Sector = fun(0) -> Boot;
+                (S) when S >= 32, S < Data ->
+                     First = (S - 32) rem FatSectors * (?SECTOR div 4),
+                     << <<(Entry(C)):32/little>> || C <- lists:seq(First, First + ?SECTOR div 4 - 1) >>;
+                (S) when S =:= Data -> <<Root/binary, 0:((?SECTOR - byte_size(Root)) * 8)>>;
+                (_) -> <<0:(?SECTOR * 8)>>
+             end,
+    {{synthesized, Total, Sector}, FatSectors}.
+
 %% ---------------------------------------------------------------------------
 %% Files by fid
 %% ---------------------------------------------------------------------------

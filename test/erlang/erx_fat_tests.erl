@@ -265,6 +265,24 @@ a_link_out_of_the_data_area_or_free_is_refused_test() ->
          ?assertEqual({error, does_not_read}, erx_fat:read(File, 0, 1025, Fat))
      end || Value <- [0, 1, 16#fff0, 16#fff7, 60000]].
 
+%% A read-only mount's recovery read of a chain broken after its first cluster, by a
+%% free, reserved or bad entry or a link out of the data area: the check refuses the
+%% volume a writable mount, a read within the first cluster answers its bytes as the
+%% intact volume holds them, and a read one byte past it is refused, so no byte comes
+%% from a cluster the chain does not reach.
+a_broken_chain_answers_only_the_clusters_it_reaches_test() ->
+    Intact = mounted(image("fat16.img")),
+    {ok, Original} = path(Intact, [<<"sub">>, ?LONG]),
+    {ok, First} = erx_fat:read(Original, 0, 1024, Intact),
+    [begin
+         Fat = mounted(relinked(image("fat16.img"), fun(_, _) -> Value end)),
+         {ok, File} = path(Fat, [<<"sub">>, ?LONG]),
+         ?assertEqual({read_only, tree}, erx_fat:check(Fat)),
+         ?assertEqual({ok, First}, erx_fat:read(File, 0, 1024, Fat)),
+         ?assertEqual({ok, binary:part(First, 1000, 24)}, erx_fat:read(File, 1000, 24, Fat)),
+         ?assertEqual({error, does_not_read}, erx_fat:read(File, 1000, 25, Fat))
+     end || Value <- [0, 1, 16#fff0, 16#fff7, 60000]].
+
 a_chain_that_ends_early_is_refused_test() ->
     Fat = mounted(relinked(image("fat16.img"), fun(_, _) -> 16#ffff end)),
     ?assertEqual({error, does_not_read}, whole(Fat, [<<"sub">>, ?LONG])).

@@ -22,7 +22,8 @@ require_relative '../../test/fixtures/fat_volumes'
 module ErxFatAllocFuzz
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_fat/src/erx_fat.erl'
-  SOURCES = %w[erlang/apps/erx_fat/src/erx_fat_alloc.erl erlang/apps/erx_fat/src/erx_fat_read.erl
+  SOURCES = %w[erlang/apps/erx_fat/src/erx_fat_alloc.erl erlang/apps/erx_fat/src/erx_fat_plan.erl
+               erlang/apps/erx_fat/src/erx_fat_read.erl
                erlang/apps/erx_fat/src/erx_fat_name.erl erlang/apps/erx_fat/src/erx_fat_entry.erl
                test/erlang/erx_fat_alloc_tests.erl test/erlang/erx_fat_alloc_fuzz.erl].freeze
   # The case table erx_fat_name reads, which the build generates.

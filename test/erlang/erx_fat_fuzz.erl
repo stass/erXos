@@ -44,7 +44,7 @@ run([Seed, Directory]) ->
     Volumes =/= [] orelse error(no_seed_volumes),
     {ok, Hello} = file:read_file(filename:join([Directory, "tree", "hello.txt"])),
     %% Loaded before the first round counts atoms, since loading a module makes its atoms.
-    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_fat, erx_fat_read, erx_fat_alloc, erx_fat_dir,
+    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_fat, erx_fat_read, erx_fat_alloc, erx_fat_plan, erx_fat_dir,
                                                              erx_fat_name, erx_fat_entry, erx_fat_case, atomics, binary, lists,
                                                              maps, unicode, unicode_util, calendar, string, proplists, filename]],
     Mounted = lists:sum([round_of(lists:nth(rand:uniform(length(Volumes)), Volumes), Hello)
@@ -197,8 +197,10 @@ finished(B) ->
         {error, _} = Error -> Error
     end.
 
+%% Plan written into the image through the plans' one writer.
 applied(Plan) ->
-    put(fuzz_image, maps:merge(get(fuzz_image), maps:from_list([W || {_Step, Writes} <- Plan, W <- Writes]))).
+    ok = erx_fat_plan:apply(Plan, fun(Sector, Bytes) -> put(fuzz_image, (get(fuzz_image))#{Sector => Bytes}), ok end,
+                            fun() -> ok end).
 
 names(Dir, Fat) ->
     case erx_fat:list(Dir, Fat) of

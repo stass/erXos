@@ -113,7 +113,7 @@ watched(#{fat_start := Start, fat_sectors := FatSectors, fsinfo := FsInfo}) ->
 %% the server reads and its mirrors in steps of their own, so the copies agree across
 %% the plan, not within each step.
 planned(Plan, L = #{fat_start := Start, fats := Fats, fat_sectors := FatSectors, fsinfo := FsInfo}) ->
-    Writes = [Write || {_Step, Step} <- Plan, Write <- Step],
+    Writes = [Write || {_Step, Images} <- Plan, Write <- erx_fat_alloc_tests:plan_writes(Images)],
     [inside(L, Sector) orelse error({write_outside, Sector}) || {Sector, _} <- Writes],
     Last = maps:from_list([Write || {Sector, _} = Write <- Writes, Sector =/= FsInfo]),
     Groups = maps:groups_from_list(fun({Sector, _}) -> (Sector - Start) rem FatSectors end,

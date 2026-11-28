@@ -187,7 +187,8 @@ committed(Fat, Apply, B) ->
 %% Plan applied step by step, the volume checked at every cut inside each step:
 %% each write of the step alone, and the step without each write.
 cuts(Fat, Plan) ->
-    lists:foreach(fun({Step, Writes}) ->
+    lists:foreach(fun({Step, Images}) ->
+                          Writes = erx_fat_alloc_tests:plan_writes(Images),
                           [cut(Fat, Step, Some) || W <- Writes, Some <- [[W], Writes -- [W]]],
                           erx_fat_alloc_tests:apply_plan([{Step, Writes}]),
                           ?assertEqual({Step, ok}, {Step, erx_fat:check(Fat)})

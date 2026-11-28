@@ -33,8 +33,12 @@ and no chain reaches a free cluster.
   commit. Releases are chosen only at commit, after every allocation of the
   batch, and a waiting chain's entries are not free on the medium, so a cluster
   freed in a batch is allocated again only in a later one, by construction.
-* **Every copy.** Each sector goes to every FAT, the first first, built from the
-  first's bytes; a FAT32 entry keeps the top four bits it was read with.
+* **Every copy.** Each sector goes to every FAT, built from the first's bytes; a
+  FAT32 entry keeps the top four bits it was read with. A plan names each FAT
+  sector once, as its place and its copies (erx_fat_plan:copies/3), and
+  erx_fat_plan writes the first FAT's before the others', so a plan's size follows
+  the sectors a batch holds whatever count of FATs the boot sector declares, which
+  the specification lets be any from 1.
 * **Allocation.** Next-fit from the cluster after the last one the mount
   allocated, starting at the first: the first run of clusters free on the medium
   and not in the batch long enough for the request, or failing that the first
@@ -108,7 +112,7 @@ allocator as it was.
 -define(HELD_SECTOR_WORDS, 30).
 -define(HELD_SECTOR_BYTES, ((2 * ?SECTOR + 4 * ?HELD_SECTOR_WORDS * 8 + 1023) div 1024 * 1024)).
 %% The sectors a batch holds before it commits (erx_fat_dir:full/1) and the FAT
-%% sectors one release step writes at most: a quarter of the volume's memory bound,
+%% sectors one release step names at most: a quarter of the volume's memory bound,
 %% media_volume_bytes, at what each costs.
 -define(BATCH_SECTORS, (?ERX_MEDIA_VOLUME_BYTES div 4 div ?HELD_SECTOR_BYTES)).
 
@@ -117,7 +121,7 @@ allocator as it was.
 -type layout() :: #{read := read_sector(), type := 16 | 32, fat_start := pos_integer(), fats := pos_integer(),
                     fat_sectors := pos_integer(), clusters := pos_integer(), fsinfo := pos_integer() | none}.
 -type step() :: dirty | dirty_mirrors | preparation | linking | publication | cutting | release | clean_mirrors | clean.
--type plan() :: [{step(), [{non_neg_integer(), binary()}]}].
+-type plan() :: [{step(), [{erx_fat_plan:place(), binary()}]}].
 -type finding() :: does_not_read | read_failed | no_space.
 
 %% next is where the next search starts; allocated whether the mount has allocated
@@ -179,7 +183,7 @@ writable(#{}) -> ok.
 
 -doc """
 The sectors a batch holds, by held/1's measure and erx_fat_dir's, before it
-commits, and the FAT sectors one release step writes at most: a quarter of
+commits, and the FAT sectors one release step names at most: a quarter of
 media_volume_bytes at what one held sector costs the volume's memory bound.
 """.
 -spec batch_sectors() -> pos_integer().
@@ -504,11 +508,11 @@ finish(Alloc = #alloc{allocated = Allocated}, Entry) ->
 %% waiting after it.
 batch_plan(Alloc) ->
     BySector = lists:sort(maps:to_list(by_sector(Alloc))),
-    Steps = [{Step, copies(Alloc, [{Index, patched(Alloc, Index, upto(Step, Entries))}
+    Steps = [{Step, fat_writes(Alloc, [{Index, patched(Alloc, Index, upto(Step, Entries))}
                                    || {Index, Entries} <- BySector, lists:keymember(Step, 1, Entries)])}
              || Step <- ?STEPS],
     {Released, Waiting} = release(Alloc, maps:from_list(BySector), Alloc#alloc.waiting, #{}),
-    {[{Step, Writes} || {Step, Writes} <- Steps ++ [{release, copies(Alloc, Released)}], Writes =/= []], Waiting}.
+    {[{Step, Writes} || {Step, Writes} <- Steps ++ [{release, fat_writes(Alloc, Released)}], Writes =/= []], Waiting}.
 
 %% Entries' {Cluster, Value} of Step and of the steps before it.
 %% A cluster written in two steps takes the later step's value.
@@ -592,24 +596,31 @@ put_entry(Alloc = #alloc{type = Type}, Cluster, Value, Sector) ->
 encode(16, _Old, Value) -> Value;
 encode(32, Old, Value) -> (Old band ?RESERVED_32) bor (Value band ?VALUE_32).
 
-%% Sectors of the first FAT, each written to every FAT, the first first.
-copies(#alloc{fat_start = FatStart, fats = Fats, fat_sectors = FatSectors}, Sectors) ->
-    [{FatStart + Copy * FatSectors + Index, Bytes} || Copy <- lists:seq(0, Fats - 1), {Index, Bytes} <- Sectors].
+%% Sectors of the first FAT, each to be written to every FAT, named once.
+fat_writes(Alloc, Sectors) -> [{place(Alloc, Index), Bytes} || {Index, Bytes} <- Sectors].
+
+%% The place of sector Index of the first FAT and its copies in the others.
+place(#alloc{fat_start = FatStart, fats = Fats, fat_sectors = FatSectors}, Index) ->
+    erx_fat_plan:copies(FatStart + Index, FatSectors, Fats).
 
 %% Steps without a write left out.
 written_steps(Steps) -> [Step || {_Name, [_ | _]} = Step <- Steps].
 
 %% The second entry, rewritten by Change, in every FAT, its sector as Plan last wrote
 %% it, or as the medium holds it: {the FAT the server reads, the other copies}.
-flag_writes(Alloc = #alloc{type = Type, fat_start = FatStart}, Change, Plan) ->
-    Sector = case [Bytes || {_Step, Writes} <- Plan, {Index, Bytes} <- Writes, Index =:= FatStart] of
+flag_writes(Alloc = #alloc{type = Type, fat_start = FatStart, fats = Fats, fat_sectors = FatSectors}, Change, Plan) ->
+    Sector = case [Image || {_Step, Writes} <- Plan, {Place, Image} <- Writes, erx_fat_plan:first(Place) =:= FatStart] of
                  [] -> fat_sector(Alloc, 0);
                  Written -> lists:last(Written)
              end,
     Offset = Type div 8,
-    <<First:Offset/binary, Entry:Type/little, After/binary>> = Sector,
-    [Read | Mirrors] = copies(Alloc, [{0, <<First/binary, (Change(Entry)):Type/little, After/binary>>}]),
-    {[Read], Mirrors}.
+    <<Before:Offset/binary, Entry:Type/little, After/binary>> = Sector,
+    Bytes = <<Before/binary, (Change(Entry)):Type/little, After/binary>>,
+    Mirrors = case Fats of
+                  1 -> [];
+                  _ -> [{erx_fat_plan:copies(FatStart + FatSectors, FatSectors, Fats - 1), Bytes}]
+              end,
+    {[{FatStart, Bytes}], Mirrors}.
 
 entry1(clean, Clean, _Type) -> fun(Old) -> Old bor Clean end;
 entry1(correct, _Clean, 16) -> fun(_Old) -> ?EOC_16 end;

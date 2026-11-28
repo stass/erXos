@@ -13,7 +13,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% The image helpers test/erlang/erx_fat_alloc_fuzz.erl shares.
--export([use/1, reader/0, apply_plan/1, flat/0, entries/1, entry/3, op/3, verify/1, collect/2, finished/1]).
+-export([use/1, reader/0, apply_plan/1, plan_writes/1, flat/0, entries/1, entry/3, op/3, verify/1, collect/2, finished/1]).
 
 -define(SECTOR, 512).
 -define(UNKNOWN, 16#ffffffff).
@@ -43,7 +43,19 @@ write(Writes) ->
     {Base, Written} = get(image),
     put(image, {Base, maps:merge(Written, maps:from_list(Writes))}).
 
-apply_plan(Plan) -> [write(Writes) || {_Step, Writes} <- Plan].
+apply_plan(Plan) -> [write(plan_writes(Images)) || {_Step, Images} <- Plan].
+
+%% A step's images as erx_fat_plan:apply/3 writes them, {Sector, Bytes}, in its order.
+plan_writes(Images) ->
+    Ref = make_ref(),
+    ok = erx_fat_plan:apply([{step, Images}], fun(Sector, Bytes) -> self() ! {Ref, Sector, Bytes}, ok end,
+                            fun() -> ok end),
+    recorded(Ref).
+
+recorded(Ref) ->
+    receive {Ref, Sector, Bytes} -> [{Sector, Bytes} | recorded(Ref)]
+    after 0 -> []
+    end.
 
 flat() ->
     {Base, _} = get(image),
@@ -205,7 +217,7 @@ batches(A, L, Tops, Pre, Left) ->
                                 end,
                         [?assertEqual(Run, walk(L, hd(Run))) || not lists:member(Step, [preparation, linking]), Run <- Runs],
                         [?assertEqual(in_sector(L, Run), walk(L, hd(Run))) || Step =:= linking, Run <- Runs],
-                        write(Writes),
+                        write(plan_writes(Writes)),
                         [?assertEqual([], [C || C <- Freed, value(L, C) =:= 0]) || Step =/= release],
                         files_hold(L, Tops, Shown, Own),
                         Shown
@@ -316,7 +328,7 @@ every_fat_is_written_in_the_same_step_the_first_first_test() ->
          ?assertEqual(Sectors, lists:sort(Sectors)),
          Copies = [[Bytes || {Index, Bytes} <- Writes, (Index - Start) div FatSectors =:= Copy] || Copy <- [0, 1, 2]],
          ?assertMatch([Same, Same, Same], Copies)
-     end || Writes <- [Preparation, Linking]].
+     end || Writes <- [plan_writes(Preparation), plan_writes(Linking)]].
 
 a_run_starts_after_the_last_cluster_allocated_and_wraps_test() ->
     L = synthetic(16, 40, 1, fun zero/1),
@@ -362,7 +374,7 @@ a_long_chain_is_released_over_several_batches_each_within_the_bound_test_() ->
              {ok, Plan, A1} = erx_fat_alloc:commit(A),
              ?assertEqual([cutting, release], [Step || {Step, _} <- Plan]),
              Released = proplists:get_value(release, Plan),
-             ?assertEqual(lists:seq(2, 2 + Bound - 1), [Sector || {Sector, _} <- Released]),
+             ?assertEqual(lists:seq(2, 2 + Bound - 1), [Sector || {Sector, _} <- plan_writes(Released)]),
              apply_plan(Plan),
              ?assertEqual(1, erx_fat_alloc:held(A1)),
              ?assertEqual([2], walk(L, 2)),
@@ -386,6 +398,32 @@ a_release_ends_on_a_medium_that_forgets_its_writes_test_() ->
              {ok, A} = erx_fat_alloc:shrink(erx_fat_alloc:new(L), 2, 1),
              Passes = 140000 div (erx_fat_alloc:batch_sectors() * 128) + 2,
              ?assertEqual({error, does_not_read}, forgetful(A, Passes))
+     end}.
+
+%% A plan names each FAT sector once, whatever count of FATs the boot sector
+%% declares (the specification allows any count from 1): the release of a chain
+%% cut on a volume of 255 FATs holds a batch's worth of FAT sectors and costs the
+%% heap what one FAT's release does, and only its writes go to every copy, the
+%% first FAT's as one FAT's release writes them. Were each copy a write of its own,
+%% the plan would hold 255 writes a sector, past the volume's memory bound.
+a_plan_names_each_fat_sector_once_whatever_the_count_of_fats_test_() ->
+    {timeout, 120,
+     fun() ->
+             Bound = erx_fat_alloc:batch_sectors(),
+             L = long_chain(140000, 16#0fffffff),
+             Released = fun(Fats) ->
+                                {ok, A} = erx_fat_alloc:shrink(erx_fat_alloc:new(L#{fats := Fats}), 2, 1),
+                                {ok, Plan, _} = erx_fat_alloc:commit(A),
+                                proplists:get_value(release, Plan)
+                        end,
+             One = Released(1),
+             Many = Released(255),
+             ?assertEqual(Bound, length(Many)),
+             ?assertEqual(erts_debug:flat_size(One), erts_debug:flat_size(Many)),
+             Writes = plan_writes(Many),
+             ?assertEqual(255 * Bound, length(Writes)),
+             #{fat_start := Start, fat_sectors := FatSectors} = L,
+             ?assertEqual(plan_writes(One), [W || {S, _} = W <- Writes, S < Start + FatSectors])
      end}.
 
 forgetful(_A, 0) -> gave_up;
