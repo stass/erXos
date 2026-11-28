@@ -45,10 +45,11 @@ write(Writes) ->
 
 apply_plan(Plan) -> [write(plan_writes(Images)) || {_Step, Images} <- Plan].
 
-%% A step's images as erx_fat_plan:apply/3 writes them, {Sector, Bytes}, in its order.
+%% A step's images as erx_fat_plan:apply/4 writes them a sector a run, {Sector, Bytes},
+%% in its order.
 plan_writes(Images) ->
     Ref = make_ref(),
-    ok = erx_fat_plan:apply([{step, Images}], fun(Sector, Bytes) -> self() ! {Ref, Sector, Bytes}, ok end,
+    ok = erx_fat_plan:apply([{step, Images}], 1, fun(Sector, 1, Bytes) -> self() ! {Ref, Sector, Bytes}, ok end,
                             fun() -> ok end),
     recorded(Ref).
 

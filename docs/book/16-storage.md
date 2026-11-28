@@ -523,7 +523,8 @@ FAT](../design-storage.md#removable-media-fat)). It reads and writes
 FAT16 and FAT32 with long names, refuses FAT12 by name, matches names without regard to case as Windows does, and
 reports files as mode `0644`, since FAT has no owners. FAT keeps no
 journal, so the server commits changes in batches whose steps it orders
-with flushes, each reference written after what it refers to, and a
+with flushes, each step sent as runs of contiguous sectors as long as
+one request carries, each reference written after what it refers to, and a
 power cut loses at most the batch it interrupts; and since the batches
 keep every cluster in one file only on a volume that starts so, it
 mounts a volume writable only after checking that no two names share a

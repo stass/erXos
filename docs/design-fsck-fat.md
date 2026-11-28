@@ -250,7 +250,7 @@ fsck_fat /media/raw/disk0/s1.data
    the steps' order means nothing. Then `erx_fat_check:write/4` writes
    the repair step by step, in the order of
    [Writing a repair](#writing-a-repair): it reads the sectors the step
-   changes, patches them, and hands the images to `erx_fat_plan:apply/3`,
+   changes, patches them, and hands the images to `erx_fat_plan:apply/4`,
    which writes them and flushes. The FAT server's volume process writes
    each step of its batches through the same function, with the window
    proxy's write and flush, so a step has one writer.
@@ -488,7 +488,7 @@ the window's deadline, 35 s.
 Each step is computed when its turn comes, from what the medium then
 holds: `erx_fat_check:write/4` reads every sector the step's edits fall
 in, patches the edited bytes, and writes the images through
-`erx_fat_plan:apply/3`, which writes them and flushes. The steps:
+`erx_fat_plan:apply/4`, which writes them and flushes. The steps:
 
 1. **`dirty`, `dirty_mirrors`**: `erx_fat_alloc:dirty/1` over the
    medium as it reads: the clean bit cleared in the first FAT, then in
@@ -584,7 +584,7 @@ wrong ([design-drives.md](design-drives.md#the-writable-rule)): when
 `erx_fat_check` in its **first-finding mode**, which stops at the first
 finding other than the dirty mark. If there is none, the process writes
 a repair whose only steps are `clean_mirrors` and `clean`, through
-`erx_fat_plan:apply/3`, and mounts the volume writable. Any other
+`erx_fat_plan:apply/4`, and mounts the volume writable. Any other
 finding, a bound, or a read, write or flush that fails keeps the volume
 read-only `dirty`, and nothing more is written. A lost chain is a
 finding, so a volume cut while a file was growing stays read-only for
@@ -815,7 +815,7 @@ byte, which FreeBSD does not check; `erx_fat_name:checksum/1`;
 files.
 
 New: `erx_fat_check`, which decides the findings and edits and writes
-them step by step; `erx_fat_plan:apply/3`, the write of a plan's steps, each
+them step by step; `erx_fat_plan:apply/4`, the write of a plan's steps, each
 step's sectors and then a flush, taken out of `erx_media_volume:applied/2`, which
 then calls it with its plans; a reason with each admission refusal of
 `erx_fat`, so the checker can print what is wrong; `finish/1`'s value

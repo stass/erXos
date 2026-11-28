@@ -104,8 +104,46 @@ changes(Pid) ->
 %% directory sector that loses a name and gains one, is flushed between, as every step is.
 flushed_between_steps(Log) ->
     lists:foldl(fun(flush, _Seen) -> #{};
-                   ({write, Lba}, Seen) -> ?assertNot(is_map_key(Lba, Seen)), Seen#{Lba => true}
+                   ({write, Lba, Count}, Seen) ->
+                        Sectors = lists:seq(Lba, Lba + Count - 1),
+                        ?assertEqual([], [S || S <- Sectors, is_map_key(S, Seen)]),
+                        maps:merge(Seen, maps:from_keys(Sectors, true))
                 end, #{}, Log).
+
+%% A 1 MiB file written in order reaches the window in runs: each batch's data,
+%% FAT sectors and directory sector as runs of contiguous sectors of at most the
+%% window's max_sectors, so its 2,048 sectors of data take about 2,048 / 64 window
+%% writes, with each batch's FAT runs, one to each FAT, and its directory sector
+%% beside them; never one write a sector.
+a_sequential_mib_reaches_the_window_in_runs_test_() ->
+    [{Name, {timeout, 300, fun() -> sequential_mib(Name) end}} || Name <- ["fat16.img", "fat32.img"]].
+
+sequential_mib(Name) ->
+    Base = image(Name),
+    Proxy = ram(Base, infinity),
+    Pid = volume(Proxy, Base),
+    {ok, dir, Root} = erx_media_volume:root(Pid),
+    {ok, file, Path} = erx_media_volume:create(Pid, Root, <<"mib.bin">>),
+    ok = erx_media_volume:fsync(Pid),
+    {_, Before} = counts(Proxy),
+    %% Each write a binary of its own, as a 9P server hands the volume, not a part of
+    %% the 1 MiB one, which the volume's memory bound would count whole.
+    Mib = << <<(I rem 253)>> || I <- lists:seq(1, 1 bsl 20) >>,
+    [{ok, 65536} = erx_media_volume:write(Pid, Path, N * 65536, binary:copy(binary:part(Mib, N * 65536, 65536))) || N <- lists:seq(0, 15)],
+    ok = erx_media_volume:fsync(Pid),
+    {_, After} = counts(Proxy),
+    Sectors = (1 bsl 20) div ?SECTOR,
+    %% A run of data for each max_sectors of it, and for each of the batches of 256
+    %% held sectors the file takes, about 9, a data run cut at the batch's end, a FAT
+    %% run to each FAT in its preparation and linking steps, and its directory
+    %% sector: 70 writes on fat16.img, 72 on fat32.img.
+    Bound = Sectors div erx_ram_window:max_sectors() + 9 * 6,
+    ?assert(After - Before =< Bound, {Name, After - Before, Bound}),
+    finish(Pid),
+    {Medium, _, Log} = ram_final(Proxy),
+    flushed_between_steps(Log),
+    ?assertMatch({0, _}, erx_fat_alloc_tests:verify(Medium)),
+    ?assertEqual({<<"mib.bin">>, Mib}, lists:keyfind(<<"mib.bin">>, 1, extracted(Medium))).
 
 %% ---------------------------------------------------------------------------
 %% Cuts and refusals
@@ -229,7 +267,7 @@ a_removal_on_a_large_volume_costs_a_handful_of_sectors_test_() ->
 
 %% A volume whose boot sector declares 255 FATs, which the specification allows,
 %% cuts a file of 32,768 clusters to nothing and syncs within its memory bound: the
-%% release's plan names each FAT sector once, its 257 sectors reach every copy, and
+%% release's plan names each FAT sector once, its 257 sectors reach every copy in runs, and
 %% every copy then holds the first FAT's bytes with the chain free. Were each copy a
 %% write of its own, the plan would hold 65,280 writes, past the volume's bound.
 a_volume_of_255_fats_frees_a_long_chain_test_() ->
@@ -246,7 +284,9 @@ a_volume_of_255_fats_frees_a_long_chain_test_() ->
                            ok = erx_media_volume:fsync(Pid),
                            ?assert(is_process_alive(Pid)),
                            {_, After} = counts(Proxy),
-                           ?assert(After - Before >= 257 * Fats),
+                           %% Each copy's 257 sectors in runs of the window's max_sectors.
+                           Runs = (257 + erx_ram_window:max_sectors() - 1) div erx_ram_window:max_sectors(),
+                           ?assert(After - Before >= Runs * Fats),
                            Sector = fun(Lba) -> {ok, Bytes} = erx_media_medium:window(Proxy, {read, Lba, 1}), Bytes end,
                            [begin
                                 First = Sector(32 + Index),

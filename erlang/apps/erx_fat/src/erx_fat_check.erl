@@ -1165,8 +1165,9 @@ kept(_Head, too_large) -> "; kept: larger than 4 GiB".
 Repair written to the volume that Read reads and Write writes, step by step in the
 design's order ("The repair order"), each step in commits of at most
 ?COMMIT_SECTORS sectors: a commit reads its sectors as the medium then holds them,
-writes their patched images and flushes, through erx_fat_plan:apply/3, before the
-next commit reads. First `dirty` and `dirty_mirrors`, by erx_fat_alloc:dirty/1;
+writes their patched images a sector at a time, as Write takes them, and flushes,
+through erx_fat_plan:apply/4, before the next commit reads. First `dirty` and
+`dirty_mirrors`, by erx_fat_alloc:dirty/1;
 then `preparation`, `cutting`, `publication` and `fsinfo`; then `mirrors`, every
 used sector of each copy that differs from the first FAT's written with the first
 FAT's; last `clean_mirrors` and `clean`, by erx_fat_alloc:finish/2 with FreeBSD's
@@ -1226,7 +1227,7 @@ commits(Sectors) ->
 committed(_Step, [], _Writer) ->
     ok;
 committed(Step, Images, #{write := Write, flush := Flush}) ->
-    case erx_fat_plan:apply([{Step, Images}], Write, Flush) of
+    case erx_fat_plan:apply([{Step, Images}], 1, fun(Sector, 1, Bytes) -> Write(Sector, Bytes) end, Flush) of
         ok -> ok;
         {error, Why} -> write_failed(Why);
         Other -> write_failed({unexpected, Other})

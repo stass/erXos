@@ -1940,6 +1940,31 @@ designed. It maps the format onto the file protocol as follows:
   never leaves a volume that reads clean with FATs that disagree, which
   fsimg's verify refuses ("mirrored FAT entries disagree").
 
+  A step's writes reach the window as **runs**: the step's sectors of the
+  first FAT, data and directories in ascending order, then each copy's,
+  each run the longest stretch of contiguous sectors up to the most one
+  request carries (the window's `max_sectors`), written as one request.
+  No flush lies inside a step, so no rule orders its writes and a medium
+  may land them in any order and any part; the runs change how many
+  requests carry them, not which states a cut can leave. So a sequential
+  copy costs one request for each `max_sectors` of its data, a few for
+  each batch's FAT and directory sectors, and the batch's flushes.
+  Every flush but one serves a rule above: after preparation and linking, so a
+  link or a name reaches only what is on the medium; after publication,
+  so a size shrinks before its chain is cut; after cutting, so nothing
+  reaches a cluster that release frees; after a batch's last step, so an
+  `fsync` and the finish answer only what is durable and the 5 s commit
+  leaves nothing in the medium's cache; and after each of the dirty
+  flag's steps: set in the FAT the server reads before the others, and
+  in the others, with FSInfo's hints marked unknown, before the first
+  change; cleared in the others before the FAT the server reads; and at
+  the finish, after the last batch, so the clean flag reaches the medium
+  only after every change it vouches for. The one other is that a batch
+  committed because it is full flushes after its last step too, which no
+  rule needs, since the next batch's first flush would cover it; so every
+  commit ends the same way, and the volume never owes a flush between
+  batches.
+
   Every cluster a batch frees belongs to a chain that no name reaches: a
   removed file's, once no fid names the file ("Removing a file" below),
   or the tail that a shrink's cut leaves. The server keeps such a chain

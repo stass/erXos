@@ -130,7 +130,8 @@ medium_answer(_Fd, Sectors, info) ->
 medium_answer(Fd, Sectors, {read, Lba, Count}) when Count >= 1, Count =< ?RUN, Lba + Count =< Sectors ->
     {ok, _} = file:pread(Fd, Lba * ?SECTOR, Count * ?SECTOR);
 medium_answer(Fd, Sectors, {write, Lba, Bytes})
-  when byte_size(Bytes) > 0, byte_size(Bytes) rem ?SECTOR =:= 0, Lba + byte_size(Bytes) div ?SECTOR =< Sectors ->
+  when byte_size(Bytes) > 0, byte_size(Bytes) rem ?SECTOR =:= 0, byte_size(Bytes) div ?SECTOR =< ?RUN,
+       Lba + byte_size(Bytes) div ?SECTOR =< Sectors ->
     file:pwrite(Fd, Lba * ?SECTOR, Bytes);
 medium_answer(_Fd, _Sectors, flush) ->
     ok;

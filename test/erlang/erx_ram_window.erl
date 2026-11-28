@@ -24,8 +24,8 @@
 %%
 %% A read of one to max_sectors/0 sectors, a USB transport's max_sectors, which `info`
 %% reports, answers a copy of its sectors, as the window does, never a sub-binary of
-%% the whole medium, which a volume's memory bound counts; a longer one is `einval`,
-%% as the window's. The window keeps a tally of the reads it was asked for, by their
+%% the whole medium, which a volume's memory bound counts; a longer read or write is
+%% `einval`, as the window's. The window keeps a tally of the reads it was asked for, by their
 %% counts of sectors, which reads/1 answers. Sent `stall`, the window
 %% answers nothing more, as a stick that hangs; sent `stop`, it ends. It also ends
 %% once final/1 has its medium or when the process that started it ends, so no
@@ -75,10 +75,10 @@ mark(Window, {Kind, I} = Mark) when (Kind =:= 'begin' orelse Kind =:= answered),
     {ok, ok} = gen:call(Window, '$gen_call', {mark, Mark}),
     ok.
 
-%% The medium as Window leaves it, its count of applied writes, its log of written
-%% sectors and flushes, and its trace (empty unless recording), as it ends. A
+%% The medium as Window leaves it, its count of applied writes, its log of flushes and
+%% applied writes, each {write, Lba, Count}, its first sector and count, and its trace (empty unless recording), as it ends. A
 %% window that ended before fails the test rather than leaving it waiting.
--spec final(pid()) -> #{medium := binary() | synthesized, writes := non_neg_integer(), log := [flush | {write, non_neg_integer()}],
+-spec final(pid()) -> #{medium := binary() | synthesized, writes := non_neg_integer(), log := [flush | {write, non_neg_integer(), pos_integer()}],
                         trace := trace()}.
 final(Window) ->
     Ref = erlang:monitor(process, Window),
@@ -89,7 +89,7 @@ final(Window) ->
     end.
 
 %% final/1's medium, count of writes and log, as the volume tests read them.
--spec ram_final(pid()) -> {binary() | synthesized, non_neg_integer(), [flush | {write, non_neg_integer()}]}.
+-spec ram_final(pid()) -> {binary() | synthesized, non_neg_integer(), [flush | {write, non_neg_integer(), pos_integer()}]}.
 ram_final(Window) ->
     #{medium := Medium, writes := Writes, log := Log} = final(Window),
     {Medium, Writes, Log}.
@@ -160,6 +160,8 @@ answer({read, _Lba, _Count}, S) ->
 answer(flush, #{flush := Flush, notify := Notify, log := Log} = S) ->
     _ = Notify =:= none orelse (Notify ! {flushed, self()}),
     {Flush, traced({flush, Flush}, S#{log := [flush | Log]})};
+answer({write, _Lba, Bytes}, S) when is_binary(Bytes), byte_size(Bytes) > ?MAX_SECTORS * ?SECTOR ->
+    {{error, einval}, S};
 answer({write, Lba, Bytes}, #{writes := Writes, cut := Cut} = S) when Writes >= Cut ->
     {{error, eio}, traced({write, Lba, Bytes, {error, eio}}, S)};
 answer({write, Lba, Bytes}, #{sectors := Sectors, written := Written, writes := Writes, log := Log} = S)
@@ -167,7 +169,7 @@ answer({write, Lba, Bytes}, #{sectors := Sectors, written := Written, writes := 
        Lba + byte_size(Bytes) div ?SECTOR =< Sectors ->
     Placed = maps:from_list([{Lba + I, binary:copy(Part)} || {I, Part} <- lists:enumerate(0, split(Bytes))]),
     {ok, traced({write, Lba, Bytes, ok},
-                S#{written := maps:merge(Written, Placed), writes := Writes + 1, log := [{write, Lba} | Log]})};
+                S#{written := maps:merge(Written, Placed), writes := Writes + 1, log := [{write, Lba, byte_size(Bytes) div ?SECTOR} | Log]})};
 answer({mark, Mark}, S) ->
     {ok, traced(Mark, S)};
 answer(Unserved, _S) ->

@@ -199,7 +199,7 @@ finished(B) ->
 
 %% Plan written into the image through the plans' one writer.
 applied(Plan) ->
-    ok = erx_fat_plan:apply(Plan, fun(Sector, Bytes) -> put(fuzz_image, (get(fuzz_image))#{Sector => Bytes}), ok end,
+    ok = erx_fat_plan:apply(Plan, 1, fun(Sector, 1, Bytes) -> put(fuzz_image, (get(fuzz_image))#{Sector => Bytes}), ok end,
                             fun() -> ok end).
 
 names(Dir, Fat) ->

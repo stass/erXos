@@ -51,7 +51,7 @@ Decisions every reader needs:
 ### The problem
 
 The FAT server writes each batch as a plan of steps, each step's writes
-followed by a flush (`erx_fat_plan:apply/3`, through which
+followed by a flush (`erx_fat_plan:apply/4`, through which
 `erx_media_volume` writes), and its safety
 across a cut rests on that order and on the device honouring the flush
 ([design-storage.md](design-storage.md#removable-media-fat)).
@@ -162,8 +162,9 @@ log format is known only from GPL code. It is
   `fault-harness` branch) holds design-recovery's fault plans, and the
   fake stick takes its faults from it; moving the window proxies onto
   it is a `docs/todo-build.md` item there.
-* The FAT server writes one sector per window write and a flush after
-  each step (`erx_fat_plan:apply/3`, called from `erx_media_volume`'s
+* The FAT server writes each step's sectors as runs of contiguous
+  sectors, up to the window's `max_sectors` a write, which the generator
+  splits into sectors, and a flush after each step (`erx_fat_plan:apply/4`, called from `erx_media_volume`'s
   `applied/2`), and ends the volume, by `answered/1` beside `applied/2`, at the
   first request answered with an error (`answered/1`, beside them);
   `erx_fat_dir:commit/1` answers the steps (`erx_fat_dir.erl`, module

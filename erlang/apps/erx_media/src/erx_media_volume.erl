@@ -334,10 +334,13 @@ handle_continue(mount, #{proxy := Proxy, volume := #{length := Length} = Volume}
         {ok, Mount} ->
             Started = erlang:monotonic_time(millisecond),
             Read = fun(Sector) -> read_run(Proxy, Volume, Sector, 1) end,
-            {Outcome, Fat} = mounted(erx_media_probe:format(Read, Length, ?WRITTEN), Read, Length, Proxy, Volume),
+            %% The most sectors one window request carries, for the ownership check's
+            %% reads and the batches' writes.
+            Mounting = State#{run_max => erx_media_medium:run_sectors(erx_media_medium:window(Proxy, info))},
+            {Outcome, Fat} = mounted(erx_media_probe:format(Read, Length, ?WRITTEN), Read, Length, Mounting),
             log_mount(Volume, Outcome, erlang:monotonic_time(millisecond) - Started),
             Batch = case Outcome of #{mount := rw} -> erx_fat_dir:new(Fat); #{} -> read_only end,
-            {noreply, named_root(State#{outcome => Outcome, mount => Mount, fat => Fat, batch => Batch})};
+            {noreply, named_root(Mounting#{outcome => Outcome, mount => Mount, fat => Fat, batch => Batch})};
         enfile ->
             Outcome = #{format => unknown, mount => {none, {failed, enfile}}},
             {noreply, State#{outcome => Outcome, mount => none, fat => none}}
@@ -690,13 +693,15 @@ planned({error, Why}) -> failed(Why).
 
 %% Plan written step by step through the window proxy by the plans' one writer,
 %% erx_fat_plan, each step's writes and then a flush, so no write of a step reaches
-%% the medium before the steps before it.
-applied(Plan, #{proxy := Proxy, volume := Volume}) ->
-    answered(erx_fat_plan:apply(Plan, fun(Sector, Bytes) -> placed_write(Proxy, Volume, Sector, Bytes) end,
+%% the medium before the steps before it; each write a run of contiguous sectors,
+%% at most as many as the window takes in one request.
+applied(Plan, #{proxy := Proxy, volume := Volume, run_max := RunMax}) ->
+    answered(erx_fat_plan:apply(Plan, RunMax,
+                                fun(Sector, Count, Bytes) -> placed_write(Proxy, Volume, Sector, Count, Bytes) end,
                                 fun() -> erx_media_medium:window(Proxy, flush) end)).
 
-placed_write(Proxy, Volume, Sector, Bytes) ->
-    case erx_media_table:place(Volume, Sector, 1) of
+placed_write(Proxy, Volume, Sector, Count, Bytes) ->
+    case erx_media_table:place(Volume, Sector, Count) of
         {ok, Lba} -> answered(erx_media_medium:window(Proxy, {write, Lba, Bytes}));
         {error, Why} -> failed(Why)
     end.
@@ -797,24 +802,24 @@ errno(_Finding) -> eio.
 %% volume (none otherwise). Only FAT16 and FAT32 are served; the selected format is the
 %% volume's one reading, and the FAT type shown is the one the mount read, since the
 %% medium answers each read afresh.
-mounted({error, Why}, _Read, _Length, _Proxy, _Volume) ->
+mounted({error, Why}, _Read, _Length, _State) ->
     {#{format => unknown, mount => {none, {failed, Why}}}, none};
-mounted({ok, #{format := fat, also := Also, fat := Type}}, Read, Length, Proxy, Volume)
+mounted({ok, #{format := fat, also := Also, fat := Type}}, Read, Length, #{proxy := Proxy} = State)
   when Type =:= 16; Type =:= 32 ->
     case erx_fat:mount(Read, Length) of
         {ok, Fat} ->
             #{type := Mounted, label := Label, serial := Serial} = erx_fat:info(Fat),
             Mount = writable(fat, Also, fun() -> erx_media_medium:window(Proxy, flush) end,
-                             fun() -> owned(Fat, Proxy, Volume) end),
+                             fun() -> owned(Fat, State) end),
             {#{format => fat, fat => Mounted, label => Label, serial => Serial, mount => Mount}, served(Mount, Fat)};
         {error, Finding} ->
             {#{format => fat, fat => Type, mount => {none, {failed, Finding}}}, none}
     end;
-mounted({ok, #{format := fat, fat := Type}}, _Read, _Length, _Proxy, _Volume) ->
+mounted({ok, #{format := fat, fat := Type}}, _Read, _Length, _State) ->
     {#{format => fat, fat => Type, mount => {none, format}}, none};
-mounted({ok, #{format := unknown}}, _Read, _Length, _Proxy, _Volume) ->
+mounted({ok, #{format := unknown}}, _Read, _Length, _State) ->
     {#{format => unknown, mount => {none, unknown}}, none};
-mounted({ok, #{format := Format}}, _Read, _Length, _Proxy, _Volume) ->
+mounted({ok, #{format := Format}}, _Read, _Length, _State) ->
     {#{format => Format, mount => {none, format}}, none}.
 
 %% A mount's one log line: a writable mount's names the volume, its label and the
@@ -837,17 +842,16 @@ labelled(Label) -> [<<", label ">>, Label].
 %% The writable rule's fourth condition: the volume's flags, then the ownership
 %% check, which runs only on a volume the flags admit and reads it whole, its FAT in
 %% runs as long as the window takes in one request (erx_media_medium:run_sectors/1).
-owned(Fat, Proxy, Volume) ->
+owned(Fat, State) ->
     case erx_fat_alloc:writable(erx_fat:info(Fat)) of
         {read_only, Reason} -> Reason;
-        ok -> checked(Fat, Proxy, Volume)
+        ok -> checked(Fat, State)
     end.
 
 %% The ownership check's outcome, the volume read through the proxy.
-checked(Fat, Proxy, Volume) ->
+checked(Fat, #{proxy := Proxy, volume := Volume, run_max := RunMax}) ->
     ReadRun = fun(First, Count) -> read_run(Proxy, Volume, First, Count) end,
-    Max = erx_media_medium:run_sectors(erx_media_medium:window(Proxy, info)),
-    case erx_fat:check(Fat, ReadRun, Max) of
+    case erx_fat:check(Fat, ReadRun, RunMax) of
         ok -> ok;
         {read_only, Reason} -> Reason;
         {error, Why} -> {none, {failed, Why}}
