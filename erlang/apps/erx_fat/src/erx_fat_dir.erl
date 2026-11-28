@@ -724,5 +724,4 @@ ok({ok, Value}) -> Value;
 ok({ok, Value, Rest}) -> {Value, Rest};
 ok({error, no_space}) -> fail(enospc);
 ok({error, not_dir}) -> fail(enotdir);
-ok({error, not_found}) -> fail(enoent);
 ok({error, Error}) -> fail(Error).
