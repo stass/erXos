@@ -107,6 +107,7 @@ goes to the document of the subsystem its component pointer names.
 
 ## Security residuals
 
+* **[Low] storage, a FAT name placed from a sector that reads differently twice** (`erx_fat_dir:place/5`). A placement scans the directory once and then builds the sectors it writes from a second read of each, so a device that answers a sector differently between the two can put a live long-name entry before a short-only name, which then lists under that long name, while the create answers the node of the name it asked for. No data is lost and the node names the entry written. Fixed by keeping the scanned bytes of the sectors the run lands in and building their images from them.
 * [High] erx_uart, the Raspberry Pi 4's console: Fiasco's polled write to the mini UART
   (`fiasco/kernel/src/lib/uart/uart_16550.cc`, `write`) reads `LSR`, clearing the overrun bit
   before `erx_mini_uart` sees it, and saves and restores `IER` around the write. Since the

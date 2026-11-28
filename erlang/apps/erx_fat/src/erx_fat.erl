@@ -69,7 +69,7 @@ function raises propagates.
 """.
 
 -export([mount/2, admission/2, info/1, layout/1, geometry/1, checked_clusters_max/0, check/1, check/3, root/1, walk/3, attr/1, list/2, read/4, key/1]).
--export([with_read/2, first/1, fold/4, cluster_sectors/2, entry_slot/2, refreshed/2, with_contents/3,
+-export([with_read/2, first/1, fold/4, entry_node/4, cluster_sectors/2, entry_slot/2, refreshed/2, with_contents/3,
          with_attributes/3]).
 -export_type([fat/0, fat_node/0, finding/0, refusal/0, read_sector/0, read_run/0, dir/0, event/0]).
 
@@ -304,6 +304,14 @@ exactly when ReadOnly, as a removed file is kept by its server.
 -spec with_attributes(fat_node(), non_neg_integer(), boolean()) -> fat_node().
 with_attributes(#fat_node{kind = file} = File, Mtime, ReadOnly) ->
     File#fat_node{mtime = Mtime, read_only = ReadOnly}.
+
+-doc """
+The node a file's or directory's short entry Short names as entry Index of directory
+Dir, as walk/3 over the volume read through Fat answers it once Dir holds the entry
+there and its name.
+""".
+-spec entry_node(fat_node(), non_neg_integer(), erx_fat_entry:short(), fat()) -> fat_node().
+entry_node(#fat_node{kind = dir, key = Parent}, Index, Short, Fat) -> short_node(Fat, Parent, Index, Short).
 
 -doc """
 Where file File's short entry lies, `{Sector, Offset}`: entry Index of the directory
@@ -862,15 +870,18 @@ dir_cluster(#fat_node{first = First}, _Fat) -> First.
 listed(Short = #{name := Bytes, flags := Case}, Long, #{fat := Fat, parent := Parent, index := Index}) ->
     Kind = erx_fat_entry:kind(Short),
     case Kind =/= label andalso binary:first(Bytes) =/= $. andalso name(Bytes, Case, Long, Index) of
-        {Name, Start} ->
-            First = erx_fat_entry:first(Short, Fat#fat.type),
-            {Name, #fat_node{key = node_key(Fat, Kind, First, Parent, Index), kind = Kind, first = First,
-                             size = case Kind of file -> maps:get(size, Short); dir -> 0 end,
-                             mtime = erx_fat_entry:mtime(Short), read_only = erx_fat_entry:read_only(Short)},
-             Start};
-        _ ->
-            none
+        {Name, Start} -> {Name, short_node(Fat, Parent, Index, Short), Start};
+        _ -> none
     end.
+
+%% The node short entry Short, a file's or a directory's, names as entry Index of the
+%% directory keyed Parent.
+short_node(Fat, Parent, Index, Short) ->
+    Kind = erx_fat_entry:kind(Short),
+    First = erx_fat_entry:first(Short, Fat#fat.type),
+    #fat_node{key = node_key(Fat, Kind, First, Parent, Index), kind = Kind, first = First,
+              size = case Kind of file -> maps:get(size, Short); dir -> 0 end,
+              mtime = erx_fat_entry:mtime(Short), read_only = erx_fat_entry:read_only(Short)}.
 
 node_key(#fat{root = First}, dir, First, _Parent, _Index) -> root;
 node_key(_Fat, dir, First, _Parent, _Index) -> {dir, First};

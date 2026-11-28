@@ -35,6 +35,7 @@ class ErxFatLoadTest < Minitest::Test
   APPLICATIONS = %w[erx erx_fat erx_media].freeze
   TESTS = %w[test/erlang/erx_fat_load.erl].freeze
   ALLOC = 'erlang/apps/erx_fat/src/erx_fat_alloc.erl'
+  PLAN = 'erlang/apps/erx_fat/src/erx_fat_plan.erl'
 
   Volume = Data.define(:mib, :cluster, :ops) do
     def self.parse(text)
@@ -68,8 +69,9 @@ class ErxFatLoadTest < Minitest::Test
               from: '-define(HELD_SECTOR_BYTES, ((2 * ?SECTOR + 4 * ?HELD_SECTOR_WORDS * 8 + 1023) div 1024 * 1024)).',
               to: '-define(HELD_SECTOR_BYTES, ?SECTOR).',
               caught_by: 'seq'),
-    Fault.new(name: 'a FAT sector written to the first FAT alone', path: ALLOC,
-              from: 'Copy <- lists:seq(0, Fats - 1)', to: 'Copy <- [0]', caught_by: IMAGE)
+    Fault.new(name: 'a FAT sector written to the first FAT alone', path: PLAN,
+              from: 'Stride, Count}, Copy) when Copy < Count ->', to: 'Stride, Count}, Copy) when Copy < 1 ->',
+              caught_by: IMAGE)
   ].freeze
 
   def test_a_seeded_load_reads_back_and_leaves_a_volume_that_checks

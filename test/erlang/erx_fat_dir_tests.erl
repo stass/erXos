@@ -401,6 +401,43 @@ big_directory_changes(Flat) ->
     {ok, _, _} = erx_fat_dir:commit(B2),
     walked(B2, Big, <<"renamed in the middle">>).
 
+%% A create or a mkdir reads its directory once, the scan that places the name, and
+%% a rename within it reads it three times, to find the old name, for the name the
+%% new one replaces and to place the new one; each answers the node a walk of the directory as the batch leaves it
+%% reads back, whether the name is stored as its short entry alone, with a case flag,
+%% with a numeric tail or with long-name entries. The directory holds forty names
+%% before them, so the first of its sectors is read only by a scan of it.
+a_placed_name_answers_the_walked_node_from_its_one_scan_test() ->
+    Fat0 = mounted("fat32.img"),
+    Root = erx_fat:root(Fat0),
+    Apply = fun(_, Plan) -> erx_fat_alloc_tests:apply_plan(Plan) end,
+    {B0, D0} = node_of(erx_fat_dir:mkdir(erx_fat_dir:new(Fat0), Root, <<"many">>, ?TIME)),
+    Forty = lists:foldl(fun(N, Acc) -> element(1, node_of(erx_fat_dir:create(Acc, D0, big_name(N), ?TIME))) end,
+                        B0, lists:seq(1, 40)),
+    _ = committed(Fat0, Apply, Forty),
+    {ok, [First | _]} = erx_fat:cluster_sectors(Fat0, erx_fat:first(D0)),
+    Reads = counters:new(1, []),
+    Inner = erx_fat_alloc_tests:reader(),
+    Counted = fun(Sector) when Sector =:= First -> counters:add(Reads, 1, 1), Inner(Sector);
+                 (Sector) -> Inner(Sector)
+              end,
+    {ok, Fat} = erx_fat:mount(Counted, byte_size(erx_fat_alloc_tests:flat()) div ?SECTOR),
+    D = walked(erx_fat_dir:new(Fat), Root, <<"many">>),
+    Scans = fun(Change) ->
+                    counters:put(Reads, 1, 0),
+                    {ok, Answer, B} = Change(erx_fat_dir:new(Fat)),
+                    {counters:get(Reads, 1), Answer, B}
+            end,
+    Placed = fun(Name, Change) ->
+                     {Count, Node, B} = Scans(Change),
+                     ?assertEqual({Name, 1, walked(B, D, Name)}, {Name, Count, Node})
+             end,
+    [Placed(Name, fun(B) -> erx_fat_dir:create(B, D, Name, ?TIME) end)
+     || Name <- [<<"X">>, <<"readme.txt">>, <<"name number 00001 of many!">>, <<"a long name of its own">>]],
+    Placed(<<"sub dir">>, fun(B) -> erx_fat_dir:mkdir(B, D, <<"sub dir">>, ?TIME) end),
+    {Count, {Moved, none}, B} = Scans(fun(B) -> erx_fat_dir:rename(B, D, big_name(30), D, <<"moved">>) end),
+    ?assertEqual({3, walked(B, D, <<"moved">>)}, {Count, Moved}).
+
 %% ---------------------------------------------------------------------------
 %% A file's contents: writes, appends, holes, cuts and growth
 %% ---------------------------------------------------------------------------

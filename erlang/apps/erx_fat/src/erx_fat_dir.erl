@@ -30,6 +30,10 @@ whose ownership check (erx_fat:check/3) passed.
   name it places the short names that claim its short name's candidates (one bit a
   numeric tail, in an atomics array local to the call) and the first free run of
   each length the name may take. What it holds does not grow with the directory.
+  The node a placed name answers is made from where that scan put it and the short
+  entry written there (erx_fat:entry_node/4), so a create or a mkdir reads its
+  directory once; a scan's cost still grows with the directory, as nothing indexes
+  its names.
 * **Placement.** A name takes the first run of free entries, deleted or past the
   end marker, long enough for its long-name entries and its short entry; failing
   that the directory grows by as many zeroed clusters as the entries need beyond
@@ -201,24 +205,28 @@ free(B = #batch{alloc = Alloc}, First) ->
 create(B, Dir, Name, Time) ->
     guarded(fun() ->
                     Units = checked(Name),
-                    B1 = place(B, Dir, Name, Units, fun(Short, Flags) -> erx_fat_entry:new(Short, Flags, file, 0, Time) end),
-                    {walked(B1, Dir, Name), B1}
+                    place(B, Dir, Name, Units, fun(Short, Flags, B1) -> {erx_fat_entry:new(Short, Flags, file, 0, Time), B1} end)
             end).
 
 -doc "An empty directory Name in directory Dir, modified at Time: its node.".
 -spec mkdir(batch(), erx_fat:fat_node(), binary(), integer()) -> {ok, erx_fat:fat_node(), batch()} | {error, error()}.
-mkdir(B = #batch{alloc = Alloc}, Dir, Name, Time) ->
+mkdir(B, Dir, Name, Time) ->
     guarded(fun() ->
                     Units = checked(Name),
-                    %% Refused before its cluster is allocated, so a full volume answers eexist.
-                    lookup(B, Dir, Name) =:= none orelse fail(eexist),
-                    {[Cluster], Alloc1} = ok(erx_fat_alloc:grow(Alloc, none, 1)),
-                    Dots = <<(erx_fat_entry:encode(erx_fat_entry:new(?DOT, 0, dir, Cluster, Time)))/binary,
-                             (erx_fat_entry:encode(erx_fat_entry:new(?DOTDOT, 0, dir, number(Dir), Time)))/binary>>,
-                    B1 = zeroed(B#batch{alloc = Alloc1}, Cluster, Dots),
-                    B2 = place(B1, Dir, Name, Units, fun(Short, Flags) -> erx_fat_entry:new(Short, Flags, dir, Cluster, Time) end),
-                    {walked(B2, Dir, Name), B2}
+                    %% Its cluster is allocated once the placing scan has refused a name
+                    %% the directory holds, so a full volume answers eexist.
+                    place(B, Dir, Name, Units, new_dir(Dir, Time))
             end).
+
+%% place/5's Entry for a new directory of Dir modified at Time: its cluster
+%% allocated and written with its `.` and `..` entries, and its short entry.
+new_dir(Dir, Time) ->
+    fun(Short, Flags, B = #batch{alloc = Alloc}) ->
+            {[Cluster], Alloc1} = ok(erx_fat_alloc:grow(Alloc, none, 1)),
+            Dots = <<(erx_fat_entry:encode(erx_fat_entry:new(?DOT, 0, dir, Cluster, Time)))/binary,
+                     (erx_fat_entry:encode(erx_fat_entry:new(?DOTDOT, 0, dir, number(Dir), Time)))/binary>>,
+            {erx_fat_entry:new(Short, Flags, dir, Cluster, Time), zeroed(B#batch{alloc = Alloc1}, Cluster, Dots)}
+    end.
 
 -doc "File Name of directory Dir taken away: its node, whose chain the caller frees.".
 -spec remove(batch(), erx_fat:fat_node(), binary()) -> {ok, erx_fat:fat_node(), batch()} | {error, error()}.
@@ -449,8 +457,8 @@ moved(B, Node, FromDir, Slots, ToDir, To, Units, Replaced) ->
              true -> parent_named(B1, erx_fat:first(Node), number(ToDir));
              false -> B1
          end,
-    B3 = place(B2, ToDir, To, Units, fun(Short, Flags) -> Old#{name := Short, flags := Flags} end),
-    {{walked(B3, ToDir, To), Replaced}, B3}.
+    {Moved, B3} = place(B2, ToDir, To, Units, fun(Short, Flags, Ready) -> {Old#{name := Short, flags := Flags}, Ready} end),
+    {{Moved, Replaced}, B3}.
 
 moves(FromDir, ToDir) -> erx_fat:key(FromDir) =/= erx_fat:key(ToDir).
 
@@ -496,8 +504,6 @@ dotdot_slot(B, Cluster) -> {hd(ok(erx_fat:cluster_sectors(view(B), Cluster))), ?
 
 checked(Name) -> ok(erx_fat_name:check(Name)).
 
-walked(B, Dir, Name) -> ok(erx_fat:walk(Dir, Name, view(B))).
-
 %% Fun folded over directory Dir as the batch leaves it (erx_fat:fold/4).
 folded(B, Dir, Fun, Acc) -> ok(erx_fat:fold(Dir, view(B), Fun, Acc)).
 
@@ -526,9 +532,12 @@ empty(B, Node) ->
                                      end, true),
     Empty.
 
-%% Name, of code units Units, placed in Dir with the short entry Entry(Short, Flags)
-%% makes: its entries written in publication in the first free run, the directory
-%% grown when none is long enough (see the module's doc).
+%% Name, of code units Units, placed in Dir: its entries written in publication in
+%% the first free run, the directory grown when none is long enough (see the
+%% module's doc). Entry(Short, Flags, B) runs once the scan has refused a name Dir
+%% holds and before the directory grows; it answers the short entry to write and B
+%% with what that entry names made ready (mkdir's cluster). Answers the node walk/3
+%% reads back for the placed entry, made from where the scan put it, and the batch.
 place(B, Dir, Name, Units, Entry) ->
     Basis = erx_fat_name:short_basis(Name),
     Long = length(erx_fat_name:long_entries(Units, ?DOT)) + 1,
@@ -541,10 +550,12 @@ place(B, Dir, Name, Units, Entry) ->
                            {short_only, {_, _, false} = Alone} -> {[], Alone};
                            _ -> {erx_fat_name:long_entries(Units, Short), run_for(Scan, Long, Read)}
                        end,
-    Written = Entries ++ [erx_fat_entry:encode(Entry(Short, Flags))],
-    {Start, Sectors, B1} = room(B, Read, Where, length(Written)),
-    lists:foldl(fun({Index, Bytes}, Acc) -> set_entry(Acc, publication, slot(Sectors, Index), Bytes) end,
-                B1, lists:enumerate(Start, Written)).
+    {Named, B1} = Entry(Short, Flags, B),
+    Written = Entries ++ [erx_fat_entry:encode(Named)],
+    {Start, Sectors, B2} = room(B1, Read, Where, length(Written)),
+    B3 = lists:foldl(fun({Index, Bytes}, Acc) -> set_entry(Acc, publication, slot(Sectors, Index), Bytes) end,
+                     B2, lists:enumerate(Start, Written)),
+    {erx_fat:entry_node(Dir, Start + length(Written) - 1, Named, B3#batch.fat), B3}.
 
 %% The scan moved past entry Index.
 scanned(Index, Event, S = #scan{runs = Runs, after_long = AfterLong}) ->
