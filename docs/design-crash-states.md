@@ -93,7 +93,7 @@ exhaustively within bounds: sequences of one to three operations from
 `creat`, `mkdir`, `write`, `link`, `unlink`, `rename`, `truncate`,
 `fsync` and others, over four directories with two files each, with
 persistence operations `sync`, `fsync`, `fdatasync` or none inserted
-(`docs/Ace.md`, "Bounds used by Ace"). The modules see only bios that a
+(the CrashMonkey repository's Ace document, its section "Bounds used by Ace"). The modules see only bios that a
 Linux file system driver sends through Linux's block layer. erXos's FAT
 server never runs in a Linux kernel, and a Linux kernel's own `msdos`
 driver is not the code under test. What erXos takes is the method:
@@ -523,8 +523,7 @@ these:
 * **Scope.** An `fsync`, a commit or the finish acknowledges the whole
   tree as it stood when the point began, since the server commits every
   waiting change in one batch at each of them
-  ([design-storage.md](design-storage.md#removable-media-fat),
-  "batches").
+  ([design-storage.md](design-storage.md#removable-media-fat)).
 * **Rule.** design-storage's rule for a cut batch, in which files hold
   old or new bytes block by block within old or new sizes, and names
   are whole, missing or under their short name alone
