@@ -277,6 +277,9 @@ preset(uint32_t scratchpads, bool four_kib, bool ac64)
 	set_field("usbcmd", "inte", 1);
 	/* An interrupt pending from before the reset, which the install's IMAN.IE must not clear. */
 	set_field("iman", "ip", 1);
+	/* IMOD at its reset interval, 4000 x 250 ns, and a counter still running (xHCI 1.2, 5.5.2.2). */
+	set_field("imod", "imodi", 4000);
+	set_field("imod", "imodc", 123);
 }
 
 /* The spec of the last open_routed, for opening its window again. */
@@ -363,7 +366,7 @@ word64(const uint8_t *at)
 static void
 check_install(void)
 {
-	static const char *const order[] = { "config", "dcbaap_lo", "dcbaap_hi", "erstsz", "erdp_lo", "erdp_hi",
+	static const char *const order[] = { "config", "dcbaap_lo", "dcbaap_hi", "erstsz", "imod", "erdp_lo", "erdp_hi",
 	    "erstba_lo", "erstba_hi", "iman", "crcr_lo", "crcr_hi", "usbcmd" };
 	uint64_t dcbaa, segment_table, dequeue, ring;
 
@@ -371,6 +374,8 @@ check_install(void)
 		CHECK(write_offsets[at] == offset_of(order[at]));
 	CHECK(erx_xhci_config_maxslotsen_get(*reg("config")) == 8);
 	CHECK(erx_xhci_erstsz_size_get(*reg("erstsz")) == 1);
+	/* FreeBSD's moderation interval, 500 x 250 ns (xhci.c:369, xhcireg.h:176), its counter 0. */
+	CHECK(erx_xhci_imod_imodi_get(*reg("imod")) == 500 && erx_xhci_imod_imodc_get(*reg("imod")) == 0);
 	CHECK(erx_xhci_iman_ie_get(*reg("iman")) == 1 && erx_xhci_iman_ip_get(*reg("iman")) == 0);
 	CHECK(erx_xhci_usbcmd_rs_get(*reg("usbcmd")) == 1 && erx_xhci_usbcmd_inte_get(*reg("usbcmd")) == 1 &&
 	    erx_xhci_usbcmd_hcrst_get(*reg("usbcmd")) == 0);
@@ -408,7 +413,7 @@ test_start(void)
 	CHECK(negotiate(device, true, 0) == ERX_EBUSY);	/* CNR still set */
 	set_field("usbsts", "cnr", 0);
 	CHECK(negotiate(device, true, 0) == ERX_DEVICE_RESET_DONE);
-	CHECK(negotiate(device, true, 12) == ERX_EBUSY);
+	CHECK(negotiate(device, true, 13) == ERX_EBUSY);
 	check_install();
 	CHECK(negotiate(device, true, 0) == ERX_EBUSY);	/* still halted */
 	set_field("usbsts", "hch", 0);
@@ -438,14 +443,14 @@ test_restart(void)
 	CHECK(negotiate(device, false, 1) == ERX_EBUSY && erx_xhci_usbcmd_hcrst_get(*reg("usbcmd")) == 1);
 	set_field("usbcmd", "hcrst", 0);
 	CHECK(negotiate(device, true, 0) == ERX_DEVICE_RESET_DONE);
-	CHECK(negotiate(device, true, 12) == ERX_EBUSY);	/* left installed, waiting for HCH to clear */
+	CHECK(negotiate(device, true, 13) == ERX_EBUSY);	/* left installed, waiting for HCH to clear */
 	/* Halted with run set, as the install leaves it: run cleared before any reset. */
 	CHECK(negotiate(device, false, 1) == ERX_EBUSY && erx_xhci_usbcmd_rs_get(*reg("usbcmd")) == 0 &&
 	    erx_xhci_usbcmd_hcrst_get(*reg("usbcmd")) == 0);
 	CHECK(negotiate(device, true, 1) == ERX_EBUSY && erx_xhci_usbcmd_hcrst_get(*reg("usbcmd")) == 1);
 	set_field("usbcmd", "hcrst", 0);
 	CHECK(negotiate(device, true, 0) == ERX_DEVICE_RESET_DONE);
-	CHECK(negotiate(device, true, 12) == ERX_EBUSY);
+	CHECK(negotiate(device, true, 13) == ERX_EBUSY);
 	set_field("usbsts", "hch", 0);
 	/* The controller runs, but this negotiation did not install it: run cleared, not answered started. */
 	CHECK(negotiate(device, false, 1) == ERX_EBUSY && erx_xhci_usbcmd_rs_get(*reg("usbcmd")) == 0);
@@ -490,8 +495,8 @@ test_msix(void)
 	for (uint32_t entry = 1; entry < MSIX_ENTRIES; entry++)
 		CHECK(*table_word((MSIX_TABLE + 16u * entry + 12u)) == 1);
 	CHECK(erx_xhci_usbcmd_rs_get(*reg("usbcmd")) == 0);	/* nothing of the install before the driver masters */
-	CHECK(negotiate(device, true, 12) == ERX_EBUSY);
-	CHECK(write_offsets[0] == offset_of("config") && write_offsets[11] == offset_of("usbcmd") &&
+	CHECK(negotiate(device, true, 13) == ERX_EBUSY);
+	CHECK(write_offsets[0] == offset_of("config") && write_offsets[12] == offset_of("usbcmd") &&
 	    erx_xhci_usbcmd_rs_get(*reg("usbcmd")) == 1);
 	/* The same window again with another route is refused: an open answers only for the spec it made. */
 	CHECK(open_reused((erx_device_msix_t){ .address = msix_route.address, .data = 0x2b, .offset = MSIX_TABLE,
@@ -556,7 +561,7 @@ started(void)
 	CHECK(negotiate(device, true, 1) == ERX_EBUSY);
 	set_field("usbcmd", "hcrst", 0);
 	CHECK(negotiate(device, true, 0) == ERX_DEVICE_RESET_DONE);
-	CHECK(negotiate(device, true, 12) == ERX_EBUSY);
+	CHECK(negotiate(device, true, 13) == ERX_EBUSY);
 	set_field("usbsts", "hch", 0);
 	CHECK(negotiate(device, true, 0) == ERX_OK);
 	CHECK(erx_mem_dma_addr(memory, 0, &base) == ERX_OK &&

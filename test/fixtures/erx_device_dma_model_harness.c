@@ -254,6 +254,7 @@ device_register(harness_t *h, erx_dma_register_write_t write)
 	case ERX_DMA_XHCI_SLOTS:
 	case ERX_DMA_XHCI_DCBAA:
 	case ERX_DMA_XHCI_EVENT_RING_SIZE:
+	case ERX_DMA_XHCI_INTERRUPT_MODERATION:
 	case ERX_DMA_XHCI_EVENT_DEQUEUE:
 	case ERX_DMA_XHCI_SEGMENT_TABLE:
 	case ERX_DMA_XHCI_INTERRUPTER_ENABLE:

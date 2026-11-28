@@ -500,7 +500,7 @@ class HardwareTest < Minitest::Test
   XHCI_PS_CLEAR = 0x80FF01FF
   # The registers docs/design-usb.md ("Install", "Registers it owns") gives the device NIF
   # whole, and the fields it gives it of USBCMD and IMAN.
-  XHCI_OWNED = %w[CRCR_LO CRCR_HI DCBAAP_LO DCBAAP_HI CONFIG ERSTSZ ERSTBA_LO ERSTBA_HI ERDP_LO ERDP_HI DB].freeze
+  XHCI_OWNED = %w[CRCR_LO CRCR_HI DCBAAP_LO DCBAAP_HI CONFIG IMOD ERSTSZ ERSTBA_LO ERSTBA_HI ERDP_LO ERDP_HI DB].freeze
   XHCI_OWNED_FIELDS = { 'USBCMD' => %w[RS HCRST INTE HSEE LHCRST CSS CRS], 'IMAN' => %w[IE] }.freeze
 
   def xhci_source = File.binread(File.join(@repository, XHCI_SVD))
@@ -575,7 +575,7 @@ class HardwareTest < Minitest::Test
       source.sub('<bitWidth>1</bitWidth><ownedByNif>true</ownedByNif></field>', '<bitWidth>1</bitWidth><ownedByNif>false</ownedByNif></field>') => /true or not at all/,
       source.sub('<name>HCH</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth><access>read-only</access>',
                  '<name>HCH</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth><access>read-only</access><ownedByNif>true</ownedByNif>') => /read-only SVD field cannot be owned/,
-      source.sub('<name>IMOD</name><ownedByNif>false</ownedByNif>', '<name>IMOD</name>') => /lacks its ownedByNif/,
+      source.sub('<name>MFINDEX</name><ownedByNif>false</ownedByNif>', '<name>MFINDEX</name>') => /lacks its ownedByNif/,
       source.sub('<name>IMAN</name><addressOffset>0x20</addressOffset><access>read-write</access>',
                  '<name>IMAN</name><addressOffset>0x20</addressOffset><access>read-write</access><readAction>clear</readAction>') => /read without side effects/,
       source.sub('<modifiedWriteValues>oneToSet</modifiedWriteValues><ownedByNif>', '<modifiedWriteValues>oneToToggle</modifiedWriteValues><ownedByNif>') => /unsupported SVD write semantics/,

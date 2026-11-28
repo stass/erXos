@@ -26,6 +26,13 @@ _Static_assert(sizeof(erx_xhci_trb_normal_t) <= ERX_DMA_STORE_BYTES_MAX, "a TRB 
 #define SPLIT_RING_TABLES	3u
 _Static_assert(SPLIT_RING_TABLES <= ERX_DMA_ZEROS_MAX && SPLIT_RING_TABLES <= ERX_DMA_CLEANS_MAX,
     "an install zeroes and cleans every table");
+/*
+ * The least time between two of an xHCI interrupter's interrupts, in 250 ns units (xHCI 1.2,
+ * 5.5.2.2, Table 5-39, p. 426): FreeBSD's XHCI_IMOD_DEFAULT, 125 us (xhcireg.h:176, written at
+ * xhci.c:369). The reset value, 4000 (1 ms), delays an interrupt until 1 ms after the driver cleared
+ * the last one's pending bit, so each step of a run of short transfers waits about 1 ms.
+ */
+#define XHCI_MODERATION_INTERVAL	500u
 
 #ifdef ERX_DMA_SEED_CYCLE_INVERTED
 #define SEED_CYCLE_INVERTED	true
@@ -615,6 +622,8 @@ erx_dma_install_controller(const erx_dma_ledger_t *ledger, const erx_device_trb_
 	out.registers[out.register_count++] = (erx_dma_register_write_t){ ERX_DMA_XHCI_DCBAA,
 	    region_address(controller, controller->dcbaa) };
 	out.registers[out.register_count++] = (erx_dma_register_write_t){ ERX_DMA_XHCI_EVENT_RING_SIZE, 1 };
+	out.registers[out.register_count++] = (erx_dma_register_write_t){ ERX_DMA_XHCI_INTERRUPT_MODERATION,
+	    XHCI_MODERATION_INTERVAL };
 	out.registers[out.register_count++] = (erx_dma_register_write_t){ ERX_DMA_XHCI_EVENT_DEQUEUE,
 	    erx_dma_dequeue_address(ledger, (uint32_t)events) };
 	out.registers[out.register_count++] = (erx_dma_register_write_t){ ERX_DMA_XHCI_SEGMENT_TABLE,

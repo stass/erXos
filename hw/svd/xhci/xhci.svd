@@ -41,7 +41,7 @@
      64-bit registers are pairs of 32-bit halves, low then high, which the
      specification allows every controller (5.1, p. 368) and FreeBSD writes.
 
-     The device NIF owns DCBAAP, CRCR, CONFIG, ERSTSZ, ERSTBA, ERDP and every
+     The device NIF owns DCBAAP, CRCR, CONFIG, ERSTSZ, IMOD, ERSTBA, ERDP and every
      doorbell whole, and USBCMD's R/S, its two resets HCRST and LHCRST, INTE, HSEE,
      CSS and CRS, and IMAN's IE as fields
      (docs/design-usb.md, "Install", "Registers it owns"). -->
@@ -304,7 +304,7 @@
           </register>
           <!-- 5.5.2.2, Table 5-39, pp. 426-427. -->
           <register>
-            <name>IMOD</name><ownedByNif>false</ownedByNif><addressOffset>0x24</addressOffset><access>read-write</access>
+            <name>IMOD</name><ownedByNif>true</ownedByNif><addressOffset>0x24</addressOffset><access>read-write</access>
             <fields>
               <field><name>IMODI</name><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
               <field><name>IMODC</name><bitOffset>16</bitOffset><bitWidth>16</bitWidth></field>

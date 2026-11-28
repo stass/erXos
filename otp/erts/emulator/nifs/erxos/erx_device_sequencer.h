@@ -75,8 +75,8 @@
  * the device context EP0's binding hands over with its DCBAA entry.
  */
 #define ERX_DMA_CLEANS_MAX		(ERX_DMA_HELD_BUFFERS_MAX + ERX_DMA_HELD_RECORDS_MAX + ERX_DMA_BINDS_MAX + 2u)
-/* An install's registers before its activation: virtio's four, or xHCI's seven. */
-#define ERX_DMA_REGISTERS_MAX		7u
+/* An install's registers before its activation: virtio's four, or xHCI's eight. */
+#define ERX_DMA_REGISTERS_MAX		8u
 
 /* `length` bytes from `offset` of the record's memory. */
 typedef struct erx_dma_range {
@@ -106,6 +106,7 @@ typedef enum erx_dma_register {
 	ERX_DMA_XHCI_SLOTS,		/* CONFIG.MaxSlotsEn: the slots the layout has */
 	ERX_DMA_XHCI_DCBAA,		/* DCBAAP: the DCBAA's device address */
 	ERX_DMA_XHCI_EVENT_RING_SIZE,	/* ERSTSZ: the segment table's entries, 1 */
+	ERX_DMA_XHCI_INTERRUPT_MODERATION,	/* IMOD: the interval, in 250 ns units; its counter 0 */
 	ERX_DMA_XHCI_EVENT_DEQUEUE,	/* ERDP: the event ring's consumer position, its busy bit clear */
 	ERX_DMA_XHCI_SEGMENT_TABLE,	/* ERSTBA: the segment table's device address */
 	ERX_DMA_XHCI_INTERRUPTER_ENABLE,	/* IMAN.IE: 1 */
@@ -161,11 +162,12 @@ erx_dma_verdict_t	erx_dma_publish(erx_dma_ledger_t *ledger, const erx_dma_public
  * no page asked for; the array names each scratchpad page; the segment table's one entry names
  * the event ring and its TRBs; the command ring's link leads back to its first TRB on lap 0; then
  * the registers, in FreeBSD's order (xhci.c:329-428): the slot count, DCBAAP, the segment table's
- * size, the event ring's dequeue pointer at the ledger's consumer position, the segment table's
- * base, IMAN.IE, the command ring's position with its cycle state; and USBCMD's run with its
- * interrupt enable, the activation. It places nothing and begins no holding. BREAKS_CALLS for a
- * ledger that holds anything; BREAKS_MEANINGS for one with no command or event ring, or an address
- * an encoder refuses, neither of which a form's own layout can have.
+ * size, the interrupter's moderation interval, the event ring's dequeue pointer at the ledger's
+ * consumer position, the segment table's base, IMAN.IE, the command ring's position with its
+ * cycle state; and USBCMD's run with its interrupt enable, the activation. It places nothing and
+ * begins no holding. BREAKS_CALLS for a ledger that holds anything; BREAKS_MEANINGS for one with
+ * no command or event ring, or an address an encoder refuses, neither of which a form's own layout
+ * can have.
  */
 erx_dma_verdict_t	erx_dma_install_controller(const erx_dma_ledger_t *ledger, const erx_device_trb_layout_t *controller,
 			    erx_dma_sequence_t *sequence);

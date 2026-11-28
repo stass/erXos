@@ -2682,14 +2682,21 @@ writes DCBAA entry 0, the scratchpad array, the segment table and the
 command ring's link (a queue block's ring gets its link when a command
 binds it), cleans them, and writes, each from the layout, the slot
 count, `DCBAAP`, the event
-ring's size and dequeue pointer, the segment table's base, the
-interrupter's `IMAN.IE`, the command ring's base with its cycle state,
+ring's size, the interrupter's moderation interval, the event ring's
+dequeue pointer, the segment table's base, the interrupter's
+`IMAN.IE`, the command ring's base with its cycle state,
 and `USBCMD` with run and `INTE`, in FreeBSD's order
 (`xhci.c:329-428`, which writes `INTE` with run at `:427-428`). The
 controller interrupts only with both gates open (4.2, p. 82), and a
 reset closes `INTE` (5.4.1, p. 394), so both are written by this one
 decision, which runs after every reset and opens both, since every
-controller is given with its interrupt. `USBCMD.HSEE` stays clear: it
+controller is given with its interrupt. The moderation interval is
+FreeBSD's, 500 units of 250 ns, or 125 us, with the counter written 0
+(`xhci.c:369`, `xhcireg.h:176`; 5.5.2.2, p. 426): the interrupter
+signals no interrupt until the interval has run since the driver last
+cleared `IMAN.IP` (Table 5-39, p. 426), and the reset value, 4000, holds
+each step of a mass-storage command, its data and its status after its
+command, about 1 ms behind the one before. `USBCMD.HSEE` stays clear: it
 only signals a host system error out of band, on the bus, gated by
 `SERR#` in the function's command register, which the PCIe domain
 owns; the controller process reads it from `USBSTS` instead, on every
@@ -2708,14 +2715,15 @@ controller past it. The scratchpad passes to the device for good.
 **Registers it owns.** `DCBAAP`, `CRCR`, `CONFIG`, `ERSTSZ`, `ERSTBA`,
 `ERDP`, every doorbell, `USBCMD`'s run bit and both resets (`HCRST` and
 `LHCRST`), its save and restore bits (`CSS` and `CRS`), `USBCMD.INTE`,
-`USBCMD.HSEE` and `IMAN.IE` are `ownedByNif` in `hw/svd/xhci/xhci.svd`:
+`USBCMD.HSEE`, `IMAN.IE` and `IMOD` are `ownedByNif` in `hw/svd/xhci/xhci.svd`:
 the first group changes where the controller reads or writes, which
 entries it takes as valid, or which of the DCBAA's entries it may
 follow; a light reset returns the controller's state as `HCRST` does,
 and a save or a restore moves that state to and from memory; and the
-interrupt gates belong with the install that must open them again after
-every reset, so no driver path can leave them closed on an
-interrupt-driven controller. `PORTSC`, `USBSTS`'s change bits,
+interrupt gates and the interrupter's moderation interval belong with
+the install that must write them again after every reset, so no driver
+path can leave them closed on an interrupt-driven controller, or leave
+the interval at the reset's 1 ms. `PORTSC`, `USBSTS`'s change bits,
 `IMAN`'s pending bit and the extended capabilities' registers are the
 driver's.
 

@@ -962,8 +962,8 @@ typedef struct xhci_registers {
 	xhci_reg_t			usbsts;
 	const erx_device_field_t	*hch, *cnr;
 	/* The registers the NIF owns (erx/hw/device_owned.h), which only this file writes. */
-	xhci_reg_t			usbcmd, config, erstsz, iman, dcbaap[2], erstba[2], erdp[2], crcr[2];
-	const erx_device_field_t	*rs, *hcrst, *inte, *max_slots_en, *erst_size, *ie, *rcs;
+	xhci_reg_t			usbcmd, config, erstsz, imod, iman, dcbaap[2], erstba[2], erdp[2], crcr[2];
+	const erx_device_field_t	*rs, *hcrst, *inte, *max_slots_en, *erst_size, *imodi, *imodc, *ie, *rcs;
 	const erx_device_field_t	*dcbaap_field[2], *erstba_field[2], *erdp_field[2], *crcr_field[2];
 	/* Written by each post (a doorbell, element n slot n's, 0 the command ring's) and each completion (ERDP's busy bit). */
 	const erx_device_register_t	*db;
@@ -1963,6 +1963,7 @@ put_ring_register(const queue_record_t *record, erx_dma_register_write_t write)
 	case ERX_DMA_XHCI_SLOTS:
 	case ERX_DMA_XHCI_DCBAA:
 	case ERX_DMA_XHCI_EVENT_RING_SIZE:
+	case ERX_DMA_XHCI_INTERRUPT_MODERATION:
 	case ERX_DMA_XHCI_EVENT_DEQUEUE:
 	case ERX_DMA_XHCI_SEGMENT_TABLE:
 	case ERX_DMA_XHCI_INTERRUPTER_ENABLE:
@@ -2295,14 +2296,14 @@ static bool
 xhci_registers(const erx_device_t *device, xhci_registers_t *regs)
 {
 	const uint32_t doorbell = erx_device_register_named(device->peripheral, "db");
-	const erx_device_field_t *fields[18];
+	const erx_device_field_t *fields[20];
 	uint32_t count = 0;
 
 	if (!xhci_register(device, "hcsparams1", &regs->hcsparams1) || !xhci_register(device, "hcsparams2", &regs->hcsparams2) ||
 	    !xhci_register(device, "hccparams1", &regs->hccparams1) || !xhci_register(device, "pagesize", &regs->pagesize) ||
 	    !xhci_register(device, "usbsts", &regs->usbsts) || !xhci_register(device, "usbcmd", &regs->usbcmd) ||
 	    !xhci_register(device, "config", &regs->config) || !xhci_register(device, "erstsz", &regs->erstsz) ||
-	    !xhci_register(device, "iman", &regs->iman) ||
+	    !xhci_register(device, "imod", &regs->imod) || !xhci_register(device, "iman", &regs->iman) ||
 	    !xhci_address(device, "dcbaap_lo", "dcbaap_hi", "pointer_lo", "pointer_hi", regs->dcbaap, regs->dcbaap_field) ||
 	    !xhci_address(device, "erstba_lo", "erstba_hi", "address_lo", "address_hi", regs->erstba, regs->erstba_field) ||
 	    !xhci_address(device, "erdp_lo", "erdp_hi", "pointer_lo", "pointer_hi", regs->erdp, regs->erdp_field) ||
@@ -2324,6 +2325,8 @@ xhci_registers(const erx_device_t *device, xhci_registers_t *regs)
 	fields[count++] = regs->inte = xhci_field(device, regs->usbcmd, "inte");
 	fields[count++] = regs->max_slots_en = xhci_field(device, regs->config, "maxslotsen");
 	fields[count++] = regs->erst_size = xhci_field(device, regs->erstsz, "size");
+	fields[count++] = regs->imodi = xhci_field(device, regs->imod, "imodi");
+	fields[count++] = regs->imodc = xhci_field(device, regs->imod, "imodc");
 	fields[count++] = regs->ie = xhci_field(device, regs->iman, "ie");
 	fields[count++] = regs->rcs = xhci_field(device, regs->crcr[0], "rcs");
 	fields[count++] = regs->ehb = xhci_field(device, regs->erdp[0], "ehb");
@@ -2409,6 +2412,14 @@ install_words(const erx_device_t *device, const xhci_registers_t *regs, erx_dma_
 		break;
 	case ERX_DMA_XHCI_EVENT_RING_SIZE:
 		made = field_word(device, regs->erstsz, regs->erst_size, write.value, out);
+		break;
+	case ERX_DMA_XHCI_INTERRUPT_MODERATION:
+		/*
+		 * The whole register, nothing read, as FreeBSD writes it (xhci.c:369): IMODC 0, so whatever
+		 * count the reset left (undefined, xHCI 1.2, Table 5-39) cannot delay the first interrupt.
+		 */
+		*out = (xhci_word_t){ .r = regs->imod, .word = 0 };
+		made = with_field(regs->imodi, write.value, &out->word) && with_field(regs->imodc, 0, &out->word);
 		break;
 	case ERX_DMA_XHCI_INTERRUPTER_ENABLE:
 		made = field_word(device, regs->iman, regs->ie, write.value, out);

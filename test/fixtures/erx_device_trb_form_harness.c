@@ -1376,6 +1376,7 @@ test_install(void)
 		{ ERX_DMA_XHCI_SLOTS, 2 },
 		{ ERX_DMA_XHCI_DCBAA, 0 },
 		{ ERX_DMA_XHCI_EVENT_RING_SIZE, 1 },
+		{ ERX_DMA_XHCI_INTERRUPT_MODERATION, 0 },
 		{ ERX_DMA_XHCI_EVENT_DEQUEUE, 0 },
 		{ ERX_DMA_XHCI_SEGMENT_TABLE, 0 },
 		{ ERX_DMA_XHCI_INTERRUPTER_ENABLE, 1 },
@@ -1406,11 +1407,12 @@ test_install(void)
 	values[0] = 2;
 	values[1] = BASE + trb.regions[trb.dcbaa].offset;
 	values[2] = 1;
-	values[3] = BASE + event_offset(0);
-	values[4] = BASE + trb.regions[trb.segment_table].offset;
-	values[5] = 1;
-	values[6] = BASE + command_offset(0) + 1u;	/* the ring's cycle state, 1, in bit 0 */
-	EXPECT(sequence.register_count == sizeof(registers) / sizeof(registers[0]), "seven registers");
+	values[3] = 500;	/* FreeBSD's moderation interval, 125 us (xhcireg.h:176) */
+	values[4] = BASE + event_offset(0);
+	values[5] = BASE + trb.regions[trb.segment_table].offset;
+	values[6] = 1;
+	values[7] = BASE + command_offset(0) + 1u;	/* the ring's cycle state, 1, in bit 0 */
+	EXPECT(sequence.register_count == sizeof(registers) / sizeof(registers[0]), "eight registers");
 	for (uint32_t at = 0; at < sequence.register_count; at++)
 		EXPECT(sequence.registers[at].reg == registers[at].reg && sequence.registers[at].value == values[at],
 		    "each register, in FreeBSD's order, from the layout");
