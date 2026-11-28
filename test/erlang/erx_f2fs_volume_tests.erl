@@ -85,13 +85,16 @@ corpus_image(Pin) ->
     {ok, Image} = erx_f2fs_corpus:image(Pin, erx_f2fs_corpus:fetched(os:getenv("ERX_F2FS_CORPUS"), Pin)),
     Image.
 
-%% The first corpus image that mounts, with its mount. It reads only the
-%% images up to that one: each read hashes a whole image, and the tests
-%% that need one tree must stay inside EUnit's five seconds on a slow host.
-first_mounted() ->
-    Reads = [fun() -> corpus_image(Pin) end || Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))]
-        ++ [fun erx_f2fs_mount_tests:cleared_fuchsia/0],
-    first_mounted(Reads).
+%% Each corpus image as a read of it, in corpus/0's order. A test that
+%% needs only the first image fit for it reads only the images up to that
+%% one: each read hashes a whole image, and such tests must stay inside
+%% EUnit's five seconds on a slow host.
+corpus_reads() ->
+    [fun() -> corpus_image(Pin) end || Pin <- erx_f2fs_corpus:pins(os:getenv("ERX_DEPS_LOCK"))]
+        ++ [fun erx_f2fs_mount_tests:cleared_fuchsia/0].
+
+%% The first corpus image that mounts, with its mount.
+first_mounted() -> first_mounted(corpus_reads()).
 
 first_mounted([Read | Rest]) ->
     Image = Read(),
@@ -618,9 +621,10 @@ file_on(Medium, Path) ->
 %% The first corpus image that mounts read-write with a regular file of
 %% more than two blocks whose size Wanted accepts: the image as a medium,
 %% the file's path, the image's mount and the file's inode nid and size.
-writable_file(Wanted) -> writable_file(Wanted, corpus_images()).
+writable_file(Wanted) -> writable_file(Wanted, corpus_reads()).
 
-writable_file(Wanted, [Image | Images]) ->
+writable_file(Wanted, [Read | Reads]) ->
+    Image = Read(),
     Files = case mounted(Image) of
                 {ok, #{mode := read_write} = Mounted} ->
                     #{stat := Stat} = Reader = core_reader(Image, Mounted),
@@ -631,7 +635,7 @@ writable_file(Wanted, [Image | Images]) ->
             end,
     case Files of
         [{Path, Found, Nid, Size} | _] -> {medium(Image), Path, Found, {Nid, Size}};
-        [] -> writable_file(Wanted, Images)
+        [] -> writable_file(Wanted, Reads)
     end.
 
 any_size(_Size) -> true.
